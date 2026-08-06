@@ -1,0 +1,158 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  GESTAO
+  VENDEDOR
+}
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         Role     @default(VENDEDOR)
+  createdAt    DateTime @default(now())
+
+  sessions Session[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// Uma loja/unidade (o "Armazenador" no DAPIC). Matriz não vende (sellsProducts=false).
+model Store {
+  id            String  @id @default(cuid())
+  code          String  @unique
+  name          String
+  sellsProducts Boolean @default(true)
+
+  sales           Sale[]
+  stockSnapshots  StockSnapshot[]
+  returns         Return[]
+  syncLogs        SyncLog[]
+}
+
+// Registros ficam denormalizados (grupo/cor/tamanho/coleção direto na linha) porque é assim
+// que o DAPIC/Power BI já exportam — evita um modelo de produto separado que a fonte não tem.
+model Sale {
+  id                String   @id @default(cuid())
+  storeId           String
+  cod               String
+  produto           String
+  grupo             String
+  cor               String?
+  tamanho            String?
+  colecao           String?
+  marca             String?
+  clienteNome       String?
+  vendedor          String?
+  tabelaPreco       String?
+  cidade            String?
+  estado            String?
+  quantidade        Int
+  valorTotalLiquido Float
+  valorCustoTotal   Float?
+  valorFrete        Float?
+  saleDate          DateTime
+
+  store Store @relation(fields: [storeId], references: [id])
+
+  @@index([storeId, saleDate])
+  @@index([grupo])
+  @@index([marca])
+}
+
+model StockSnapshot {
+  id                    String   @id @default(cuid())
+  storeId               String
+  cod                   String
+  produto               String
+  grupo                 String
+  cor                   String?
+  tamanho               String?
+  colecao               String?
+  quantidadeDisponivel  Int
+  estoqueMinimo         Int?
+  syncedAt              DateTime @default(now())
+
+  store Store @relation(fields: [storeId], references: [id])
+
+  @@index([storeId, cod, syncedAt])
+  @@index([grupo])
+}
+
+model Return {
+  id         String   @id @default(cuid())
+  storeId    String
+  cod        String
+  produto    String
+  grupo      String
+  cor        String?
+  tamanho    String?
+  quantidade Int
+  valorTotal Float
+  returnDate DateTime
+
+  store Store @relation(fields: [storeId], references: [id])
+
+  @@index([storeId, returnDate])
+}
+
+model ProductionOrder {
+  id                   String   @id @default(cuid())
+  grupo                String
+  referencia           String?
+  produto              String
+  tamanho              String?
+  quantidadeFinalizada Int
+  dataPrevisao         DateTime?
+  ordemProducao        String
+  cod                  String?
+
+  @@index([grupo])
+}
+
+// Grupos de produto marcados como prioritários para vendedores (administrável, sem UI ainda).
+model PriorityGroup {
+  id    String @id @default(cuid())
+  grupo String @unique
+}
+
+enum SyncSource {
+  SALES
+  STOCK
+  RETURNS
+  PRODUCTION
+}
+
+enum SyncStatus {
+  SUCCESS
+  FAILED
+}
+
+model SyncLog {
+  id            String     @id @default(cuid())
+  storeId       String?
+  source        SyncSource
+  status        SyncStatus
+  recordsSynced Int        @default(0)
+  message       String?
+  startedAt     DateTime   @default(now())
+  finishedAt    DateTime?
+
+  store Store? @relation(fields: [storeId], references: [id])
+}
