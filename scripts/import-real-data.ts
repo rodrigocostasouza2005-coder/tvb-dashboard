@@ -4,9 +4,13 @@
 
 import path from "path";
 import XLSX from "xlsx";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, type Prisma } from "@prisma/client";
 
-const prisma = new PrismaClient();
+// Usa a conexão direta (sem pgbouncer) pra esse script em lote — o pooler recicla/derruba
+// conexões ociosas de forma mais agressiva, o que é ótimo pra requests de app mas ruim
+// pra um script que fica minutos parseando um xlsx antes da próxima query.
+const directUrl = process.env.DATABASE_URL?.replace("-pooler.", ".");
+const prisma = new PrismaClient(directUrl ? { datasourceUrl: directUrl } : undefined);
 
 const sourceDir = process.argv[2] ?? "C:\\Users\\Dell\\Desktop\\Power Bi - Dashboards";
 
@@ -27,11 +31,31 @@ function toStringOrNull(v: unknown): string | null {
   return s === "" || s === "(vazio)" ? null : s;
 }
 
+// O Neon derruba conexões ociosas (ex: depois de minutos parseando um xlsx grande em JS
+// antes da próxima query) — tenta de novo com reconexão explícita antes de desistir.
+async function withRetry<T>(fn: () => Promise<T>, attempts = 6): Promise<T> {
+  let lastError: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastError = err;
+      await prisma.$disconnect();
+      const waitMs = Math.min(2000 * 2 ** i, 30000);
+      console.log(`  (conexão falhou, tentando de novo em ${waitMs / 1000}s...)`);
+      await new Promise((r) => setTimeout(r, waitMs));
+    }
+  }
+  throw lastError;
+}
+
 async function getStoreIdByName(cache: Map<string, string>, fantasiaOrCode: string): Promise<string | null> {
   if (cache.has(fantasiaOrCode)) return cache.get(fantasiaOrCode)!;
-  const store = await prisma.store.findFirst({
-    where: { OR: [{ name: fantasiaOrCode }, { code: fantasiaOrCode }] },
-  });
+  const store = await withRetry(() =>
+    prisma.store.findFirst({
+      where: { OR: [{ name: fantasiaOrCode }, { code: fantasiaOrCode }] },
+    })
+  );
   if (!store) return null;
   cache.set(fantasiaOrCode, store.id);
   return store.id;
@@ -44,12 +68,13 @@ function readSheet(file: string, sheetName?: string) {
 }
 
 async function importSales() {
+  await prisma.$disconnect();
   const rows = readSheet("VENDAS_PARA_BI.xlsx", "VENDAS");
   const storeCache = new Map<string, string>();
   let imported = 0;
   let skipped = 0;
 
-  const data = [];
+  const data: Prisma.SaleCreateManyInput[] = [];
   for (const row of rows) {
     const storeId = await getStoreIdByName(storeCache, String(row["Fantasia (Empresa)"] ?? ""));
     const saleDate = excelSerialToDate(row["Data da venda"]);
@@ -81,18 +106,19 @@ async function importSales() {
 
   const BATCH = 2000;
   for (let i = 0; i < data.length; i += BATCH) {
-    await prisma.sale.createMany({ data: data.slice(i, i + BATCH) });
+    await withRetry(() => prisma.sale.createMany({ data: data.slice(i, i + BATCH) }));
   }
   console.log(`Vendas: ${imported} importadas, ${skipped} ignoradas (loja/data inválida).`);
   return { imported, skipped };
 }
 
 async function importStock() {
+  await prisma.$disconnect();
   const rows = readSheet("ESTOQUE_POWER_BI.xlsx", "ESTOQUE");
   const storeCache = new Map<string, string>();
   let imported = 0;
   let skipped = 0;
-  const data = [];
+  const data: Prisma.StockSnapshotCreateManyInput[] = [];
 
   for (const row of rows) {
     const storeId = await getStoreIdByName(storeCache, String(row["Armazenador"] ?? row["Empresa"] ?? ""));
@@ -116,18 +142,19 @@ async function importStock() {
 
   const BATCH = 2000;
   for (let i = 0; i < data.length; i += BATCH) {
-    await prisma.stockSnapshot.createMany({ data: data.slice(i, i + BATCH) });
+    await withRetry(() => prisma.stockSnapshot.createMany({ data: data.slice(i, i + BATCH) }));
   }
   console.log(`Estoque: ${imported} snapshots importados, ${skipped} ignorados.`);
   return { imported, skipped };
 }
 
 async function importReturns() {
+  await prisma.$disconnect();
   const rows = readSheet("DEVOLUÇÃO_BI.xlsx", "DEVOLUÇÃO ");
   const storeCache = new Map<string, string>();
   let imported = 0;
   let skipped = 0;
-  const data = [];
+  const data: Prisma.ReturnCreateManyInput[] = [];
 
   for (const row of rows) {
     const storeId = await getStoreIdByName(storeCache, String(row["Armazenador"] ?? ""));
@@ -152,16 +179,17 @@ async function importReturns() {
 
   const BATCH = 2000;
   for (let i = 0; i < data.length; i += BATCH) {
-    await prisma.return.createMany({ data: data.slice(i, i + BATCH) });
+    await withRetry(() => prisma.return.createMany({ data: data.slice(i, i + BATCH) }));
   }
   console.log(`Devoluções: ${imported} importadas, ${skipped} ignoradas.`);
   return { imported, skipped };
 }
 
 async function importProductionOrders() {
+  await prisma.$disconnect();
   const rows = readSheet("ORDEM_PRODUÇAO.xlsx", "ORDEM DE PRODUÇÃO");
   let imported = 0;
-  const data = [];
+  const data: Prisma.ProductionOrderCreateManyInput[] = [];
 
   for (const row of rows) {
     data.push({
@@ -179,7 +207,7 @@ async function importProductionOrders() {
 
   const BATCH = 2000;
   for (let i = 0; i < data.length; i += BATCH) {
-    await prisma.productionOrder.createMany({ data: data.slice(i, i + BATCH) });
+    await withRetry(() => prisma.productionOrder.createMany({ data: data.slice(i, i + BATCH) }));
   }
   console.log(`Ordens de produção: ${imported} importadas.`);
   return { imported };
@@ -187,6 +215,14 @@ async function importProductionOrders() {
 
 async function main() {
   console.log(`Lendo arquivos de: ${sourceDir}`);
+
+  // Roda limpo a cada execução (esse script é o bootstrap histórico, não a sync contínua).
+  await prisma.return.deleteMany({});
+  await prisma.productionOrder.deleteMany({});
+  await prisma.sale.deleteMany({});
+  await prisma.stockSnapshot.deleteMany({});
+  await prisma.syncLog.deleteMany({});
+
   const sales = await importSales();
   await prisma.syncLog.create({
     data: { source: "SALES", status: "SUCCESS", recordsSynced: sales.imported, message: "Import histórico inicial (xlsx)", finishedAt: new Date() },

@@ -4,13 +4,7 @@ import { getGrupoRestriction } from "@/lib/permissions";
 import { parseFilters, parseDimension, type RawSearchParams } from "@/lib/filters";
 import { FilterBar } from "../filter-bar";
 import { DimensionToggle } from "../dimension-toggle";
-
-function statusFor(rate: number | null): { label: string; color: string } {
-  if (rate === null) return { label: "—", color: "var(--text-muted)" };
-  if (rate >= 50) return { label: "Bom", color: "var(--status-good)" };
-  if (rate >= 30) return { label: "Atenção", color: "var(--status-warning)" };
-  return { label: "Crítico", color: "var(--status-critical)" };
-}
+import { StatusFilter, statusFor, type StatusKey } from "../status-filter";
 
 export default async function SellthroughPage({
   searchParams,
@@ -22,6 +16,7 @@ export default async function SellthroughPage({
 
   const rawParams = await searchParams;
   const dimension = parseDimension(rawParams);
+  const statusParam = typeof rawParams.status === "string" ? rawParams.status : "";
   const grupoIn = await getGrupoRestriction(user.role);
   const filters = { ...parseFilters(rawParams), grupoIn };
 
@@ -30,12 +25,19 @@ export default async function SellthroughPage({
     getStores(),
     getMarcas(),
   ]);
-  const sorted = [...rows].sort((a, b) => (b.sellThroughRate ?? -1) - (a.sellThroughRate ?? -1));
+  const withStatus = rows.map((r) => ({ ...r, status: statusFor(r.sellThroughRate) }));
+  const filtered = statusParam
+    ? withStatus.filter((r) => r.status.key === (statusParam as StatusKey))
+    : withStatus;
+  const sorted = filtered.sort((a, b) => (b.sellThroughRate ?? -1) - (a.sellThroughRate ?? -1));
 
   return (
     <div>
       <FilterBar action="/dashboard/sellthrough" stores={stores} marcas={marcas} filters={filters} />
-      <DimensionToggle basePath="/dashboard/sellthrough" searchParams={rawParams} current={dimension} />
+      <div className="mb-1 flex flex-wrap items-center gap-4">
+        <DimensionToggle basePath="/dashboard/sellthrough" searchParams={rawParams} current={dimension} />
+        <StatusFilter basePath="/dashboard/sellthrough" searchParams={rawParams} current={statusParam} />
+      </div>
       <p className="mb-3 text-xs text-[var(--text-muted)]">
         Sell-through = vendido / (vendido + estoque atual). Giro = vendido / estoque atual (aproximação
         até termos série histórica de estoque via sync automático).
@@ -53,30 +55,27 @@ export default async function SellthroughPage({
             </tr>
           </thead>
           <tbody>
-            {sorted.map((r) => {
-              const status = statusFor(r.sellThroughRate);
-              return (
-                <tr key={r.key} className="border-b border-[var(--gridline)] last:border-0">
-                  <td className="px-4 py-2 font-medium">{r.key}</td>
-                  <td className="px-4 py-2 tabular-nums">
-                    {r.sellThroughRate !== null ? `${r.sellThroughRate.toFixed(0)}%` : "—"}
-                  </td>
-                  <td className="px-4 py-2 tabular-nums">
-                    {r.inventoryTurnover !== null ? r.inventoryTurnover.toFixed(2) : "—"}
-                  </td>
-                  <td className="px-4 py-2">
-                    <span className="flex items-center gap-1.5">
-                      <span className="h-2 w-2 rounded-full" style={{ backgroundColor: status.color }} />
-                      {status.label}
-                    </span>
-                  </td>
-                </tr>
-              );
-            })}
+            {sorted.map((r) => (
+              <tr key={r.key} className="border-b border-[var(--gridline)] last:border-0">
+                <td className="px-4 py-2 font-medium">{r.key}</td>
+                <td className="px-4 py-2 tabular-nums">
+                  {r.sellThroughRate !== null ? `${r.sellThroughRate.toFixed(0)}%` : "—"}
+                </td>
+                <td className="px-4 py-2 tabular-nums">
+                  {r.inventoryTurnover !== null ? r.inventoryTurnover.toFixed(2) : "—"}
+                </td>
+                <td className="px-4 py-2">
+                  <span className="flex items-center gap-1.5">
+                    <span className="h-2 w-2 rounded-full" style={{ backgroundColor: r.status.color }} />
+                    {r.status.label}
+                  </span>
+                </td>
+              </tr>
+            ))}
             {sorted.length === 0 && (
               <tr>
                 <td colSpan={4} className="px-4 py-6 text-center text-[var(--text-muted)]">
-                  Sem dados para o período/filtro selecionado.
+                  Sem dados para o período/filtro/status selecionado.
                 </td>
               </tr>
             )}
