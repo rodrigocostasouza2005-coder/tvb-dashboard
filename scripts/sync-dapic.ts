@@ -6,12 +6,30 @@ import { PrismaClient, type Prisma } from "@prisma/client";
 import { createDapicClients, type DapicClient } from "../src/lib/connectors/dapic";
 import { sendTelegramMessage } from "../src/lib/telegram";
 
-const prisma = new PrismaClient();
+// Conexão direta (sem pgbouncer) — scripts longos derrubam a conexão do pooler no meio.
+const directUrl = process.env.DATABASE_URL?.replace("-pooler.", ".");
+const prisma = new PrismaClient(directUrl ? { datasourceUrl: directUrl } : undefined);
 
 const diasDeVendas = Number(process.argv[2] ?? 3);
 
 function toDateStr(d: Date) {
   return d.toISOString().slice(0, 10);
+}
+
+async function withRetry<T>(fn: () => Promise<T>, attempts = 6): Promise<T> {
+  let lastError: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastError = err;
+      await prisma.$disconnect();
+      const waitMs = Math.min(2000 * 2 ** i, 30000);
+      console.log(`  (conexão com o banco falhou, tentando de novo em ${waitMs / 1000}s...)`);
+      await new Promise((r) => setTimeout(r, waitMs));
+    }
+  }
+  throw lastError;
 }
 
 // Armazenadores de "defeito", lixeira, bonificação e marketing/produção não são loja de venda.
@@ -23,15 +41,17 @@ async function syncArmazenadores(client: DapicClient) {
   let primaryStoreId: string | null = null;
 
   for (const a of armazenadores) {
-    const existing = await prisma.store.findFirst({
-      where: { OR: [{ code: a.Descricao }, { dapicArmazenadorId: a.Id }] },
-    });
+    const existing = await withRetry(() =>
+      prisma.store.findFirst({ where: { OR: [{ code: a.Descricao }, { dapicArmazenadorId: a.Id }] } })
+    );
     const sellsProducts = !NAO_VENDE.test(a.Descricao);
     const store = existing
-      ? await prisma.store.update({ where: { id: existing.id }, data: { dapicArmazenadorId: a.Id } })
-      : await prisma.store.create({
-          data: { code: a.Descricao, name: a.Descricao, dapicArmazenadorId: a.Id, sellsProducts },
-        });
+      ? await withRetry(() => prisma.store.update({ where: { id: existing.id }, data: { dapicArmazenadorId: a.Id } }))
+      : await withRetry(() =>
+          prisma.store.create({
+            data: { code: a.Descricao, name: a.Descricao, dapicArmazenadorId: a.Id, sellsProducts },
+          })
+        );
     storeByDapicId.set(a.Id, store.id);
     if (sellsProducts && !primaryStoreId) primaryStoreId = store.id;
   }
@@ -66,7 +86,7 @@ async function syncEstoque(client: DapicClient, storeByDapicId: Map<number, stri
 
   const BATCH = 2000;
   for (let i = 0; i < data.length; i += BATCH) {
-    await prisma.stockSnapshot.createMany({ data: data.slice(i, i + BATCH) });
+    await withRetry(() => prisma.stockSnapshot.createMany({ data: data.slice(i, i + BATCH) }));
   }
 
   return { linhas: linhas.length, gravadas: data.length, semArmazenador };
@@ -102,7 +122,7 @@ async function syncVendas(client: DapicClient, storeId: string | null) {
     }
   }
 
-  if (data.length) await prisma.sale.createMany({ data });
+  if (data.length) await withRetry(() => prisma.sale.createMany({ data }));
   return data.length;
 }
 
