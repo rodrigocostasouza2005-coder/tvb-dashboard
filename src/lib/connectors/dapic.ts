@@ -73,6 +73,7 @@ export class DapicClient {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ Empresa: EMPRESA, TokenIntegracao: this.tokenIntegracao }),
       cache: "no-store",
+      signal: AbortSignal.timeout(30_000),
     });
 
     if (!response.ok) {
@@ -108,10 +109,20 @@ export class DapicClient {
       if (value !== undefined) url.searchParams.set(key, String(value));
     }
 
-    const response = await fetch(url, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-      cache: "no-store",
-    });
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        cache: "no-store",
+        signal: AbortSignal.timeout(30_000), // nunca trava pra sempre num request pendurado
+      });
+    } catch (err) {
+      if (attempt <= 5) {
+        await sleep(1000 * 2 ** attempt);
+        return this.fetch<T>(path, params, attempt + 1);
+      }
+      throw err;
+    }
 
     if (response.status === 429 && attempt <= 5) {
       const retryAfter = Number(response.headers.get("Retry-After"));
@@ -170,6 +181,17 @@ export class DapicClient {
     return this.fetchAllPages<DapicOrdemProducao>("/ordensproducao", {
       DataInicial: dataInicial,
       DataFinal: dataFinal,
+    });
+  }
+
+  // Vendas de ponto de venda (loja física) — confirmado em 2026-08-07 como a fonte de verdade
+  // de vendas de loja (pedidosvendas trazia volume baixo demais, provavelmente é outro canal
+  // tipo online/atacado). Já vem com Grupo/Marca/Coleção prontos por item.
+  fetchVendasPdv(dataInicial: string, dataFinal: string) {
+    return this.fetchAllPages<DapicVendaPdv>("/vendaspdv", {
+      DataInicial: dataInicial,
+      DataFinal: dataFinal,
+      FiltrarPor: "Fechamento",
     });
   }
 }
@@ -232,6 +254,33 @@ export type DapicPedidoVendaDetalhe = {
     ValorFrete: number;
     ValorTotal: number;
   };
+};
+
+export type DapicVendaPdvProduto = {
+  IdGradeProduto?: number;
+  Produto: string;
+  Cor?: string;
+  Tamanho?: string;
+  // "Venda" | "Devolução" | "Brinde" — uma mesma venda de PV pode misturar os três.
+  Tipo: string;
+  Quantidade: number;
+  Grupo: string | null;
+  Marca: string | null;
+  Colecao: string | null;
+  ValorUnitario: number;
+  ValorLiquido: number;
+};
+
+export type DapicVendaPdv = {
+  Id: number;
+  Status: string; // "Fechada" | "Cancelada" | "Aberto"
+  Codigo: string;
+  Cliente: string | null;
+  Vendedor: string | null;
+  DataFechamento: string | null;
+  Cidade?: { Nome: string; Estado: string };
+  Empresa: string;
+  Produtos: DapicVendaPdvProduto[];
 };
 
 export type DapicOrdemProducao = {

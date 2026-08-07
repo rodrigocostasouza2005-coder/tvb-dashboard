@@ -93,37 +93,61 @@ async function syncEstoque(client: DapicClient, storeByDapicId: Map<number, stri
 }
 
 async function syncVendas(client: DapicClient, storeId: string | null) {
-  if (!storeId) return 0;
+  if (!storeId) return { vendas: 0, devolucoes: 0 };
 
   const hoje = new Date();
   const inicio = new Date(hoje);
   inicio.setDate(inicio.getDate() - diasDeVendas);
 
-  const resumos = await client.fetchPedidosVendas(toDateStr(inicio), toDateStr(hoje));
+  const vendasPdv = await client.fetchVendasPdv(toDateStr(inicio), toDateStr(hoje));
 
-  const data: Prisma.SaleCreateManyInput[] = [];
-  for (const resumo of resumos) {
-    const detalhe = await client.fetchPedidoVendaDetalhe(resumo.Id);
-    for (const item of detalhe.Produtos) {
-      data.push({
-        storeId,
-        cod: detalhe.Codigo,
-        produto: item.Produto,
-        grupo: "(a confirmar)",
-        cor: item.Cor ?? null,
-        tamanho: item.Tamanho ?? null,
-        clienteNome: detalhe.Cliente?.Nome ?? null,
-        tabelaPreco: detalhe.TabelaPrecos ?? null,
-        quantidade: item.Quantidade,
-        valorTotalLiquido: item.ValorTotal,
-        valorFrete: detalhe.Valores?.ValorFrete ?? null,
-        saleDate: new Date(detalhe.DataEmissao),
-      });
+  const saleData: Prisma.SaleCreateManyInput[] = [];
+  const returnData: Prisma.ReturnCreateManyInput[] = [];
+
+  for (const venda of vendasPdv) {
+    if (venda.Status !== "Fechada" || !venda.DataFechamento) continue;
+    const saleDate = new Date(venda.DataFechamento);
+
+    for (const item of venda.Produtos) {
+      const cod = item.IdGradeProduto != null ? String(item.IdGradeProduto) : venda.Codigo;
+      if (item.Tipo === "Venda") {
+        saleData.push({
+          storeId,
+          cod,
+          produto: item.Produto,
+          grupo: item.Grupo ?? "(sem grupo)",
+          cor: item.Cor ?? null,
+          tamanho: item.Tamanho ?? null,
+          marca: item.Marca ?? null,
+          colecao: item.Colecao ?? null,
+          clienteNome: venda.Cliente ?? null,
+          vendedor: venda.Vendedor ?? null,
+          cidade: venda.Cidade?.Nome ?? null,
+          estado: venda.Cidade?.Estado ?? null,
+          quantidade: item.Quantidade,
+          valorTotalLiquido: item.ValorLiquido,
+          saleDate,
+        });
+      } else if (item.Tipo === "Devolução") {
+        returnData.push({
+          storeId,
+          cod,
+          produto: item.Produto,
+          grupo: item.Grupo ?? "(sem grupo)",
+          cor: item.Cor ?? null,
+          tamanho: item.Tamanho ?? null,
+          quantidade: item.Quantidade,
+          valorTotal: item.ValorLiquido,
+          returnDate: saleDate,
+        });
+      }
+      // "Brinde" fica de fora por enquanto — não é venda nem devolução de verdade.
     }
   }
 
-  if (data.length) await withRetry(() => prisma.sale.createMany({ data }));
-  return data.length;
+  if (saleData.length) await withRetry(() => prisma.sale.createMany({ data: saleData }));
+  if (returnData.length) await withRetry(() => prisma.return.createMany({ data: returnData }));
+  return { vendas: saleData.length, devolucoes: returnData.length };
 }
 
 async function main() {
@@ -136,6 +160,7 @@ async function main() {
 
   let totalEstoque = 0;
   let totalVendas = 0;
+  let totalDevolucoes = 0;
 
   for (const client of clients) {
     console.log(`\n--- ${client.label} ---`);
@@ -147,8 +172,9 @@ async function main() {
     totalEstoque += estoque.gravadas;
 
     const vendas = await syncVendas(client, primaryStoreId);
-    console.log(`Vendas (${diasDeVendas}d): ${vendas}`);
-    totalVendas += vendas;
+    console.log(`Vendas (${diasDeVendas}d): ${vendas.vendas} | Devoluções: ${vendas.devolucoes}`);
+    totalVendas += vendas.vendas;
+    totalDevolucoes += vendas.devolucoes;
   }
 
   await prisma.syncLog.create({
@@ -157,10 +183,13 @@ async function main() {
   await prisma.syncLog.create({
     data: { source: "SALES", status: "SUCCESS", recordsSynced: totalVendas, message: `Sync real (${clients.length} lojas)`, finishedAt: new Date() },
   });
+  await prisma.syncLog.create({
+    data: { source: "RETURNS", status: "SUCCESS", recordsSynced: totalDevolucoes, message: `Sync real (${clients.length} lojas)`, finishedAt: new Date() },
+  });
 
   const agora = new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" });
   await sendTelegramMessage(
-    `✅ Dashboard TVB atualizado (${agora})\nLojas: ${clients.map((c) => c.label).join(", ")}\nEstoque: ${totalEstoque} linhas\nVendas: ${totalVendas} itens`
+    `✅ Dashboard TVB atualizado (${agora})\nLojas: ${clients.map((c) => c.label).join(", ")}\nEstoque: ${totalEstoque} linhas\nVendas: ${totalVendas} itens\nDevoluções: ${totalDevolucoes} itens`
   );
 
   console.log("\nSync concluído.");
