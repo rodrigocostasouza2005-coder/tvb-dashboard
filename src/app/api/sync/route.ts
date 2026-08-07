@@ -7,6 +7,7 @@ import {
   fetchPedidosVendas,
   fetchPedidoVendaDetalhe,
 } from "@/lib/connectors/dapic";
+import { sendTelegramMessage } from "@/lib/telegram";
 import type { Prisma } from "@prisma/client";
 
 // Chamado por um agendador externo (cron-job.org, GitHub Actions, etc) 2x/dia, às 8h e 17h.
@@ -105,12 +106,18 @@ export async function POST(request: NextRequest) {
       data: { source: "SALES", status: "SUCCESS", recordsSynced: salesCount, finishedAt: new Date() },
     });
 
+    const agora = new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" });
+    await sendTelegramMessage(
+      `✅ Dashboard TVB atualizado (${agora})\nEstoque: ${stockData.length} linhas\nVendas: ${salesCount} itens`
+    );
+
     return NextResponse.json({ ok: true, armazenadores: armazenadores.length, estoque: stockData.length, vendas: salesCount });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await prisma.syncLog.create({
       data: { source: "STOCK", status: "FAILED", message, finishedAt: new Date() },
     });
+    await sendTelegramMessage(`⚠️ Falha ao atualizar o Dashboard TVB: ${message}`);
     return NextResponse.json({ ok: false, error: message }, { status: 502 });
   }
 }

@@ -9,6 +9,7 @@ import {
   fetchPedidosVendas,
   fetchPedidoVendaDetalhe,
 } from "../src/lib/connectors/dapic";
+import { sendTelegramMessage } from "../src/lib/telegram";
 
 const prisma = new PrismaClient();
 
@@ -153,6 +154,11 @@ async function main() {
   await prisma.syncLog.create({
     data: { source: "SALES", status: "SUCCESS", recordsSynced: vendasCount, message: "Sync de vendas (API real)", finishedAt: new Date() },
   });
+
+  const agora = new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" });
+  await sendTelegramMessage(
+    `✅ Dashboard TVB atualizado (${agora})\nEstoque: ${estoqueCount} linhas\nVendas: ${vendasCount} itens`
+  );
 
   console.log("Sync concluído.");
 }
