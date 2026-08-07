@@ -34,11 +34,14 @@ model Session {
 }
 
 // Uma loja/unidade (o "Armazenador" no DAPIC). Matriz não vende (sellsProducts=false).
+// dapicArmazenadorId liga direto com o Id retornado por GET /armazenadores na API real —
+// nem todo armazenador é uma loja de verdade (ex: "Defeito", "Lixeira", "Bonificação").
 model Store {
-  id            String  @id @default(cuid())
-  code          String  @unique
-  name          String
-  sellsProducts Boolean @default(true)
+  id                 String  @id @default(cuid())
+  code               String  @unique
+  name               String
+  sellsProducts      Boolean @default(true)
+  dapicArmazenadorId Int?    @unique
 
   sales           Sale[]
   stockSnapshots  StockSnapshot[]
@@ -87,6 +90,7 @@ model StockSnapshot {
   colecao               String?
   quantidadeDisponivel  Int
   estoqueMinimo         Int?
+  valorCusto            Float?
   syncedAt              DateTime @default(now())
 
   store Store @relation(fields: [storeId], references: [id])

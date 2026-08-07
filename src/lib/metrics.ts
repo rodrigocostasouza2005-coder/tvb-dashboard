@@ -92,6 +92,7 @@ async function latestStockSnapshots(filters: Pick<DashboardFilters, "storeIds" |
       tamanho: true,
       quantidadeDisponivel: true,
       estoqueMinimo: true,
+      valorCusto: true,
     },
   });
   const seen = new Set<string>();
@@ -187,6 +188,29 @@ export async function getTopClientes(filters: DashboardFilters, limit = 30) {
 
 export async function getStores() {
   return prisma.store.findMany({ where: { sellsProducts: true }, orderBy: { name: "asc" } });
+}
+
+// Todos os armazenadores, incluindo os que não são loja de venda (Defeito, Bonificação,
+// Lixeira, Marketing/Produção) — usado no filtro da aba Estoque Atual.
+export async function getAllStores() {
+  return prisma.store.findMany({ orderBy: { name: "asc" } });
+}
+
+export async function getEstoqueAtual(filters: Pick<DashboardFilters, "storeIds" | "grupoIn">, dimension: Dimension) {
+  const stock = await latestStockSnapshots(filters);
+
+  const byKey = new Map<string, { quantidade: number; valorCusto: number }>();
+  for (const s of stock) {
+    const key = dimensionKey(dimension, s);
+    const acc = byKey.get(key) ?? { quantidade: 0, valorCusto: 0 };
+    acc.quantidade += s.quantidadeDisponivel;
+    acc.valorCusto += (s.valorCusto ?? 0) * s.quantidadeDisponivel;
+    byKey.set(key, acc);
+  }
+
+  return [...byKey.entries()]
+    .map(([key, v]) => ({ key, quantidade: v.quantidade, valorCusto: v.valorCusto }))
+    .sort((a, b) => b.quantidade - a.quantidade);
 }
 
 export async function getMarcas() {
