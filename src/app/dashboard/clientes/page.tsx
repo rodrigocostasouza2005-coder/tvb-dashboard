@@ -1,8 +1,8 @@
-import { redirect } from "next/navigation";
 import { getSessionUser } from "@/lib/auth";
 import { getTopClientes, getStores, getMarcas, getTabelasPreco } from "@/lib/metrics";
 import { canSeeFinancials } from "@/lib/permissions";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
+import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
 
 function formatBRL(value: number) {
@@ -16,7 +16,7 @@ export default async function ClientesPage({
 }) {
   const user = await getSessionUser();
   if (!user) return null;
-  if (user.role === "VENDEDOR") redirect("/dashboard");
+  requireTabAccess(user, user.role, "clientes");
 
   const filters = parseFilters(await searchParams);
   const [rows, stores, marcas, tabelasPreco] = await Promise.all([

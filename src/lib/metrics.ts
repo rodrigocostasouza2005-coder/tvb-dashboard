@@ -5,8 +5,8 @@ export type Dimension = "grupo" | "produto" | "tamanho";
 
 export type DashboardFilters = {
   storeIds?: string[];
-  marca?: string;
-  tabelaPreco?: string;
+  marcas?: string[];
+  tabelasPreco?: string[];
   from: Date;
   to: Date;
   // Restringe a grupos específicos — usado pra aplicar a regra de permissão do VENDEDOR
@@ -18,8 +18,8 @@ function saleWhere(filters: DashboardFilters): Prisma.SaleWhereInput {
   return {
     saleDate: { gte: filters.from, lte: filters.to },
     ...(filters.storeIds?.length ? { storeId: { in: filters.storeIds } } : {}),
-    ...(filters.marca ? { marca: filters.marca } : {}),
-    ...(filters.tabelaPreco ? { tabelaPreco: filters.tabelaPreco } : {}),
+    ...(filters.marcas?.length ? { marca: { in: filters.marcas } } : {}),
+    ...(filters.tabelasPreco?.length ? { tabelaPreco: { in: filters.tabelasPreco } } : {}),
     ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
   };
 }
@@ -153,16 +153,32 @@ export async function getReplenishment(filters: Pick<DashboardFilters, "storeIds
   const stores = await prisma.store.findMany({ where: { id: { in: storeIds } } });
   const storeName = new Map(stores.map((s) => [s.id, s.name]));
 
+  // A reposição sempre vem do centro de distribuição ("CD" / TVB Site e Atacado).
+  const cdStore = await prisma.store.findFirst({ where: { code: "CD" } });
+  const cdStockByCod = new Map<string, number>();
+  if (cdStore) {
+    const cdStock = await latestStockSnapshots({ storeIds: [cdStore.id] });
+    for (const s of cdStock) cdStockByCod.set(s.cod, s.quantidadeDisponivel);
+  }
+
   return stock
-    .filter((s) => s.estoqueMinimo != null && s.quantidadeDisponivel < s.estoqueMinimo)
+    .filter(
+      (s) =>
+        s.estoqueMinimo != null &&
+        s.quantidadeDisponivel < s.estoqueMinimo &&
+        (!cdStore || s.storeId !== cdStore.id)
+    )
     .map((s) => ({
       storeId: s.storeId,
       storeName: storeName.get(s.storeId) ?? s.storeId,
+      produto: s.produto,
       grupo: s.grupo,
       tamanho: s.tamanho,
       quantidadeDisponivel: s.quantidadeDisponivel,
       estoqueMinimo: s.estoqueMinimo as number,
       falta: (s.estoqueMinimo as number) - s.quantidadeDisponivel,
+      origemSugerida: cdStore?.name ?? "—",
+      estoqueNaOrigem: cdStockByCod.get(s.cod) ?? 0,
     }))
     .sort((a, b) => b.falta - a.falta);
 }
@@ -186,14 +202,39 @@ export async function getTopClientes(filters: DashboardFilters, limit = 30) {
     .slice(0, limit);
 }
 
-export async function getStores() {
-  return prisma.store.findMany({ where: { sellsProducts: true }, orderBy: { name: "asc" } });
+export type StoreFilterOption = { id: string; name: string };
+
+// Junta lojas com o mesmo displayGroup (ex: CD + ATACADO) numa única opção de filtro —
+// o id vira "id1|id2", que parseFilters() expande de volta em vários storeId no where.
+// Os dados por baixo continuam separados (evita somar/sobrescrever quantidade errado).
+function groupStoresForFilter(stores: { id: string; name: string; displayGroup: string | null }[]): StoreFilterOption[] {
+  const groups = new Map<string, string[]>();
+  const standalone: StoreFilterOption[] = [];
+
+  for (const s of stores) {
+    if (s.displayGroup) {
+      const ids = groups.get(s.displayGroup) ?? [];
+      ids.push(s.id);
+      groups.set(s.displayGroup, ids);
+    } else {
+      standalone.push({ id: s.id, name: s.name });
+    }
+  }
+
+  const grouped = [...groups.entries()].map(([name, ids]) => ({ id: ids.join("|"), name }));
+  return [...grouped, ...standalone].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export async function getStores(): Promise<StoreFilterOption[]> {
+  const stores = await prisma.store.findMany({ where: { sellsProducts: true }, orderBy: { name: "asc" } });
+  return groupStoresForFilter(stores);
 }
 
 // Todos os armazenadores, incluindo os que não são loja de venda (Defeito, Bonificação,
 // Lixeira, Marketing/Produção) — usado no filtro da aba Estoque Atual.
-export async function getAllStores() {
-  return prisma.store.findMany({ orderBy: { name: "asc" } });
+export async function getAllStores(): Promise<StoreFilterOption[]> {
+  const stores = await prisma.store.findMany({ orderBy: { name: "asc" } });
+  return groupStoresForFilter(stores);
 }
 
 export async function getEstoqueAtual(filters: Pick<DashboardFilters, "storeIds" | "grupoIn">, dimension: Dimension) {
@@ -210,6 +251,28 @@ export async function getEstoqueAtual(filters: Pick<DashboardFilters, "storeIds"
 
   return [...byKey.entries()]
     .map(([key, v]) => ({ key, quantidade: v.quantidade, valorCusto: v.valorCusto }))
+    .sort((a, b) => b.quantidade - a.quantidade);
+}
+
+// Distribuição de estoque por armazenador — pra gráfico de pizza (% de peças por loja/armazém).
+export async function getEstoquePorArmazenador(filters: Pick<DashboardFilters, "grupoIn"> = {}) {
+  const stock = await latestStockSnapshots({ grupoIn: filters.grupoIn });
+  const stores = await prisma.store.findMany();
+  const storeName = new Map(stores.map((s) => [s.id, s.name]));
+
+  const byStore = new Map<string, number>();
+  for (const s of stock) {
+    const name = storeName.get(s.storeId) ?? s.storeId;
+    byStore.set(name, (byStore.get(name) ?? 0) + s.quantidadeDisponivel);
+  }
+
+  const total = [...byStore.values()].reduce((sum, v) => sum + v, 0);
+  return [...byStore.entries()]
+    .map(([storeName, quantidade]) => ({
+      storeName,
+      quantidade,
+      percentual: total > 0 ? (quantidade / total) * 100 : 0,
+    }))
     .sort((a, b) => b.quantidade - a.quantidade);
 }
 

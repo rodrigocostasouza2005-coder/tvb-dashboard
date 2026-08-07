@@ -2,6 +2,7 @@ import { getSessionUser } from "@/lib/auth";
 import { getSalesByDimension, getStores, getMarcas, getTabelasPreco } from "@/lib/metrics";
 import { canSeeFinancials, getGrupoRestriction } from "@/lib/permissions";
 import { parseFilters, parseDimension, type RawSearchParams } from "@/lib/filters";
+import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
 import { DimensionToggle } from "../dimension-toggle";
 
@@ -16,6 +17,7 @@ export default async function VendasPage({
 }) {
   const user = await getSessionUser();
   if (!user) return null;
+  requireTabAccess(user, user.role, "vendas");
 
   const rawParams = await searchParams;
   const dimension = parseDimension(rawParams);

@@ -2,6 +2,7 @@ import { getSessionUser } from "@/lib/auth";
 import { searchStockVsSales, getStores, getMarcas } from "@/lib/metrics";
 import { getGrupoRestriction } from "@/lib/permissions";
 import { parseFilters, parseDimension, type RawSearchParams } from "@/lib/filters";
+import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
 import { DimensionToggle } from "../dimension-toggle";
 
@@ -19,6 +20,7 @@ export default async function PesquisaPage({
 }) {
   const user = await getSessionUser();
   if (!user) return null;
+  requireTabAccess(user, user.role, "pesquisa");
 
   const rawParams = await searchParams;
   const dimension = parseDimension(rawParams);
@@ -42,7 +44,9 @@ export default async function PesquisaPage({
         {(filters.storeIds ?? []).map((id) => (
           <input key={id} type="hidden" name="store" value={id} />
         ))}
-        {filters.marca && <input type="hidden" name="marca" value={filters.marca} />}
+        {(filters.marcas ?? []).map((m) => (
+          <input key={m} type="hidden" name="marca" value={m} />
+        ))}
         <input
           type="text"
           name="q"

@@ -3,10 +3,14 @@ import Image from "next/image";
 import { getSessionUser } from "@/lib/auth";
 import { logoutAction } from "./actions";
 import { TabNav } from "./tab-nav";
+import { TABS, defaultAllowedTabs } from "@/lib/tabs";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const user = await getSessionUser();
   if (!user) redirect("/login");
+
+  const allowed = user.allowedTabs.length > 0 ? user.allowedTabs : defaultAllowedTabs(user.role);
+  const visibleKeys = TABS.filter((t) => allowed.includes(t.key)).map((t) => t.key);
 
   return (
     <div className="min-h-screen bg-[var(--page-plane)] text-[var(--text-primary)]">
@@ -35,7 +39,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
             </form>
           </div>
         </div>
-        <TabNav />
+        <TabNav visibleKeys={visibleKeys} isAdmin={user.role === "ADMIN"} />
       </header>
       <main className="mx-auto max-w-7xl px-6 py-6">{children}</main>
     </div>

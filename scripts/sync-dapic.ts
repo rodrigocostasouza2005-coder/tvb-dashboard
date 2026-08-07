@@ -4,6 +4,7 @@
 
 import { PrismaClient, type Prisma } from "@prisma/client";
 import { createDapicClients, type DapicClient } from "../src/lib/connectors/dapic";
+import { displayGroupFor, sellsProducts } from "../src/lib/connectors/armazenadores";
 import { sendTelegramMessage } from "../src/lib/telegram";
 
 // Conexão direta (sem pgbouncer) — scripts longos derrubam a conexão do pooler no meio.
@@ -32,9 +33,6 @@ async function withRetry<T>(fn: () => Promise<T>, attempts = 6): Promise<T> {
   throw lastError;
 }
 
-// Armazenadores de "defeito", lixeira, bonificação e marketing/produção não são loja de venda.
-const NAO_VENDE = /defeito|lixeira|bonifica|marketing/i;
-
 async function syncArmazenadores(client: DapicClient) {
   const armazenadores = await client.fetchArmazenadores();
   const storeByDapicId = new Map<number, string>();
@@ -44,16 +42,28 @@ async function syncArmazenadores(client: DapicClient) {
     const existing = await withRetry(() =>
       prisma.store.findFirst({ where: { OR: [{ code: a.Descricao }, { dapicArmazenadorId: a.Id }] } })
     );
-    const sellsProducts = !NAO_VENDE.test(a.Descricao);
+    const sells = sellsProducts(a.Descricao);
+    const group = displayGroupFor(a.Descricao);
     const store = existing
-      ? await withRetry(() => prisma.store.update({ where: { id: existing.id }, data: { dapicArmazenadorId: a.Id } }))
+      ? await withRetry(() =>
+          prisma.store.update({
+            where: { id: existing.id },
+            data: { dapicArmazenadorId: a.Id, displayGroup: group },
+          })
+        )
       : await withRetry(() =>
           prisma.store.create({
-            data: { code: a.Descricao, name: a.Descricao, dapicArmazenadorId: a.Id, sellsProducts },
+            data: {
+              code: a.Descricao,
+              name: a.Descricao === "CD" ? "TVB Site e Atacado" : a.Descricao,
+              dapicArmazenadorId: a.Id,
+              sellsProducts: sells,
+              displayGroup: group,
+            },
           })
         );
     storeByDapicId.set(a.Id, store.id);
-    if (sellsProducts && !primaryStoreId) primaryStoreId = store.id;
+    if (sells && !primaryStoreId) primaryStoreId = store.id;
   }
 
   return { storeByDapicId, primaryStoreId };

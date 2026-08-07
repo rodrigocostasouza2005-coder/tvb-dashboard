@@ -2,25 +2,21 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { TABS, type TabKey } from "@/lib/tabs";
 
-const TABS = [
-  { href: "/dashboard", label: "Visão Geral" },
-  { href: "/dashboard/vendas", label: "Vendas" },
-  { href: "/dashboard/estoque-atual", label: "Estoque Atual" },
-  { href: "/dashboard/estoque", label: "Estoque × Vendas" },
-  { href: "/dashboard/sellthrough", label: "Sellthrough & Giro" },
-  { href: "/dashboard/reposicao", label: "Reposição de Lojas" },
-  { href: "/dashboard/pesquisa", label: "Pesquisa" },
-  { href: "/dashboard/clientes", label: "Clientes" },
-  { href: "/dashboard/marketing", label: "Marketing" },
-];
-
-export function TabNav() {
+export function TabNav({ visibleKeys, isAdmin }: { visibleKeys: TabKey[]; isAdmin: boolean }) {
   const pathname = usePathname();
+  const visible = new Set(visibleKeys);
+
+  const links = [
+    { href: "/dashboard", label: "Visão Geral" },
+    ...TABS.filter((t) => visible.has(t.key)),
+    ...(isAdmin ? [{ href: "/dashboard/admin", label: "Admin" }] : []),
+  ];
 
   return (
     <nav className="mx-auto flex max-w-7xl flex-wrap gap-1 px-6">
-      {TABS.map((tab) => {
+      {links.map((tab) => {
         const active =
           tab.href === "/dashboard" ? pathname === "/dashboard" : pathname === tab.href || pathname.startsWith(`${tab.href}/`);
         return (

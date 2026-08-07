@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { createDapicClients, type DapicClient } from "@/lib/connectors/dapic";
+import { displayGroupFor, sellsProducts } from "@/lib/connectors/armazenadores";
 import { sendTelegramMessage } from "@/lib/telegram";
 import type { Prisma } from "@prisma/client";
 
@@ -11,8 +12,6 @@ import type { Prisma } from "@prisma/client";
 // POST continua disponível pra chamar manualmente (com x-cron-secret), útil pra testar.
 // Cada credencial em DAPIC_CREDENTIALS é uma loja (CD/Atacado, Leblon, Rio Sul, Barra...).
 export const maxDuration = 300;
-
-const NAO_VENDE = /defeito|lixeira|bonifica|marketing/i;
 
 function toDateStr(d: Date) {
   return d.toISOString().slice(0, 10);
@@ -27,14 +26,24 @@ async function syncArmazenadores(client: DapicClient) {
     const existing = await prisma.store.findFirst({
       where: { OR: [{ code: a.Descricao }, { dapicArmazenadorId: a.Id }] },
     });
-    const sellsProducts = !NAO_VENDE.test(a.Descricao);
+    const sells = sellsProducts(a.Descricao);
+    const group = displayGroupFor(a.Descricao);
     const store = existing
-      ? await prisma.store.update({ where: { id: existing.id }, data: { dapicArmazenadorId: a.Id } })
+      ? await prisma.store.update({
+          where: { id: existing.id },
+          data: { dapicArmazenadorId: a.Id, displayGroup: group },
+        })
       : await prisma.store.create({
-          data: { code: a.Descricao, name: a.Descricao, dapicArmazenadorId: a.Id, sellsProducts },
+          data: {
+            code: a.Descricao,
+            name: a.Descricao === "CD" ? "TVB Site e Atacado" : a.Descricao,
+            dapicArmazenadorId: a.Id,
+            sellsProducts: sells,
+            displayGroup: group,
+          },
         });
     storeByDapicId.set(a.Id, store.id);
-    if (sellsProducts && !primaryStoreId) primaryStoreId = store.id;
+    if (sells && !primaryStoreId) primaryStoreId = store.id;
   }
 
   return { storeByDapicId, primaryStoreId };

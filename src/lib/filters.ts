@@ -8,10 +8,10 @@ function toArray(v: string | string[] | undefined): string[] {
 }
 
 export function parseFilters(params: RawSearchParams): DashboardFilters {
-  const storeIds = toArray(params.store);
-  const marca = typeof params.marca === "string" && params.marca ? params.marca : undefined;
-  const tabelaPreco =
-    typeof params.tabelaPreco === "string" && params.tabelaPreco ? params.tabelaPreco : undefined;
+  // Opções de loja agrupadas (ex: CD+ATACADO) chegam como "id1|id2" — expande de volta.
+  const storeIds = toArray(params.store).flatMap((v) => v.split("|"));
+  const marcas = toArray(params.marca);
+  const tabelasPreco = toArray(params.tabelaPreco);
 
   const now = new Date();
   const defaultFrom = new Date(now);
@@ -22,7 +22,13 @@ export function parseFilters(params: RawSearchParams): DashboardFilters {
   // inclui o dia inteiro do "até"
   to.setHours(23, 59, 59, 999);
 
-  return { storeIds: storeIds.length ? storeIds : undefined, marca, tabelaPreco, from, to };
+  return {
+    storeIds: storeIds.length ? storeIds : undefined,
+    marcas: marcas.length ? marcas : undefined,
+    tabelasPreco: tabelasPreco.length ? tabelasPreco : undefined,
+    from,
+    to,
+  };
 }
 
 export function parseDimension(params: RawSearchParams): Dimension {

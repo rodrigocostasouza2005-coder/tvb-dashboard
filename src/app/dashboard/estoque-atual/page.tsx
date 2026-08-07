@@ -1,9 +1,11 @@
 import { getSessionUser } from "@/lib/auth";
-import { getEstoqueAtual, getAllStores, getMarcas } from "@/lib/metrics";
+import { getEstoqueAtual, getEstoquePorArmazenador, getAllStores, getMarcas } from "@/lib/metrics";
 import { getGrupoRestriction, canSeeFinancials } from "@/lib/permissions";
 import { parseFilters, parseDimension, type RawSearchParams } from "@/lib/filters";
+import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
 import { DimensionToggle } from "../dimension-toggle";
+import { PieChart } from "../pie-chart";
 
 function formatBRL(value: number) {
   return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -16,14 +18,16 @@ export default async function EstoqueAtualPage({
 }) {
   const user = await getSessionUser();
   if (!user) return null;
+  requireTabAccess(user, user.role, "estoque-atual");
 
   const rawParams = await searchParams;
   const dimension = parseDimension(rawParams);
   const grupoIn = await getGrupoRestriction(user.role);
   const filters = { ...parseFilters(rawParams), grupoIn };
 
-  const [rows, stores, marcas] = await Promise.all([
+  const [rows, porArmazenador, stores, marcas] = await Promise.all([
     getEstoqueAtual(filters, dimension),
+    getEstoquePorArmazenador({ grupoIn }),
     getAllStores(),
     getMarcas(),
   ]);
@@ -52,6 +56,13 @@ export default async function EstoqueAtualPage({
             <div className="mt-1 text-2xl font-semibold tabular-nums">{formatBRL(totalCusto)}</div>
           </div>
         )}
+      </section>
+
+      <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
+        <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">% de estoque por armazenador</h2>
+        <PieChart
+          data={porArmazenador.map((p) => ({ label: p.storeName, value: p.quantidade, percentual: p.percentual }))}
+        />
       </section>
 
       <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)]">

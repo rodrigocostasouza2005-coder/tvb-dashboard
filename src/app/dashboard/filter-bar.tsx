@@ -3,6 +3,38 @@ import { toDateInputValue } from "@/lib/filters";
 
 type Store = { id: string; name: string };
 
+function CheckboxGroup({
+  label,
+  name,
+  options,
+  selected,
+}: {
+  label: string;
+  name: string;
+  options: { value: string; label: string }[];
+  selected: Set<string>;
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-xs font-medium text-[var(--text-muted)]">{label}</span>
+      <div className="flex flex-wrap gap-2">
+        {options.map((opt) => (
+          <label key={opt.value} className="flex items-center gap-1.5 text-[var(--text-secondary)]">
+            <input
+              type="checkbox"
+              name={name}
+              value={opt.value}
+              defaultChecked={opt.value.split("|").some((v) => selected.has(v))}
+              className="accent-[var(--series-1)]"
+            />
+            {opt.label}
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function FilterBar({
   action,
   stores,
@@ -21,6 +53,8 @@ export function FilterBar({
   showTabelaPreco?: boolean;
 }) {
   const selectedStores = new Set(filters.storeIds ?? []);
+  const selectedMarcas = new Set(filters.marcas ?? []);
+  const selectedTabelas = new Set(filters.tabelasPreco ?? []);
 
   return (
     <form
@@ -28,66 +62,29 @@ export function FilterBar({
       method="GET"
       className="mb-6 flex flex-wrap items-end gap-4 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3 text-sm"
     >
-      <div className="flex flex-col gap-1">
-        <span className="text-xs font-medium text-[var(--text-muted)]">Loja</span>
-        <div className="flex flex-wrap gap-2">
-          {stores.map((s) => (
-            <label key={s.id} className="flex items-center gap-1.5 text-[var(--text-secondary)]">
-              <input
-                type="checkbox"
-                name="store"
-                value={s.id}
-                defaultChecked={selectedStores.has(s.id)}
-                className="accent-[var(--series-1)]"
-              />
-              {s.name}
-            </label>
-          ))}
-        </div>
-      </div>
+      <CheckboxGroup
+        label="Loja"
+        name="store"
+        options={stores.map((s) => ({ value: s.id, label: s.name }))}
+        selected={selectedStores}
+      />
 
       {showMarca && (
-        <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-[var(--text-muted)]" htmlFor="marca">
-            Marca
-          </label>
-          <select
-            id="marca"
-            name="marca"
-            defaultValue={filters.marca ?? ""}
-            className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1 text-[var(--text-primary)]"
-            style={{ colorScheme: "light dark" }}
-          >
-            <option value="">Todas</option>
-            {marcas.map((m) => (
-              <option key={m} value={m}>
-                {m}
-              </option>
-            ))}
-          </select>
-        </div>
+        <CheckboxGroup
+          label="Marca"
+          name="marca"
+          options={marcas.map((m) => ({ value: m, label: m }))}
+          selected={selectedMarcas}
+        />
       )}
 
       {showTabelaPreco && (
-        <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-[var(--text-muted)]" htmlFor="tabelaPreco">
-            Tabela de preço
-          </label>
-          <select
-            id="tabelaPreco"
-            name="tabelaPreco"
-            defaultValue={filters.tabelaPreco ?? ""}
-            className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1 text-[var(--text-primary)]"
-            style={{ colorScheme: "light dark" }}
-          >
-            <option value="">Todas</option>
-            {(tabelasPreco ?? []).map((t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
-            ))}
-          </select>
-        </div>
+        <CheckboxGroup
+          label="Tabela de preço"
+          name="tabelaPreco"
+          options={(tabelasPreco ?? []).map((t) => ({ value: t, label: t }))}
+          selected={selectedTabelas}
+        />
       )}
 
       <div className="flex flex-col gap-1">

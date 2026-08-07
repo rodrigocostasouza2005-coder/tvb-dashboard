@@ -2,6 +2,7 @@ import { getSessionUser } from "@/lib/auth";
 import { getStockVsSales, getStores, getMarcas } from "@/lib/metrics";
 import { getGrupoRestriction } from "@/lib/permissions";
 import { parseFilters, parseDimension, type RawSearchParams } from "@/lib/filters";
+import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
 import { DimensionToggle } from "../dimension-toggle";
 import { StatusFilter, statusFor, type StatusKey } from "../status-filter";
@@ -13,6 +14,7 @@ export default async function SellthroughPage({
 }) {
   const user = await getSessionUser();
   if (!user) return null;
+  requireTabAccess(user, user.role, "sellthrough");
 
   const rawParams = await searchParams;
   const dimension = parseDimension(rawParams);
