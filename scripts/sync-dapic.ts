@@ -1,14 +1,9 @@
-// Sincronização real com a API do DAPIC (login + armazenadores + estoque + vendas).
+// Sincronização real com a API do DAPIC — agora com um token por loja (CD/Atacado, Leblon,
+// Rio Sul, Barra), confirmado em 2026-08-07. Cada token só enxerga sua(s) própria(s) loja(s).
 // Uso: npx tsx scripts/sync-dapic.ts [diasDeVendas]
-// diasDeVendas (opcional, padrão 3): quantos dias pra trás buscar em Pedidos de Vendas.
 
 import { PrismaClient, type Prisma } from "@prisma/client";
-import {
-  fetchArmazenadores,
-  fetchEstoqueTodosArmazenadores,
-  fetchPedidosVendas,
-  fetchPedidoVendaDetalhe,
-} from "../src/lib/connectors/dapic";
+import { createDapicClients, type DapicClient } from "../src/lib/connectors/dapic";
 import { sendTelegramMessage } from "../src/lib/telegram";
 
 const prisma = new PrismaClient();
@@ -19,46 +14,33 @@ function toDateStr(d: Date) {
   return d.toISOString().slice(0, 10);
 }
 
-// Armazenadores que sabemos que são canal de venda de verdade — o resto (Defeito, Lixeira,
-// Bonificação, Marketing/Produção) ainda entra como Store (pra aparecer no filtro de estoque),
-// só não conta como "loja que vende" nos relatórios de venda.
-const CANAIS_DE_VENDA = new Set(["CD", "ATACADO"]);
+// Armazenadores de "defeito", lixeira, bonificação e marketing/produção não são loja de venda.
+const NAO_VENDE = /defeito|lixeira|bonifica|marketing/i;
 
-async function syncArmazenadores() {
-  const armazenadores = await fetchArmazenadores();
+async function syncArmazenadores(client: DapicClient) {
+  const armazenadores = await client.fetchArmazenadores();
   const storeByDapicId = new Map<number, string>();
+  let primaryStoreId: string | null = null;
 
   for (const a of armazenadores) {
     const existing = await prisma.store.findFirst({
       where: { OR: [{ code: a.Descricao }, { dapicArmazenadorId: a.Id }] },
     });
-
-    if (existing) {
-      const updated = await prisma.store.update({
-        where: { id: existing.id },
-        data: { dapicArmazenadorId: a.Id },
-      });
-      storeByDapicId.set(a.Id, updated.id);
-    } else {
-      const created = await prisma.store.create({
-        data: {
-          code: a.Descricao,
-          name: a.Descricao,
-          dapicArmazenadorId: a.Id,
-          sellsProducts: CANAIS_DE_VENDA.has(a.Descricao),
-        },
-      });
-      storeByDapicId.set(a.Id, created.id);
-    }
+    const sellsProducts = !NAO_VENDE.test(a.Descricao);
+    const store = existing
+      ? await prisma.store.update({ where: { id: existing.id }, data: { dapicArmazenadorId: a.Id } })
+      : await prisma.store.create({
+          data: { code: a.Descricao, name: a.Descricao, dapicArmazenadorId: a.Id, sellsProducts },
+        });
+    storeByDapicId.set(a.Id, store.id);
+    if (sellsProducts && !primaryStoreId) primaryStoreId = store.id;
   }
 
-  console.log(`Armazenadores sincronizados: ${armazenadores.length}`);
-  return storeByDapicId;
+  return { storeByDapicId, primaryStoreId };
 }
 
-async function syncEstoque(storeByDapicId: Map<number, string>) {
-  const linhas = await fetchEstoqueTodosArmazenadores();
-  console.log(`Linhas de estoque recebidas: ${linhas.length}`);
+async function syncEstoque(client: DapicClient, storeByDapicId: Map<number, string>) {
+  const linhas = await client.fetchEstoqueTodosArmazenadores();
 
   const data: Prisma.StockSnapshotCreateManyInput[] = [];
   let semArmazenador = 0;
@@ -87,39 +69,29 @@ async function syncEstoque(storeByDapicId: Map<number, string>) {
     await prisma.stockSnapshot.createMany({ data: data.slice(i, i + BATCH) });
   }
 
-  console.log(`Estoque gravado: ${data.length} (${semArmazenador} sem armazenador reconhecido)`);
-  return data.length;
+  return { linhas: linhas.length, gravadas: data.length, semArmazenador };
 }
 
-async function syncVendas(storeByDapicId: Map<number, string>) {
-  // Vendas ainda não têm "armazenador" claro no resumo da API — por enquanto assume que
-  // tudo cai no primeiro canal de venda conhecido (CD/Site e Atacado), até confirmarmos
-  // como associar pedido -> loja na resposta real.
-  const cdStore = await prisma.store.findFirst({ where: { code: "CD" } });
-  if (!cdStore) {
-    console.log("Store CD não encontrada — pulando sync de vendas.");
-    return 0;
-  }
+async function syncVendas(client: DapicClient, storeId: string | null) {
+  if (!storeId) return 0;
 
   const hoje = new Date();
   const inicio = new Date(hoje);
   inicio.setDate(inicio.getDate() - diasDeVendas);
 
-  const resumos = await fetchPedidosVendas(toDateStr(inicio), toDateStr(hoje));
-  console.log(`Pedidos de venda no período (${diasDeVendas} dias): ${resumos.length}`);
+  const resumos = await client.fetchPedidosVendas(toDateStr(inicio), toDateStr(hoje));
 
   const data: Prisma.SaleCreateManyInput[] = [];
   for (const resumo of resumos) {
-    const detalhe = await fetchPedidoVendaDetalhe(resumo.Id);
+    const detalhe = await client.fetchPedidoVendaDetalhe(resumo.Id);
     for (const item of detalhe.Produtos) {
       data.push({
-        storeId: cdStore.id,
+        storeId,
         cod: detalhe.Codigo,
         produto: item.Produto,
         grupo: "(a confirmar)",
         cor: item.Cor ?? null,
         tamanho: item.Tamanho ?? null,
-        marca: null,
         clienteNome: detalhe.Cliente?.Nome ?? null,
         tabelaPreco: detalhe.TabelaPrecos ?? null,
         quantidade: item.Quantidade,
@@ -130,42 +102,54 @@ async function syncVendas(storeByDapicId: Map<number, string>) {
     }
   }
 
-  if (data.length) {
-    await prisma.sale.createMany({ data });
-  }
-  console.log(`Vendas gravadas: ${data.length}`);
+  if (data.length) await prisma.sale.createMany({ data });
   return data.length;
 }
 
 async function main() {
-  console.log("Login + sync com a API real do DAPIC...");
+  const clients = createDapicClients();
+  if (!clients.length) {
+    console.log("Nenhuma credencial DAPIC configurada (DAPIC_CREDENTIALS ou DAPIC_TOKEN_INTEGRACAO).");
+    process.exit(1);
+  }
+  console.log(`Sincronizando ${clients.length} loja(s): ${clients.map((c) => c.label).join(", ")}`);
 
-  const storeByDapicId = await syncArmazenadores();
+  let totalEstoque = 0;
+  let totalVendas = 0;
+
+  for (const client of clients) {
+    console.log(`\n--- ${client.label} ---`);
+    const { storeByDapicId, primaryStoreId } = await syncArmazenadores(client);
+    console.log(`Armazenadores: ${storeByDapicId.size}`);
+
+    const estoque = await syncEstoque(client, storeByDapicId);
+    console.log(`Estoque: ${estoque.gravadas} gravadas de ${estoque.linhas} linhas (${estoque.semArmazenador} sem armazenador)`);
+    totalEstoque += estoque.gravadas;
+
+    const vendas = await syncVendas(client, primaryStoreId);
+    console.log(`Vendas (${diasDeVendas}d): ${vendas}`);
+    totalVendas += vendas;
+  }
+
   await prisma.syncLog.create({
-    data: { source: "STOCK", status: "SUCCESS", recordsSynced: storeByDapicId.size, message: "Sync de armazenadores (API real)", finishedAt: new Date() },
+    data: { source: "STOCK", status: "SUCCESS", recordsSynced: totalEstoque, message: `Sync real (${clients.length} lojas)`, finishedAt: new Date() },
   });
-
-  const estoqueCount = await syncEstoque(storeByDapicId);
   await prisma.syncLog.create({
-    data: { source: "STOCK", status: "SUCCESS", recordsSynced: estoqueCount, message: "Sync de estoque (API real)", finishedAt: new Date() },
-  });
-
-  const vendasCount = await syncVendas(storeByDapicId);
-  await prisma.syncLog.create({
-    data: { source: "SALES", status: "SUCCESS", recordsSynced: vendasCount, message: "Sync de vendas (API real)", finishedAt: new Date() },
+    data: { source: "SALES", status: "SUCCESS", recordsSynced: totalVendas, message: `Sync real (${clients.length} lojas)`, finishedAt: new Date() },
   });
 
   const agora = new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" });
   await sendTelegramMessage(
-    `✅ Dashboard TVB atualizado (${agora})\nEstoque: ${estoqueCount} linhas\nVendas: ${vendasCount} itens`
+    `✅ Dashboard TVB atualizado (${agora})\nLojas: ${clients.map((c) => c.label).join(", ")}\nEstoque: ${totalEstoque} linhas\nVendas: ${totalVendas} itens`
   );
 
-  console.log("Sync concluído.");
+  console.log("\nSync concluído.");
 }
 
 main()
-  .catch((e) => {
+  .catch(async (e) => {
     console.error(e);
+    await sendTelegramMessage(`⚠️ Falha ao atualizar o Dashboard TVB: ${e instanceof Error ? e.message : String(e)}`);
     process.exit(1);
   })
   .finally(() => prisma.$disconnect());
