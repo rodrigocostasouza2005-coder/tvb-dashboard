@@ -8,8 +8,8 @@ import {
   getTamanhosPorGrupo,
 } from "@/lib/metrics";
 import { requireTabAccess } from "@/lib/tabs";
-import { deleteMinimumRuleAction } from "./actions";
 import { NovaRegraForm } from "./nova-regra-form";
+import { RulesTable } from "./rules-table";
 
 export default async function EstoqueMinimoPage() {
   const user = await getSessionUser();
@@ -52,50 +52,16 @@ export default async function EstoqueMinimoPage() {
         />
       </section>
 
-      <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)]">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
-              <th className="px-4 py-2 font-medium">Loja</th>
-              <th className="px-4 py-2 font-medium">Grupo</th>
-              <th className="px-4 py-2 font-medium">Tamanho</th>
-              <th className="px-4 py-2 font-medium">Coleção</th>
-              <th className="px-4 py-2 font-medium">Mínimo</th>
-              <th className="px-4 py-2 font-medium"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {rules.map((r) => (
-              <tr key={r.id} className="border-b border-[var(--gridline)] last:border-0">
-                <td className="px-4 py-2">{r.store.name}</td>
-                <td className="px-4 py-2 font-medium">{r.grupo}</td>
-                <td className="px-4 py-2">{r.tamanho}</td>
-                <td className="px-4 py-2 text-[var(--text-secondary)]">{r.colecao ?? "todas"}</td>
-                <td className="px-4 py-2 tabular-nums">{r.valorMinimo}</td>
-                <td className="px-4 py-2">
-                  <form action={deleteMinimumRuleAction}>
-                    <input type="hidden" name="id" value={r.id} />
-                    <button
-                      type="submit"
-                      className="rounded-md border border-[var(--border)] px-2 py-1 text-xs"
-                      style={{ color: "var(--status-critical)" }}
-                    >
-                      Excluir
-                    </button>
-                  </form>
-                </td>
-              </tr>
-            ))}
-            {rules.length === 0 && (
-              <tr>
-                <td colSpan={6} className="px-4 py-6 text-center text-[var(--text-muted)]">
-                  Nenhuma regra manual ainda — a Reposição usa o mínimo que vem do DAPIC.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      <RulesTable
+        rows={rules.map((r) => ({
+          id: r.id,
+          storeName: r.store.name,
+          grupo: r.grupo,
+          tamanho: r.tamanho,
+          colecao: r.colecao,
+          valorMinimo: r.valorMinimo,
+        }))}
+      />
     </div>
   );
 }
