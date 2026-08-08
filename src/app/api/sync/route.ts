@@ -85,11 +85,13 @@ async function syncVendas(client: DapicClient, storeId: string | null, dias: num
     if (venda.Status !== "Fechada" || !venda.DataFechamento) continue;
     const saleDate = new Date(venda.DataFechamento);
 
-    for (const item of venda.Produtos) {
+    venda.Produtos.forEach((item, itemIndex) => {
       const cod = item.IdGradeProduto != null ? String(item.IdGradeProduto) : venda.Codigo;
       if (item.Tipo === "Venda") {
         saleData.push({
           storeId,
+          dapicVendaId: venda.Id,
+          itemIndex,
           cod,
           produto: item.Produto,
           grupo: item.Grupo ?? "(sem grupo)",
@@ -108,6 +110,8 @@ async function syncVendas(client: DapicClient, storeId: string | null, dias: num
       } else if (item.Tipo === "Devolução") {
         returnData.push({
           storeId,
+          dapicVendaId: venda.Id,
+          itemIndex,
           cod,
           produto: item.Produto,
           grupo: item.Grupo ?? "(sem grupo)",
@@ -118,11 +122,13 @@ async function syncVendas(client: DapicClient, storeId: string | null, dias: num
           returnDate: saleDate,
         });
       }
-    }
+    });
   }
 
-  if (saleData.length) await prisma.sale.createMany({ data: saleData });
-  if (returnData.length) await prisma.return.createMany({ data: returnData });
+  // skipDuplicates: idempotente em cima de (storeId, dapicVendaId, itemIndex) — o cron roda 2x/dia
+  // olhando sempre "últimos N dias", então as janelas se sobrepõem e sem isso duplicava tudo.
+  if (saleData.length) await prisma.sale.createMany({ data: saleData, skipDuplicates: true });
+  if (returnData.length) await prisma.return.createMany({ data: returnData, skipDuplicates: true });
   return { vendas: saleData.length, devolucoes: returnData.length };
 }
 

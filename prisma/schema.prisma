@@ -97,9 +97,15 @@ model Sale {
   valorCustoTotal   Float?
   valorFrete        Float?
   saleDate          DateTime
+  // Id da venda no DAPIC (vendaspdv) + índice do item dentro dela — chave de idempotência pra
+  // sync não duplicar quando a janela de datas de duas rodadas se sobrepõe (o cron roda 2x/dia
+  // sempre olhando "últimos N dias", então sem isso toda venda recente era reinserida a cada sync).
+  dapicVendaId      Int
+  itemIndex         Int
 
   store Store @relation(fields: [storeId], references: [id])
 
+  @@unique([storeId, dapicVendaId, itemIndex])
   @@index([storeId, saleDate])
   @@index([grupo])
   @@index([marca])
@@ -126,19 +132,24 @@ model StockSnapshot {
 }
 
 model Return {
-  id         String   @id @default(cuid())
-  storeId    String
-  cod        String
-  produto    String
-  grupo      String
-  cor        String?
-  tamanho    String?
-  quantidade Int
-  valorTotal Float
-  returnDate DateTime
+  id           String   @id @default(cuid())
+  storeId      String
+  cod          String
+  produto      String
+  grupo        String
+  cor          String?
+  tamanho      String?
+  quantidade   Int
+  valorTotal   Float
+  returnDate   DateTime
+  // Mesma lógica de idempotência do Sale — ver comentário lá. Nulo só nos registros fictícios
+  // antigos (seed-fictional-returns-production.ts), que não vêm da API.
+  dapicVendaId Int?
+  itemIndex    Int?
 
   store Store @relation(fields: [storeId], references: [id])
 
+  @@unique([storeId, dapicVendaId, itemIndex])
   @@index([storeId, returnDate])
 }
 

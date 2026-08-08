@@ -118,11 +118,13 @@ async function syncVendas(client: DapicClient, storeId: string | null) {
     if (venda.Status !== "Fechada" || !venda.DataFechamento) continue;
     const saleDate = new Date(venda.DataFechamento);
 
-    for (const item of venda.Produtos) {
+    venda.Produtos.forEach((item, itemIndex) => {
       const cod = item.IdGradeProduto != null ? String(item.IdGradeProduto) : venda.Codigo;
       if (item.Tipo === "Venda") {
         saleData.push({
           storeId,
+          dapicVendaId: venda.Id,
+          itemIndex,
           cod,
           produto: item.Produto,
           grupo: item.Grupo ?? "(sem grupo)",
@@ -141,6 +143,8 @@ async function syncVendas(client: DapicClient, storeId: string | null) {
       } else if (item.Tipo === "Devolução") {
         returnData.push({
           storeId,
+          dapicVendaId: venda.Id,
+          itemIndex,
           cod,
           produto: item.Produto,
           grupo: item.Grupo ?? "(sem grupo)",
@@ -152,11 +156,15 @@ async function syncVendas(client: DapicClient, storeId: string | null) {
         });
       }
       // "Brinde" fica de fora por enquanto — não é venda nem devolução de verdade.
-    }
+    });
   }
 
-  if (saleData.length) await withRetry(() => prisma.sale.createMany({ data: saleData }));
-  if (returnData.length) await withRetry(() => prisma.return.createMany({ data: returnData }));
+  // skipDuplicates: idempotente em cima de (storeId, dapicVendaId, itemIndex) — rerodar a sync
+  // com uma janela de datas que se sobrepõe à anterior não duplica mais as vendas/devoluções.
+  if (saleData.length)
+    await withRetry(() => prisma.sale.createMany({ data: saleData, skipDuplicates: true }));
+  if (returnData.length)
+    await withRetry(() => prisma.return.createMany({ data: returnData, skipDuplicates: true }));
   return { vendas: saleData.length, devolucoes: returnData.length };
 }
 

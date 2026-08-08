@@ -8,7 +8,6 @@
     "start": "next start",
     "lint": "eslint",
     "db:seed": "tsx prisma/seed.ts",
-    "db:import-real": "tsx scripts/import-real-data.ts",
     "postinstall": "prisma generate"
   },
   "prisma": {
@@ -21,7 +20,6 @@
     "prisma": "^6.19.3",
     "react": "19.2.8",
     "react-dom": "19.2.8",
-    "xlsx": "^0.18.5",
     "zod": "^4.4.3"
   },
   "devDependencies": {
