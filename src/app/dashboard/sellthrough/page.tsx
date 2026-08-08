@@ -1,5 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
-import { getStockVsSales, getStores, getMarcas } from "@/lib/metrics";
+import { getStockVsSales, getStores, getMarcas, getTabelasPreco } from "@/lib/metrics";
 import { getGrupoRestriction } from "@/lib/permissions";
 import { parseFilters, parseDimension, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
@@ -22,10 +22,11 @@ export default async function SellthroughPage({
   const grupoIn = await getGrupoRestriction(user.role);
   const filters = { ...parseFilters(rawParams), grupoIn };
 
-  const [rows, stores, marcas] = await Promise.all([
+  const [rows, stores, marcas, tabelasPreco] = await Promise.all([
     getStockVsSales(filters, dimension),
     getStores(),
     getMarcas(),
+    getTabelasPreco(),
   ]);
   const withStatus = rows.map((r) => ({ ...r, status: statusFor(r.sellThroughRate) }));
   const filtered = statusParam
@@ -35,7 +36,14 @@ export default async function SellthroughPage({
 
   return (
     <div>
-      <FilterBar action="/dashboard/sellthrough" stores={stores} marcas={marcas} filters={filters} />
+      <FilterBar
+        action="/dashboard/sellthrough"
+        stores={stores}
+        marcas={marcas}
+        tabelasPreco={tabelasPreco}
+        showTabelaPreco
+        filters={filters}
+      />
       <div className="mb-1 flex flex-wrap items-center gap-4">
         <DimensionToggle basePath="/dashboard/sellthrough" searchParams={rawParams} current={dimension} />
         <StatusFilter basePath="/dashboard/sellthrough" searchParams={rawParams} current={statusParam} />

@@ -90,6 +90,7 @@ async function latestStockSnapshots(filters: Pick<DashboardFilters, "storeIds" |
       grupo: true,
       produto: true,
       tamanho: true,
+      colecao: true,
       quantidadeDisponivel: true,
       estoqueMinimo: true,
       valorCusto: true,
@@ -147,8 +148,26 @@ export async function searchStockVsSales(
   return all.filter((r) => r.key.toLowerCase().includes(q));
 }
 
+// Acha a regra de mínimo manual mais específica (com coleção bate antes da genérica).
+function matchMinimumRule(
+  rules: { storeId: string; grupo: string; tamanho: string; colecao: string | null; valorMinimo: number }[],
+  s: { storeId: string; grupo: string; tamanho: string | null; colecao: string | null }
+): number | null {
+  const exact = rules.find(
+    (r) => r.storeId === s.storeId && r.grupo === s.grupo && r.tamanho === s.tamanho && r.colecao === s.colecao
+  );
+  if (exact) return exact.valorMinimo;
+  const generic = rules.find(
+    (r) => r.storeId === s.storeId && r.grupo === s.grupo && r.tamanho === s.tamanho && r.colecao === null
+  );
+  return generic?.valorMinimo ?? null;
+}
+
 export async function getReplenishment(filters: Pick<DashboardFilters, "storeIds" | "grupoIn">) {
-  const stock = await latestStockSnapshots(filters);
+  const [stock, minimumRules] = await Promise.all([
+    latestStockSnapshots(filters),
+    prisma.stockMinimumRule.findMany(),
+  ]);
   const storeIds = [...new Set(stock.map((s) => s.storeId))];
   const stores = await prisma.store.findMany({ where: { id: { in: storeIds } } });
   const storeName = new Map(stores.map((s) => [s.id, s.name]));
@@ -162,6 +181,11 @@ export async function getReplenishment(filters: Pick<DashboardFilters, "storeIds
   }
 
   return stock
+    .map((s) => {
+      // Regra manual do Rodrigo ganha do estoqueMinimo que vem do DAPIC.
+      const estoqueMinimo = matchMinimumRule(minimumRules, s) ?? s.estoqueMinimo;
+      return { ...s, estoqueMinimo };
+    })
     .filter(
       (s) =>
         s.estoqueMinimo != null &&
@@ -181,6 +205,29 @@ export async function getReplenishment(filters: Pick<DashboardFilters, "storeIds
       estoqueNaOrigem: cdStockByCod.get(s.cod) ?? 0,
     }))
     .sort((a, b) => b.falta - a.falta);
+}
+
+export async function getVendedorRanking(filters: DashboardFilters) {
+  const rows = await prisma.sale.groupBy({
+    by: ["storeId", "vendedor"],
+    where: { ...saleWhere(filters), vendedor: { not: null } },
+    _sum: { quantidade: true, valorTotalLiquido: true },
+    _count: { _all: true },
+  });
+
+  const storeIds = [...new Set(rows.map((r) => r.storeId))];
+  const stores = await prisma.store.findMany({ where: { id: { in: storeIds } } });
+  const storeName = new Map(stores.map((s) => [s.id, s.name]));
+
+  return rows
+    .map((r) => ({
+      vendedor: r.vendedor as string,
+      storeName: storeName.get(r.storeId) ?? r.storeId,
+      pedidos: r._count._all,
+      unidades: r._sum.quantidade ?? 0,
+      receita: r._sum.valorTotalLiquido ?? 0,
+    }))
+    .sort((a, b) => b.receita - a.receita);
 }
 
 export async function getTopClientes(filters: DashboardFilters, limit = 30) {
@@ -274,6 +321,27 @@ export async function getEstoquePorArmazenador(filters: Pick<DashboardFilters, "
       percentual: total > 0 ? (quantidade / total) * 100 : 0,
     }))
     .sort((a, b) => b.quantidade - a.quantidade);
+}
+
+// Lojas "cruas" (sem agrupar CD+ATACADO) — usado na tela de estoque mínimo, onde a regra
+// precisa mirar o armazenador de verdade, não a opção agrupada do filtro.
+export async function getRawStores() {
+  return prisma.store.findMany({ orderBy: { name: "asc" } });
+}
+
+export async function getDistinctGrupos() {
+  const rows = await prisma.stockSnapshot.findMany({
+    distinct: ["grupo"],
+    select: { grupo: true },
+  });
+  return rows.map((r) => r.grupo).sort();
+}
+
+export async function getMinimumRules() {
+  return prisma.stockMinimumRule.findMany({
+    include: { store: true },
+    orderBy: [{ storeId: "asc" }, { grupo: "asc" }, { tamanho: "asc" }],
+  });
 }
 
 export async function getMarcas() {

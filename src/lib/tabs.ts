@@ -9,7 +9,9 @@ export type TabKey =
   | "reposicao"
   | "pesquisa"
   | "clientes"
-  | "marketing";
+  | "vendedores"
+  | "marketing"
+  | "estoque-minimo";
 
 export const TABS: { key: TabKey; label: string; href: string }[] = [
   { key: "vendas", label: "Vendas", href: "/dashboard/vendas" },
@@ -19,12 +21,14 @@ export const TABS: { key: TabKey; label: string; href: string }[] = [
   { key: "reposicao", label: "Reposição de Lojas", href: "/dashboard/reposicao" },
   { key: "pesquisa", label: "Pesquisa", href: "/dashboard/pesquisa" },
   { key: "clientes", label: "Clientes", href: "/dashboard/clientes" },
+  { key: "vendedores", label: "Vendedores", href: "/dashboard/vendedores" },
   { key: "marketing", label: "Marketing", href: "/dashboard/marketing" },
+  { key: "estoque-minimo", label: "Estoque Mínimo", href: "/dashboard/estoque-minimo" },
 ];
 
 // "Visão Geral" (/dashboard) não entra na lista — todo usuário logado sempre pode ver ela,
 // é a página de pouso padrão.
-const BLOCKED_BY_DEFAULT_FOR_VENDEDOR: TabKey[] = ["clientes"];
+const BLOCKED_BY_DEFAULT_FOR_VENDEDOR: TabKey[] = ["clientes", "vendedores", "estoque-minimo"];
 
 export function defaultAllowedTabs(role: Role): TabKey[] {
   if (role === "VENDEDOR") {

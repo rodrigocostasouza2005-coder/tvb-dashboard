@@ -1,5 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
-import { getStockVsSales, getStores, getMarcas } from "@/lib/metrics";
+import { getStockVsSales, getStores, getMarcas, getTabelasPreco } from "@/lib/metrics";
 import { getGrupoRestriction } from "@/lib/permissions";
 import { parseFilters, parseDimension, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
@@ -21,15 +21,23 @@ export default async function EstoquePage({
   const grupoIn = await getGrupoRestriction(user.role);
   const filters = { ...parseFilters(rawParams), grupoIn };
 
-  const [rows, stores, marcas] = await Promise.all([
+  const [rows, stores, marcas, tabelasPreco] = await Promise.all([
     getStockVsSales(filters, dimension),
     getStores(),
     getMarcas(),
+    getTabelasPreco(),
   ]);
 
   return (
     <div>
-      <FilterBar action="/dashboard/estoque" stores={stores} marcas={marcas} filters={filters} />
+      <FilterBar
+        action="/dashboard/estoque"
+        stores={stores}
+        marcas={marcas}
+        tabelasPreco={tabelasPreco}
+        showTabelaPreco
+        filters={filters}
+      />
       <DimensionToggle basePath="/dashboard/estoque" searchParams={rawParams} current={dimension} />
       <BarCompare
         rows={rows.slice(0, 40).map((r) => ({ label: r.key, a: r.currentStock, b: r.unitsSold }))}

@@ -1,5 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
-import { getStockVsSales, getStores, getMarcas } from "@/lib/metrics";
+import { getStockVsSales, getStores, getMarcas, getTabelasPreco } from "@/lib/metrics";
 import { getGrupoRestriction } from "@/lib/permissions";
 import { parseFilters, parseDimension, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
@@ -21,10 +21,11 @@ export default async function MarketingPage({
   const grupoIn = await getGrupoRestriction(user.role);
   const filters = { ...parseFilters(rawParams), grupoIn };
 
-  const [rows, stores, marcas] = await Promise.all([
+  const [rows, stores, marcas, tabelasPreco] = await Promise.all([
     getStockVsSales(filters, dimension),
     getStores(),
     getMarcas(),
+    getTabelasPreco(),
   ]);
 
   const ranked = rows
@@ -34,7 +35,14 @@ export default async function MarketingPage({
 
   return (
     <div>
-      <FilterBar action="/dashboard/marketing" stores={stores} marcas={marcas} filters={filters} />
+      <FilterBar
+        action="/dashboard/marketing"
+        stores={stores}
+        marcas={marcas}
+        tabelasPreco={tabelasPreco}
+        showTabelaPreco
+        filters={filters}
+      />
       <DimensionToggle basePath="/dashboard/marketing" searchParams={rawParams} current={dimension} />
 
       <h2 className="mb-1 text-sm font-medium text-[var(--text-primary)]">

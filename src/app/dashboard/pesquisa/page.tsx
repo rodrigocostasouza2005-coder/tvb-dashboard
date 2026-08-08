@@ -1,5 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
-import { searchStockVsSales, getStores, getMarcas } from "@/lib/metrics";
+import { searchStockVsSales, getStores, getMarcas, getTabelasPreco } from "@/lib/metrics";
 import { getGrupoRestriction } from "@/lib/permissions";
 import { parseFilters, parseDimension, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
@@ -28,15 +28,23 @@ export default async function PesquisaPage({
   const grupoIn = await getGrupoRestriction(user.role);
   const filters = { ...parseFilters(rawParams), grupoIn };
 
-  const [rows, stores, marcas] = await Promise.all([
+  const [rows, stores, marcas, tabelasPreco] = await Promise.all([
     searchStockVsSales(filters, dimension, query),
     getStores(),
     getMarcas(),
+    getTabelasPreco(),
   ]);
 
   return (
     <div>
-      <FilterBar action="/dashboard/pesquisa" stores={stores} marcas={marcas} filters={filters} />
+      <FilterBar
+        action="/dashboard/pesquisa"
+        stores={stores}
+        marcas={marcas}
+        tabelasPreco={tabelasPreco}
+        showTabelaPreco
+        filters={filters}
+      />
       <DimensionToggle basePath="/dashboard/pesquisa" searchParams={rawParams} current={dimension} />
 
       <form action="/dashboard/pesquisa" method="GET" className="mb-4 flex gap-2">
@@ -46,6 +54,9 @@ export default async function PesquisaPage({
         ))}
         {(filters.marcas ?? []).map((m) => (
           <input key={m} type="hidden" name="marca" value={m} />
+        ))}
+        {(filters.tabelasPreco ?? []).map((t) => (
+          <input key={t} type="hidden" name="tabelaPreco" value={t} />
         ))}
         <input
           type="text"

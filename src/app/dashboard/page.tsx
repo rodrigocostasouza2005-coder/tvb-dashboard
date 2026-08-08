@@ -1,5 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
-import { getKpiSummary, getSalesByDimension, getStores, getMarcas, getLastSyncs } from "@/lib/metrics";
+import { getKpiSummary, getSalesByDimension, getStores, getMarcas, getTabelasPreco, getLastSyncs } from "@/lib/metrics";
 import { canSeeFinancials, getGrupoRestriction } from "@/lib/permissions";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { FilterBar } from "./filter-bar";
@@ -30,11 +30,12 @@ export default async function OverviewPage({
 
   const grupoIn = await getGrupoRestriction(user.role);
   const filters = { ...parseFilters(await searchParams), grupoIn };
-  const [kpi, salesByGroup, stores, marcas, syncs] = await Promise.all([
+  const [kpi, salesByGroup, stores, marcas, tabelasPreco, syncs] = await Promise.all([
     getKpiSummary(filters),
     getSalesByDimension(filters, "grupo"),
     getStores(),
     getMarcas(),
+    getTabelasPreco(),
     getLastSyncs(),
   ]);
 
@@ -43,7 +44,14 @@ export default async function OverviewPage({
 
   return (
     <div>
-      <FilterBar action="/dashboard" stores={stores} marcas={marcas} filters={filters} />
+      <FilterBar
+        action="/dashboard"
+        stores={stores}
+        marcas={marcas}
+        tabelasPreco={tabelasPreco}
+        showTabelaPreco
+        filters={filters}
+      />
 
       <section className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
         <StatTile label="Unidades vendidas" value={kpi.unitsSold.toLocaleString("pt-BR")} />

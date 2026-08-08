@@ -50,10 +50,29 @@ model Store {
   // dados separados por baixo — evita somar/sobrescrever quantidade errado.
   displayGroup       String?
 
-  sales           Sale[]
-  stockSnapshots  StockSnapshot[]
-  returns         Return[]
-  syncLogs        SyncLog[]
+  sales               Sale[]
+  stockSnapshots      StockSnapshot[]
+  returns             Return[]
+  syncLogs            SyncLog[]
+  stockMinimumRules   StockMinimumRule[]
+}
+
+// Estoque mínimo definido manualmente pelo Rodrigo (o valor que vem do DAPIC nem sempre é
+// bom) — colecao nulo = vale pra qualquer coleção desse grupo+tamanho+loja. Regra mais
+// específica (com colecao) ganha da mais genérica na hora de aplicar.
+model StockMinimumRule {
+  id          String   @id @default(cuid())
+  storeId     String
+  grupo       String
+  tamanho     String
+  colecao     String?
+  valorMinimo Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  store Store @relation(fields: [storeId], references: [id])
+
+  @@unique([storeId, grupo, tamanho, colecao])
 }
 
 // Registros ficam denormalizados (grupo/cor/tamanho/coleção direto na linha) porque é assim
