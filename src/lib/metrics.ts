@@ -402,13 +402,22 @@ export async function getDistinctGrupos() {
   return rows.map((r) => r.grupo).sort();
 }
 
-export async function getDistinctTamanhos() {
+// Tamanhos que cada grupo realmente tem (camisa não tem 42, Classic não tem G/UNICO, etc) —
+// usado pra filtrar o dropdown de Tamanho conforme o Grupo escolhido, na tela de Estoque Mínimo.
+export async function getTamanhosPorGrupo() {
   const rows = await prisma.stockSnapshot.findMany({
-    distinct: ["tamanho"],
-    select: { tamanho: true },
+    distinct: ["grupo", "tamanho"],
+    select: { grupo: true, tamanho: true },
     where: { tamanho: { not: null } },
   });
-  return rows.map((r) => r.tamanho as string).sort();
+  const map = new Map<string, string[]>();
+  for (const r of rows) {
+    const list = map.get(r.grupo) ?? [];
+    list.push(r.tamanho as string);
+    map.set(r.grupo, list);
+  }
+  for (const list of map.values()) list.sort();
+  return Object.fromEntries(map);
 }
 
 export async function getMinimumRules() {

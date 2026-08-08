@@ -5,7 +5,7 @@ import {
   getRawStores,
   getDistinctColecoes,
   getDistinctGrupos,
-  getDistinctTamanhos,
+  getTamanhosPorGrupo,
 } from "@/lib/metrics";
 import { requireTabAccess } from "@/lib/tabs";
 import { deleteMinimumRuleAction } from "./actions";
@@ -17,13 +17,20 @@ export default async function EstoqueMinimoPage() {
   requireTabAccess(user, user.role, "estoque-minimo");
   if (user.role === "VENDEDOR") redirect("/dashboard");
 
-  const [rules, stores, colecoes, grupos, tamanhos] = await Promise.all([
+  const [rules, stores, colecoes, grupos, tamanhosPorGrupo] = await Promise.all([
     getMinimumRules(),
     getRawStores(),
     getDistinctColecoes(),
     getDistinctGrupos(),
-    getDistinctTamanhos(),
+    getTamanhosPorGrupo(),
   ]);
+  const existingRules = rules.map((r) => ({
+    storeId: r.storeId,
+    grupo: r.grupo,
+    tamanho: r.tamanho,
+    colecao: r.colecao,
+    valorMinimo: r.valorMinimo,
+  }));
 
   return (
     <div>
@@ -36,7 +43,13 @@ export default async function EstoqueMinimoPage() {
 
       <section className="mb-8 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
         <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Nova regra</h2>
-        <NovaRegraForm stores={stores} colecoes={colecoes} grupos={grupos} tamanhos={tamanhos} />
+        <NovaRegraForm
+          stores={stores}
+          colecoes={colecoes}
+          grupos={grupos}
+          tamanhosPorGrupo={tamanhosPorGrupo}
+          existingRules={existingRules}
+        />
       </section>
 
       <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)]">
