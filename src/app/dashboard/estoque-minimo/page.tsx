@@ -1,8 +1,9 @@
 import { redirect } from "next/navigation";
 import { getSessionUser } from "@/lib/auth";
-import { getMinimumRules, getRawStores, getDistinctGrupos } from "@/lib/metrics";
+import { getMinimumRules, getRawStores, getColecaoGrupoTamanhoCombos } from "@/lib/metrics";
 import { requireTabAccess } from "@/lib/tabs";
-import { createMinimumRuleAction, deleteMinimumRuleAction } from "./actions";
+import { deleteMinimumRuleAction } from "./actions";
+import { NovaRegraForm } from "./nova-regra-form";
 
 export default async function EstoqueMinimoPage() {
   const user = await getSessionUser();
@@ -10,7 +11,11 @@ export default async function EstoqueMinimoPage() {
   requireTabAccess(user, user.role, "estoque-minimo");
   if (user.role === "VENDEDOR") redirect("/dashboard");
 
-  const [rules, stores, grupos] = await Promise.all([getMinimumRules(), getRawStores(), getDistinctGrupos()]);
+  const [rules, stores, combos] = await Promise.all([
+    getMinimumRules(),
+    getRawStores(),
+    getColecaoGrupoTamanhoCombos(),
+  ]);
 
   return (
     <div>
@@ -23,94 +28,7 @@ export default async function EstoqueMinimoPage() {
 
       <section className="mb-8 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
         <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Nova regra</h2>
-        <form action={createMinimumRuleAction} className="flex flex-wrap items-end gap-3">
-          <div className="flex flex-col gap-1">
-            <label className="text-xs text-[var(--text-muted)]" htmlFor="storeId">
-              Loja
-            </label>
-            <select
-              id="storeId"
-              name="storeId"
-              required
-              className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1 text-sm text-[var(--text-primary)]"
-              style={{ colorScheme: "light dark" }}
-            >
-              {stores.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="flex flex-col gap-1">
-            <label className="text-xs text-[var(--text-muted)]" htmlFor="grupo">
-              Grupo
-            </label>
-            <input
-              id="grupo"
-              name="grupo"
-              list="grupos-list"
-              required
-              className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1 text-sm text-[var(--text-primary)]"
-              style={{ colorScheme: "light dark" }}
-            />
-            <datalist id="grupos-list">
-              {grupos.map((g) => (
-                <option key={g} value={g} />
-              ))}
-            </datalist>
-          </div>
-
-          <div className="flex flex-col gap-1">
-            <label className="text-xs text-[var(--text-muted)]" htmlFor="tamanho">
-              Tamanho
-            </label>
-            <input
-              id="tamanho"
-              name="tamanho"
-              required
-              placeholder="P, 38, UNICO..."
-              className="w-24 rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1 text-sm text-[var(--text-primary)]"
-              style={{ colorScheme: "light dark" }}
-            />
-          </div>
-
-          <div className="flex flex-col gap-1">
-            <label className="text-xs text-[var(--text-muted)]" htmlFor="colecao">
-              Coleção (opcional)
-            </label>
-            <input
-              id="colecao"
-              name="colecao"
-              placeholder="vazio = todas"
-              className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1 text-sm text-[var(--text-primary)]"
-              style={{ colorScheme: "light dark" }}
-            />
-          </div>
-
-          <div className="flex flex-col gap-1">
-            <label className="text-xs text-[var(--text-muted)]" htmlFor="valorMinimo">
-              Mínimo
-            </label>
-            <input
-              id="valorMinimo"
-              name="valorMinimo"
-              type="number"
-              min={0}
-              required
-              className="w-24 rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1 text-sm text-[var(--text-primary)]"
-              style={{ colorScheme: "light dark" }}
-            />
-          </div>
-
-          <button
-            type="submit"
-            className="rounded-md bg-[var(--series-1)] px-3 py-1.5 text-sm font-medium text-white"
-          >
-            Salvar
-          </button>
-        </form>
+        <NovaRegraForm stores={stores} combos={combos} />
       </section>
 
       <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)]">

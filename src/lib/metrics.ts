@@ -385,12 +385,16 @@ export async function getRawStores() {
   return prisma.store.findMany({ orderBy: { name: "asc" } });
 }
 
-export async function getDistinctGrupos() {
+// Combinações reais de coleção/grupo/tamanho existentes no estoque — usado pra montar os
+// dropdowns em cascata da tela de Estoque Mínimo (cada nível filtra o próximo).
+export async function getColecaoGrupoTamanhoCombos() {
   const rows = await prisma.stockSnapshot.findMany({
-    distinct: ["grupo"],
-    select: { grupo: true },
+    distinct: ["colecao", "grupo", "tamanho"],
+    select: { colecao: true, grupo: true, tamanho: true },
   });
-  return rows.map((r) => r.grupo).sort();
+  return rows
+    .filter((r) => r.tamanho !== null)
+    .map((r) => ({ colecao: r.colecao, grupo: r.grupo, tamanho: r.tamanho as string }));
 }
 
 export async function getMinimumRules() {
