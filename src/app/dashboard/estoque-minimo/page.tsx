@@ -1,6 +1,12 @@
 import { redirect } from "next/navigation";
 import { getSessionUser } from "@/lib/auth";
-import { getMinimumRules, getRawStores, getColecaoGrupoTamanhoCombos } from "@/lib/metrics";
+import {
+  getMinimumRules,
+  getRawStores,
+  getDistinctColecoes,
+  getDistinctGrupos,
+  getDistinctTamanhos,
+} from "@/lib/metrics";
 import { requireTabAccess } from "@/lib/tabs";
 import { deleteMinimumRuleAction } from "./actions";
 import { NovaRegraForm } from "./nova-regra-form";
@@ -11,10 +17,12 @@ export default async function EstoqueMinimoPage() {
   requireTabAccess(user, user.role, "estoque-minimo");
   if (user.role === "VENDEDOR") redirect("/dashboard");
 
-  const [rules, stores, combos] = await Promise.all([
+  const [rules, stores, colecoes, grupos, tamanhos] = await Promise.all([
     getMinimumRules(),
     getRawStores(),
-    getColecaoGrupoTamanhoCombos(),
+    getDistinctColecoes(),
+    getDistinctGrupos(),
+    getDistinctTamanhos(),
   ]);
 
   return (
@@ -28,7 +36,7 @@ export default async function EstoqueMinimoPage() {
 
       <section className="mb-8 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
         <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Nova regra</h2>
-        <NovaRegraForm stores={stores} combos={combos} />
+        <NovaRegraForm stores={stores} colecoes={colecoes} grupos={grupos} tamanhos={tamanhos} />
       </section>
 
       <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)]">

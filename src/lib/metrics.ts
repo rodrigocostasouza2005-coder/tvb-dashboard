@@ -385,16 +385,30 @@ export async function getRawStores() {
   return prisma.store.findMany({ orderBy: { name: "asc" } });
 }
 
-// Combinações reais de coleção/grupo/tamanho existentes no estoque — usado pra montar os
-// dropdowns em cascata da tela de Estoque Mínimo (cada nível filtra o próximo).
-export async function getColecaoGrupoTamanhoCombos() {
+// Listas completas (não filtradas entre si) pra montar os dropdowns da tela de Estoque Mínimo —
+// Rodrigo quer preencher via Tab, então nenhum campo pode ficar vazio/desabilitado esperando
+// outro ser escolhido primeiro.
+export async function getDistinctColecoes() {
   const rows = await prisma.stockSnapshot.findMany({
-    distinct: ["colecao", "grupo", "tamanho"],
-    select: { colecao: true, grupo: true, tamanho: true },
+    distinct: ["colecao"],
+    select: { colecao: true },
+    where: { colecao: { not: null } },
   });
-  return rows
-    .filter((r) => r.tamanho !== null)
-    .map((r) => ({ colecao: r.colecao, grupo: r.grupo, tamanho: r.tamanho as string }));
+  return rows.map((r) => r.colecao as string).sort();
+}
+
+export async function getDistinctGrupos() {
+  const rows = await prisma.stockSnapshot.findMany({ distinct: ["grupo"], select: { grupo: true } });
+  return rows.map((r) => r.grupo).sort();
+}
+
+export async function getDistinctTamanhos() {
+  const rows = await prisma.stockSnapshot.findMany({
+    distinct: ["tamanho"],
+    select: { tamanho: true },
+    where: { tamanho: { not: null } },
+  });
+  return rows.map((r) => r.tamanho as string).sort();
 }
 
 export async function getMinimumRules() {
