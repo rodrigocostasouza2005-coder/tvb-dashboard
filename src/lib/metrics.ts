@@ -230,6 +230,62 @@ export async function getVendedorRanking(filters: DashboardFilters) {
     .sort((a, b) => b.receita - a.receita);
 }
 
+// Envelhecimento de estoque: pra cada item com estoque > 0, olha o histórico TODO de vendas
+// (não só o período filtrado) pra achar a primeira e a última venda daquele produto naquela
+// loja. "Dias desde a 1ª venda" é o sinal principal pedido pelo Rodrigo — mostra desde quando
+// aquele produto realmente começou a vender, não só se parou de vender recentemente.
+export async function getStockAging(filters: Pick<DashboardFilters, "storeIds" | "grupoIn">) {
+  const stock = (await latestStockSnapshots(filters)).filter((s) => s.quantidadeDisponivel > 0);
+  if (stock.length === 0) return [];
+
+  const storeIds = [...new Set(stock.map((s) => s.storeId))];
+  const cods = [...new Set(stock.map((s) => s.cod))];
+
+  const [saleAgg, stores] = await Promise.all([
+    prisma.sale.groupBy({
+      by: ["storeId", "cod"],
+      where: { storeId: { in: storeIds }, cod: { in: cods } },
+      _min: { saleDate: true },
+      _max: { saleDate: true },
+      _sum: { quantidade: true },
+    }),
+    prisma.store.findMany({ where: { id: { in: storeIds } } }),
+  ]);
+
+  const storeName = new Map(stores.map((s) => [s.id, s.name]));
+  const saleByKey = new Map(saleAgg.map((s) => [`${s.storeId}::${s.cod}`, s]));
+
+  const today = new Date();
+  const daysSince = (d: Date | null | undefined) =>
+    d ? Math.floor((today.getTime() - d.getTime()) / 86_400_000) : null;
+
+  return stock
+    .map((s) => {
+      const sale = saleByKey.get(`${s.storeId}::${s.cod}`);
+      const primeiraVenda = sale?._min.saleDate ?? null;
+      const ultimaVenda = sale?._max.saleDate ?? null;
+      const totalVendido = sale?._sum.quantidade ?? 0;
+      const sellThroughRate =
+        totalVendido + s.quantidadeDisponivel > 0
+          ? (totalVendido / (totalVendido + s.quantidadeDisponivel)) * 100
+          : null;
+      return {
+        storeName: storeName.get(s.storeId) ?? s.storeId,
+        produto: s.produto,
+        grupo: s.grupo,
+        tamanho: s.tamanho,
+        quantidadeDisponivel: s.quantidadeDisponivel,
+        primeiraVenda,
+        ultimaVenda,
+        diasDesdePrimeiraVenda: daysSince(primeiraVenda),
+        diasDesdeUltimaVenda: daysSince(ultimaVenda),
+        totalVendido,
+        sellThroughRate,
+      };
+    })
+    .sort((a, b) => (b.diasDesdePrimeiraVenda ?? 999999) - (a.diasDesdePrimeiraVenda ?? 999999));
+}
+
 export async function getTopClientes(filters: DashboardFilters, limit = 30) {
   const rows = await prisma.sale.groupBy({
     by: ["clienteNome"],

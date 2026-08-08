@@ -11,7 +11,8 @@ export type TabKey =
   | "clientes"
   | "vendedores"
   | "marketing"
-  | "estoque-minimo";
+  | "estoque-minimo"
+  | "envelhecimento";
 
 export const TABS: { key: TabKey; label: string; href: string }[] = [
   { key: "vendas", label: "Vendas", href: "/dashboard/vendas" },
@@ -24,6 +25,7 @@ export const TABS: { key: TabKey; label: string; href: string }[] = [
   { key: "vendedores", label: "Vendedores", href: "/dashboard/vendedores" },
   { key: "marketing", label: "Marketing", href: "/dashboard/marketing" },
   { key: "estoque-minimo", label: "Estoque Mínimo", href: "/dashboard/estoque-minimo" },
+  { key: "envelhecimento", label: "Envelhecimento", href: "/dashboard/envelhecimento" },
 ];
 
 // "Visão Geral" (/dashboard) não entra na lista — todo usuário logado sempre pode ver ela,
