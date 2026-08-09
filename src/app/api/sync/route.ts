@@ -135,17 +135,22 @@ async function syncVendas(client: DapicClient, storeId: string | null, dias: num
 async function runSync() {
   try {
     const clients = createDapicClients();
-    let totalEstoque = 0;
-    let totalVendas = 0;
-    let totalDevolucoes = 0;
 
-    for (const client of clients) {
-      const { storeByDapicId, primaryStoreId } = await syncArmazenadores(client);
-      totalEstoque += await syncEstoque(client, storeByDapicId);
-      const vendas = await syncVendas(client, primaryStoreId, 2);
-      totalVendas += vendas.vendas;
-      totalDevolucoes += vendas.devolucoes;
-    }
+    // Lojas em paralelo, não em sequência — cada uma leva dezenas de segundos pra buscar o
+    // estoque completo na API do DAPIC, e rodando uma por vez as 4 juntas passavam dos 300s
+    // (maxDuration) e a função da Vercel dava timeout, quebrando a sync automática.
+    const results = await Promise.all(
+      clients.map(async (client) => {
+        const { storeByDapicId, primaryStoreId } = await syncArmazenadores(client);
+        const estoque = await syncEstoque(client, storeByDapicId);
+        const vendas = await syncVendas(client, primaryStoreId, 2);
+        return { estoque, vendas: vendas.vendas, devolucoes: vendas.devolucoes };
+      })
+    );
+
+    const totalEstoque = results.reduce((a, r) => a + r.estoque, 0);
+    const totalVendas = results.reduce((a, r) => a + r.vendas, 0);
+    const totalDevolucoes = results.reduce((a, r) => a + r.devolucoes, 0);
 
     await prisma.syncLog.create({
       data: { source: "STOCK", status: "SUCCESS", recordsSynced: totalEstoque, finishedAt: new Date() },
