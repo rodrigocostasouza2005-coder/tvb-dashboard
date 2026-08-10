@@ -87,32 +87,37 @@ export function FilterBar({
         />
       )}
 
-      <div className="flex flex-col gap-1">
-        <label className="text-xs font-medium text-[var(--text-muted)]" htmlFor="from">
-          De
-        </label>
-        <input
-          id="from"
-          type="date"
-          name="from"
-          defaultValue={toDateInputValue(filters.from)}
-          className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1 text-[var(--text-primary)]"
-          style={{ colorScheme: "light dark" }}
-        />
-      </div>
+      {/* Os dois campos de data ficam juntos num bloco só — soltos direto no flex-wrap do
+          formulário, eles podiam parar em linhas diferentes (um de cada lado) dependendo da
+          largura disponível. */}
+      <div className="flex items-end gap-3">
+        <div className="flex flex-col gap-1">
+          <label className="text-xs font-medium text-[var(--text-muted)]" htmlFor="from">
+            De
+          </label>
+          <input
+            id="from"
+            type="date"
+            name="from"
+            defaultValue={toDateInputValue(filters.from)}
+            className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1 text-[var(--text-primary)]"
+            style={{ colorScheme: "light dark" }}
+          />
+        </div>
 
-      <div className="flex flex-col gap-1">
-        <label className="text-xs font-medium text-[var(--text-muted)]" htmlFor="to">
-          Até
-        </label>
-        <input
-          id="to"
-          type="date"
-          name="to"
-          defaultValue={toDateInputValue(filters.to)}
-          className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1 text-[var(--text-primary)]"
-          style={{ colorScheme: "light dark" }}
-        />
+        <div className="flex flex-col gap-1">
+          <label className="text-xs font-medium text-[var(--text-muted)]" htmlFor="to">
+            Até
+          </label>
+          <input
+            id="to"
+            type="date"
+            name="to"
+            defaultValue={toDateInputValue(filters.to)}
+            className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1 text-[var(--text-primary)]"
+            style={{ colorScheme: "light dark" }}
+          />
+        </div>
       </div>
 
       <button
