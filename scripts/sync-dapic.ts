@@ -5,6 +5,7 @@
 import { PrismaClient, type Prisma } from "@prisma/client";
 import { createDapicClients, type DapicClient } from "../src/lib/connectors/dapic";
 import { displayGroupFor, sellsProducts } from "../src/lib/connectors/armazenadores";
+import { upsertStockSnapshots, type StockSnapshotRow } from "../src/lib/connectors/upsert-stock";
 import { sendTelegramMessage } from "../src/lib/telegram";
 
 // Conexão direta (sem pgbouncer) — scripts longos derrubam a conexão do pooler no meio.
@@ -72,7 +73,7 @@ async function syncArmazenadores(client: DapicClient) {
 async function syncEstoque(client: DapicClient, storeByDapicId: Map<number, string>) {
   const linhas = await client.fetchEstoqueTodosArmazenadores();
 
-  const data: Prisma.StockSnapshotCreateManyInput[] = [];
+  const data: StockSnapshotRow[] = [];
   let semArmazenador = 0;
 
   for (const l of linhas) {
@@ -90,14 +91,12 @@ async function syncEstoque(client: DapicClient, storeByDapicId: Map<number, stri
       tamanho: l.Tamanho ?? null,
       colecao: l.Colecao ?? null,
       quantidadeDisponivel: l.QuantidadeReal ?? l.Quantidade ?? 0,
+      estoqueMinimo: null,
       valorCusto: l.ValorCusto ?? null,
     });
   }
 
-  const BATCH = 2000;
-  for (let i = 0; i < data.length; i += BATCH) {
-    await withRetry(() => prisma.stockSnapshot.createMany({ data: data.slice(i, i + BATCH) }));
-  }
+  await withRetry(() => upsertStockSnapshots(prisma, data));
 
   return { linhas: linhas.length, gravadas: data.length, semArmazenador };
 }

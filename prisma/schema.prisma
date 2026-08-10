@@ -127,7 +127,10 @@ model StockSnapshot {
 
   store Store @relation(fields: [storeId], references: [id])
 
-  @@index([storeId, cod, syncedAt])
+  // 1 linha por produto+loja, atualizada a cada sync (upsert) em vez de acumular uma linha nova
+  // por rodada — sem isso a tabela crescia pra sempre (2 syncs/dia, sem limpeza), ficando lenta
+  // e fazendo os totais de estoque somarem histórico em vez do valor atual.
+  @@unique([storeId, cod])
   @@index([grupo])
 }
 

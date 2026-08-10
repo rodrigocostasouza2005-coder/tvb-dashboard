@@ -27,7 +27,7 @@ export default async function EstoqueAtualPage({
 
   const [rows, porArmazenador, stores, marcas] = await Promise.all([
     getEstoqueAtual(filters, dimension),
-    getEstoquePorArmazenador({ grupoIn }),
+    getEstoquePorArmazenador(filters),
     getAllStores(),
     getMarcas(),
   ]);

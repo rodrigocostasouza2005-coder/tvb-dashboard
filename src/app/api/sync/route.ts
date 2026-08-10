@@ -3,6 +3,7 @@ import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { createDapicClients, type DapicClient } from "@/lib/connectors/dapic";
 import { displayGroupFor, sellsProducts } from "@/lib/connectors/armazenadores";
+import { upsertStockSnapshots, type StockSnapshotRow } from "@/lib/connectors/upsert-stock";
 import { sendTelegramMessage } from "@/lib/telegram";
 import type { Prisma } from "@prisma/client";
 
@@ -51,7 +52,7 @@ async function syncArmazenadores(client: DapicClient) {
 
 async function syncEstoque(client: DapicClient, storeByDapicId: Map<number, string>) {
   const linhas = await client.fetchEstoqueTodosArmazenadores();
-  const data: Prisma.StockSnapshotCreateManyInput[] = [];
+  const data: StockSnapshotRow[] = [];
   for (const l of linhas) {
     const storeId = storeByDapicId.get(l.IdArmazenador);
     if (!storeId) continue;
@@ -64,10 +65,11 @@ async function syncEstoque(client: DapicClient, storeByDapicId: Map<number, stri
       tamanho: l.Tamanho ?? null,
       colecao: l.Colecao ?? null,
       quantidadeDisponivel: l.QuantidadeReal ?? l.Quantidade ?? 0,
+      estoqueMinimo: null,
       valorCusto: l.ValorCusto ?? null,
     });
   }
-  if (data.length) await prisma.stockSnapshot.createMany({ data });
+  if (data.length) await upsertStockSnapshots(prisma, data);
   return data.length;
 }
 

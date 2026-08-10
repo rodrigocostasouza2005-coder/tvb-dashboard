@@ -80,10 +80,11 @@ export async function getSalesByDimension(filters: DashboardFilters, dimension: 
 
 // Pega o snapshot mais recente por loja+produto (evita somar duplicado se já tivermos
 // vários syncs no histórico).
+// StockSnapshot tem 1 linha por storeId+cod (upsert no sync mantém sempre atualizada, ver
+// upsertStockSnapshots) — não tem mais duplicata histórica pra dedupar aqui.
 async function latestStockSnapshots(filters: Pick<DashboardFilters, "storeIds" | "grupoIn">) {
-  const rows = await prisma.stockSnapshot.findMany({
+  return prisma.stockSnapshot.findMany({
     where: stockWhere(filters),
-    orderBy: { syncedAt: "desc" },
     select: {
       storeId: true,
       cod: true,
@@ -96,15 +97,6 @@ async function latestStockSnapshots(filters: Pick<DashboardFilters, "storeIds" |
       valorCusto: true,
     },
   });
-  const seen = new Set<string>();
-  const latest: typeof rows = [];
-  for (const row of rows) {
-    const key = `${row.storeId}::${row.cod}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    latest.push(row);
-  }
-  return latest;
 }
 
 export async function getStockVsSales(filters: DashboardFilters, dimension: Dimension = "grupo") {
@@ -358,8 +350,10 @@ export async function getEstoqueAtual(filters: Pick<DashboardFilters, "storeIds"
 }
 
 // Distribuição de estoque por armazenador — pra gráfico de pizza (% de peças por loja/armazém).
-export async function getEstoquePorArmazenador(filters: Pick<DashboardFilters, "grupoIn"> = {}) {
-  const stock = await latestStockSnapshots({ grupoIn: filters.grupoIn });
+// Respeita o mesmo filtro de Loja do topo da página (storeIds) — antes ignorava e sempre
+// mostrava todo mundo, mesmo filtrando a tabela abaixo.
+export async function getEstoquePorArmazenador(filters: Pick<DashboardFilters, "storeIds" | "grupoIn"> = {}) {
+  const stock = await latestStockSnapshots(filters);
   const stores = await prisma.store.findMany();
   const storeName = new Map(stores.map((s) => [s.id, s.name]));
 
