@@ -193,12 +193,32 @@ export class DapicClient {
   // Vendas de ponto de venda (loja física) — confirmado em 2026-08-07 como a fonte de verdade
   // de vendas de loja (pedidosvendas trazia volume baixo demais, provavelmente é outro canal
   // tipo online/atacado). Já vem com Grupo/Marca/Coleção prontos por item.
+  // EXCEÇÃO (achada em 2026-08-10, confirmada pelo Rodrigo): pro token cd-atacado, esse endpoint
+  // só captura DEVOLUÇÃO de verdade — a VENDA de verdade do canal Site+Atacado vem de /faturas
+  // (nota fiscal), não daqui. As linhas "Venda" que aparecem aqui pra esse token são só o lado
+  // de troca (a devolução do item antigo tem uma linha "Venda" pareada, mas não é a venda real).
   fetchVendasPdv(dataInicial: string, dataFinal: string) {
     return this.fetchAllPages<DapicVendaPdv>("/vendaspdv", {
       DataInicial: dataInicial,
       DataFinal: dataFinal,
       FiltrarPor: "Fechamento",
     });
+  }
+
+  // Faturas (nota fiscal) — só o token cd-atacado tem acesso (as outras 3 lojas físicas retornam
+  // vazio, tudo delas passa por vendaspdv mesmo). É a fonte de verdade de VENDA do canal Site +
+  // Atacado (confirmado com Rodrigo em 2026-08-10) — vendaspdv desse token só tem devolução.
+  fetchFaturas(dataInicial: string, dataFinal: string) {
+    return this.fetchAllPages<DapicFatura>("/faturas", {
+      DataInicial: dataInicial,
+      DataFinal: dataFinal,
+    });
+  }
+
+  // Detalhe por produto de uma fatura — não tem endpoint em lote, precisa 1 chamada por fatura
+  // (por isso o backfill histórico é lento, ver scripts/backfill-faturas-site.ts).
+  fetchFaturaProdutos(idFatura: number) {
+    return this.fetchAllPages<DapicFaturaProduto>(`/faturas/${idFatura}/produtos`);
   }
 }
 
@@ -319,4 +339,48 @@ export type DapicOrdemProducaoProduto = {
   Status: string;
   DataFinalizacaoProducao: string | null;
   DataEntradaCelula: string | null;
+};
+
+// Campos reais de /faturas, confirmados em 2026-08-10 com o token cd-atacado. Ao contrário de
+// /vendaspdv, Cidade/Estado vêm como string solta (não objeto aninhado).
+export type DapicFatura = {
+  Status: string;
+  Id: number;
+  Codigo: string;
+  CodigoExterno: string | null;
+  DataCadastro: string;
+  DataEmissao: string;
+  DataFechamento: string | null;
+  DataModificacao: string;
+  IdCliente: number;
+  Cliente: string;
+  ClienteFantasia: string | null;
+  ValorLiquido: number;
+  Cidade: string | null;
+  Estado: string | null;
+  Empresa: string;
+};
+
+// Campos reais de /faturas/{id}/produtos, confirmados em 2026-08-10. Produto vem com a
+// referência colada no nome igual /armazenadores/produtos ("CC353427 - Calça Confort Black") —
+// precisa de stripReferenciaPrefix() igual o estoque.
+export type DapicFaturaProduto = {
+  IdProduto: number;
+  Grupo: string | null;
+  Marca: string | null;
+  Colecao: string | null;
+  Id: number;
+  IdGradeProduto: number;
+  Produto: string;
+  Cor?: string;
+  Tamanho?: string;
+  Tipo: string;
+  Quantidade: number;
+  Valores: {
+    ValorUnitario: number;
+    ValorTotal: number;
+    ValorDesconto: number;
+    ValorAcrescimo: number;
+    ValorFrete: number;
+  };
 };

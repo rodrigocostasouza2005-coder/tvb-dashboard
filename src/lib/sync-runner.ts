@@ -72,8 +72,12 @@ async function syncEstoque(client: DapicClient, storeByDapicId: Map<number, stri
   return data.length;
 }
 
+// Pro token cd-atacado, vendaspdv só tem devolução de verdade — a venda do canal Site+Atacado
+// vem de /faturas (confirmado com Rodrigo em 2026-08-10). As linhas "Venda" que aparecem aqui
+// pra esse token são só o lado de troca (pareada com uma devolução), não a venda real — ignora.
 async function syncVendas(client: DapicClient, storeId: string | null, dias: number) {
   if (!storeId) return { vendas: 0, devolucoes: 0 };
+  const contaVendaDoPdv = client.label !== "cd-atacado";
   const hoje = new Date();
   const inicio = new Date(hoje);
   inicio.setDate(inicio.getDate() - dias);
@@ -88,7 +92,7 @@ async function syncVendas(client: DapicClient, storeId: string | null, dias: num
 
     venda.Produtos.forEach((item, itemIndex) => {
       const cod = item.IdGradeProduto != null ? String(item.IdGradeProduto) : venda.Codigo;
-      if (item.Tipo === "Venda") {
+      if (item.Tipo === "Venda" && contaVendaDoPdv) {
         saleData.push({
           storeId,
           dapicVendaId: venda.Id,
@@ -131,6 +135,49 @@ async function syncVendas(client: DapicClient, storeId: string | null, dias: num
   if (saleData.length) await prisma.sale.createMany({ data: saleData, skipDuplicates: true });
   if (returnData.length) await prisma.return.createMany({ data: returnData, skipDuplicates: true });
   return { vendas: saleData.length, devolucoes: returnData.length };
+}
+
+// Venda de verdade do canal Site+Atacado (só cd-atacado tem acesso a /faturas). Mesma chave de
+// idempotência (storeId, dapicVendaId=Id da fatura, itemIndex) — nunca colide com vendaspdv
+// porque esse token não grava mais Sale via vendaspdv (ver syncVendas).
+async function syncFaturas(client: DapicClient, storeId: string | null, dias: number) {
+  if (!storeId || client.label !== "cd-atacado") return { vendas: 0 };
+  const hoje = new Date();
+  const inicio = new Date(hoje);
+  inicio.setDate(inicio.getDate() - dias);
+  const faturas = await client.fetchFaturas(toDateStr(inicio), toDateStr(hoje));
+
+  const saleData: Prisma.SaleCreateManyInput[] = [];
+  for (const fatura of faturas) {
+    if (fatura.Status !== "Fechado" || !fatura.DataFechamento) continue;
+    const saleDate = new Date(fatura.DataFechamento);
+    const produtos = await client.fetchFaturaProdutos(fatura.Id);
+
+    produtos.forEach((item, itemIndex) => {
+      if (item.Tipo !== "Venda") return;
+      saleData.push({
+        storeId,
+        dapicVendaId: fatura.Id,
+        itemIndex,
+        cod: String(item.IdGradeProduto),
+        produto: stripReferenciaPrefix(item.Produto),
+        grupo: item.Grupo ?? "(sem grupo)",
+        cor: item.Cor ?? null,
+        tamanho: item.Tamanho ?? null,
+        marca: item.Marca ?? null,
+        colecao: item.Colecao ?? null,
+        clienteNome: fatura.Cliente ?? null,
+        cidade: fatura.Cidade ?? null,
+        estado: fatura.Estado ?? null,
+        quantidade: item.Quantidade,
+        valorTotalLiquido: item.Valores.ValorTotal,
+        saleDate,
+      });
+    });
+  }
+
+  if (saleData.length) await prisma.sale.createMany({ data: saleData, skipDuplicates: true });
+  return { vendas: saleData.length };
 }
 
 function formatProduto(pos: number, p: string, estoque: number, vendido: number) {
@@ -198,7 +245,8 @@ export async function runSync() {
         const { storeByDapicId, primaryStoreId } = await syncArmazenadores(client);
         const estoque = await syncEstoque(client, storeByDapicId);
         const vendas = await syncVendas(client, primaryStoreId, 2);
-        return { estoque, vendas: vendas.vendas, devolucoes: vendas.devolucoes };
+        const faturas = await syncFaturas(client, primaryStoreId, 2);
+        return { estoque, vendas: vendas.vendas + faturas.vendas, devolucoes: vendas.devolucoes };
       })
     );
 

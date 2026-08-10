@@ -101,8 +101,11 @@ async function syncEstoque(client: DapicClient, storeByDapicId: Map<number, stri
   return { linhas: linhas.length, gravadas: data.length, semArmazenador };
 }
 
+// Pro token cd-atacado, vendaspdv só tem devolução de verdade — a venda do canal Site+Atacado
+// vem de /faturas (confirmado com Rodrigo em 2026-08-10, ver syncFaturas abaixo).
 async function syncVendas(client: DapicClient, storeId: string | null) {
   if (!storeId) return { vendas: 0, devolucoes: 0 };
+  const contaVendaDoPdv = client.label !== "cd-atacado";
 
   const hoje = new Date();
   const inicio = new Date(hoje);
@@ -119,7 +122,7 @@ async function syncVendas(client: DapicClient, storeId: string | null) {
 
     venda.Produtos.forEach((item, itemIndex) => {
       const cod = item.IdGradeProduto != null ? String(item.IdGradeProduto) : venda.Codigo;
-      if (item.Tipo === "Venda") {
+      if (item.Tipo === "Venda" && contaVendaDoPdv) {
         saleData.push({
           storeId,
           dapicVendaId: venda.Id,
@@ -167,6 +170,48 @@ async function syncVendas(client: DapicClient, storeId: string | null) {
   return { vendas: saleData.length, devolucoes: returnData.length };
 }
 
+// Venda de verdade do canal Site+Atacado (só cd-atacado tem acesso a /faturas).
+async function syncFaturas(client: DapicClient, storeId: string | null) {
+  if (!storeId || client.label !== "cd-atacado") return { vendas: 0 };
+  const hoje = new Date();
+  const inicio = new Date(hoje);
+  inicio.setDate(inicio.getDate() - diasDeVendas);
+  const faturas = await client.fetchFaturas(toDateStr(inicio), toDateStr(hoje));
+
+  const saleData: Prisma.SaleCreateManyInput[] = [];
+  for (const fatura of faturas) {
+    if (fatura.Status !== "Fechado" || !fatura.DataFechamento) continue;
+    const saleDate = new Date(fatura.DataFechamento);
+    const produtos = await withRetry(() => client.fetchFaturaProdutos(fatura.Id));
+
+    produtos.forEach((item, itemIndex) => {
+      if (item.Tipo !== "Venda") return;
+      saleData.push({
+        storeId,
+        dapicVendaId: fatura.Id,
+        itemIndex,
+        cod: String(item.IdGradeProduto),
+        produto: stripReferenciaPrefix(item.Produto),
+        grupo: item.Grupo ?? "(sem grupo)",
+        cor: item.Cor ?? null,
+        tamanho: item.Tamanho ?? null,
+        marca: item.Marca ?? null,
+        colecao: item.Colecao ?? null,
+        clienteNome: fatura.Cliente ?? null,
+        cidade: fatura.Cidade ?? null,
+        estado: fatura.Estado ?? null,
+        quantidade: item.Quantidade,
+        valorTotalLiquido: item.Valores.ValorTotal,
+        saleDate,
+      });
+    });
+  }
+
+  if (saleData.length)
+    await withRetry(() => prisma.sale.createMany({ data: saleData, skipDuplicates: true }));
+  return { vendas: saleData.length };
+}
+
 async function main() {
   const clients = createDapicClients();
   if (!clients.length) {
@@ -189,8 +234,9 @@ async function main() {
     totalEstoque += estoque.gravadas;
 
     const vendas = await syncVendas(client, primaryStoreId);
-    console.log(`Vendas (${diasDeVendas}d): ${vendas.vendas} | Devoluções: ${vendas.devolucoes}`);
-    totalVendas += vendas.vendas;
+    const faturas = await syncFaturas(client, primaryStoreId);
+    console.log(`Vendas (${diasDeVendas}d): ${vendas.vendas + faturas.vendas} (pdv ${vendas.vendas} + faturas ${faturas.vendas}) | Devoluções: ${vendas.devolucoes}`);
+    totalVendas += vendas.vendas + faturas.vendas;
     totalDevolucoes += vendas.devolucoes;
   }
 
