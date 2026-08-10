@@ -10,7 +10,9 @@ function formatBRL(value: number) {
 }
 
 function formatDateTime(date: Date) {
-  return date.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+  // Sem timeZone explícito, o servidor formata em UTC (não no fuso de Brasília) — mostrava
+  // 2-3h a mais que o horário real.
+  return date.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short", timeZone: "America/Sao_Paulo" });
 }
 
 const SOURCE_LABEL: Record<string, string> = {
