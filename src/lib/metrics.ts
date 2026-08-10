@@ -194,28 +194,49 @@ export async function getReplenishment(filters: Pick<DashboardFilters, "storeIds
   const stores = await prisma.store.findMany({ where: { id: { in: storeIds } } });
   const storeName = new Map(stores.map((s) => [s.id, s.name]));
 
-  // A reposição sempre vem do centro de distribuição ("CD" / TVB Site e Atacado).
+  // A reposição prefere sempre o CD ("TVB Site e Atacado"). Quando o CD não tem estoque do
+  // item, cai pra redistribuição entre lojas — ordem de preferência fixa pedida pelo Rodrigo:
+  // Leblon, depois Barra, depois Rio Sul.
   const cdStore = await prisma.store.findFirst({ where: { code: "CD" } });
-  const cdStockByCod = new Map<string, number>();
-  if (cdStore) {
-    const cdStock = await latestStockSnapshots({ storeIds: [cdStore.id] });
-    for (const s of cdStock) cdStockByCod.set(s.cod, s.quantidadeDisponivel);
+  const fallbackOrder = ["TVB Leblon", "TVB Barra", "TVB Rio Sul"];
+  const fallbackStores = await prisma.store.findMany({ where: { name: { in: fallbackOrder } } });
+  const originCandidates = [cdStore, ...fallbackStores]
+    .filter((s): s is NonNullable<typeof s> => s != null)
+    .sort((a, b) => {
+      const ai = a.id === cdStore?.id ? -1 : fallbackOrder.indexOf(a.name);
+      const bi = b.id === cdStore?.id ? -1 : fallbackOrder.indexOf(b.name);
+      return ai - bi;
+    });
+
+  const originStockByStoreCod = new Map<string, number>();
+  if (originCandidates.length) {
+    const originStock = await latestStockSnapshots({ storeIds: originCandidates.map((s) => s.id) });
+    for (const s of originStock) originStockByStoreCod.set(`${s.storeId}::${s.cod}`, s.quantidadeDisponivel);
+  }
+
+  function findOrigin(destStoreId: string, cod: string) {
+    for (const origin of originCandidates) {
+      if (origin.id === destStoreId) continue; // não repor de si mesma
+      const quantidade = originStockByStoreCod.get(`${origin.id}::${cod}`) ?? 0;
+      if (quantidade > 0) return { storeName: origin.name, quantidade };
+    }
+    return null;
   }
 
   return stock
     .map((s) => {
       // Regra manual do Rodrigo ganha do estoqueMinimo que vem do DAPIC.
       const estoqueMinimo = matchMinimumRule(minimumRules, s) ?? s.estoqueMinimo;
-      return { ...s, estoqueMinimo };
+      return { ...s, estoqueMinimo, origin: findOrigin(s.storeId, s.cod) };
     })
     .filter(
       (s) =>
         s.estoqueMinimo != null &&
         s.quantidadeDisponivel < s.estoqueMinimo &&
         (!cdStore || s.storeId !== cdStore.id) &&
-        // Sem estoque na origem pra puxar = não tem reposição real pra fazer agora, só
-        // polui a lista. Rodrigo pediu pra esconder em vez de só avisar "sem estoque".
-        (cdStockByCod.get(s.cod) ?? 0) > 0
+        // Sem estoque em nenhuma origem (CD nem as outras lojas) pra puxar = não tem
+        // reposição real pra fazer agora, só polui a lista.
+        s.origin !== null
     )
     .map((s) => ({
       storeId: s.storeId,
@@ -226,8 +247,8 @@ export async function getReplenishment(filters: Pick<DashboardFilters, "storeIds
       quantidadeDisponivel: s.quantidadeDisponivel,
       estoqueMinimo: s.estoqueMinimo as number,
       falta: (s.estoqueMinimo as number) - s.quantidadeDisponivel,
-      origemSugerida: cdStore?.name ?? "—",
-      estoqueNaOrigem: cdStockByCod.get(s.cod) ?? 0,
+      origemSugerida: s.origin!.storeName,
+      estoqueNaOrigem: s.origin!.quantidade,
     }))
     // Por loja primeiro (Rodrigo pediu — antes vinha misturado, parecendo ordenado só por
     // produto), maior falta primeiro dentro de cada loja.
