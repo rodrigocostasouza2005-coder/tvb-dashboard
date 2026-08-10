@@ -3,7 +3,7 @@
 // Uso: npx tsx scripts/sync-dapic.ts [diasDeVendas]
 
 import { PrismaClient, type Prisma } from "@prisma/client";
-import { createDapicClients, type DapicClient } from "../src/lib/connectors/dapic";
+import { createDapicClients, stripReferenciaPrefix, type DapicClient } from "../src/lib/connectors/dapic";
 import { displayGroupFor, sellsProducts } from "../src/lib/connectors/armazenadores";
 import { upsertStockSnapshots, type StockSnapshotRow } from "../src/lib/connectors/upsert-stock";
 import { sendTelegramMessage } from "../src/lib/telegram";
@@ -85,7 +85,7 @@ async function syncEstoque(client: DapicClient, storeByDapicId: Map<number, stri
     data.push({
       storeId,
       cod: String(l.IdGradeProduto),
-      produto: l.Produto,
+      produto: stripReferenciaPrefix(l.Produto),
       grupo: l.Grupo ?? "(sem grupo)",
       cor: l.Cor ?? null,
       tamanho: l.Tamanho ?? null,

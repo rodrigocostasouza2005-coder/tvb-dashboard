@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { createDapicClients, type DapicClient } from "@/lib/connectors/dapic";
+import { createDapicClients, stripReferenciaPrefix, type DapicClient } from "@/lib/connectors/dapic";
 import { displayGroupFor, sellsProducts } from "@/lib/connectors/armazenadores";
 import { upsertStockSnapshots, type StockSnapshotRow } from "@/lib/connectors/upsert-stock";
 import { sendTelegramMessage } from "@/lib/telegram";
@@ -57,7 +57,7 @@ async function syncEstoque(client: DapicClient, storeByDapicId: Map<number, stri
     data.push({
       storeId,
       cod: String(l.IdGradeProduto),
-      produto: l.Produto,
+      produto: stripReferenciaPrefix(l.Produto),
       grupo: l.Grupo ?? "(sem grupo)",
       cor: l.Cor ?? null,
       tamanho: l.Tamanho ?? null,

@@ -203,6 +203,15 @@ export function createDapicClients(): DapicClient[] {
   return getCredentials().map((c) => new DapicClient(c.tokenIntegracao, c.label));
 }
 
+// O endpoint de estoque (/armazenadores/produtos) gruda a referência do produto no nome
+// ("CSLBE - Classic Blue"), mas o endpoint de vendas (/vendaspdv) devolve o nome limpo
+// ("Classic Blue") pro mesmo produto (mesmo IdGradeProduto/cod) — sem isso, Sellthrough e
+// Pesquisa tratavam como dois produtos diferentes na hora de cruzar venda com estoque.
+// Achado por Rodrigo em 2026-08-10.
+export function stripReferenciaPrefix(produto: string): string {
+  return produto.replace(/^\S+\s-\s/, "");
+}
+
 export type DapicArmazenador = {
   Id: number;
   Status: string;
