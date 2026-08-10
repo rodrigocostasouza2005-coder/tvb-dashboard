@@ -39,7 +39,7 @@ export async function getKpiSummary(filters: DashboardFilters) {
   const [salesAgg, stockAgg] = await Promise.all([
     prisma.sale.aggregate({
       where: saleWhere(filters),
-      _sum: { quantidade: true, valorTotalLiquido: true, valorCustoTotal: true },
+      _sum: { quantidade: true, valorTotalLiquido: true },
     }),
     prisma.stockSnapshot.aggregate({
       where: stockWhere(filters),
@@ -50,7 +50,6 @@ export async function getKpiSummary(filters: DashboardFilters) {
   return {
     unitsSold: salesAgg._sum.quantidade ?? 0,
     revenue: salesAgg._sum.valorTotalLiquido ?? 0,
-    cost: salesAgg._sum.valorCustoTotal ?? 0,
     currentStock: stockAgg._sum.quantidadeDisponivel ?? 0,
   };
 }

@@ -1,9 +1,10 @@
 import { getSessionUser } from "@/lib/auth";
 import { getKpiSummary, getSalesByDimension, getStores, getMarcas, getTabelasPreco, getLastSyncs } from "@/lib/metrics";
 import { canSeeFinancials, getGrupoRestriction, getStoreRestriction } from "@/lib/permissions";
-import { parseFilters, type RawSearchParams } from "@/lib/filters";
+import { parseFilters, parseDimension, type RawSearchParams } from "@/lib/filters";
 import { FilterBar } from "./filter-bar";
 import { StatTile } from "./stat-tile";
+import { DimensionToggle } from "./dimension-toggle";
 
 function formatBRL(value: number) {
   return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -32,10 +33,12 @@ export default async function OverviewPage({
 
   const grupoIn = await getGrupoRestriction(user.role);
   const allowedStores = getStoreRestriction(user);
-  const filters = { ...parseFilters(await searchParams, allowedStores), grupoIn };
-  const [kpi, salesByGroup, stores, marcas, tabelasPreco, syncs] = await Promise.all([
+  const rawParams = await searchParams;
+  const filters = { ...parseFilters(rawParams, allowedStores), grupoIn };
+  const dimension = parseDimension(rawParams);
+  const [kpi, salesByDimension, stores, marcas, tabelasPreco, syncs] = await Promise.all([
     getKpiSummary(filters),
-    getSalesByDimension(filters, "grupo"),
+    getSalesByDimension(filters, dimension),
     getStores(allowedStores),
     getMarcas(),
     getTabelasPreco(),
@@ -43,7 +46,8 @@ export default async function OverviewPage({
   ]);
 
   const showFinancials = canSeeFinancials(user.role);
-  const top5 = salesByGroup.slice(0, 5);
+  const top10 = salesByDimension.slice(0, 10);
+  const dimensionLabel = dimension === "produto" ? "Produto" : dimension === "tamanho" ? "Tamanho" : "Grupo";
 
   return (
     <div>
@@ -59,39 +63,32 @@ export default async function OverviewPage({
       <section className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
         <StatTile label="Unidades vendidas" value={kpi.unitsSold.toLocaleString("pt-BR")} />
         {showFinancials && <StatTile label="Receita" value={formatBRL(kpi.revenue)} />}
-        {showFinancials && (
-          <StatTile
-            label="Margem"
-            value={
-              kpi.revenue > 0 ? `${(((kpi.revenue - kpi.cost) / kpi.revenue) * 100).toFixed(0)}%` : "—"
-            }
-          />
-        )}
         <StatTile label="Estoque atual" value={kpi.currentStock.toLocaleString("pt-BR")} />
       </section>
 
       <section className="mb-6">
         <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">
-          Top grupos de produto {showFinancials ? "por receita" : "por vendas"}
+          Top {dimensionLabel.toLowerCase()} {showFinancials ? "por receita" : "por vendas"}
         </h2>
+        <DimensionToggle basePath="/dashboard" searchParams={rawParams} current={dimension} />
         <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)]">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
-                <th className="px-4 py-2 font-medium">Grupo</th>
+                <th className="px-4 py-2 font-medium">{dimensionLabel}</th>
                 <th className="px-4 py-2 font-medium">Unidades</th>
                 {showFinancials && <th className="px-4 py-2 font-medium">Receita</th>}
               </tr>
             </thead>
             <tbody>
-              {top5.map((g) => (
+              {top10.map((g) => (
                 <tr key={g.key} className="border-b border-[var(--gridline)] last:border-0">
                   <td className="px-4 py-2 font-medium">{g.key}</td>
                   <td className="px-4 py-2 tabular-nums">{g.unitsSold.toLocaleString("pt-BR")}</td>
                   {showFinancials && <td className="px-4 py-2 tabular-nums">{formatBRL(g.revenue)}</td>}
                 </tr>
               ))}
-              {top5.length === 0 && (
+              {top10.length === 0 && (
                 <tr>
                   <td colSpan={showFinancials ? 3 : 2} className="px-4 py-6 text-center text-[var(--text-muted)]">
                     Sem vendas no período/filtro selecionado.
