@@ -22,6 +22,10 @@ function readAllowedTabs(formData: FormData): string[] {
     .filter((k): k is TabKey => (keys as string[]).includes(k));
 }
 
+function readAllowedStores(formData: FormData): string[] {
+  return formData.getAll("store").map(String).filter(Boolean);
+}
+
 export async function createUserAction(formData: FormData) {
   await requireAdmin();
 
@@ -32,12 +36,13 @@ export async function createUserAction(formData: FormData) {
   const password = String(formData.get("password") ?? "");
   const role = String(formData.get("role") ?? "VENDEDOR") as Role;
   const allowedTabs = readAllowedTabs(formData);
+  const allowedStores = readAllowedStores(formData);
 
   if (!name || !email || !password) return;
 
   const passwordHash = await hashPassword(password);
   await prisma.user.create({
-    data: { name, email, passwordHash, role, allowedTabs },
+    data: { name, email, passwordHash, role, allowedTabs, allowedStores },
   });
 
   revalidatePath("/dashboard/admin");
@@ -49,11 +54,12 @@ export async function updateUserAction(formData: FormData) {
   const userId = String(formData.get("userId") ?? "");
   const role = String(formData.get("role") ?? "VENDEDOR") as Role;
   const allowedTabs = readAllowedTabs(formData);
+  const allowedStores = readAllowedStores(formData);
   if (!userId) return;
 
   await prisma.user.update({
     where: { id: userId },
-    data: { role, allowedTabs },
+    data: { role, allowedTabs, allowedStores },
   });
 
   revalidatePath("/dashboard/admin");

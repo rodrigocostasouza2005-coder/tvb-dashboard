@@ -22,6 +22,9 @@ model User {
   // Lista de chaves de aba liberadas pra esse usuário (ver src/lib/tabs.ts).
   // Vazio = usa o padrão do role (comportamento de antes, continua funcionando sozinho).
   allowedTabs  String[] @default([])
+  // Ids de Store que esse usuário pode ver (ver getStoreRestriction em lib/permissions.ts).
+  // Vazio = sem restrição, vê todas as lojas.
+  allowedStores String[] @default([])
   createdAt    DateTime @default(now())
 
   sessions Session[]

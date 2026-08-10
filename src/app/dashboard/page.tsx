@@ -1,6 +1,6 @@
 import { getSessionUser } from "@/lib/auth";
 import { getKpiSummary, getSalesByDimension, getStores, getMarcas, getTabelasPreco, getLastSyncs } from "@/lib/metrics";
-import { canSeeFinancials, getGrupoRestriction } from "@/lib/permissions";
+import { canSeeFinancials, getGrupoRestriction, getStoreRestriction } from "@/lib/permissions";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { FilterBar } from "./filter-bar";
 import { StatTile } from "./stat-tile";
@@ -31,11 +31,12 @@ export default async function OverviewPage({
   if (!user) return null;
 
   const grupoIn = await getGrupoRestriction(user.role);
-  const filters = { ...parseFilters(await searchParams), grupoIn };
+  const allowedStores = getStoreRestriction(user);
+  const filters = { ...parseFilters(await searchParams, allowedStores), grupoIn };
   const [kpi, salesByGroup, stores, marcas, tabelasPreco, syncs] = await Promise.all([
     getKpiSummary(filters),
     getSalesByDimension(filters, "grupo"),
-    getStores(),
+    getStores(allowedStores),
     getMarcas(),
     getTabelasPreco(),
     getLastSyncs(),

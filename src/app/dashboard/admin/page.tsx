@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { getSessionUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { getRawStores } from "@/lib/metrics";
 import { TABS, defaultAllowedTabs } from "@/lib/tabs";
 import { createUserAction, updateUserAction, resetPasswordAction, deleteUserAction } from "./actions";
 
@@ -25,12 +26,43 @@ function TabCheckboxes({ name, checked }: { name: string; checked: Set<string> }
   );
 }
 
+// Vazio = sem restrição, vê todas as lojas (mesmo padrão do TabCheckboxes/allowedTabs).
+function StoreCheckboxes({
+  name,
+  checked,
+  stores,
+}: {
+  name: string;
+  checked: Set<string>;
+  stores: { id: string; name: string }[];
+}) {
+  return (
+    <div className="flex flex-wrap gap-x-3 gap-y-1">
+      {stores.map((s) => (
+        <label key={s.id} className="flex items-center gap-1 text-xs text-[var(--text-secondary)]">
+          <input
+            type="checkbox"
+            name={name}
+            value={s.id}
+            defaultChecked={checked.has(s.id)}
+            className="accent-[var(--series-1)]"
+          />
+          {s.name}
+        </label>
+      ))}
+    </div>
+  );
+}
+
 export default async function AdminPage() {
   const user = await getSessionUser();
   if (!user) return null;
   if (user.role !== "ADMIN") redirect("/dashboard");
 
-  const users = await prisma.user.findMany({ orderBy: { createdAt: "asc" } });
+  const [users, stores] = await Promise.all([
+    prisma.user.findMany({ orderBy: { createdAt: "asc" } }),
+    getRawStores(),
+  ]);
 
   return (
     <div>
@@ -38,6 +70,8 @@ export default async function AdminPage() {
       <p className="mb-6 text-sm text-[var(--text-muted)]">
         Crie logins e escolha quais abas cada pessoa pode ver. Deixar todas as caixinhas
         desmarcadas usa o padrão do papel (Admin/Gestão veem tudo, Vendedor não vê Clientes).
+        O mesmo vale pras lojas: nenhuma marcada = vê todas. Marcando uma ou mais, a pessoa só
+        vê dado daquelas lojas em qualquer aba — nem aparece opção de escolher outra.
       </p>
 
       <section className="mb-8 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
@@ -81,6 +115,7 @@ export default async function AdminPage() {
             </select>
           </div>
           <TabCheckboxes name="tab" checked={new Set()} />
+          <StoreCheckboxes name="store" checked={new Set()} stores={stores} />
           <button
             type="submit"
             className="w-fit rounded-md bg-[var(--series-1)] px-3 py-1.5 text-sm font-medium text-white"
@@ -135,6 +170,7 @@ export default async function AdminPage() {
                   </select>
                 </div>
                 <TabCheckboxes name="tab" checked={effectiveTabs} />
+                <StoreCheckboxes name="store" checked={new Set(u.allowedStores)} stores={stores} />
                 <button
                   type="submit"
                   className="w-fit rounded-md border border-[var(--border)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--page-plane)]"

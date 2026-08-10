@@ -1,6 +1,6 @@
 import { getSessionUser } from "@/lib/auth";
 import { getStockVsSales, getStores, getMarcas, getTabelasPreco } from "@/lib/metrics";
-import { getGrupoRestriction } from "@/lib/permissions";
+import { getGrupoRestriction, getStoreRestriction } from "@/lib/permissions";
 import { parseFilters, parseDimension, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
@@ -19,11 +19,12 @@ export default async function MarketingPage({
   const rawParams = await searchParams;
   const dimension = parseDimension(rawParams);
   const grupoIn = await getGrupoRestriction(user.role);
-  const filters = { ...parseFilters(rawParams), grupoIn };
+  const allowedStores = getStoreRestriction(user);
+  const filters = { ...parseFilters(rawParams, allowedStores), grupoIn };
 
   const [rows, stores, marcas, tabelasPreco] = await Promise.all([
     getStockVsSales(filters, dimension),
-    getStores(),
+    getStores(allowedStores),
     getMarcas(),
     getTabelasPreco(),
   ]);

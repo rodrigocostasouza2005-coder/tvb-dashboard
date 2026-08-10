@@ -7,11 +7,21 @@ function toArray(v: string | string[] | undefined): string[] {
   return Array.isArray(v) ? v : [v];
 }
 
-export function parseFilters(params: RawSearchParams): DashboardFilters {
+// allowedStoreIds: restrição por usuário (ver getStoreRestriction em lib/permissions.ts).
+// undefined = sem restrição. Se o usuário escolheu lojas específicas no filtro, cruza com o
+// que ele tem permissão de ver; se não escolheu nenhuma, o padrão já vira só as permitidas —
+// trava de verdade, não dá pra contornar digitando outro id de loja na URL.
+export function parseFilters(params: RawSearchParams, allowedStoreIds?: string[]): DashboardFilters {
   // Opções de loja agrupadas (ex: CD+ATACADO) chegam como "id1|id2" — expande de volta.
-  const storeIds = toArray(params.store).flatMap((v) => v.split("|"));
+  let storeIds = toArray(params.store).flatMap((v) => v.split("|"));
   const marcas = toArray(params.marca);
   const tabelasPreco = toArray(params.tabelaPreco);
+
+  if (allowedStoreIds) {
+    storeIds = storeIds.length
+      ? storeIds.filter((id) => allowedStoreIds.includes(id))
+      : allowedStoreIds;
+  }
 
   const now = new Date();
   const defaultFrom = new Date(now);

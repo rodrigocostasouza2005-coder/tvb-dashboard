@@ -1,6 +1,6 @@
 import { getSessionUser } from "@/lib/auth";
 import { getVendedorRanking, getStores, getMarcas, getTabelasPreco } from "@/lib/metrics";
-import { canSeeFinancials } from "@/lib/permissions";
+import { canSeeFinancials, getStoreRestriction } from "@/lib/permissions";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
@@ -18,10 +18,11 @@ export default async function VendedoresPage({
   if (!user) return null;
   requireTabAccess(user, user.role, "vendedores");
 
-  const filters = parseFilters(await searchParams);
+  const allowedStores = getStoreRestriction(user);
+  const filters = parseFilters(await searchParams, allowedStores);
   const [rows, stores, marcas, tabelasPreco] = await Promise.all([
     getVendedorRanking(filters),
-    getStores(),
+    getStores(allowedStores),
     getMarcas(),
     getTabelasPreco(),
   ]);

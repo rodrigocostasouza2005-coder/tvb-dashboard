@@ -1,6 +1,6 @@
 import { getSessionUser } from "@/lib/auth";
 import { getStockAging, getAllStores, getMarcas } from "@/lib/metrics";
-import { getGrupoRestriction } from "@/lib/permissions";
+import { getGrupoRestriction, getStoreRestriction } from "@/lib/permissions";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
@@ -24,11 +24,12 @@ export default async function EnvelhecimentoPage({
   requireTabAccess(user, user.role, "envelhecimento");
 
   const grupoIn = await getGrupoRestriction(user.role);
-  const filters = { ...parseFilters(await searchParams), grupoIn };
+  const allowedStores = getStoreRestriction(user);
+  const filters = { ...parseFilters(await searchParams, allowedStores), grupoIn };
 
   const [allRows, stores, marcas] = await Promise.all([
     getStockAging(filters),
-    getAllStores(),
+    getAllStores(allowedStores),
     getMarcas(),
   ]);
 

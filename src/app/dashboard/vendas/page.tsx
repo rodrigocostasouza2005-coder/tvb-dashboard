@@ -1,6 +1,6 @@
 import { getSessionUser } from "@/lib/auth";
 import { getSalesByDimension, getSalesByGrupoProduto, getStores, getMarcas, getTabelasPreco } from "@/lib/metrics";
-import { canSeeFinancials, getGrupoRestriction } from "@/lib/permissions";
+import { canSeeFinancials, getGrupoRestriction, getStoreRestriction } from "@/lib/permissions";
 import { parseFilters, parseDimension, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
@@ -23,12 +23,13 @@ export default async function VendasPage({
   const rawParams = await searchParams;
   const dimension = parseDimension(rawParams);
   const grupoIn = await getGrupoRestriction(user.role);
-  const filters = { ...parseFilters(rawParams), grupoIn };
+  const allowedStores = getStoreRestriction(user);
+  const filters = { ...parseFilters(rawParams, allowedStores), grupoIn };
 
   const [rows, produtoRows, stores, marcas, tabelasPreco] = await Promise.all([
     getSalesByDimension(filters, dimension),
     dimension === "grupo" ? getSalesByGrupoProduto(filters) : Promise.resolve([]),
-    getStores(),
+    getStores(allowedStores),
     getMarcas(),
     getTabelasPreco(),
   ]);

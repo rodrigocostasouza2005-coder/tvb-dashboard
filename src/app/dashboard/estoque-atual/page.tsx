@@ -1,6 +1,6 @@
 import { getSessionUser } from "@/lib/auth";
 import { getEstoqueAtual, getEstoquePorArmazenador, getAllStores, getMarcas } from "@/lib/metrics";
-import { getGrupoRestriction, canSeeFinancials } from "@/lib/permissions";
+import { getGrupoRestriction, canSeeFinancials, getStoreRestriction } from "@/lib/permissions";
 import { parseFilters, parseDimension, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
@@ -23,12 +23,13 @@ export default async function EstoqueAtualPage({
   const rawParams = await searchParams;
   const dimension = parseDimension(rawParams);
   const grupoIn = await getGrupoRestriction(user.role);
-  const filters = { ...parseFilters(rawParams), grupoIn };
+  const allowedStores = getStoreRestriction(user);
+  const filters = { ...parseFilters(rawParams, allowedStores), grupoIn };
 
   const [rows, porArmazenador, stores, marcas] = await Promise.all([
     getEstoqueAtual(filters, dimension),
     getEstoquePorArmazenador(filters),
-    getAllStores(),
+    getAllStores(allowedStores),
     getMarcas(),
   ]);
   const showFinancials = canSeeFinancials(user.role);

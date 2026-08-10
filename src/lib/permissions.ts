@@ -25,3 +25,11 @@ export async function getGrupoRestriction(role: Role): Promise<string[] | undefi
   if (role !== "VENDEDOR") return undefined;
   return getPriorityGroups();
 }
+
+// Lojas que o usuário pode ver (undefined = sem restrição) — administrável por usuário em
+// /dashboard/admin (User.allowedStores, vazio = sem restrição, mesmo padrão do allowedTabs).
+// Passar pra parseFilters() e pra getStores()/getAllStores() — trava de verdade (nem aparece
+// como opção de escolher), não é só um valor padrão no filtro.
+export function getStoreRestriction(user: { allowedStores: string[] }): string[] | undefined {
+  return user.allowedStores.length > 0 ? user.allowedStores : undefined;
+}

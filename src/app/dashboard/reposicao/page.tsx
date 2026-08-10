@@ -1,6 +1,6 @@
 import { getSessionUser } from "@/lib/auth";
 import { getReplenishment, getStores, getMarcas } from "@/lib/metrics";
-import { getGrupoRestriction } from "@/lib/permissions";
+import { getGrupoRestriction, getStoreRestriction } from "@/lib/permissions";
 import { parseFilters, toDateInputValue, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
@@ -15,10 +15,11 @@ export default async function ReposicaoPage({
   requireTabAccess(user, user.role, "reposicao");
 
   const grupoIn = await getGrupoRestriction(user.role);
-  const filters = { ...parseFilters(await searchParams), grupoIn };
+  const allowedStores = getStoreRestriction(user);
+  const filters = { ...parseFilters(await searchParams, allowedStores), grupoIn };
   const [rows, stores, marcas] = await Promise.all([
     getReplenishment(filters),
-    getStores(),
+    getStores(allowedStores),
     getMarcas(),
   ]);
 

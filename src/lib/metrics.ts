@@ -338,15 +338,23 @@ function groupStoresForFilter(stores: { id: string; name: string; displayGroup: 
   return [...grouped, ...standalone].sort((a, b) => a.name.localeCompare(b.name));
 }
 
-export async function getStores(): Promise<StoreFilterOption[]> {
-  const stores = await prisma.store.findMany({ where: { sellsProducts: true }, orderBy: { name: "asc" } });
+// allowedStoreIds: restrição por usuário (ver getStoreRestriction) — quando presente, nem
+// aparece como opção pra escolher, não é só um filtro que já vem pré-marcado.
+export async function getStores(allowedStoreIds?: string[]): Promise<StoreFilterOption[]> {
+  const stores = await prisma.store.findMany({
+    where: { sellsProducts: true, ...(allowedStoreIds ? { id: { in: allowedStoreIds } } : {}) },
+    orderBy: { name: "asc" },
+  });
   return groupStoresForFilter(stores);
 }
 
 // Todos os armazenadores, incluindo os que não são loja de venda (Defeito, Bonificação,
 // Lixeira, Marketing/Produção) — usado no filtro da aba Estoque Atual.
-export async function getAllStores(): Promise<StoreFilterOption[]> {
-  const stores = await prisma.store.findMany({ orderBy: { name: "asc" } });
+export async function getAllStores(allowedStoreIds?: string[]): Promise<StoreFilterOption[]> {
+  const stores = await prisma.store.findMany({
+    where: allowedStoreIds ? { id: { in: allowedStoreIds } } : undefined,
+    orderBy: { name: "asc" },
+  });
   return groupStoresForFilter(stores);
 }
 
