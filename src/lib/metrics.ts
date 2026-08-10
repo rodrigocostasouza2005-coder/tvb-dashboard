@@ -491,3 +491,66 @@ export async function getLastSyncs() {
     take: 4,
   });
 }
+
+// Produto (não grupo) com maior "Estoque parado - Vendas recentes" — o que sobrou muito e
+// vendeu pouco é o que precisa de empurrão (desconto, destaque na loja, etc). Vendas usa uma
+// janela de dias (não all-time, ao contrário do sell-through) pra não misturar produto de
+// coleção antiga "parado" com produto normal que só vendeu bem há muito tempo.
+export async function getTopParaIncentivar(dias = 30, limit = 10) {
+  const desde = new Date();
+  desde.setDate(desde.getDate() - dias);
+
+  const [stock, vendas] = await Promise.all([
+    prisma.stockSnapshot.groupBy({
+      by: ["produto"],
+      where: stockWhere({}),
+      _sum: { quantidadeDisponivel: true },
+    }),
+    prisma.sale.groupBy({
+      by: ["produto"],
+      where: { saleDate: { gte: desde } },
+      _sum: { quantidade: true },
+    }),
+  ]);
+
+  const vendidoByProduto = new Map(vendas.map((v) => [v.produto, v._sum.quantidade ?? 0]));
+
+  return stock
+    .map((s) => {
+      const estoque = s._sum.quantidadeDisponivel ?? 0;
+      const vendido = vendidoByProduto.get(s.produto) ?? 0;
+      return { produto: s.produto, estoque, vendido, diferenca: estoque - vendido };
+    })
+    .filter((r) => r.estoque > 0)
+    .sort((a, b) => b.diferenca - a.diferenca)
+    .slice(0, limit);
+}
+
+// Os produtos mais vendidos em cada loja desde um horário de corte (o momento da sync
+// anterior, tipicamente) — pro aviso do bot mostrar "o que vendeu desde a última atualização".
+export async function getTopVendidosPorLoja(desde: Date, limit = 3) {
+  const vendas = await prisma.sale.groupBy({
+    by: ["storeId", "produto"],
+    where: { saleDate: { gte: desde } },
+    _sum: { quantidade: true },
+  });
+  if (!vendas.length) return [];
+
+  const storeIds = [...new Set(vendas.map((v) => v.storeId))];
+  const stores = await prisma.store.findMany({ where: { id: { in: storeIds } } });
+  const storeName = new Map(stores.map((s) => [s.id, s.name]));
+
+  const byStore = new Map<string, { produto: string; quantidade: number }[]>();
+  for (const v of vendas) {
+    const list = byStore.get(v.storeId) ?? [];
+    list.push({ produto: v.produto, quantidade: v._sum.quantidade ?? 0 });
+    byStore.set(v.storeId, list);
+  }
+
+  return [...byStore.entries()]
+    .map(([storeId, produtos]) => ({
+      storeName: storeName.get(storeId) ?? storeId,
+      produtos: produtos.sort((a, b) => b.quantidade - a.quantidade).slice(0, limit),
+    }))
+    .sort((a, b) => a.storeName.localeCompare(b.storeName));
+}

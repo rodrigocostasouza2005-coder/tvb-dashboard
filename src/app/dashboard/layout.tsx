@@ -1,6 +1,8 @@
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import Image from "next/image";
 import { getSessionUser } from "@/lib/auth";
+import { scheduleCatchupSyncIfStale } from "@/lib/self-heal-sync";
 import { logoutAction } from "./actions";
 import { TabNav } from "./tab-nav";
 import { TABS, defaultAllowedTabs } from "@/lib/tabs";
@@ -8,6 +10,10 @@ import { TABS, defaultAllowedTabs } from "@/lib/tabs";
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const user = await getSessionUser();
   if (!user) redirect("/login");
+
+  // Best-effort: se o cron da Vercel falhar (ex: deploy em cima do horário), quem abrir o
+  // dashboard dispara a sync sozinho — depois de responder a página, não trava a navegação.
+  after(() => scheduleCatchupSyncIfStale());
 
   const allowed = user.allowedTabs.length > 0 ? user.allowedTabs : defaultAllowedTabs(user.role);
   const visibleKeys = TABS.filter((t) => allowed.includes(t.key)).map((t) => t.key);

@@ -5,6 +5,7 @@ import { createDapicClients, stripReferenciaPrefix, type DapicClient } from "@/l
 import { displayGroupFor, sellsProducts } from "@/lib/connectors/armazenadores";
 import { upsertStockSnapshots, type StockSnapshotRow } from "@/lib/connectors/upsert-stock";
 import { sendTelegramMessage } from "@/lib/telegram";
+import { getTopParaIncentivar, getTopVendidosPorLoja } from "@/lib/metrics";
 import type { Prisma } from "@prisma/client";
 
 // Lógica compartilhada pelas duas rotas de sync (/api/sync e /api/sync-evening) — precisam ser
@@ -132,7 +133,50 @@ async function syncVendas(client: DapicClient, storeId: string | null, dias: num
   return { vendas: saleData.length, devolucoes: returnData.length };
 }
 
-async function runSync() {
+function formatProduto(p: string, estoque: number, vendido: number) {
+  return `• ${p} (estoque ${estoque}, vendeu ${vendido})`;
+}
+
+async function buildResumoMessage(desde: Date) {
+  const [incentivar, porLoja] = await Promise.all([
+    getTopParaIncentivar(30, 10),
+    getTopVendidosPorLoja(desde, 3),
+  ]);
+
+  const partes: string[] = [];
+
+  if (incentivar.length) {
+    partes.push(
+      "\n📦 Top 10 pra incentivar (estoque parado, pouca venda nos últimos 30d):\n" +
+        incentivar.map((p) => formatProduto(p.produto, p.estoque, p.vendido)).join("\n")
+    );
+  }
+
+  if (porLoja.length) {
+    partes.push(
+      "\n🏆 Mais vendidos por loja desde a última atualização:\n" +
+        porLoja
+          .map(
+            (l) =>
+              `${l.storeName}:\n` +
+              l.produtos.map((p) => `  • ${p.produto} (${p.quantidade})`).join("\n")
+          )
+          .join("\n")
+    );
+  }
+
+  return partes.join("\n");
+}
+
+export async function runSync() {
+  // Pega o horário do último sync ANTES de rodar esse aqui, pra "vendido desde a última
+  // atualização" comparar com o período certo (não com o que acabamos de gravar agora).
+  const ultimoSync = await prisma.syncLog.findFirst({
+    where: { source: "SALES", status: "SUCCESS" },
+    orderBy: { startedAt: "desc" },
+  });
+  const desde = ultimoSync?.startedAt ?? new Date(Date.now() - 24 * 60 * 60 * 1000);
+
   try {
     const clients = createDapicClients();
 
@@ -163,8 +207,9 @@ async function runSync() {
     });
 
     const agora = new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" });
+    const resumo = await buildResumoMessage(desde).catch(() => "");
     await sendTelegramMessage(
-      `✅ Dashboard TVB atualizado (${agora})\nLojas: ${clients.map((c) => c.label).join(", ")}\nEstoque: ${totalEstoque} linhas\nVendas: ${totalVendas} itens\nDevoluções: ${totalDevolucoes} itens`
+      `✅ Dashboard TVB atualizado (${agora})\nLojas: ${clients.map((c) => c.label).join(", ")}\nEstoque: ${totalEstoque} linhas\nVendas: ${totalVendas} itens\nDevoluções: ${totalDevolucoes} itens\n${resumo}`
     );
 
     return NextResponse.json({ ok: true, lojas: clients.length, estoque: totalEstoque, vendas: totalVendas, devolucoes: totalDevolucoes });
