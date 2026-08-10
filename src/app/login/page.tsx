@@ -11,13 +11,13 @@ export default function LoginPage() {
 
   return (
     <main className="flex min-h-screen bg-[#f9f9f7]">
-      <div className="relative hidden w-1/2 lg:block">
+      <div className="relative hidden w-1/2 items-center justify-center bg-[#0a4d6e] lg:flex">
         <Image
           src="/login-photo.jpg"
           alt="TVB Shorts"
           fill
           priority
-          className="object-cover"
+          className="object-contain"
           sizes="50vw"
         />
       </div>
