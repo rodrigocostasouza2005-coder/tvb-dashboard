@@ -138,6 +138,9 @@ export class DapicClient {
     return response.json();
   }
 
+  // 1000 por página (era 100) — testado em 2026-08-10: o estoque completo do CD/Atacado
+  // (~14k linhas) foi de 144 páginas/253s pra ~15 páginas/132s, quase 2x mais rápido. A sync
+  // estava tomando timeout (>300s) na Vercel com o valor antigo.
   private async fetchAllPages<T>(
     path: string,
     params: Record<string, string | number | undefined> = {}
@@ -148,7 +151,7 @@ export class DapicClient {
       const page = await this.fetch<PaginatedResponse<T>>(path, {
         ...params,
         Pagina: pagina,
-        RegistrosPorPagina: 100,
+        RegistrosPorPagina: 1000,
       });
       all.push(...page.Dados);
       if (pagina >= page.TotalPaginas) break;
