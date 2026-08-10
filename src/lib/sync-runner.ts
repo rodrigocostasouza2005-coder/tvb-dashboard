@@ -185,7 +185,10 @@ export async function runSync() {
   const desde = ultimoSync && ultimoSync.startedAt < pisoMinimo ? ultimoSync.startedAt : pisoMinimo;
 
   try {
-    const clients = createDapicClients();
+    // "matriz" não vende nada (só existe pra dar acesso a /ordensproducao/produtos, usado pelo
+    // script de backfill à parte) — incluir ela aqui duplicaria a busca de estoque das outras
+    // lojas (o token da matriz enxerga tudo) e arriscaria timeout de novo à toa.
+    const clients = createDapicClients().filter((c) => c.label !== "matriz");
 
     // Lojas em paralelo, não em sequência — cada uma leva dezenas de segundos pra buscar o
     // estoque completo na API do DAPIC, e rodando uma por vez as 4 juntas passavam dos 300s
