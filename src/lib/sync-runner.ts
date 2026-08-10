@@ -141,9 +141,16 @@ async function runSync() {
     // (maxDuration) e a função da Vercel dava timeout, quebrando a sync automática.
     const results = await Promise.all(
       clients.map(async (client) => {
+        const t0 = Date.now();
         const { storeByDapicId, primaryStoreId } = await syncArmazenadores(client);
+        const t1 = Date.now();
         const estoque = await syncEstoque(client, storeByDapicId);
+        const t2 = Date.now();
         const vendas = await syncVendas(client, primaryStoreId, 2);
+        const t3 = Date.now();
+        console.log(
+          `[sync-timing] ${client.label}: armazenadores=${t1 - t0}ms estoque=${t2 - t1}ms(${estoque}linhas) vendas=${t3 - t2}ms(${vendas.vendas}v/${vendas.devolucoes}d)`
+        );
         return { estoque, vendas: vendas.vendas, devolucoes: vendas.devolucoes };
       })
     );
