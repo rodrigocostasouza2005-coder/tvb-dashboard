@@ -118,10 +118,17 @@ async function latestStockSnapshots(filters: Pick<DashboardFilters, "storeIds" |
 }
 
 export async function getStockVsSales(filters: DashboardFilters, dimension: Dimension = "grupo") {
-  const [sales, stock] = await Promise.all([
+  // Sell-through é "quanto do que já existiu já vendeu" — não deve mudar conforme o filtro de
+  // data (Rodrigo notou isso em 2026-08-10). "Vendido no período" e Giro continuam usando o
+  // período escolhido normalmente; só o sellThroughRate usa vendas de todo o histórico.
+  const allTimeFilters: DashboardFilters = { ...filters, from: new Date(0), to: new Date() };
+
+  const [sales, salesAllTime, stock] = await Promise.all([
     getSalesByDimension(filters, dimension),
+    getSalesByDimension(allTimeFilters, dimension),
     latestStockSnapshots(filters),
   ]);
+  const soldAllTimeByKey = new Map(salesAllTime.map((s) => [s.key, s.unitsSold]));
 
   const stockByKey = new Map<string, number>();
   for (const s of stock) {
@@ -137,8 +144,9 @@ export async function getStockVsSales(filters: DashboardFilters, dimension: Dime
       const unitsSold = sale?.unitsSold ?? 0;
       const revenue = sale?.revenue ?? 0;
       const currentStock = stockByKey.get(key) ?? 0;
+      const unitsSoldAllTime = soldAllTimeByKey.get(key) ?? 0;
       const sellThroughRate =
-        unitsSold + currentStock > 0 ? (unitsSold / (unitsSold + currentStock)) * 100 : null;
+        unitsSoldAllTime + currentStock > 0 ? (unitsSoldAllTime / (unitsSoldAllTime + currentStock)) * 100 : null;
       // Aproximação: sem série histórica de estoque ainda, usamos o snapshot atual como
       // "estoque médio" do período. Melhora sozinho conforme o /api/sync acumular snapshots.
       const inventoryTurnover = currentStock > 0 ? unitsSold / currentStock : null;
