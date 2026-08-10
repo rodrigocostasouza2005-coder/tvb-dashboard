@@ -26,6 +26,10 @@ function saleWhere(filters: DashboardFilters): Prisma.SaleWhereInput {
 
 function stockWhere(filters: Pick<DashboardFilters, "storeIds" | "grupoIn">): Prisma.StockSnapshotWhereInput {
   return {
+    // "(sem grupo)" é o que o sync grava quando o DAPIC não manda Grupo pra aquela linha —
+    // na prática é sempre matéria-prima/insumo (etiqueta, zíper, tecido em rolo), nunca produto
+    // de verdade à venda. Rodrigo pediu pra tirar do dashboard inteiro.
+    grupo: { not: "(sem grupo)" },
     ...(filters.storeIds?.length ? { storeId: { in: filters.storeIds } } : {}),
     ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
   };
@@ -426,7 +430,11 @@ export async function getDistinctColecoes() {
 }
 
 export async function getDistinctGrupos() {
-  const rows = await prisma.stockSnapshot.findMany({ distinct: ["grupo"], select: { grupo: true } });
+  const rows = await prisma.stockSnapshot.findMany({
+    distinct: ["grupo"],
+    select: { grupo: true },
+    where: { grupo: { not: "(sem grupo)" } },
+  });
   return rows.map((r) => r.grupo).sort();
 }
 
@@ -436,7 +444,7 @@ export async function getTamanhosPorGrupo() {
   const rows = await prisma.stockSnapshot.findMany({
     distinct: ["grupo", "tamanho"],
     select: { grupo: true, tamanho: true },
-    where: { tamanho: { not: null } },
+    where: { tamanho: { not: null }, grupo: { not: "(sem grupo)" } },
   });
   const map = new Map<string, string[]>();
   for (const r of rows) {
