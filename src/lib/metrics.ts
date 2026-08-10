@@ -78,6 +78,24 @@ export async function getSalesByDimension(filters: DashboardFilters, dimension: 
     .sort((a, b) => b.revenue - a.revenue);
 }
 
+// Vendas por produto, com o grupo de cada um junto — usado pra "abrir" um grupo na aba Vendas
+// e ver os produtos dele, sem precisar de uma chamada nova por grupo clicado.
+export async function getSalesByGrupoProduto(filters: DashboardFilters) {
+  const rows = await prisma.sale.groupBy({
+    by: ["grupo", "produto"],
+    where: saleWhere(filters),
+    _sum: { quantidade: true, valorTotalLiquido: true },
+  });
+  return rows
+    .map((r) => ({
+      grupo: r.grupo,
+      key: r.produto,
+      unitsSold: r._sum.quantidade ?? 0,
+      revenue: r._sum.valorTotalLiquido ?? 0,
+    }))
+    .sort((a, b) => b.revenue - a.revenue);
+}
+
 // Pega o snapshot mais recente por loja+produto (evita somar duplicado se já tivermos
 // vários syncs no histórico).
 // StockSnapshot tem 1 linha por storeId+cod (upsert no sync mantém sempre atualizada, ver
