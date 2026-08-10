@@ -33,7 +33,8 @@ export default async function ReposicaoPage({
       <FilterBar action="/dashboard/reposicao" stores={stores} marcas={marcas} filters={filters} showMarca={false} />
       <div className="mb-3 flex items-center justify-between">
         <p className="text-xs text-[var(--text-muted)]">
-          Mostra itens com estoque abaixo do mínimo, com sugestão de onde puxar a reposição.
+          Mostra itens com estoque abaixo do mínimo e com estoque disponível na origem pra
+          repor de verdade — o que está abaixo do mínimo mas sem nada pra puxar não aparece aqui.
         </p>
         <a
           href={`/api/export/reposicao?${exportParams.toString()}`}
@@ -68,13 +69,7 @@ export default async function ReposicaoPage({
                   {r.falta}
                 </td>
                 <td className="px-4 py-2 text-[var(--text-secondary)]">{r.origemSugerida}</td>
-                <td className="px-4 py-2 tabular-nums">
-                  {r.estoqueNaOrigem > 0 ? (
-                    r.estoqueNaOrigem
-                  ) : (
-                    <span style={{ color: "var(--status-warning)" }}>sem estoque</span>
-                  )}
-                </td>
+                <td className="px-4 py-2 tabular-nums">{r.estoqueNaOrigem}</td>
               </tr>
             ))}
             {rows.length === 0 && (

@@ -212,7 +212,10 @@ export async function getReplenishment(filters: Pick<DashboardFilters, "storeIds
       (s) =>
         s.estoqueMinimo != null &&
         s.quantidadeDisponivel < s.estoqueMinimo &&
-        (!cdStore || s.storeId !== cdStore.id)
+        (!cdStore || s.storeId !== cdStore.id) &&
+        // Sem estoque na origem pra puxar = não tem reposição real pra fazer agora, só
+        // polui a lista. Rodrigo pediu pra esconder em vez de só avisar "sem estoque".
+        (cdStockByCod.get(s.cod) ?? 0) > 0
     )
     .map((s) => ({
       storeId: s.storeId,
@@ -226,7 +229,9 @@ export async function getReplenishment(filters: Pick<DashboardFilters, "storeIds
       origemSugerida: cdStore?.name ?? "—",
       estoqueNaOrigem: cdStockByCod.get(s.cod) ?? 0,
     }))
-    .sort((a, b) => b.falta - a.falta);
+    // Por loja primeiro (Rodrigo pediu — antes vinha misturado, parecendo ordenado só por
+    // produto), maior falta primeiro dentro de cada loja.
+    .sort((a, b) => a.storeName.localeCompare(b.storeName) || b.falta - a.falta);
 }
 
 export async function getVendedorRanking(filters: DashboardFilters) {
