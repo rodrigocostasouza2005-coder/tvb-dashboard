@@ -496,6 +496,9 @@ export async function getLastSyncs() {
 // vendeu pouco é o que precisa de empurrão (desconto, destaque na loja, etc). Vendas usa uma
 // janela de dias (não all-time, ao contrário do sell-through) pra não misturar produto de
 // coleção antiga "parado" com produto normal que só vendeu bem há muito tempo.
+// Exclui a coleção "BESTSELLER" (linha permanente/best-seller marcada assim no DAPIC) — esses
+// produtos naturalmente têm bastante estoque e podem ter uma janela de 30d fraca por acaso, mas
+// não são o que precisa de incentivo (Rodrigo confirmou em 2026-08-10, ex: Ultra Light Black).
 export async function getTopParaIncentivar(dias = 30, limit = 10) {
   const desde = new Date();
   desde.setDate(desde.getDate() - dias);
@@ -503,7 +506,7 @@ export async function getTopParaIncentivar(dias = 30, limit = 10) {
   const [stock, vendas] = await Promise.all([
     prisma.stockSnapshot.groupBy({
       by: ["produto"],
-      where: stockWhere({}),
+      where: { ...stockWhere({}), colecao: { not: "BESTSELLER" } },
       _sum: { quantidadeDisponivel: true },
     }),
     prisma.sale.groupBy({

@@ -133,8 +133,8 @@ async function syncVendas(client: DapicClient, storeId: string | null, dias: num
   return { vendas: saleData.length, devolucoes: returnData.length };
 }
 
-function formatProduto(p: string, estoque: number, vendido: number) {
-  return `• ${p} (estoque ${estoque}, vendeu ${vendido})`;
+function formatProduto(pos: number, p: string, estoque: number, vendido: number) {
+  return `${pos}. ${p} (estoque ${estoque}, vendeu ${vendido})`;
 }
 
 async function buildResumoMessage(desde: Date) {
@@ -148,7 +148,7 @@ async function buildResumoMessage(desde: Date) {
   if (incentivar.length) {
     partes.push(
       "\n📦 Top 10 pra incentivar (estoque parado, pouca venda nos últimos 30d):\n" +
-        incentivar.map((p) => formatProduto(p.produto, p.estoque, p.vendido)).join("\n")
+        incentivar.map((p, i) => formatProduto(i + 1, p.produto, p.estoque, p.vendido)).join("\n")
     );
   }
 
@@ -159,7 +159,7 @@ async function buildResumoMessage(desde: Date) {
           .map(
             (l) =>
               `${l.storeName}:\n` +
-              l.produtos.map((p) => `  • ${p.produto} (${p.quantidade})`).join("\n")
+              l.produtos.map((p, i) => `  ${i + 1}. ${p.produto} (${p.quantidade})`).join("\n")
           )
           .join("\n")
     );
@@ -168,6 +168,12 @@ async function buildResumoMessage(desde: Date) {
   return partes.join("\n");
 }
 
+// Piso mínimo da janela do "vendido desde a última atualização" — sem isso, uma sync manual ou
+// um catchup automático rodado pouco antes (ex: teste, ou recuperação de um cron que falhou)
+// encolhe a janela pra minutos e a lista de mais vendidos por loja sai quase vazia. Cron normal
+// roda 2x/dia (~9h de intervalo), então 12h nunca corta a janela real ao meio.
+const JANELA_MINIMA_HORAS = 12;
+
 export async function runSync() {
   // Pega o horário do último sync ANTES de rodar esse aqui, pra "vendido desde a última
   // atualização" comparar com o período certo (não com o que acabamos de gravar agora).
@@ -175,7 +181,8 @@ export async function runSync() {
     where: { source: "SALES", status: "SUCCESS" },
     orderBy: { startedAt: "desc" },
   });
-  const desde = ultimoSync?.startedAt ?? new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const pisoMinimo = new Date(Date.now() - JANELA_MINIMA_HORAS * 60 * 60 * 1000);
+  const desde = ultimoSync && ultimoSync.startedAt < pisoMinimo ? ultimoSync.startedAt : pisoMinimo;
 
   try {
     const clients = createDapicClients();
@@ -208,9 +215,7 @@ export async function runSync() {
 
     const agora = new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" });
     const resumo = await buildResumoMessage(desde).catch(() => "");
-    await sendTelegramMessage(
-      `✅ Dashboard TVB atualizado (${agora})\nLojas: ${clients.map((c) => c.label).join(", ")}\nEstoque: ${totalEstoque} linhas\nVendas: ${totalVendas} itens\nDevoluções: ${totalDevolucoes} itens\n${resumo}`
-    );
+    await sendTelegramMessage(`✅ Dashboard TVB atualizado (${agora})\n${resumo}`);
 
     return NextResponse.json({ ok: true, lojas: clients.length, estoque: totalEstoque, vendas: totalVendas, devolucoes: totalDevolucoes });
   } catch (error) {
