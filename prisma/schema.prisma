@@ -159,17 +159,31 @@ model Return {
   @@index([storeId, returnDate])
 }
 
+// Reescrito em 2026-08-10 pros campos reais de /ordensproducao/produtos (endpoint só descoberto
+// nessa data — a versão anterior era especulativa, nunca tinha sido testada com dado real).
+// "cod" (IdGradeProduto) é o mesmo identificador usado em Sale/StockSnapshot — dataFinalizacaoProducao
+// é o sinal de "quando essa peça foi produzida", usado no Envelhecimento como alternativa/complemento
+// à 1ª venda (bestsellers são repostos direto, "1ª venda histórica" não reflete um lote novo).
 model ProductionOrder {
-  id                   String   @id @default(cuid())
-  grupo                String
-  referencia           String?
-  produto              String
-  tamanho              String?
-  quantidadeFinalizada Int
-  dataPrevisao         DateTime?
-  ordemProducao        String
-  cod                  String?
+  id                      String    @id @default(cuid())
+  idOrdemProducao         Int
+  cod                     String
+  ordemProducao           String
+  referencia              String
+  produto                 String
+  cor                     String?
+  tamanho                 String?
+  grupo                   String
+  marca                   String?
+  colecao                 String?
+  quantidade              Int
+  quantidadeOriginal      Int
+  status                  String
+  dataFinalizacaoProducao DateTime?
+  dataEntradaCelula       DateTime?
 
+  @@unique([idOrdemProducao, cod])
+  @@index([cod])
   @@index([grupo])
 }
 

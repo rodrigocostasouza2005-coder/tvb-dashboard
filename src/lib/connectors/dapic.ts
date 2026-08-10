@@ -180,8 +180,11 @@ export class DapicClient {
     return this.fetch<DapicPedidoVendaDetalhe>(`/pedidosvendas/${id}`);
   }
 
-  fetchOrdensProducao(dataInicial: string, dataFinal: string) {
-    return this.fetchAllPages<DapicOrdemProducao>("/ordensproducao", {
+  // Descoberto em 2026-08-10 (token da Matriz) — o endpoint de LISTA (/ordensproducao) só traz
+  // dado no nível da ordem (referência, quantidade total, sem produto/tamanho). Esse aqui
+  // (/ordensproducao/produtos) é o que traz o detalhe por grade (IdGradeProduto = nosso cod).
+  fetchOrdensProducaoProdutos(dataInicial: string, dataFinal: string) {
+    return this.fetchAllPages<DapicOrdemProducaoProduto>("/ordensproducao/produtos", {
       DataInicial: dataInicial,
       DataFinal: dataFinal,
     });
@@ -295,12 +298,25 @@ export type DapicVendaPdv = {
   Produtos: DapicVendaPdvProduto[];
 };
 
-export type DapicOrdemProducao = {
+// Campos reais de /ordensproducao/produtos, confirmados em 2026-08-10 com o token da Matriz.
+// "Id" NÃO é uma chave única por linha (várias linhas de tamanhos diferentes do mesmo produto
+// numa mesma ordem repetem o mesmo Id) — usar (IdOrdemProducao, IdGradeProduto) como chave.
+export type DapicOrdemProducaoProduto = {
   Id: number;
-  Grupo?: string;
+  IdOrdemProducao: number;
+  IdGradeProduto: number;
+  IdProduto: number;
+  OrdemProducao: string;
+  Referencia: string;
   Produto: string;
+  Cor?: string;
   Tamanho?: string;
-  QuantidadeFinalizada?: number;
-  DataPrevisao?: string;
-  OrdemProducao?: string;
+  Grupo: string | null;
+  Marca: string | null;
+  Colecao: string | null;
+  QuantidadeOriginal: number;
+  Quantidade: number;
+  Status: string;
+  DataFinalizacaoProducao: string | null;
+  DataEntradaCelula: string | null;
 };
