@@ -51,8 +51,8 @@ export default async function ReposicaoPage({
               <th className="px-4 py-2 font-medium">Produto</th>
               <th className="px-4 py-2 font-medium">Tamanho</th>
               <th className="px-4 py-2 font-medium">Estoque</th>
+              <th className="px-4 py-2 font-medium">Repor</th>
               <th className="px-4 py-2 font-medium">Mínimo</th>
-              <th className="px-4 py-2 font-medium">Falta</th>
               <th className="px-4 py-2 font-medium">Repor de</th>
               <th className="px-4 py-2 font-medium">Disponível na origem</th>
             </tr>
@@ -64,10 +64,10 @@ export default async function ReposicaoPage({
                 <td className="px-4 py-2 font-medium">{r.produto}</td>
                 <td className="px-4 py-2">{r.tamanho ?? "—"}</td>
                 <td className="px-4 py-2 tabular-nums">{r.quantidadeDisponivel}</td>
-                <td className="px-4 py-2 tabular-nums">{r.estoqueMinimo}</td>
                 <td className="px-4 py-2 tabular-nums font-medium" style={{ color: "var(--status-critical)" }}>
                   {r.falta}
                 </td>
+                <td className="px-4 py-2 tabular-nums">{r.estoqueMinimo}</td>
                 <td className="px-4 py-2 text-[var(--text-secondary)]">{r.origemSugerida}</td>
                 <td className="px-4 py-2 tabular-nums">{r.estoqueNaOrigem}</td>
               </tr>
