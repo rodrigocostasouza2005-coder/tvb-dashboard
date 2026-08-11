@@ -56,6 +56,7 @@ model Store {
   sales               Sale[]
   stockSnapshots      StockSnapshot[]
   returns             Return[]
+  gifts               Gift[]
   syncLogs            SyncLog[]
   stockMinimumRules   StockMinimumRule[]
 }
@@ -159,6 +160,34 @@ model Return {
   @@index([storeId, returnDate])
 }
 
+// Item "Tipo=Brinde" (vendaspdv/faturas) — antes era descartado no sync. Pedido do Rodrigo em
+// 2026-08-11: mesma estrutura da Sale (pra caber no mesmo padrão de filtro/dimensão da aba
+// Vendas), sem os campos específicos de venda que não fazem sentido pra brinde (tabelaPreco,
+// cliente, vendedor).
+model Gift {
+  id                String   @id @default(cuid())
+  storeId           String
+  cod               String
+  produto           String
+  grupo             String
+  cor               String?
+  tamanho           String?
+  colecao           String?
+  marca             String?
+  quantidade        Int
+  valorTotalLiquido Float
+  giftDate          DateTime
+  // Mesma lógica de idempotência de Sale/Return — ver comentário lá.
+  dapicVendaId      Int
+  itemIndex         Int
+
+  store Store @relation(fields: [storeId], references: [id])
+
+  @@unique([storeId, dapicVendaId, itemIndex])
+  @@index([storeId, giftDate])
+  @@index([grupo])
+}
+
 // Reescrito em 2026-08-10 pros campos reais de /ordensproducao/produtos (endpoint só descoberto
 // nessa data — a versão anterior era especulativa, nunca tinha sido testada com dado real).
 // "cod" (IdGradeProduto) é o mesmo identificador usado em Sale/StockSnapshot — dataFinalizacaoProducao
@@ -198,6 +227,7 @@ enum SyncSource {
   STOCK
   RETURNS
   PRODUCTION
+  GIFTS
 }
 
 enum SyncStatus {

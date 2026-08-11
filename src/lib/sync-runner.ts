@@ -78,7 +78,7 @@ async function syncEstoque(client: DapicClient, storeByDapicId: Map<number, stri
 // vem de /faturas (confirmado com Rodrigo em 2026-08-10). As linhas "Venda" que aparecem aqui
 // pra esse token são só o lado de troca (pareada com uma devolução), não a venda real — ignora.
 async function syncVendas(client: DapicClient, storeId: string | null, dias: number, priceCatalog: PriceCatalog) {
-  if (!storeId) return { vendas: 0, devolucoes: 0 };
+  if (!storeId) return { vendas: 0, devolucoes: 0, brindes: 0 };
   const contaVendaDoPdv = client.label !== "cd-atacado";
   const hoje = new Date();
   const inicio = new Date(hoje);
@@ -87,6 +87,7 @@ async function syncVendas(client: DapicClient, storeId: string | null, dias: num
 
   const saleData: Prisma.SaleCreateManyInput[] = [];
   const returnData: Prisma.ReturnCreateManyInput[] = [];
+  const giftData: Prisma.GiftCreateManyInput[] = [];
 
   for (const venda of vendasPdv) {
     if (venda.Status !== "Fechada" || !venda.DataFechamento) continue;
@@ -129,6 +130,22 @@ async function syncVendas(client: DapicClient, storeId: string | null, dias: num
           valorTotal: item.ValorLiquido,
           returnDate: saleDate,
         });
+      } else if (item.Tipo === "Brinde") {
+        giftData.push({
+          storeId,
+          dapicVendaId: venda.Id,
+          itemIndex,
+          cod,
+          produto: item.Produto,
+          grupo: item.Grupo ?? "(sem grupo)",
+          cor: item.Cor ?? null,
+          tamanho: item.Tamanho ?? null,
+          marca: item.Marca ?? null,
+          colecao: item.Colecao ?? null,
+          quantidade: item.Quantidade,
+          valorTotalLiquido: item.ValorLiquido,
+          giftDate: saleDate,
+        });
       }
     });
   }
@@ -137,26 +154,46 @@ async function syncVendas(client: DapicClient, storeId: string | null, dias: num
   // olhando sempre "últimos N dias", então as janelas se sobrepõem e sem isso duplicava tudo.
   if (saleData.length) await prisma.sale.createMany({ data: saleData, skipDuplicates: true });
   if (returnData.length) await prisma.return.createMany({ data: returnData, skipDuplicates: true });
-  return { vendas: saleData.length, devolucoes: returnData.length };
+  if (giftData.length) await prisma.gift.createMany({ data: giftData, skipDuplicates: true });
+  return { vendas: saleData.length, devolucoes: returnData.length, brindes: giftData.length };
 }
 
 // Venda de verdade do canal Site+Atacado (só cd-atacado tem acesso a /faturas). Mesma chave de
 // idempotência (storeId, dapicVendaId=Id da fatura, itemIndex) — nunca colide com vendaspdv
 // porque esse token não grava mais Sale via vendaspdv (ver syncVendas).
 async function syncFaturas(client: DapicClient, storeId: string | null, dias: number, priceCatalog: PriceCatalog) {
-  if (!storeId || client.label !== "cd-atacado") return { vendas: 0 };
+  if (!storeId || client.label !== "cd-atacado") return { vendas: 0, brindes: 0 };
   const hoje = new Date();
   const inicio = new Date(hoje);
   inicio.setDate(inicio.getDate() - dias);
   const faturas = await client.fetchFaturas(toDateStr(inicio), toDateStr(hoje));
 
   const saleData: Prisma.SaleCreateManyInput[] = [];
+  const giftData: Prisma.GiftCreateManyInput[] = [];
   for (const fatura of faturas) {
     if (fatura.Status !== "Fechado" || !fatura.DataFechamento) continue;
     const saleDate = parseDapicDateTime(fatura.DataFechamento);
     const produtos = await client.fetchFaturaProdutos(fatura.Id);
 
     produtos.forEach((item, itemIndex) => {
+      if (item.Tipo === "Brinde") {
+        giftData.push({
+          storeId,
+          dapicVendaId: fatura.Id,
+          itemIndex,
+          cod: String(item.IdGradeProduto),
+          produto: stripReferenciaPrefix(item.Produto),
+          grupo: item.Grupo ?? "(sem grupo)",
+          cor: item.Cor ?? null,
+          tamanho: item.Tamanho ?? null,
+          marca: item.Marca ?? null,
+          colecao: item.Colecao ?? null,
+          quantidade: item.Quantidade,
+          valorTotalLiquido: item.Valores.ValorTotal,
+          giftDate: saleDate,
+        });
+        return;
+      }
       if (item.Tipo !== "Venda") return;
       saleData.push({
         storeId,
@@ -179,9 +216,10 @@ async function syncFaturas(client: DapicClient, storeId: string | null, dias: nu
       });
     });
   }
+  if (giftData.length) await prisma.gift.createMany({ data: giftData, skipDuplicates: true });
 
   if (saleData.length) await prisma.sale.createMany({ data: saleData, skipDuplicates: true });
-  return { vendas: saleData.length };
+  return { vendas: saleData.length, brindes: giftData.length };
 }
 
 // Ordem de produção (token "matriz", separado das 4 lojas físicas — não vende nada, só dá acesso
@@ -289,7 +327,12 @@ export async function runSync() {
           ]);
           const vendas = await syncVendas(client, primaryStoreId, 2, priceCatalog);
           const faturas = await syncFaturas(client, primaryStoreId, 2, priceCatalog);
-          return { estoque, vendas: vendas.vendas + faturas.vendas, devolucoes: vendas.devolucoes };
+          return {
+            estoque,
+            vendas: vendas.vendas + faturas.vendas,
+            devolucoes: vendas.devolucoes,
+            brindes: vendas.brindes + faturas.brindes,
+          };
         })
       ),
       // Não fatal: se o token da matriz ainda não estiver configurado (ex: só em dev, não em
@@ -300,6 +343,7 @@ export async function runSync() {
     const totalEstoque = results.reduce((a, r) => a + r.estoque, 0);
     const totalVendas = results.reduce((a, r) => a + r.vendas, 0);
     const totalDevolucoes = results.reduce((a, r) => a + r.devolucoes, 0);
+    const totalBrindes = results.reduce((a, r) => a + r.brindes, 0);
 
     await prisma.syncLog.create({
       data: { source: "STOCK", status: "SUCCESS", recordsSynced: totalEstoque, finishedAt: new Date() },
@@ -313,6 +357,9 @@ export async function runSync() {
     await prisma.syncLog.create({
       data: { source: "PRODUCTION", status: "SUCCESS", recordsSynced: totalOrdensProducao, finishedAt: new Date() },
     });
+    await prisma.syncLog.create({
+      data: { source: "GIFTS", status: "SUCCESS", recordsSynced: totalBrindes, finishedAt: new Date() },
+    });
 
     const agora = new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" });
     const resumo = await buildResumoMessage(desde).catch(() => "");
@@ -325,6 +372,7 @@ export async function runSync() {
       vendas: totalVendas,
       devolucoes: totalDevolucoes,
       ordensProducao: totalOrdensProducao,
+      brindes: totalBrindes,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

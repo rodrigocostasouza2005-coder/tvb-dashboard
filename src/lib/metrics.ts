@@ -99,6 +99,54 @@ export async function getSalesByGrupoProduto(filters: DashboardFilters) {
     .sort((a, b) => b.revenue - a.revenue);
 }
 
+function giftWhere(filters: DashboardFilters): Prisma.GiftWhereInput {
+  return {
+    giftDate: { gte: filters.from, lte: filters.to },
+    ...(filters.storeIds?.length ? { storeId: { in: filters.storeIds } } : {}),
+    ...(filters.marcas?.length ? { marca: { in: filters.marcas } } : {}),
+    ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
+  };
+}
+
+async function groupGiftsByDimension(dimension: Dimension, where: Prisma.GiftWhereInput) {
+  switch (dimension) {
+    case "grupo":
+      return prisma.gift.groupBy({ by: ["grupo"], where, _sum: { quantidade: true, valorTotalLiquido: true } });
+    case "produto":
+      return prisma.gift.groupBy({ by: ["produto"], where, _sum: { quantidade: true, valorTotalLiquido: true } });
+    case "tamanho":
+      return prisma.gift.groupBy({ by: ["tamanho"], where, _sum: { quantidade: true, valorTotalLiquido: true } });
+  }
+}
+
+export async function getGiftsByDimension(filters: DashboardFilters, dimension: Dimension = "grupo") {
+  const rows = await groupGiftsByDimension(dimension, giftWhere(filters));
+  return rows
+    .map((r) => ({
+      key: dimensionKey(dimension, r),
+      unitsSold: r._sum.quantidade ?? 0,
+      revenue: r._sum.valorTotalLiquido ?? 0,
+    }))
+    .sort((a, b) => b.unitsSold - a.unitsSold);
+}
+
+// Mesmo padrão de getSalesByGrupoProduto — usado pra "abrir" um grupo na aba Brinde.
+export async function getGiftsByGrupoProduto(filters: DashboardFilters) {
+  const rows = await prisma.gift.groupBy({
+    by: ["grupo", "produto"],
+    where: giftWhere(filters),
+    _sum: { quantidade: true, valorTotalLiquido: true },
+  });
+  return rows
+    .map((r) => ({
+      grupo: r.grupo,
+      key: r.produto,
+      unitsSold: r._sum.quantidade ?? 0,
+      revenue: r._sum.valorTotalLiquido ?? 0,
+    }))
+    .sort((a, b) => b.unitsSold - a.unitsSold);
+}
+
 // Pega o snapshot mais recente por loja+produto (evita somar duplicado se já tivermos
 // vários syncs no histórico).
 // StockSnapshot tem 1 linha por storeId+cod (upsert no sync mantém sempre atualizada, ver

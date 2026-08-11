@@ -16,11 +16,13 @@ export function ExpandableSalesTable({
   produtoRows,
   totalUnits,
   showFinancials,
+  emptyMessage = "Sem vendas no período/filtro selecionado.",
 }: {
   rows: Row[];
   produtoRows: ProdutoRow[];
   totalUnits: number;
   showFinancials: boolean;
+  emptyMessage?: string;
 }) {
   const [open, setOpen] = useState<Set<string>>(new Set());
 
@@ -94,7 +96,7 @@ export function ExpandableSalesTable({
           {rows.length === 0 && (
             <tr>
               <td colSpan={showFinancials ? 4 : 3} className="px-4 py-6 text-center text-[var(--text-muted)]">
-                Sem vendas no período/filtro selecionado.
+                {emptyMessage}
               </td>
             </tr>
           )}

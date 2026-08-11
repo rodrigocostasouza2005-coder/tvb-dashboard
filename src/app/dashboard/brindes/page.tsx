@@ -1,0 +1,90 @@
+import { getSessionUser } from "@/lib/auth";
+import { getGiftsByDimension, getGiftsByGrupoProduto, getStores, getMarcas } from "@/lib/metrics";
+import { canSeeFinancials, getGrupoRestriction, getStoreRestriction } from "@/lib/permissions";
+import { parseFilters, parseDimension, type RawSearchParams } from "@/lib/filters";
+import { requireTabAccess } from "@/lib/tabs";
+import { FilterBar } from "../filter-bar";
+import { DimensionToggle } from "../dimension-toggle";
+import { ExpandableSalesTable } from "../vendas/expandable-sales-table";
+
+function formatBRL(value: number) {
+  return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+
+export default async function BrindesPage({
+  searchParams,
+}: {
+  searchParams: Promise<RawSearchParams>;
+}) {
+  const user = await getSessionUser();
+  if (!user) return null;
+  requireTabAccess(user, user.role, "brindes");
+
+  const rawParams = await searchParams;
+  const dimension = parseDimension(rawParams);
+  const grupoIn = await getGrupoRestriction(user.role);
+  const allowedStores = getStoreRestriction(user);
+  const filters = { ...parseFilters(rawParams, allowedStores), grupoIn };
+
+  const [rows, produtoRows, stores, marcas] = await Promise.all([
+    getGiftsByDimension(filters, dimension),
+    dimension === "grupo" ? getGiftsByGrupoProduto(filters) : Promise.resolve([]),
+    getStores(allowedStores),
+    getMarcas(),
+  ]);
+  const showFinancials = canSeeFinancials(user.role);
+  const totalUnits = rows.reduce((sum, r) => sum + r.unitsSold, 0);
+
+  return (
+    <div>
+      <FilterBar action="/dashboard/brindes" stores={stores} marcas={marcas} filters={filters} />
+      <p className="mb-3 text-xs text-[var(--text-muted)]">
+        Itens dados como brinde (Tipo=Brinde na API) — não entram na contagem de vendas nem de
+        devoluções.
+      </p>
+      <DimensionToggle basePath="/dashboard/brindes" searchParams={rawParams} current={dimension} />
+
+      {dimension === "grupo" ? (
+        <ExpandableSalesTable
+          rows={rows}
+          produtoRows={produtoRows}
+          totalUnits={totalUnits}
+          showFinancials={showFinancials}
+          emptyMessage="Sem brinde no período/filtro selecionado."
+        />
+      ) : (
+        <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)]">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
+                <th className="px-4 py-2 font-medium">{dimension === "produto" ? "Produto" : "Tamanho"}</th>
+                <th className="px-4 py-2 font-medium">Unidades</th>
+                <th className="px-4 py-2 font-medium">% do total</th>
+                {showFinancials && <th className="px-4 py-2 font-medium">Valor doado</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.key} className="border-b border-[var(--gridline)] last:border-0">
+                  <td className="px-4 py-2 font-medium">{r.key}</td>
+                  <td className="px-4 py-2 tabular-nums">{r.unitsSold.toLocaleString("pt-BR")}</td>
+                  <td className="px-4 py-2 tabular-nums text-[var(--text-secondary)]">
+                    {totalUnits > 0 ? `${((r.unitsSold / totalUnits) * 100).toFixed(1)}%` : "—"}
+                  </td>
+                  {showFinancials && <td className="px-4 py-2 tabular-nums">{formatBRL(r.revenue)}</td>}
+                </tr>
+              ))}
+              {rows.length === 0 && (
+                <tr>
+                  <td colSpan={showFinancials ? 4 : 3} className="px-4 py-6 text-center text-[var(--text-muted)]">
+                    Sem brinde no período/filtro selecionado.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}

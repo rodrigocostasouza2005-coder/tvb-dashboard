@@ -3,6 +3,7 @@ import type { Role } from "@prisma/client";
 
 export type TabKey =
   | "vendas"
+  | "brindes"
   | "estoque-atual"
   | "estoque"
   | "sellthrough"
@@ -16,6 +17,7 @@ export type TabKey =
 
 export const TABS: { key: TabKey; label: string; href: string }[] = [
   { key: "vendas", label: "Vendas", href: "/dashboard/vendas" },
+  { key: "brindes", label: "Brinde", href: "/dashboard/brindes" },
   { key: "estoque-atual", label: "Estoque Atual", href: "/dashboard/estoque-atual" },
   { key: "estoque", label: "Estoque × Vendas", href: "/dashboard/estoque" },
   { key: "sellthrough", label: "Sellthrough & Giro", href: "/dashboard/sellthrough" },

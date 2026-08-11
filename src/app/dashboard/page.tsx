@@ -29,6 +29,7 @@ const SOURCE_LABEL: Record<string, string> = {
   STOCK: "Estoque",
   RETURNS: "Devoluções",
   PRODUCTION: "Produção",
+  GIFTS: "Brinde",
 };
 
 export default async function OverviewPage({
