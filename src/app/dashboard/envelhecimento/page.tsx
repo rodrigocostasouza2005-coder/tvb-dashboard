@@ -1,5 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
-import { getStockAging, getAllStores, getMarcas } from "@/lib/metrics";
+import { getStockAging, getAllStores, getMarcas, getTabelasPreco } from "@/lib/metrics";
 import { getGrupoRestriction, getStoreRestriction } from "@/lib/permissions";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
@@ -27,10 +27,11 @@ export default async function EnvelhecimentoPage({
   const allowedStores = getStoreRestriction(user);
   const filters = { ...parseFilters(await searchParams, allowedStores), grupoIn };
 
-  const [allRows, stores, marcas] = await Promise.all([
+  const [allRows, stores, marcas, tabelasPreco] = await Promise.all([
     getStockAging(filters),
     getAllStores(allowedStores),
     getMarcas(),
+    getTabelasPreco(),
   ]);
 
   // Itens que nunca venderam ficam de fora da tabela de envelhecimento: com só ~dias de
@@ -45,7 +46,15 @@ export default async function EnvelhecimentoPage({
 
   return (
     <div>
-      <FilterBar action="/dashboard/envelhecimento" stores={stores} marcas={marcas} filters={filters} showMarca={false} />
+      <FilterBar
+        action="/dashboard/envelhecimento"
+        stores={stores}
+        marcas={marcas}
+        tabelasPreco={tabelasPreco}
+        showTabelaPreco
+        filters={filters}
+        showMarca={false}
+      />
       <p className="mb-3 text-xs text-[var(--text-muted)]">
         Idade contada a partir da <strong>primeira venda</strong> daquele produto naquela loja (não
         da última) — pra saber desde quando ele realmente começou a vender. Só mostra itens com

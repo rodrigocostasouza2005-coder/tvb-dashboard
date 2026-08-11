@@ -268,6 +268,27 @@ export async function getReplenishment(filters: Pick<DashboardFilters, "storeIds
     .sort((a, b) => a.storeName.localeCompare(b.storeName) || b.falta - a.falta);
 }
 
+// "Cliente novo" = a 1ª compra dele de todas (sem limite de data, dentro do resto do filtro
+// aplicado — loja/marca/tabela de preço/grupo) caiu dentro do período escolhido no filtro de
+// data. Pedido do Rodrigo em 2026-08-11 pro card da Visão Geral.
+export async function getNewClientsCount(filters: DashboardFilters) {
+  const where: Prisma.SaleWhereInput = {
+    clienteNome: { not: null },
+    ...(filters.storeIds?.length ? { storeId: { in: filters.storeIds } } : {}),
+    ...(filters.marcas?.length ? { marca: { in: filters.marcas } } : {}),
+    ...(filters.tabelasPreco?.length ? { tabelaPreco: { in: filters.tabelasPreco } } : {}),
+    ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
+  };
+  const firstPurchaseByClient = await prisma.sale.groupBy({
+    by: ["clienteNome"],
+    where,
+    _min: { saleDate: true },
+  });
+  return firstPurchaseByClient.filter(
+    (c) => c._min.saleDate && c._min.saleDate >= filters.from && c._min.saleDate <= filters.to
+  ).length;
+}
+
 export async function getVendedorRanking(filters: DashboardFilters) {
   const rows = await prisma.sale.groupBy({
     by: ["storeId", "vendedor"],
@@ -295,7 +316,9 @@ export async function getVendedorRanking(filters: DashboardFilters) {
 // (não só o período filtrado) pra achar a primeira e a última venda daquele produto naquela
 // loja. "Dias desde a 1ª venda" é o sinal principal pedido pelo Rodrigo — mostra desde quando
 // aquele produto realmente começou a vender, não só se parou de vender recentemente.
-export async function getStockAging(filters: Pick<DashboardFilters, "storeIds" | "grupoIn">) {
+export async function getStockAging(
+  filters: Pick<DashboardFilters, "storeIds" | "grupoIn" | "tabelasPreco">
+) {
   const stock = (await latestStockSnapshots(filters)).filter((s) => s.quantidadeDisponivel > 0);
   if (stock.length === 0) return [];
 
@@ -305,7 +328,11 @@ export async function getStockAging(filters: Pick<DashboardFilters, "storeIds" |
   const [saleAgg, stores, producedAgg] = await Promise.all([
     prisma.sale.groupBy({
       by: ["storeId", "cod"],
-      where: { storeId: { in: storeIds }, cod: { in: cods } },
+      where: {
+        storeId: { in: storeIds },
+        cod: { in: cods },
+        ...(filters.tabelasPreco?.length ? { tabelaPreco: { in: filters.tabelasPreco } } : {}),
+      },
       _min: { saleDate: true },
       _max: { saleDate: true },
       _sum: { quantidade: true },

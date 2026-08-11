@@ -1,5 +1,13 @@
 import { getSessionUser } from "@/lib/auth";
-import { getKpiSummary, getSalesByDimension, getStores, getMarcas, getTabelasPreco, getLastSyncs } from "@/lib/metrics";
+import {
+  getKpiSummary,
+  getSalesByDimension,
+  getStores,
+  getMarcas,
+  getTabelasPreco,
+  getLastSyncs,
+  getNewClientsCount,
+} from "@/lib/metrics";
 import { canSeeFinancials, getGrupoRestriction, getStoreRestriction } from "@/lib/permissions";
 import { parseFilters, parseDimension, type RawSearchParams } from "@/lib/filters";
 import { FilterBar } from "./filter-bar";
@@ -36,13 +44,14 @@ export default async function OverviewPage({
   const rawParams = await searchParams;
   const filters = { ...parseFilters(rawParams, allowedStores), grupoIn };
   const dimension = parseDimension(rawParams);
-  const [kpi, salesByDimension, stores, marcas, tabelasPreco, syncs] = await Promise.all([
+  const [kpi, salesByDimension, stores, marcas, tabelasPreco, syncs, newClients] = await Promise.all([
     getKpiSummary(filters),
     getSalesByDimension(filters, dimension),
     getStores(allowedStores),
     getMarcas(),
     getTabelasPreco(),
     getLastSyncs(),
+    getNewClientsCount(filters),
   ]);
 
   const showFinancials = canSeeFinancials(user.role);
@@ -64,6 +73,11 @@ export default async function OverviewPage({
         <StatTile label="Unidades vendidas" value={kpi.unitsSold.toLocaleString("pt-BR")} />
         {showFinancials && <StatTile label="Receita" value={formatBRL(kpi.revenue)} />}
         <StatTile label="Estoque atual" value={kpi.currentStock.toLocaleString("pt-BR")} />
+        <StatTile
+          label="Clientes novos"
+          value={newClients.toLocaleString("pt-BR")}
+          trend={newClients > 0 ? "up" : undefined}
+        />
       </section>
 
       <section className="mb-6">
