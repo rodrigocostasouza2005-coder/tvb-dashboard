@@ -13,6 +13,7 @@ import { PrismaClient, Prisma } from "@prisma/client";
 import { createDapicClients, type DapicClient } from "../src/lib/connectors/dapic";
 import { sellsProducts } from "../src/lib/connectors/armazenadores";
 import { fetchPriceCatalog, inferTabelaPreco, type PriceCatalog } from "../src/lib/connectors/tabela-preco";
+import { sendTelegramMessage } from "../src/lib/telegram";
 
 const directUrl = process.env.DATABASE_URL?.replace("-pooler.", ".");
 const prisma = new PrismaClient(directUrl ? { datasourceUrl: directUrl } : undefined);
@@ -171,8 +172,14 @@ async function main() {
       finishedAt: new Date(),
     },
   });
+  await sendTelegramMessage(
+    `✅ Backfill de Tabela de Preço concluído\nVendas atualizadas: ${totalAtualizado}\nSem tabela encontrada: ${totalSemMatch}`
+  );
 }
 
 main()
-  .catch((e) => console.error(e))
+  .catch(async (e) => {
+    console.error(e);
+    await sendTelegramMessage(`⚠️ Backfill de Tabela de Preço falhou: ${e instanceof Error ? e.message : String(e)}`);
+  })
   .finally(() => prisma.$disconnect());
