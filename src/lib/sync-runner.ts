@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { createDapicClients, stripReferenciaPrefix, type DapicClient } from "@/lib/connectors/dapic";
 import { displayGroupFor, sellsProducts } from "@/lib/connectors/armazenadores";
 import { upsertStockSnapshots, type StockSnapshotRow } from "@/lib/connectors/upsert-stock";
+import { upsertProductionOrders, type ProductionOrderRow } from "@/lib/connectors/upsert-production-order";
 import { sendTelegramMessage } from "@/lib/telegram";
 import { getTopParaIncentivar, getTopVendidosPorLoja } from "@/lib/metrics";
 import type { Prisma } from "@prisma/client";
@@ -180,6 +181,39 @@ async function syncFaturas(client: DapicClient, storeId: string | null, dias: nu
   return { vendas: saleData.length };
 }
 
+// Ordem de produção (token "matriz", separado das 4 lojas físicas — não vende nada, só dá acesso
+// a esse endpoint). Volume é pequeno (~2300 linhas, 82 ordens desde 2025-08-22, testado em
+// 2026-08-10: não existe nada mais antigo que isso), então busca o histórico completo a cada
+// sync em vez de janela — mais simples e garante que status de ordens antigas ainda abertas
+// (EmProducao/AguardandoInicio) seja atualizado quando finalizarem, sem depender de acertar o
+// campo certo de filtro de data da API.
+const ORDENS_PRODUCAO_DATA_INICIAL = "2018-01-01";
+
+async function syncOrdensProducao(client: DapicClient | undefined) {
+  if (!client) return 0;
+  const linhas = await client.fetchOrdensProducaoProdutos(ORDENS_PRODUCAO_DATA_INICIAL, toDateStr(new Date()));
+  const rows: ProductionOrderRow[] = linhas
+    .filter((l) => l.IdGradeProduto != null)
+    .map((l) => ({
+      idOrdemProducao: l.IdOrdemProducao,
+      cod: String(l.IdGradeProduto),
+      ordemProducao: l.OrdemProducao,
+      referencia: l.Referencia,
+      produto: l.Produto,
+      cor: l.Cor ?? null,
+      tamanho: l.Tamanho ?? null,
+      grupo: l.Grupo ?? "(sem grupo)",
+      marca: l.Marca ?? null,
+      colecao: l.Colecao ?? null,
+      quantidade: l.Quantidade,
+      quantidadeOriginal: l.QuantidadeOriginal,
+      status: l.Status,
+      dataFinalizacaoProducao: l.DataFinalizacaoProducao ? new Date(l.DataFinalizacaoProducao) : null,
+      dataEntradaCelula: l.DataEntradaCelula ? new Date(l.DataEntradaCelula) : null,
+    }));
+  return upsertProductionOrders(prisma, rows);
+}
+
 function formatProduto(pos: number, p: string, estoque: number, vendido: number) {
   return `${pos}. ${p} (estoque ${estoque}, vendeu ${vendido})`;
 }
@@ -232,23 +266,30 @@ export async function runSync() {
   const desde = ultimoSync && ultimoSync.startedAt < pisoMinimo ? ultimoSync.startedAt : pisoMinimo;
 
   try {
-    // "matriz" não vende nada (só existe pra dar acesso a /ordensproducao/produtos, usado pelo
-    // script de backfill à parte) — incluir ela aqui duplicaria a busca de estoque das outras
-    // lojas (o token da matriz enxerga tudo) e arriscaria timeout de novo à toa.
-    const clients = createDapicClients().filter((c) => c.label !== "matriz");
+    // "matriz" não vende nada (só existe pra dar acesso a /ordensproducao/produtos) — incluir ela
+    // no loop de estoque/vendas abaixo duplicaria a busca de estoque das outras lojas (o token da
+    // matriz enxerga tudo) e arriscaria timeout de novo à toa. Sincronizada à parte, em paralelo.
+    const allClients = createDapicClients();
+    const clients = allClients.filter((c) => c.label !== "matriz");
+    const matrizClient = allClients.find((c) => c.label === "matriz");
 
     // Lojas em paralelo, não em sequência — cada uma leva dezenas de segundos pra buscar o
     // estoque completo na API do DAPIC, e rodando uma por vez as 4 juntas passavam dos 300s
     // (maxDuration) e a função da Vercel dava timeout, quebrando a sync automática.
-    const results = await Promise.all(
-      clients.map(async (client) => {
-        const { storeByDapicId, primaryStoreId } = await syncArmazenadores(client);
-        const estoque = await syncEstoque(client, storeByDapicId);
-        const vendas = await syncVendas(client, primaryStoreId, 2);
-        const faturas = await syncFaturas(client, primaryStoreId, 2);
-        return { estoque, vendas: vendas.vendas + faturas.vendas, devolucoes: vendas.devolucoes };
-      })
-    );
+    const [results, totalOrdensProducao] = await Promise.all([
+      Promise.all(
+        clients.map(async (client) => {
+          const { storeByDapicId, primaryStoreId } = await syncArmazenadores(client);
+          const estoque = await syncEstoque(client, storeByDapicId);
+          const vendas = await syncVendas(client, primaryStoreId, 2);
+          const faturas = await syncFaturas(client, primaryStoreId, 2);
+          return { estoque, vendas: vendas.vendas + faturas.vendas, devolucoes: vendas.devolucoes };
+        })
+      ),
+      // Não fatal: se o token da matriz ainda não estiver configurado (ex: só em dev, não em
+      // produção), syncOrdensProducao devolve 0 sem quebrar o resto da sync.
+      syncOrdensProducao(matrizClient).catch(() => 0),
+    ]);
 
     const totalEstoque = results.reduce((a, r) => a + r.estoque, 0);
     const totalVendas = results.reduce((a, r) => a + r.vendas, 0);
@@ -263,12 +304,22 @@ export async function runSync() {
     await prisma.syncLog.create({
       data: { source: "RETURNS", status: "SUCCESS", recordsSynced: totalDevolucoes, finishedAt: new Date() },
     });
+    await prisma.syncLog.create({
+      data: { source: "PRODUCTION", status: "SUCCESS", recordsSynced: totalOrdensProducao, finishedAt: new Date() },
+    });
 
     const agora = new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" });
     const resumo = await buildResumoMessage(desde).catch(() => "");
     await sendTelegramMessage(`✅ Dashboard TVB atualizado (${agora})\n${resumo}`);
 
-    return NextResponse.json({ ok: true, lojas: clients.length, estoque: totalEstoque, vendas: totalVendas, devolucoes: totalDevolucoes });
+    return NextResponse.json({
+      ok: true,
+      lojas: clients.length,
+      estoque: totalEstoque,
+      vendas: totalVendas,
+      devolucoes: totalDevolucoes,
+      ordensProducao: totalOrdensProducao,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await prisma.syncLog.create({
