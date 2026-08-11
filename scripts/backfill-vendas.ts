@@ -5,7 +5,7 @@
 // Uso: npx tsx scripts/backfill-vendas.ts
 
 import { PrismaClient, type Prisma } from "@prisma/client";
-import { createDapicClients, type DapicClient } from "../src/lib/connectors/dapic";
+import { createDapicClients, parseDapicDateTime, type DapicClient } from "../src/lib/connectors/dapic";
 import { sendTelegramMessage } from "../src/lib/telegram";
 
 const directUrl = process.env.DATABASE_URL?.replace("-pooler.", ".");
@@ -59,7 +59,7 @@ async function backfillLoja(client: DapicClient) {
 
   for (const venda of vendasPdv) {
     if (venda.Status !== "Fechada" || !venda.DataFechamento) continue;
-    const saleDate = new Date(venda.DataFechamento);
+    const saleDate = parseDapicDateTime(venda.DataFechamento);
 
     venda.Produtos.forEach((item, itemIndex) => {
       const cod = item.IdGradeProduto != null ? String(item.IdGradeProduto) : venda.Codigo;

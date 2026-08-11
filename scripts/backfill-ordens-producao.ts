@@ -3,7 +3,7 @@
 // Idempotente (upsert em (idOrdemProducao, cod) via SQL bruto, mesmo padrão de
 // upsert-stock.ts) — pode rodar de novo sem duplicar. Uso: npx tsx scripts/backfill-ordens-producao.ts
 import { PrismaClient } from "@prisma/client";
-import { createDapicClients } from "../src/lib/connectors/dapic";
+import { createDapicClients, parseDapicDateTime } from "../src/lib/connectors/dapic";
 import { sendTelegramMessage } from "../src/lib/telegram";
 import { upsertProductionOrders, type ProductionOrderRow } from "../src/lib/connectors/upsert-production-order";
 
@@ -59,8 +59,8 @@ async function main() {
       quantidade: l.Quantidade,
       quantidadeOriginal: l.QuantidadeOriginal,
       status: l.Status,
-      dataFinalizacaoProducao: l.DataFinalizacaoProducao ? new Date(l.DataFinalizacaoProducao) : null,
-      dataEntradaCelula: l.DataEntradaCelula ? new Date(l.DataEntradaCelula) : null,
+      dataFinalizacaoProducao: l.DataFinalizacaoProducao ? parseDapicDateTime(l.DataFinalizacaoProducao) : null,
+      dataEntradaCelula: l.DataEntradaCelula ? parseDapicDateTime(l.DataEntradaCelula) : null,
     }));
 
   const gravadas = await withRetry(() => upsertProductionOrders(prisma, rows));

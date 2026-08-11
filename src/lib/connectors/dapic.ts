@@ -24,6 +24,18 @@ const EMPRESA = process.env.DAPIC_EMPRESA;
 
 export type DapicCredential = { label: string; tokenIntegracao: string };
 
+// A API manda datas sem timezone (ex: "2026-08-10T12:58:07.582", sem "Z"/offset). `new Date()`
+// sem timezone é interpretado como horário LOCAL DA MÁQUINA que roda o código — em produção
+// (Vercel, UTC) isso por acaso dava o resultado certo, mas rodando local (Windows em horário de
+// Brasília, UTC-3) deslocava a data em 3h. Confirmado real em 2026-08-11: causou duplicata de
+// venda (mesmo pedido gravado 2x com saleDate 3h diferente, porque a ordem dos itens também não
+// é garantida entre chamadas da API, então o item ganhou um itemIndex diferente na 2ª gravação e
+// escapou da proteção de idempotência). Sempre ancorar em UTC explicitamente, não importa onde o
+// código roda.
+export function parseDapicDateTime(raw: string): Date {
+  return new Date(raw.endsWith("Z") || /[+-]\d{2}:?\d{2}$/.test(raw) ? raw : `${raw}Z`);
+}
+
 // DAPIC_CREDENTIALS: JSON tipo [{"label":"cd-atacado","tokenIntegracao":"..."}, ...]
 // Mantém DAPIC_TOKEN_INTEGRACAO (um token só) funcionando como fallback pra não quebrar nada.
 export function getCredentials(): DapicCredential[] {

@@ -10,7 +10,7 @@
 //
 // Uso: npx tsx scripts/backfill-faturas-site.ts
 import { PrismaClient, Prisma } from "@prisma/client";
-import { createDapicClients, stripReferenciaPrefix } from "../src/lib/connectors/dapic";
+import { createDapicClients, stripReferenciaPrefix, parseDapicDateTime } from "../src/lib/connectors/dapic";
 import { sendTelegramMessage } from "../src/lib/telegram";
 
 const directUrl = process.env.DATABASE_URL?.replace("-pooler.", ".");
@@ -114,7 +114,7 @@ async function main() {
 
   for (const fatura of fechadas) {
     const produtos = await withRetry(() => cdAtacado.fetchFaturaProdutos(fatura.Id));
-    const saleDate = new Date(fatura.DataFechamento as string);
+    const saleDate = parseDapicDateTime(fatura.DataFechamento as string);
 
     produtos.forEach((item, itemIndex) => {
       if (item.Tipo !== "Venda") return;

@@ -3,7 +3,7 @@
 // Uso: npx tsx scripts/sync-dapic.ts [diasDeVendas]
 
 import { PrismaClient, type Prisma } from "@prisma/client";
-import { createDapicClients, stripReferenciaPrefix, type DapicClient } from "../src/lib/connectors/dapic";
+import { createDapicClients, stripReferenciaPrefix, parseDapicDateTime, type DapicClient } from "../src/lib/connectors/dapic";
 import { displayGroupFor, sellsProducts } from "../src/lib/connectors/armazenadores";
 import { upsertStockSnapshots, type StockSnapshotRow } from "../src/lib/connectors/upsert-stock";
 import { sendTelegramMessage } from "../src/lib/telegram";
@@ -118,7 +118,7 @@ async function syncVendas(client: DapicClient, storeId: string | null) {
 
   for (const venda of vendasPdv) {
     if (venda.Status !== "Fechada" || !venda.DataFechamento) continue;
-    const saleDate = new Date(venda.DataFechamento);
+    const saleDate = parseDapicDateTime(venda.DataFechamento);
 
     venda.Produtos.forEach((item, itemIndex) => {
       const cod = item.IdGradeProduto != null ? String(item.IdGradeProduto) : venda.Codigo;
@@ -181,7 +181,7 @@ async function syncFaturas(client: DapicClient, storeId: string | null) {
   const saleData: Prisma.SaleCreateManyInput[] = [];
   for (const fatura of faturas) {
     if (fatura.Status !== "Fechado" || !fatura.DataFechamento) continue;
-    const saleDate = new Date(fatura.DataFechamento);
+    const saleDate = parseDapicDateTime(fatura.DataFechamento);
     const produtos = await withRetry(() => client.fetchFaturaProdutos(fatura.Id));
 
     produtos.forEach((item, itemIndex) => {

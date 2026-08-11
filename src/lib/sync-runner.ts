@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { createDapicClients, stripReferenciaPrefix, type DapicClient } from "@/lib/connectors/dapic";
+import { createDapicClients, stripReferenciaPrefix, parseDapicDateTime, type DapicClient } from "@/lib/connectors/dapic";
 import { displayGroupFor, sellsProducts } from "@/lib/connectors/armazenadores";
 import { upsertStockSnapshots, type StockSnapshotRow } from "@/lib/connectors/upsert-stock";
 import { upsertProductionOrders, type ProductionOrderRow } from "@/lib/connectors/upsert-production-order";
@@ -90,7 +90,7 @@ async function syncVendas(client: DapicClient, storeId: string | null, dias: num
 
   for (const venda of vendasPdv) {
     if (venda.Status !== "Fechada" || !venda.DataFechamento) continue;
-    const saleDate = new Date(venda.DataFechamento);
+    const saleDate = parseDapicDateTime(venda.DataFechamento);
 
     venda.Produtos.forEach((item, itemIndex) => {
       const cod = item.IdGradeProduto != null ? String(item.IdGradeProduto) : venda.Codigo;
@@ -153,7 +153,7 @@ async function syncFaturas(client: DapicClient, storeId: string | null, dias: nu
   const saleData: Prisma.SaleCreateManyInput[] = [];
   for (const fatura of faturas) {
     if (fatura.Status !== "Fechado" || !fatura.DataFechamento) continue;
-    const saleDate = new Date(fatura.DataFechamento);
+    const saleDate = parseDapicDateTime(fatura.DataFechamento);
     const produtos = await client.fetchFaturaProdutos(fatura.Id);
 
     produtos.forEach((item, itemIndex) => {
@@ -211,8 +211,8 @@ async function syncOrdensProducao(client: DapicClient | undefined) {
       quantidade: l.Quantidade,
       quantidadeOriginal: l.QuantidadeOriginal,
       status: l.Status,
-      dataFinalizacaoProducao: l.DataFinalizacaoProducao ? new Date(l.DataFinalizacaoProducao) : null,
-      dataEntradaCelula: l.DataEntradaCelula ? new Date(l.DataEntradaCelula) : null,
+      dataFinalizacaoProducao: l.DataFinalizacaoProducao ? parseDapicDateTime(l.DataFinalizacaoProducao) : null,
+      dataEntradaCelula: l.DataEntradaCelula ? parseDapicDateTime(l.DataEntradaCelula) : null,
     }));
   return upsertProductionOrders(prisma, rows);
 }
