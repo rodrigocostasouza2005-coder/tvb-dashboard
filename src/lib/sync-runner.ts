@@ -5,6 +5,7 @@ import { createDapicClients, stripReferenciaPrefix, type DapicClient } from "@/l
 import { displayGroupFor, sellsProducts } from "@/lib/connectors/armazenadores";
 import { upsertStockSnapshots, type StockSnapshotRow } from "@/lib/connectors/upsert-stock";
 import { upsertProductionOrders, type ProductionOrderRow } from "@/lib/connectors/upsert-production-order";
+import { fetchPriceCatalog, inferTabelaPreco, type PriceCatalog } from "@/lib/connectors/tabela-preco";
 import { sendTelegramMessage } from "@/lib/telegram";
 import { getTopParaIncentivar, getTopVendidosPorLoja } from "@/lib/metrics";
 import type { Prisma } from "@prisma/client";
@@ -76,7 +77,7 @@ async function syncEstoque(client: DapicClient, storeByDapicId: Map<number, stri
 // Pro token cd-atacado, vendaspdv só tem devolução de verdade — a venda do canal Site+Atacado
 // vem de /faturas (confirmado com Rodrigo em 2026-08-10). As linhas "Venda" que aparecem aqui
 // pra esse token são só o lado de troca (pareada com uma devolução), não a venda real — ignora.
-async function syncVendas(client: DapicClient, storeId: string | null, dias: number) {
+async function syncVendas(client: DapicClient, storeId: string | null, dias: number, priceCatalog: PriceCatalog) {
   if (!storeId) return { vendas: 0, devolucoes: 0 };
   const contaVendaDoPdv = client.label !== "cd-atacado";
   const hoje = new Date();
@@ -111,6 +112,7 @@ async function syncVendas(client: DapicClient, storeId: string | null, dias: num
           estado: venda.Cidade?.Estado ?? null,
           quantidade: item.Quantidade,
           valorTotalLiquido: item.ValorLiquido,
+          tabelaPreco: inferTabelaPreco(cod, item.ValorLiquido, item.Quantidade, priceCatalog),
           saleDate,
         });
       } else if (item.Tipo === "Devolução") {
@@ -141,7 +143,7 @@ async function syncVendas(client: DapicClient, storeId: string | null, dias: num
 // Venda de verdade do canal Site+Atacado (só cd-atacado tem acesso a /faturas). Mesma chave de
 // idempotência (storeId, dapicVendaId=Id da fatura, itemIndex) — nunca colide com vendaspdv
 // porque esse token não grava mais Sale via vendaspdv (ver syncVendas).
-async function syncFaturas(client: DapicClient, storeId: string | null, dias: number) {
+async function syncFaturas(client: DapicClient, storeId: string | null, dias: number, priceCatalog: PriceCatalog) {
   if (!storeId || client.label !== "cd-atacado") return { vendas: 0 };
   const hoje = new Date();
   const inicio = new Date(hoje);
@@ -172,6 +174,7 @@ async function syncFaturas(client: DapicClient, storeId: string | null, dias: nu
         estado: fatura.Estado ?? null,
         quantidade: item.Quantidade,
         valorTotalLiquido: item.Valores.ValorTotal,
+        tabelaPreco: inferTabelaPreco(String(item.IdGradeProduto), item.Valores.ValorTotal, item.Quantidade, priceCatalog),
         saleDate,
       });
     });
@@ -280,9 +283,12 @@ export async function runSync() {
       Promise.all(
         clients.map(async (client) => {
           const { storeByDapicId, primaryStoreId } = await syncArmazenadores(client);
-          const estoque = await syncEstoque(client, storeByDapicId);
-          const vendas = await syncVendas(client, primaryStoreId, 2);
-          const faturas = await syncFaturas(client, primaryStoreId, 2);
+          const [estoque, priceCatalog] = await Promise.all([
+            syncEstoque(client, storeByDapicId),
+            fetchPriceCatalog(client),
+          ]);
+          const vendas = await syncVendas(client, primaryStoreId, 2, priceCatalog);
+          const faturas = await syncFaturas(client, primaryStoreId, 2, priceCatalog);
           return { estoque, vendas: vendas.vendas + faturas.vendas, devolucoes: vendas.devolucoes };
         })
       ),

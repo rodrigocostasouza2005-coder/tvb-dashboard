@@ -220,6 +220,18 @@ export class DapicClient {
   fetchFaturaProdutos(idFatura: number) {
     return this.fetchAllPages<DapicFaturaProduto>(`/faturas/${idFatura}/produtos`);
   }
+
+  // Catálogo de tabelas de preço (ex: Varejo, Atacado) — nenhuma venda vem com esse campo
+  // direto (nem /vendaspdv nem /faturas), só o endpoint abandonado /pedidosvendas tinha.
+  // Achado em 2026-08-10, usado a partir de 2026-08-11 pra inferir qual tabela valeu numa venda
+  // cruzando o preço unitário cobrado com o preço registrado aqui pro mesmo SKU.
+  fetchTabelasPrecos() {
+    return this.fetchAllPages<DapicTabelaPreco>("/tabelaprecos");
+  }
+
+  fetchTabelaPrecoProdutos(idTabela: number) {
+    return this.fetchAllPages<DapicTabelaPrecoProduto>(`/tabelaprecos/${idTabela}/produtos`);
+  }
 }
 
 export function createDapicClients(): DapicClient[] {
@@ -383,4 +395,18 @@ export type DapicFaturaProduto = {
     ValorAcrescimo: number;
     ValorFrete: number;
   };
+};
+
+// Campos reais confirmados em 2026-08-11 (tokens cd-atacado e leblon). 7 tabelas no total: Tabela
+// varejo, Tabela atacado, Tabela Promocional, Promoção, Black Friday 2025, Transferência (65%),
+// Custo — nem todo token vê todas (leblon viu só 5).
+export type DapicTabelaPreco = {
+  Id: number;
+  Codigo: string;
+  Descricao: string;
+};
+
+export type DapicTabelaPrecoProduto = {
+  IdGradeProduto: number;
+  Valor: number;
 };
