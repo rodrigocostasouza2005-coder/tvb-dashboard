@@ -112,7 +112,7 @@ async function syncVendas(client: DapicClient, storeId: string | null, dias: num
           estado: venda.Cidade?.Estado ?? null,
           quantidade: item.Quantidade,
           valorTotalLiquido: item.ValorLiquido,
-          tabelaPreco: inferTabelaPreco(cod, item.ValorLiquido, item.Quantidade, priceCatalog),
+          tabelaPreco: inferTabelaPreco(cod, item.ValorUnitario, priceCatalog),
           saleDate,
         });
       } else if (item.Tipo === "Devolução") {
@@ -174,7 +174,7 @@ async function syncFaturas(client: DapicClient, storeId: string | null, dias: nu
         estado: fatura.Estado ?? null,
         quantidade: item.Quantidade,
         valorTotalLiquido: item.Valores.ValorTotal,
-        tabelaPreco: inferTabelaPreco(String(item.IdGradeProduto), item.Valores.ValorTotal, item.Quantidade, priceCatalog),
+        tabelaPreco: inferTabelaPreco(String(item.IdGradeProduto), item.Valores.ValorUnitario, priceCatalog),
         saleDate,
       });
     });

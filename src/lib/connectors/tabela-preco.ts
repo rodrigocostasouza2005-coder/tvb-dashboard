@@ -28,15 +28,15 @@ export async function fetchPriceCatalog(client: DapicClient): Promise<PriceCatal
 // arredondamento de centavos não derrubar um match real.
 const TOLERANCIA_REAIS = 1;
 
-export function inferTabelaPreco(
-  cod: string,
-  valorTotalLiquido: number,
-  quantidade: number,
-  catalog: PriceCatalog
-): string | null {
+// IMPORTANTE: precisa ser o "ValorUnitario" cru da API (preço de tabela, antes de desconto/frete
+// avulso do item) — NÃO "ValorLiquido"/"ValorTotal" (que já vem líquido de desconto e com frete
+// somado). Achado em 2026-08-11 depois do Rodrigo estranhar a taxa baixa de match: comparar
+// contra o valor líquido derrubava o acerto pra ~90% (lojas físicas) ou ~40% (Site+Atacado, que
+// tem frete quase sempre). Usando ValorUnitario, sobe pra 99.1% (testado contra 2883 itens reais
+// do Leblon).
+export function inferTabelaPreco(cod: string, valorUnitario: number, catalog: PriceCatalog): string | null {
   const options = catalog.get(cod);
-  if (!options?.length || quantidade <= 0) return null;
-  const valorUnitario = valorTotalLiquido / quantidade;
+  if (!options?.length) return null;
 
   let best = options[0];
   let bestDiff = Math.abs(valorUnitario - best.valor);
