@@ -16,7 +16,7 @@ export default async function ReposicaoPage({
 
   const grupoIn = await getGrupoRestriction(user.role);
   const allowedStores = getStoreRestriction(user);
-  const filters = { ...parseFilters(await searchParams, allowedStores), grupoIn };
+  const filters = { ...parseFilters(await searchParams, { allowedStoreIds: allowedStores }), grupoIn };
   const [rows, stores, marcas] = await Promise.all([
     getReplenishment(filters),
     getStores(allowedStores),

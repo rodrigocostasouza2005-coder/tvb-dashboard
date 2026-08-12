@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { getSessionUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { getRawStores } from "@/lib/metrics";
+import { getRawStores, getMarcas, getTabelasPreco } from "@/lib/metrics";
 import { TABS, defaultAllowedTabs } from "@/lib/tabs";
 import { createUserAction, updateUserAction, resetPasswordAction, deleteUserAction } from "./actions";
 import { ForceSyncButton } from "./force-sync-button";
@@ -59,14 +59,36 @@ function StoreCheckboxes({
   );
 }
 
+// Mesmo padrão de StoreCheckboxes, genérico pra valor=label (Marca, Tabela de Preço).
+function OptionCheckboxes({ name, checked, options }: { name: string; checked: Set<string>; options: string[] }) {
+  return (
+    <div className="flex flex-wrap gap-x-3 gap-y-1">
+      {options.map((o) => (
+        <label key={o} className="flex items-center gap-1 text-xs text-[var(--text-secondary)]">
+          <input
+            type="checkbox"
+            name={name}
+            value={o}
+            defaultChecked={checked.has(o)}
+            className="accent-[var(--series-1)]"
+          />
+          {o}
+        </label>
+      ))}
+    </div>
+  );
+}
+
 export default async function AdminPage() {
   const user = await getSessionUser();
   if (!user) return null;
   if (user.role !== "ADMIN") redirect("/dashboard");
 
-  const [users, stores] = await Promise.all([
+  const [users, stores, marcas, tabelasPreco] = await Promise.all([
     prisma.user.findMany({ orderBy: { createdAt: "asc" } }),
     getRawStores(),
+    getMarcas(),
+    getTabelasPreco(),
   ]);
 
   return (
@@ -75,8 +97,9 @@ export default async function AdminPage() {
       <p className="mb-6 text-sm text-[var(--text-muted)]">
         Crie logins e escolha quais abas cada pessoa pode ver. Deixar todas as caixinhas
         desmarcadas usa o padrão do papel (Admin/Gestão veem tudo, Vendedor não vê Clientes).
-        O mesmo vale pras lojas: nenhuma marcada = vê todas. Marcando uma ou mais, a pessoa só
-        vê dado daquelas lojas em qualquer aba — nem aparece opção de escolher outra.
+        O mesmo vale pra Loja, Marca e Tabela de Preço: nenhuma marcada = vê tudo. Marcando uma
+        ou mais, a pessoa só vê dado daquelas opções em qualquer aba — nem aparece opção de
+        escolher outra.
       </p>
 
       <section className="mb-8 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
@@ -130,6 +153,8 @@ export default async function AdminPage() {
           </div>
           <TabCheckboxes name="tab" checked={new Set()} />
           <StoreCheckboxes name="store" checked={new Set()} stores={stores} />
+          <OptionCheckboxes name="marca" checked={new Set()} options={marcas} />
+          <OptionCheckboxes name="tabelaPreco" checked={new Set()} options={tabelasPreco} />
           <button
             type="submit"
             className="w-fit rounded-md bg-[var(--series-1)] px-3 py-1.5 text-sm font-medium text-white"
@@ -185,6 +210,8 @@ export default async function AdminPage() {
                 </div>
                 <TabCheckboxes name="tab" checked={effectiveTabs} />
                 <StoreCheckboxes name="store" checked={new Set(u.allowedStores)} stores={stores} />
+                <OptionCheckboxes name="marca" checked={new Set(u.allowedMarcas)} options={marcas} />
+                <OptionCheckboxes name="tabelaPreco" checked={new Set(u.allowedTabelasPreco)} options={tabelasPreco} />
                 <button
                   type="submit"
                   className="w-fit rounded-md border border-[var(--border)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--page-plane)]"

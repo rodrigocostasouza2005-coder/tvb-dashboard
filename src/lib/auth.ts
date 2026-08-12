@@ -49,6 +49,8 @@ export type SessionUser = {
   role: Role;
   allowedTabs: string[];
   allowedStores: string[];
+  allowedMarcas: string[];
+  allowedTabelasPreco: string[];
 };
 
 export async function getSessionUser(): Promise<SessionUser | null> {
@@ -70,5 +72,7 @@ export async function getSessionUser(): Promise<SessionUser | null> {
     role: session.user.role,
     allowedTabs: session.user.allowedTabs,
     allowedStores: session.user.allowedStores,
+    allowedMarcas: session.user.allowedMarcas,
+    allowedTabelasPreco: session.user.allowedTabelasPreco,
   };
 }

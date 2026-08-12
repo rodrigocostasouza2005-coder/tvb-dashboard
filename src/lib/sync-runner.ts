@@ -8,6 +8,7 @@ import { upsertProductionOrders, type ProductionOrderRow } from "@/lib/connector
 import { fetchPriceCatalogCached, inferTabelaPreco, type PriceCatalog } from "@/lib/connectors/tabela-preco";
 import { sendTelegramMessage } from "@/lib/telegram";
 import { getTopParaIncentivar, getTopVendidosPorLoja } from "@/lib/metrics";
+import { brasiliaDayStart, brasiliaDayEnd, todayBrasiliaStr } from "@/lib/filters";
 import type { Prisma } from "@prisma/client";
 
 // Lógica compartilhada pelas duas rotas de sync (/api/sync e /api/sync-evening) — precisam ser
@@ -261,10 +262,10 @@ function formatProduto(pos: number, p: string, estoque: number, vendido: number)
   return `${pos}. ${p} (estoque ${estoque}, vendeu ${vendido})`;
 }
 
-async function buildResumoMessage(desde: Date) {
+async function buildResumoMessage(desde: Date, ate: Date) {
   const [incentivar, porLoja] = await Promise.all([
     getTopParaIncentivar(30, 10),
-    getTopVendidosPorLoja(desde, 3),
+    getTopVendidosPorLoja(desde, ate, 3),
   ]);
 
   const partes: string[] = [];
@@ -278,7 +279,7 @@ async function buildResumoMessage(desde: Date) {
 
   if (porLoja.length) {
     partes.push(
-      "\n🏆 Mais vendidos por loja (últimas 24h):\n" +
+      "\n🏆 Mais vendidos por loja (dia de ontem):\n" +
         porLoja
           .map(
             (l) =>
@@ -292,15 +293,18 @@ async function buildResumoMessage(desde: Date) {
   return partes.join("\n");
 }
 
-// "Mais vendidos por loja" sempre olha as últimas 24h fixas — não mais "desde o último sync"
-// (essa lógica dinâmica, com piso de 12h, podia cair majoritariamente numa janela de madrugada
-// sem movimento das lojas físicas e mostrar só o canal online, mesmo com as lojas tendo vendido
-// normalmente fora dessa janela estreita — achado pelo Rodrigo em 2026-08-12). 24h fixas cobre
-// sempre o dia inteiro de operação de qualquer loja.
-const JANELA_RESUMO_HORAS = 24;
-
 export async function runSync() {
-  const desde = new Date(Date.now() - JANELA_RESUMO_HORAS * 60 * 60 * 1000);
+  // "Mais vendidos por loja" olha o dia de ontem inteiro (00h-23h59 Brasília) — não mais
+  // últimas 24h corridas nem "desde o último sync" (as duas versões anteriores podiam cair
+  // majoritariamente numa janela de madrugada sem movimento das lojas físicas e mostrar só o
+  // canal online. Rodrigo pediu "dia de ontem" fixo em 2026-08-12 pra sempre ser um dia
+  // completo e comparável).
+  const hojeBrasiliaStr = todayBrasiliaStr(new Date());
+  const ontem = new Date(`${hojeBrasiliaStr}T00:00:00.000-03:00`);
+  ontem.setUTCDate(ontem.getUTCDate() - 1);
+  const ontemStr = todayBrasiliaStr(ontem);
+  const desde = brasiliaDayStart(ontemStr);
+  const ate = brasiliaDayEnd(ontemStr);
 
   try {
     // "matriz" não vende nada (só existe pra dar acesso a /ordensproducao/produtos) — incluir ela
@@ -373,7 +377,7 @@ export async function runSync() {
     });
 
     const agora = new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" });
-    const resumo = await buildResumoMessage(desde).catch(() => "");
+    const resumo = await buildResumoMessage(desde, ate).catch(() => "");
     await sendTelegramMessage(`✅ Dashboard TVB atualizado (${agora})\n${resumo}`);
 
     return NextResponse.json({

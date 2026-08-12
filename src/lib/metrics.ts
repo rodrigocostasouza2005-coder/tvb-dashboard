@@ -654,20 +654,22 @@ export async function getMinimumRules() {
   });
 }
 
-export async function getMarcas() {
+// allowedMarcas: restrição por usuário (ver getMarcaRestriction em lib/permissions.ts) —
+// mesmo padrão de getStores(allowedStoreIds), trava de verdade (nem aparece como opção).
+export async function getMarcas(allowedMarcas?: string[]) {
   const rows = await prisma.sale.findMany({
     distinct: ["marca"],
     select: { marca: true },
-    where: { marca: { not: null } },
+    where: { marca: { not: null, ...(allowedMarcas ? { in: allowedMarcas } : {}) } },
   });
   return rows.map((r) => r.marca as string).sort();
 }
 
-export async function getTabelasPreco() {
+export async function getTabelasPreco(allowedTabelasPreco?: string[]) {
   const rows = await prisma.sale.findMany({
     distinct: ["tabelaPreco"],
     select: { tabelaPreco: true },
-    where: { tabelaPreco: { not: null } },
+    where: { tabelaPreco: { not: null, ...(allowedTabelasPreco ? { in: allowedTabelasPreco } : {}) } },
   });
   return rows.map((r) => r.tabelaPreco as string).sort();
 }
@@ -718,10 +720,10 @@ export async function getTopParaIncentivar(dias = 30, limit = 10) {
 
 // Os produtos mais vendidos em cada loja desde um horário de corte (o momento da sync
 // anterior, tipicamente) — pro aviso do bot mostrar "o que vendeu desde a última atualização".
-export async function getTopVendidosPorLoja(desde: Date, limit = 3) {
+export async function getTopVendidosPorLoja(desde: Date, ate: Date, limit = 3) {
   const vendas = await prisma.sale.groupBy({
     by: ["storeId", "produto"],
-    where: { saleDate: { gte: desde } },
+    where: { saleDate: { gte: desde, lte: ate } },
     _sum: { quantidade: true },
   });
   if (!vendas.length) return [];

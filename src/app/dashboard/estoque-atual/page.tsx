@@ -24,7 +24,7 @@ export default async function EstoqueAtualPage({
   const dimension = parseDimension(rawParams);
   const grupoIn = await getGrupoRestriction(user.role);
   const allowedStores = getStoreRestriction(user);
-  const filters = { ...parseFilters(rawParams, allowedStores), grupoIn };
+  const filters = { ...parseFilters(rawParams, { allowedStoreIds: allowedStores }), grupoIn };
 
   const [rows, porArmazenador, stores, marcas] = await Promise.all([
     getEstoqueAtual(filters, dimension),

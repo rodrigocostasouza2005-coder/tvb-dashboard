@@ -1,6 +1,6 @@
 import { getSessionUser } from "@/lib/auth";
 import { getStockAging, getAllStores, getMarcas, getTabelasPreco } from "@/lib/metrics";
-import { getGrupoRestriction, getStoreRestriction } from "@/lib/permissions";
+import { getGrupoRestriction, getStoreRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
@@ -25,13 +25,17 @@ export default async function EnvelhecimentoPage({
 
   const grupoIn = await getGrupoRestriction(user.role);
   const allowedStores = getStoreRestriction(user);
-  const filters = { ...parseFilters(await searchParams, allowedStores), grupoIn };
+  const allowedTabelasPreco = getTabelaPrecoRestriction(user);
+  const filters = {
+    ...parseFilters(await searchParams, { allowedStoreIds: allowedStores, allowedTabelasPreco }),
+    grupoIn,
+  };
 
   const [allRows, stores, marcas, tabelasPreco] = await Promise.all([
     getStockAging(filters),
     getAllStores(allowedStores),
     getMarcas(),
-    getTabelasPreco(),
+    getTabelasPreco(allowedTabelasPreco),
   ]);
 
   // Itens que nunca venderam ficam de fora da tabela de envelhecimento: com só ~dias de

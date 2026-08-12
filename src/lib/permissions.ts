@@ -33,3 +33,13 @@ export async function getGrupoRestriction(role: Role): Promise<string[] | undefi
 export function getStoreRestriction(user: { allowedStores: string[] }): string[] | undefined {
   return user.allowedStores.length > 0 ? user.allowedStores : undefined;
 }
+
+// Mesmo padrão de getStoreRestriction, pra Marca e Tabela de Preço (User.allowedMarcas/
+// allowedTabelasPreco, administrável em /dashboard/admin). Pedido do Rodrigo em 2026-08-12.
+export function getMarcaRestriction(user: { allowedMarcas: string[] }): string[] | undefined {
+  return user.allowedMarcas.length > 0 ? user.allowedMarcas : undefined;
+}
+
+export function getTabelaPrecoRestriction(user: { allowedTabelasPreco: string[] }): string[] | undefined {
+  return user.allowedTabelasPreco.length > 0 ? user.allowedTabelasPreco : undefined;
+}

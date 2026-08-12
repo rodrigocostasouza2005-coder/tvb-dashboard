@@ -27,6 +27,14 @@ function readAllowedStores(formData: FormData): string[] {
   return formData.getAll("store").map(String).filter(Boolean);
 }
 
+function readAllowedMarcas(formData: FormData): string[] {
+  return formData.getAll("marca").map(String).filter(Boolean);
+}
+
+function readAllowedTabelasPreco(formData: FormData): string[] {
+  return formData.getAll("tabelaPreco").map(String).filter(Boolean);
+}
+
 export async function createUserAction(formData: FormData) {
   await requireAdmin();
 
@@ -38,12 +46,14 @@ export async function createUserAction(formData: FormData) {
   const role = String(formData.get("role") ?? "VENDEDOR") as Role;
   const allowedTabs = readAllowedTabs(formData);
   const allowedStores = readAllowedStores(formData);
+  const allowedMarcas = readAllowedMarcas(formData);
+  const allowedTabelasPreco = readAllowedTabelasPreco(formData);
 
   if (!name || !email || !password) return;
 
   const passwordHash = await hashPassword(password);
   await prisma.user.create({
-    data: { name, email, passwordHash, role, allowedTabs, allowedStores },
+    data: { name, email, passwordHash, role, allowedTabs, allowedStores, allowedMarcas, allowedTabelasPreco },
   });
 
   revalidatePath("/dashboard/admin");
@@ -56,11 +66,13 @@ export async function updateUserAction(formData: FormData) {
   const role = String(formData.get("role") ?? "VENDEDOR") as Role;
   const allowedTabs = readAllowedTabs(formData);
   const allowedStores = readAllowedStores(formData);
+  const allowedMarcas = readAllowedMarcas(formData);
+  const allowedTabelasPreco = readAllowedTabelasPreco(formData);
   if (!userId) return;
 
   await prisma.user.update({
     where: { id: userId },
-    data: { role, allowedTabs, allowedStores },
+    data: { role, allowedTabs, allowedStores, allowedMarcas, allowedTabelasPreco },
   });
 
   revalidatePath("/dashboard/admin");

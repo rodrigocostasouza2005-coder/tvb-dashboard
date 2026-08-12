@@ -1,6 +1,12 @@
 import { getSessionUser } from "@/lib/auth";
 import { getSalesByDimension, getSalesByGrupoProduto, getStores, getMarcas, getTabelasPreco } from "@/lib/metrics";
-import { canSeeFinancials, getGrupoRestriction, getStoreRestriction } from "@/lib/permissions";
+import {
+  canSeeFinancials,
+  getGrupoRestriction,
+  getStoreRestriction,
+  getMarcaRestriction,
+  getTabelaPrecoRestriction,
+} from "@/lib/permissions";
 import { parseFilters, parseDimension, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
@@ -24,14 +30,19 @@ export default async function VendasPage({
   const dimension = parseDimension(rawParams);
   const grupoIn = await getGrupoRestriction(user.role);
   const allowedStores = getStoreRestriction(user);
-  const filters = { ...parseFilters(rawParams, allowedStores), grupoIn };
+  const allowedMarcas = getMarcaRestriction(user);
+  const allowedTabelasPreco = getTabelaPrecoRestriction(user);
+  const filters = {
+    ...parseFilters(rawParams, { allowedStoreIds: allowedStores, allowedMarcas, allowedTabelasPreco }),
+    grupoIn,
+  };
 
   const [rows, produtoRows, stores, marcas, tabelasPreco] = await Promise.all([
     getSalesByDimension(filters, dimension),
     dimension === "grupo" ? getSalesByGrupoProduto(filters) : Promise.resolve([]),
     getStores(allowedStores),
-    getMarcas(),
-    getTabelasPreco(),
+    getMarcas(allowedMarcas),
+    getTabelasPreco(allowedTabelasPreco),
   ]);
   const showFinancials = canSeeFinancials(user.role);
   const totalUnits = rows.reduce((sum, r) => sum + r.unitsSold, 0);

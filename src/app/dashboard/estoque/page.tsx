@@ -1,6 +1,6 @@
 import { getSessionUser } from "@/lib/auth";
 import { getStockVsSales, getStores, getMarcas, getTabelasPreco } from "@/lib/metrics";
-import { getGrupoRestriction, getStoreRestriction } from "@/lib/permissions";
+import { getGrupoRestriction, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
 import { parseFilters, parseDimension, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
@@ -21,7 +21,12 @@ export default async function EstoquePage({
   const dimension = parseDimension(rawParams);
   const grupoIn = await getGrupoRestriction(user.role);
   const allowedStores = getStoreRestriction(user);
-  const filters = { ...parseFilters(rawParams, allowedStores), grupoIn };
+  const allowedMarcas = getMarcaRestriction(user);
+  const allowedTabelasPreco = getTabelaPrecoRestriction(user);
+  const filters = {
+    ...parseFilters(rawParams, { allowedStoreIds: allowedStores, allowedMarcas, allowedTabelasPreco }),
+    grupoIn,
+  };
 
   // Grupo escolhido no drill-down (só ativo quando a dimensão é grupo — não faz sentido drillar
   // dentro de um grupo se já estamos vendo por Produto ou Tamanho): força ver por Produto,
@@ -34,8 +39,8 @@ export default async function EstoquePage({
     getStockVsSales(effectiveFilters, effectiveDimension),
     dimension === "grupo" ? getStockVsSales(filters, "grupo") : Promise.resolve([]),
     getStores(allowedStores),
-    getMarcas(),
-    getTabelasPreco(),
+    getMarcas(allowedMarcas),
+    getTabelasPreco(allowedTabelasPreco),
   ]);
 
   return (

@@ -1,6 +1,6 @@
 import { getSessionUser } from "@/lib/auth";
 import { getGiftsByDimension, getGiftsByGrupoProduto, getStores, getMarcas } from "@/lib/metrics";
-import { canSeeFinancials, getGrupoRestriction, getStoreRestriction } from "@/lib/permissions";
+import { canSeeFinancials, getGrupoRestriction, getStoreRestriction, getMarcaRestriction } from "@/lib/permissions";
 import { parseFilters, parseDimension, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
@@ -24,13 +24,14 @@ export default async function BrindesPage({
   const dimension = parseDimension(rawParams);
   const grupoIn = await getGrupoRestriction(user.role);
   const allowedStores = getStoreRestriction(user);
-  const filters = { ...parseFilters(rawParams, allowedStores), grupoIn };
+  const allowedMarcas = getMarcaRestriction(user);
+  const filters = { ...parseFilters(rawParams, { allowedStoreIds: allowedStores, allowedMarcas }), grupoIn };
 
   const [rows, produtoRows, stores, marcas] = await Promise.all([
     getGiftsByDimension(filters, dimension),
     dimension === "grupo" ? getGiftsByGrupoProduto(filters) : Promise.resolve([]),
     getStores(allowedStores),
-    getMarcas(),
+    getMarcas(allowedMarcas),
   ]);
   const showFinancials = canSeeFinancials(user.role);
   const totalUnits = rows.reduce((sum, r) => sum + r.unitsSold, 0);

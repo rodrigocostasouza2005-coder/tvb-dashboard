@@ -1,6 +1,6 @@
 import { getSessionUser } from "@/lib/auth";
 import { searchStockVsSalesComTamanhos, getStores, getMarcas, getTabelasPreco } from "@/lib/metrics";
-import { getGrupoRestriction, getStoreRestriction } from "@/lib/permissions";
+import { getGrupoRestriction, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
@@ -25,13 +25,18 @@ export default async function PesquisaPage({
   const query = typeof rawParams.q === "string" ? rawParams.q : "";
   const grupoIn = await getGrupoRestriction(user.role);
   const allowedStores = getStoreRestriction(user);
-  const filters = { ...parseFilters(rawParams, allowedStores), grupoIn };
+  const allowedMarcas = getMarcaRestriction(user);
+  const allowedTabelasPreco = getTabelaPrecoRestriction(user);
+  const filters = {
+    ...parseFilters(rawParams, { allowedStoreIds: allowedStores, allowedMarcas, allowedTabelasPreco }),
+    grupoIn,
+  };
 
   const [{ rows, tamanhos }, stores, marcas, tabelasPreco] = await Promise.all([
     searchStockVsSalesComTamanhos(filters, query),
     getStores(allowedStores),
-    getMarcas(),
-    getTabelasPreco(),
+    getMarcas(allowedMarcas),
+    getTabelasPreco(allowedTabelasPreco),
   ]);
 
   return (

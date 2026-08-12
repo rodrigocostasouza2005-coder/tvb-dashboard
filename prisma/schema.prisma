@@ -25,6 +25,10 @@ model User {
   // Ids de Store que esse usuário pode ver (ver getStoreRestriction em lib/permissions.ts).
   // Vazio = sem restrição, vê todas as lojas.
   allowedStores String[] @default([])
+  // Mesmo padrão de allowedStores, mas pra Marca e Tabela de Preço (ver getMarcaRestriction/
+  // getTabelaPrecoRestriction em lib/permissions.ts). Vazio = sem restrição.
+  allowedMarcas String[] @default([])
+  allowedTabelasPreco String[] @default([])
   createdAt    DateTime @default(now())
 
   sessions Session[]
