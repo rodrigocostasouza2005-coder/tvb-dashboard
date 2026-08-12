@@ -276,7 +276,7 @@ async function buildResumoMessage(desde: Date) {
 
   if (porLoja.length) {
     partes.push(
-      "\n🏆 Mais vendidos por loja desde a última atualização:\n" +
+      "\n🏆 Mais vendidos por loja (últimas 24h):\n" +
         porLoja
           .map(
             (l) =>
@@ -290,21 +290,15 @@ async function buildResumoMessage(desde: Date) {
   return partes.join("\n");
 }
 
-// Piso mínimo da janela do "vendido desde a última atualização" — sem isso, uma sync manual ou
-// um catchup automático rodado pouco antes (ex: teste, ou recuperação de um cron que falhou)
-// encolhe a janela pra minutos e a lista de mais vendidos por loja sai quase vazia. Cron normal
-// roda 2x/dia (~9h de intervalo), então 12h nunca corta a janela real ao meio.
-const JANELA_MINIMA_HORAS = 12;
+// "Mais vendidos por loja" sempre olha as últimas 24h fixas — não mais "desde o último sync"
+// (essa lógica dinâmica, com piso de 12h, podia cair majoritariamente numa janela de madrugada
+// sem movimento das lojas físicas e mostrar só o canal online, mesmo com as lojas tendo vendido
+// normalmente fora dessa janela estreita — achado pelo Rodrigo em 2026-08-12). 24h fixas cobre
+// sempre o dia inteiro de operação de qualquer loja.
+const JANELA_RESUMO_HORAS = 24;
 
 export async function runSync() {
-  // Pega o horário do último sync ANTES de rodar esse aqui, pra "vendido desde a última
-  // atualização" comparar com o período certo (não com o que acabamos de gravar agora).
-  const ultimoSync = await prisma.syncLog.findFirst({
-    where: { source: "SALES", status: "SUCCESS" },
-    orderBy: { startedAt: "desc" },
-  });
-  const pisoMinimo = new Date(Date.now() - JANELA_MINIMA_HORAS * 60 * 60 * 1000);
-  const desde = ultimoSync && ultimoSync.startedAt < pisoMinimo ? ultimoSync.startedAt : pisoMinimo;
+  const desde = new Date(Date.now() - JANELA_RESUMO_HORAS * 60 * 60 * 1000);
 
   try {
     // "matriz" não vende nada (só existe pra dar acesso a /ordensproducao/produtos) — incluir ela
@@ -325,8 +319,14 @@ export async function runSync() {
             syncEstoque(client, storeByDapicId),
             fetchPriceCatalog(client),
           ]);
-          const vendas = await syncVendas(client, primaryStoreId, 2, priceCatalog);
-          const faturas = await syncFaturas(client, primaryStoreId, 2, priceCatalog);
+          // Janela de 1 dia (24h) — cobre com folga o intervalo entre os 2 syncs diários (12h) e
+          // reduz o volume processado (menos chamadas de /faturas, que é 1 por fatura pro
+          // Site+Atacado). Reduzido de 2 pra 1 dia em 2026-08-12 depois de um clique manual do
+          // Rodrigo estourar os 300s da Vercel. Se um sync falhar, o self-heal-sync.ts (dispara
+          // sozinho se o último SyncLog tiver mais de 5h) cobre o risco de perder dado mais velho
+          // que essa janela.
+          const vendas = await syncVendas(client, primaryStoreId, 1, priceCatalog);
+          const faturas = await syncFaturas(client, primaryStoreId, 1, priceCatalog);
           return {
             estoque,
             vendas: vendas.vendas + faturas.vendas,
