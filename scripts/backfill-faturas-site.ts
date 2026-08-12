@@ -116,12 +116,12 @@ async function main() {
     const produtos = await withRetry(() => cdAtacado.fetchFaturaProdutos(fatura.Id));
     const saleDate = parseDapicDateTime(fatura.DataFechamento as string);
 
-    produtos.forEach((item, itemIndex) => {
+    produtos.forEach((item) => {
       if (item.Tipo !== "Venda") return;
       buffer.push({
         storeId: cdStore.id,
         dapicVendaId: fatura.Id,
-        itemIndex,
+        itemIndex: item.Id,
         cod: String(item.IdGradeProduto),
         produto: stripReferenciaPrefix(item.Produto),
         grupo: item.Grupo ?? "(sem grupo)",

@@ -120,13 +120,13 @@ async function syncVendas(client: DapicClient, storeId: string | null) {
     if (venda.Status !== "Fechada" || !venda.DataFechamento) continue;
     const saleDate = parseDapicDateTime(venda.DataFechamento);
 
-    venda.Produtos.forEach((item, itemIndex) => {
+    venda.Produtos.forEach((item) => {
       const cod = item.IdGradeProduto != null ? String(item.IdGradeProduto) : venda.Codigo;
       if (item.Tipo === "Venda" && contaVendaDoPdv) {
         saleData.push({
           storeId,
           dapicVendaId: venda.Id,
-          itemIndex,
+          itemIndex: item.Id,
           cod,
           produto: item.Produto,
           grupo: item.Grupo ?? "(sem grupo)",
@@ -146,7 +146,7 @@ async function syncVendas(client: DapicClient, storeId: string | null) {
         returnData.push({
           storeId,
           dapicVendaId: venda.Id,
-          itemIndex,
+          itemIndex: item.Id,
           cod,
           produto: item.Produto,
           grupo: item.Grupo ?? "(sem grupo)",
@@ -184,12 +184,12 @@ async function syncFaturas(client: DapicClient, storeId: string | null) {
     const saleDate = parseDapicDateTime(fatura.DataFechamento);
     const produtos = await withRetry(() => client.fetchFaturaProdutos(fatura.Id));
 
-    produtos.forEach((item, itemIndex) => {
+    produtos.forEach((item) => {
       if (item.Tipo !== "Venda") return;
       saleData.push({
         storeId,
         dapicVendaId: fatura.Id,
-        itemIndex,
+        itemIndex: item.Id,
         cod: String(item.IdGradeProduto),
         produto: stripReferenciaPrefix(item.Produto),
         grupo: item.Grupo ?? "(sem grupo)",

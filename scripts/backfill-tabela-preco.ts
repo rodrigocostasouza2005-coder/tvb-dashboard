@@ -82,7 +82,7 @@ async function backfillViaVendasPdv(client: DapicClient, storeId: string, catalo
 
   for (const venda of vendas) {
     if (venda.Status !== "Fechada") continue;
-    for (const [itemIndex, item] of venda.Produtos.entries()) {
+    for (const item of venda.Produtos) {
       if (item.Tipo !== "Venda") continue;
       const cod = item.IdGradeProduto != null ? String(item.IdGradeProduto) : venda.Codigo;
       const tabela = inferTabelaPreco(cod, item.ValorUnitario, catalog);
@@ -90,7 +90,8 @@ async function backfillViaVendasPdv(client: DapicClient, storeId: string, catalo
         semMatch++;
         continue;
       }
-      const saleId = saleIdByKey.get(`${venda.Id}::${itemIndex}`);
+      // item.Id, não posição no array — a API não garante ordem estável entre chamadas.
+      const saleId = saleIdByKey.get(`${venda.Id}::${item.Id}`);
       if (saleId) updates.push({ id: saleId, tabelaPreco: tabela });
     }
   }
@@ -111,7 +112,7 @@ async function backfillViaFaturas(client: DapicClient, storeId: string, catalog:
 
   for (const fatura of fechadas) {
     const produtos = await withRetry(() => client.fetchFaturaProdutos(fatura.Id));
-    for (const [itemIndex, item] of produtos.entries()) {
+    for (const item of produtos) {
       if (item.Tipo !== "Venda") continue;
       const cod = String(item.IdGradeProduto);
       const tabela = inferTabelaPreco(cod, item.Valores.ValorUnitario, catalog);
@@ -119,7 +120,7 @@ async function backfillViaFaturas(client: DapicClient, storeId: string, catalog:
         semMatch++;
         continue;
       }
-      const saleId = saleIdByKey.get(`${fatura.Id}::${itemIndex}`);
+      const saleId = saleIdByKey.get(`${fatura.Id}::${item.Id}`);
       if (saleId) updates.push({ id: saleId, tabelaPreco: tabela });
     }
     processadas++;

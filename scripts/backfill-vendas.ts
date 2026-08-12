@@ -61,13 +61,13 @@ async function backfillLoja(client: DapicClient) {
     if (venda.Status !== "Fechada" || !venda.DataFechamento) continue;
     const saleDate = parseDapicDateTime(venda.DataFechamento);
 
-    venda.Produtos.forEach((item, itemIndex) => {
+    venda.Produtos.forEach((item) => {
       const cod = item.IdGradeProduto != null ? String(item.IdGradeProduto) : venda.Codigo;
       if (item.Tipo === "Venda") {
         saleData.push({
           storeId,
           dapicVendaId: venda.Id,
-          itemIndex,
+          itemIndex: item.Id,
           cod,
           produto: item.Produto,
           grupo: item.Grupo ?? "(sem grupo)",
@@ -87,7 +87,7 @@ async function backfillLoja(client: DapicClient) {
         returnData.push({
           storeId,
           dapicVendaId: venda.Id,
-          itemIndex,
+          itemIndex: item.Id,
           cod,
           produto: item.Produto,
           grupo: item.Grupo ?? "(sem grupo)",

@@ -58,13 +58,13 @@ async function backfillViaVendasPdv(client: DapicClient, storeId: string) {
   for (const venda of vendas) {
     if (venda.Status !== "Fechada" || !venda.DataFechamento) continue;
     const giftDate = parseDapicDateTime(venda.DataFechamento);
-    venda.Produtos.forEach((item, itemIndex) => {
+    venda.Produtos.forEach((item) => {
       if (item.Tipo !== "Brinde") return;
       const cod = item.IdGradeProduto != null ? String(item.IdGradeProduto) : venda.Codigo;
       giftData.push({
         storeId,
         dapicVendaId: venda.Id,
-        itemIndex,
+        itemIndex: item.Id,
         cod,
         produto: item.Produto,
         grupo: item.Grupo ?? "(sem grupo)",
@@ -93,12 +93,12 @@ async function backfillViaFaturas(client: DapicClient, storeId: string) {
   for (const fatura of fechadas) {
     const produtos = await withRetry(() => client.fetchFaturaProdutos(fatura.Id));
     const giftDate = parseDapicDateTime(fatura.DataFechamento as string);
-    produtos.forEach((item, itemIndex) => {
+    produtos.forEach((item) => {
       if (item.Tipo !== "Brinde") return;
       giftData.push({
         storeId,
         dapicVendaId: fatura.Id,
-        itemIndex,
+        itemIndex: item.Id,
         cod: String(item.IdGradeProduto),
         produto: stripReferenciaPrefix(item.Produto),
         grupo: item.Grupo ?? "(sem grupo)",

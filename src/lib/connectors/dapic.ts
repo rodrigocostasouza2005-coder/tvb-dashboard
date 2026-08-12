@@ -316,6 +316,12 @@ export type DapicPedidoVendaDetalhe = {
 };
 
 export type DapicVendaPdvProduto = {
+  // Id da linha em si (não confundir com IdGradeProduto, o SKU) — único e estável por item,
+  // ao contrário da posição no array Produtos[], que a API não garante manter entre chamadas
+  // diferentes (achado em 2026-08-12: causou duplicata real quando o mesmo pedido foi buscado
+  // 2x em janelas sobrepostas e a ordem dos itens mudou). Usar isso como chave de idempotência
+  // em vez da posição.
+  Id: number;
   IdGradeProduto?: number;
   Produto: string;
   Cor?: string;
