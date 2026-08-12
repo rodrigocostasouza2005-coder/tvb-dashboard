@@ -358,11 +358,26 @@ export async function searchStockVsSalesComTamanhos(filters: DashboardFilters, q
   if (rows.length === 0) return { rows: [], tamanhos: [] as string[] };
 
   const produtoNames = rows.map((r) => r.key);
-  const stockRows = await prisma.stockSnapshot.groupBy({
-    by: ["produto", "tamanho"],
-    where: { ...stockWhere(filters), produto: { in: produtoNames } },
-    _sum: { quantidadeDisponivel: true },
-  });
+
+  // Só lojas de venda de verdade (não armazéns tipo Defeito/Lixeira/Marketing) — "quanto tem
+  // nas lojas" quer dizer ponto de venda, não todo armazenador. Junta por displayGroup igual
+  // o filtro de loja já faz (TVB Site e Atacado vira uma linha só), senão contaria a mesma
+  // operação duas vezes.
+  const sellingStores = await prisma.store.findMany({ where: { sellsProducts: true } });
+  const lojaNameByStoreId = new Map(sellingStores.map((s) => [s.id, s.displayGroup ?? s.name]));
+
+  const [stockRows, stockPorLojaRows] = await Promise.all([
+    prisma.stockSnapshot.groupBy({
+      by: ["produto", "tamanho"],
+      where: { ...stockWhere(filters), produto: { in: produtoNames } },
+      _sum: { quantidadeDisponivel: true },
+    }),
+    prisma.stockSnapshot.groupBy({
+      by: ["produto", "storeId"],
+      where: { ...stockWhere(filters), produto: { in: produtoNames }, storeId: { in: [...lojaNameByStoreId.keys()] } },
+      _sum: { quantidadeDisponivel: true },
+    }),
+  ]);
 
   const tamanhoSet = new Set<string>();
   const porProdutoTamanho = new Map<string, Map<string, number>>();
@@ -374,10 +389,20 @@ export async function searchStockVsSalesComTamanhos(filters: DashboardFilters, q
     porProdutoTamanho.set(s.produto, map);
   }
 
+  const porProdutoLoja = new Map<string, Map<string, number>>();
+  for (const s of stockPorLojaRows) {
+    const lojaNome = lojaNameByStoreId.get(s.storeId);
+    if (!lojaNome) continue;
+    const map = porProdutoLoja.get(s.produto) ?? new Map<string, number>();
+    map.set(lojaNome, (map.get(lojaNome) ?? 0) + (s._sum.quantidadeDisponivel ?? 0));
+    porProdutoLoja.set(s.produto, map);
+  }
+
   const tamanhos = sortTamanhos([...tamanhoSet]);
   const rowsComTamanhos = rows.map((r) => ({
     ...r,
     porTamanho: porProdutoTamanho.get(r.key) ?? new Map<string, number>(),
+    porLoja: porProdutoLoja.get(r.key) ?? new Map<string, number>(),
   }));
 
   return { rows: rowsComTamanhos, tamanhos };

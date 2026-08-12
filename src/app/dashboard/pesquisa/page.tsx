@@ -4,13 +4,7 @@ import { getGrupoRestriction, getStoreRestriction, getMarcaRestriction, getTabel
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
-
-function statusFor(rate: number | null): { label: string; color: string } {
-  if (rate === null) return { label: "—", color: "var(--text-muted)" };
-  if (rate >= 50) return { label: "Bom", color: "var(--status-good)" };
-  if (rate >= 30) return { label: "Atenção", color: "var(--status-warning)" };
-  return { label: "Crítico", color: "var(--status-critical)" };
-}
+import { PesquisaTable } from "./pesquisa-table";
 
 export default async function PesquisaPage({
   searchParams,
@@ -91,79 +85,20 @@ export default async function PesquisaPage({
         </button>
       </form>
 
-      <div className="overflow-x-auto rounded-lg border border-[var(--border)] bg-[var(--surface-1)]">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
-              <th className="px-4 py-2 font-medium">Produto</th>
-              <th className="px-4 py-2 font-medium">Vendido no período</th>
-              {tamanhos.map((t) => (
-                <th key={t} className="px-3 py-2 text-center font-medium">
-                  {t}
-                </th>
-              ))}
-              <th className="px-4 py-2 font-medium">Total estoque</th>
-              <th className="px-4 py-2 font-medium">Sell-through</th>
-              <th className="px-4 py-2 font-medium">Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.slice(0, 100).map((r) => {
-              const status = statusFor(r.sellThroughRate);
-              const pct = r.sellThroughRate ?? 0;
-              return (
-                <tr
-                  key={r.key}
-                  className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]"
-                >
-                  <td className="px-4 py-2 font-medium">{r.key}</td>
-                  <td className="px-4 py-2 tabular-nums">{r.unitsSold.toLocaleString("pt-BR")}</td>
-                  {tamanhos.map((t) => {
-                    const qtd = r.porTamanho.get(t) ?? 0;
-                    return (
-                      <td key={t} className="px-3 py-2 text-center tabular-nums text-[var(--text-secondary)]">
-                        {qtd > 0 ? qtd.toLocaleString("pt-BR") : "—"}
-                      </td>
-                    );
-                  })}
-                  <td className="px-4 py-2 tabular-nums font-medium">{r.currentStock.toLocaleString("pt-BR")}</td>
-                  <td className="px-4 py-2">
-                    {r.sellThroughRate !== null ? (
-                      <div className="flex items-center gap-2">
-                        <div className="h-1.5 w-16 overflow-hidden rounded-full bg-[var(--gridline)]">
-                          <div
-                            className="h-full rounded-full"
-                            style={{ width: `${Math.min(pct, 100)}%`, backgroundColor: status.color }}
-                          />
-                        </div>
-                        <span className="tabular-nums text-[var(--text-secondary)]">{pct.toFixed(0)}%</span>
-                      </div>
-                    ) : (
-                      <span className="text-[var(--text-muted)]">—</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-2">
-                    <span
-                      className="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium"
-                      style={{ backgroundColor: `color-mix(in srgb, ${status.color} 15%, transparent)`, color: status.color }}
-                    >
-                      <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: status.color }} />
-                      {status.label}
-                    </span>
-                  </td>
-                </tr>
-              );
-            })}
-            {rows.length === 0 && (
-              <tr>
-                <td colSpan={5 + tamanhos.length} className="px-4 py-6 text-center text-[var(--text-muted)]">
-                  {query ? "Nenhum resultado pra essa busca." : "Digite algo pra buscar."}
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      <PesquisaTable
+        rows={rows.slice(0, 100).map((r) => ({
+          key: r.key,
+          unitsSold: r.unitsSold,
+          currentStock: r.currentStock,
+          sellThroughRate: r.sellThroughRate,
+          porTamanho: Object.fromEntries(r.porTamanho),
+          porLoja: [...r.porLoja.entries()]
+            .map(([loja, qtd]) => ({ loja, qtd }))
+            .sort((a, b) => b.qtd - a.qtd),
+        }))}
+        tamanhos={tamanhos}
+        emptyMessage={query ? "Nenhum resultado pra essa busca." : "Digite algo pra buscar."}
+      />
     </div>
   );
 }
