@@ -60,17 +60,32 @@ export default async function PesquisaPage({
         {(filters.tabelasPreco ?? []).map((t) => (
           <input key={t} type="hidden" name="tabelaPreco" value={t} />
         ))}
-        <input
-          type="text"
-          name="q"
-          defaultValue={query}
-          placeholder="Buscar por nome..."
-          className="w-full max-w-sm rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-3 py-1.5 text-sm text-[var(--text-primary)]"
-          style={{ colorScheme: "light dark" }}
-        />
+        <div className="relative w-full max-w-sm">
+          <svg
+            className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-[var(--text-muted)]"
+            width={14}
+            height={14}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2}
+            aria-hidden
+          >
+            <circle cx={11} cy={11} r={7} />
+            <line x1={21} y1={21} x2={16.65} y2={16.65} />
+          </svg>
+          <input
+            type="text"
+            name="q"
+            defaultValue={query}
+            placeholder="Buscar por nome..."
+            className="w-full rounded-full border border-[var(--border)] bg-[var(--surface-1)] py-1.5 pr-3 pl-8 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--series-1)]"
+            style={{ colorScheme: "light dark" }}
+          />
+        </div>
         <button
           type="submit"
-          className="rounded-md bg-[var(--series-1)] px-3 py-1.5 text-sm font-medium text-white"
+          className="rounded-full bg-[var(--series-1)] px-4 py-1.5 text-sm font-medium text-white"
         >
           Buscar
         </button>
@@ -95,8 +110,12 @@ export default async function PesquisaPage({
           <tbody>
             {rows.slice(0, 100).map((r) => {
               const status = statusFor(r.sellThroughRate);
+              const pct = r.sellThroughRate ?? 0;
               return (
-                <tr key={r.key} className="border-b border-[var(--gridline)] last:border-0">
+                <tr
+                  key={r.key}
+                  className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]"
+                >
                   <td className="px-4 py-2 font-medium">{r.key}</td>
                   <td className="px-4 py-2 tabular-nums">{r.unitsSold.toLocaleString("pt-BR")}</td>
                   {tamanhos.map((t) => {
@@ -108,12 +127,27 @@ export default async function PesquisaPage({
                     );
                   })}
                   <td className="px-4 py-2 tabular-nums font-medium">{r.currentStock.toLocaleString("pt-BR")}</td>
-                  <td className="px-4 py-2 tabular-nums">
-                    {r.sellThroughRate !== null ? `${r.sellThroughRate.toFixed(0)}%` : "—"}
+                  <td className="px-4 py-2">
+                    {r.sellThroughRate !== null ? (
+                      <div className="flex items-center gap-2">
+                        <div className="h-1.5 w-16 overflow-hidden rounded-full bg-[var(--gridline)]">
+                          <div
+                            className="h-full rounded-full"
+                            style={{ width: `${Math.min(pct, 100)}%`, backgroundColor: status.color }}
+                          />
+                        </div>
+                        <span className="tabular-nums text-[var(--text-secondary)]">{pct.toFixed(0)}%</span>
+                      </div>
+                    ) : (
+                      <span className="text-[var(--text-muted)]">—</span>
+                    )}
                   </td>
                   <td className="px-4 py-2">
-                    <span className="flex items-center gap-1.5">
-                      <span className="h-2 w-2 rounded-full" style={{ backgroundColor: status.color }} />
+                    <span
+                      className="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium"
+                      style={{ backgroundColor: `color-mix(in srgb, ${status.color} 15%, transparent)`, color: status.color }}
+                    >
+                      <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: status.color }} />
                       {status.label}
                     </span>
                   </td>

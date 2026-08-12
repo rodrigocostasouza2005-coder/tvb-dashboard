@@ -88,7 +88,7 @@ export default async function EstoqueAtualPage({
           </thead>
           <tbody>
             {rows.slice(0, 100).map((r) => (
-              <tr key={r.key} className="border-b border-[var(--gridline)] last:border-0">
+              <tr key={r.key} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
                 <td className="px-4 py-2 font-medium">{r.key}</td>
                 <td className="px-4 py-2 tabular-nums">{r.quantidade.toLocaleString("pt-BR")}</td>
                 {showFinancials && <td className="px-4 py-2 tabular-nums">{formatBRL(r.valorCusto)}</td>}

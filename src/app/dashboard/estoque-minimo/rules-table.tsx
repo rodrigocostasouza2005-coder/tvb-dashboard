@@ -96,12 +96,16 @@ export function RulesTable({ rows }: { rows: Row[] }) {
         </thead>
         <tbody>
           {filtered.map((r) => (
-            <tr key={r.id} className="border-b border-[var(--gridline)] last:border-0">
+            <tr key={r.id} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
               <td className="px-4 py-2">{r.storeName}</td>
               <td className="px-4 py-2 font-medium">{r.grupo}</td>
-              <td className="px-4 py-2">{r.tamanho}</td>
+              <td className="px-4 py-2">
+                <span className="rounded-full bg-[var(--page-plane)] px-2 py-0.5 text-xs font-medium">
+                  {r.tamanho}
+                </span>
+              </td>
               <td className="px-4 py-2 text-[var(--text-secondary)]">{r.colecao ?? "todas"}</td>
-              <td className="px-4 py-2 tabular-nums">{r.valorMinimo}</td>
+              <td className="px-4 py-2 tabular-nums font-medium">{r.valorMinimo}</td>
               <td className="px-4 py-2">
                 <form action={deleteMinimumRuleAction}>
                   <input type="hidden" name="id" value={r.id} />

@@ -107,7 +107,7 @@ export function EnvelhecimentoTable({ rows }: { rows: Row[] }) {
         </thead>
         <tbody>
           {visible.map((r, i) => (
-            <tr key={i} className="border-b border-[var(--gridline)] last:border-0">
+            <tr key={i} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
               <td className="px-4 py-2">{r.storeName}</td>
               <td className="px-4 py-2 font-medium">{r.produto}</td>
               <td className="px-4 py-2">{r.tamanho ?? "—"}</td>

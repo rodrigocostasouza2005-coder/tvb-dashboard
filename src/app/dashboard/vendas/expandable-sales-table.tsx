@@ -52,7 +52,7 @@ export function ExpandableSalesTable({
             const produtos = produtoRows.filter((p) => p.grupo === r.key);
             return (
               <Fragment key={r.key}>
-                <tr className="border-b border-[var(--gridline)] last:border-0">
+                <tr className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
                   <td className="px-4 py-2 font-medium">
                     <button
                       type="button"

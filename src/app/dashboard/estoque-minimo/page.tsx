@@ -8,6 +8,7 @@ import {
   getTamanhosPorGrupo,
 } from "@/lib/metrics";
 import { requireTabAccess } from "@/lib/tabs";
+import { MetricBarChart } from "../metric-bar-chart";
 import { NovaRegraForm } from "./nova-regra-form";
 import { RulesTable } from "./rules-table";
 
@@ -51,6 +52,23 @@ export default async function EstoqueMinimoPage() {
           existingRules={existingRules}
         />
       </section>
+
+      {rules.length > 0 && (
+        <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
+          <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Regras por loja</h2>
+          <MetricBarChart
+            data={Object.entries(
+              rules.reduce<Record<string, number>>((acc, r) => {
+                acc[r.store.name] = (acc[r.store.name] ?? 0) + 1;
+                return acc;
+              }, {})
+            )
+              .map(([key, value]) => ({ key, value }))
+              .sort((a, b) => b.value - a.value)}
+            color="var(--cat-5)"
+          />
+        </section>
+      )}
 
       <RulesTable
         rows={rules.map((r) => ({

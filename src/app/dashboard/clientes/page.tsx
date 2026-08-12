@@ -73,7 +73,7 @@ export default async function ClientesPage({
           </thead>
           <tbody>
             {rows.map((r) => (
-              <tr key={r.cliente} className="border-b border-[var(--gridline)] last:border-0">
+              <tr key={r.cliente} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
                 <td className="px-4 py-2 font-medium">{r.cliente}</td>
                 <td className="px-4 py-2 tabular-nums">{r.pedidos}</td>
                 <td className="px-4 py-2 tabular-nums">{r.unidades}</td>

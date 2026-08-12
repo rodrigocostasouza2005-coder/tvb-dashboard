@@ -113,7 +113,7 @@ export default async function VendasPage({
             </thead>
             <tbody>
               {rows.map((r) => (
-                <tr key={r.key} className="border-b border-[var(--gridline)] last:border-0">
+                <tr key={r.key} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
                   <td className="px-4 py-2 font-medium">{r.key}</td>
                   <td className="px-4 py-2 tabular-nums">{r.unitsSold.toLocaleString("pt-BR")}</td>
                   <td className="px-4 py-2 tabular-nums text-[var(--text-secondary)]">
