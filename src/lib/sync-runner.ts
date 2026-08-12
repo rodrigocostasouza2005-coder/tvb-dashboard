@@ -308,43 +308,42 @@ export async function runSync() {
     const clients = allClients.filter((c) => c.label !== "matriz");
     const matrizClient = allClients.find((c) => c.label === "matriz");
 
-    // Lojas em paralelo, não em sequência — cada uma leva dezenas de segundos pra buscar o
-    // estoque completo na API do DAPIC, e rodando uma por vez as 4 juntas passavam dos 300s
-    // (maxDuration) e a função da Vercel dava timeout, quebrando a sync automática.
+    async function syncOneClient(client: DapicClient) {
+      const { storeByDapicId, primaryStoreId } = await syncArmazenadores(client);
+      const [estoque, priceCatalog] = await Promise.all([
+        syncEstoque(client, storeByDapicId),
+        fetchPriceCatalogCached(prisma, client),
+      ]);
+      // Janela de 1 dia (24h) — cobre com folga o intervalo entre os 2 syncs diários (12h) e
+      // reduz o volume processado (menos chamadas de /faturas, que é 1 por fatura pro
+      // Site+Atacado). Se um sync falhar, o self-heal-sync.ts (dispara sozinho se o último
+      // SyncLog tiver mais de 5h) cobre o risco de perder dado mais velho que essa janela.
+      const vendas = await syncVendas(client, primaryStoreId, 1, priceCatalog);
+      const faturas = await syncFaturas(client, primaryStoreId, 1, priceCatalog);
+      return {
+        estoque,
+        vendas: vendas.vendas + faturas.vendas,
+        devolucoes: vendas.devolucoes,
+        brindes: vendas.brindes + faturas.brindes,
+      };
+    }
+
+    // cd-atacado (Site+Atacado, ~14k linhas de estoque, 3x maior que cada loja física) rodava em
+    // paralelo com as outras 3 e travava todo mundo junto — medido em 2026-08-12: isolado leva
+    // ~130s, mas junto com as outras 3 passava de 260s (quase estourando os 300s da Vercel), e as
+    // 3 pequenas juntas SEM ela levam só ~87s (eram 126-200s cada rodando junto com ela). Parece
+    // ser contenção real do lado do DAPIC quando os 4 tokens batem ao mesmo tempo, não só volume
+    // de dado. Separado em duas fases sequenciais (cd-atacado sozinho, depois as 3 pequenas juntas)
+    // — soma ~217s em vez de ~270-280s, com bem mais folga do limite.
+    const cdAtacadoClient = clients.find((c) => c.label === "cd-atacado");
+    const outrasLojas = clients.filter((c) => c.label !== "cd-atacado");
+
     const [results, totalOrdensProducao] = await Promise.all([
-      Promise.all(
-        clients.map(async (client) => {
-          const t0 = Date.now();
-          const { storeByDapicId, primaryStoreId } = await syncArmazenadores(client);
-          const t1 = Date.now();
-          const [estoque, priceCatalog] = await Promise.all([
-            syncEstoque(client, storeByDapicId),
-            fetchPriceCatalogCached(prisma, client),
-          ]);
-          const t2 = Date.now();
-          // Janela de 1 dia (24h) — cobre com folga o intervalo entre os 2 syncs diários (12h) e
-          // reduz o volume processado (menos chamadas de /faturas, que é 1 por fatura pro
-          // Site+Atacado). Reduzido de 2 pra 1 dia em 2026-08-12 depois de um clique manual do
-          // Rodrigo estourar os 300s da Vercel. Se um sync falhar, o self-heal-sync.ts (dispara
-          // sozinho se o último SyncLog tiver mais de 5h) cobre o risco de perder dado mais velho
-          // que essa janela.
-          const vendas = await syncVendas(client, primaryStoreId, 1, priceCatalog);
-          const t3 = Date.now();
-          const faturas = await syncFaturas(client, primaryStoreId, 1, priceCatalog);
-          const t4 = Date.now();
-          // Instrumentação temporária pra achar o gargalo real (2026-08-12) — remover depois.
-          console.log(
-            `[sync-timing] ${client.label}: armazenadores=${t1 - t0}ms estoque+preco=${t2 - t1}ms vendas=${t3 - t2}ms faturas=${t4 - t3}ms total=${t4 - t0}ms`
-          );
-          return {
-            estoque,
-            vendas: vendas.vendas + faturas.vendas,
-            devolucoes: vendas.devolucoes,
-            brindes: vendas.brindes + faturas.brindes,
-            timing: `${client.label}:arm=${t1 - t0}ms,est+preco=${t2 - t1}ms,vend=${t3 - t2}ms,fat=${t4 - t3}ms,tot=${t4 - t0}ms`,
-          };
-        })
-      ),
+      (async () => {
+        const outrosResultados = await Promise.all(outrasLojas.map(syncOneClient));
+        const cdResultado = cdAtacadoClient ? [await syncOneClient(cdAtacadoClient)] : [];
+        return [...outrosResultados, ...cdResultado];
+      })(),
       // Não fatal: se o token da matriz ainda não estiver configurado (ex: só em dev, não em
       // produção), syncOrdensProducao devolve 0 sem quebrar o resto da sync.
       syncOrdensProducao(matrizClient).catch(() => 0),
@@ -356,14 +355,7 @@ export async function runSync() {
     const totalBrindes = results.reduce((a, r) => a + r.brindes, 0);
 
     await prisma.syncLog.create({
-      data: {
-        source: "STOCK",
-        status: "SUCCESS",
-        recordsSynced: totalEstoque,
-        // Instrumentação temporária (2026-08-12) — remover depois de achar o gargalo.
-        message: results.map((r) => r.timing).join(" | "),
-        finishedAt: new Date(),
-      },
+      data: { source: "STOCK", status: "SUCCESS", recordsSynced: totalEstoque, finishedAt: new Date() },
     });
     await prisma.syncLog.create({
       data: { source: "SALES", status: "SUCCESS", recordsSynced: totalVendas, finishedAt: new Date() },
