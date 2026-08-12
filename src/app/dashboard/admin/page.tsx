@@ -4,6 +4,11 @@ import { prisma } from "@/lib/prisma";
 import { getRawStores } from "@/lib/metrics";
 import { TABS, defaultAllowedTabs } from "@/lib/tabs";
 import { createUserAction, updateUserAction, resetPasswordAction, deleteUserAction } from "./actions";
+import { ForceSyncButton } from "./force-sync-button";
+
+// A sincronização manual (ForceSyncButton) chama runSync() direto, que pode levar minutos
+// (estoque de 4 lojas + faturas) — sem isso a Server Action tomaria timeout no plano padrão.
+export const maxDuration = 300;
 
 const ROLES = ["ADMIN", "GESTAO", "VENDEDOR"] as const;
 
@@ -73,6 +78,15 @@ export default async function AdminPage() {
         O mesmo vale pras lojas: nenhuma marcada = vê todas. Marcando uma ou mais, a pessoa só
         vê dado daquelas lojas em qualquer aba — nem aparece opção de escolher outra.
       </p>
+
+      <section className="mb-8 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
+        <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Sincronização</h2>
+        <p className="mb-3 text-xs text-[var(--text-muted)]">
+          Roda a mesma sincronização do cron das 8h/17h, na hora. Dispara o aviso no Telegram do
+          mesmo jeito.
+        </p>
+        <ForceSyncButton />
+      </section>
 
       <section className="mb-8 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
         <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Novo usuário</h2>
