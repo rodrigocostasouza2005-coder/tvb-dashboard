@@ -3,6 +3,7 @@ import {
   getKpiSummary,
   getSalesByDimension,
   getSalesByDay,
+  getSalesByDayPerStore,
   getStores,
   getMarcas,
   getTabelasPreco,
@@ -22,6 +23,7 @@ import { StatTile } from "./stat-tile";
 import { DimensionToggle } from "./dimension-toggle";
 import { SalesTrendChart } from "./sales-trend-chart";
 import { TopBarChart } from "./top-bar-chart";
+import { StoreCompareChart } from "./store-compare-chart";
 
 function formatBRL(value: number) {
   return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -59,16 +61,18 @@ export default async function OverviewPage({
     grupoIn,
   };
   const dimension = parseDimension(rawParams);
-  const [kpi, salesByDimension, salesByDay, stores, marcas, tabelasPreco, syncs, newClients] = await Promise.all([
-    getKpiSummary(filters),
-    getSalesByDimension(filters, dimension),
-    getSalesByDay(filters),
-    getStores(allowedStores),
-    getMarcas(allowedMarcas),
-    getTabelasPreco(allowedTabelasPreco),
-    getLastSyncs(),
-    getNewClientsCount(filters),
-  ]);
+  const [kpi, salesByDimension, salesByDay, salesByDayPerStore, stores, marcas, tabelasPreco, syncs, newClients] =
+    await Promise.all([
+      getKpiSummary(filters),
+      getSalesByDimension(filters, dimension),
+      getSalesByDay(filters),
+      getSalesByDayPerStore(filters),
+      getStores(allowedStores),
+      getMarcas(allowedMarcas),
+      getTabelasPreco(allowedTabelasPreco),
+      getLastSyncs(),
+      getNewClientsCount(filters),
+    ]);
 
   const showFinancials = canSeeFinancials(user.role);
   const top10 = salesByDimension.slice(0, 10);
@@ -99,6 +103,11 @@ export default async function OverviewPage({
       <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
         <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Vendas ao longo do período</h2>
         <SalesTrendChart data={salesByDay} showRevenue={showFinancials} />
+      </section>
+
+      <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
+        <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Comparativo entre lojas</h2>
+        <StoreCompareChart data={salesByDayPerStore.data} series={salesByDayPerStore.series} />
       </section>
 
       <section className="mb-6">
