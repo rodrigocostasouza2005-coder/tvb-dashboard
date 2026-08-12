@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 
 export type Dimension = "grupo" | "produto" | "tamanho";
 
@@ -52,6 +52,37 @@ export async function getKpiSummary(filters: DashboardFilters) {
     revenue: salesAgg._sum.valorTotalLiquido ?? 0,
     currentStock: stockAgg._sum.quantidadeDisponivel ?? 0,
   };
+}
+
+// Vendas agrupadas por dia (horário de Brasília) dentro do período filtrado — usado pro
+// gráfico de tendência da Visão Geral. Agrupar por dia em SQL é mais simples que em JS aqui
+// porque saleDate é timestamp; usa AT TIME ZONE pra não cair no dia errado perto da meia-noite
+// (mesmo cuidado de fuso já documentado em filters.ts).
+export async function getSalesByDay(filters: DashboardFilters) {
+  const rows = await prisma.$queryRaw<{ day: Date; units: bigint; revenue: number }[]>`
+    SELECT
+      (("saleDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo')::date AS day,
+      SUM("quantidade") AS units,
+      SUM("valorTotalLiquido") AS revenue
+    FROM "Sale"
+    WHERE "saleDate" >= ${filters.from}
+      AND "saleDate" <= ${filters.to}
+      ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
+      ${filters.marcas !== undefined ? Prisma.sql`AND "marca" = ANY(${filters.marcas})` : Prisma.empty}
+      ${filters.tabelasPreco !== undefined ? Prisma.sql`AND "tabelaPreco" = ANY(${filters.tabelasPreco})` : Prisma.empty}
+      ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
+    GROUP BY day
+    ORDER BY day ASC
+  `;
+  // O SQL acima já resolveu o dia certo em horário de Brasília e devolveu como DATE — o driver
+  // do Postgres traz DATE como Date em meia-noite UTC. Reformatar essa data usando timeZone
+  // America/Sao_Paulo aqui jogaria pro dia anterior (meia-noite UTC = 21h do dia anterior em
+  // Brasília), o mesmo tipo de bug de fuso já visto nesse projeto — por isso lê direto em UTC.
+  return rows.map((r) => ({
+    day: new Date(r.day).toISOString().slice(0, 10),
+    unitsSold: Number(r.units),
+    revenue: Number(r.revenue),
+  }));
 }
 
 async function groupSalesByDimension(dimension: Dimension, where: Prisma.SaleWhereInput) {

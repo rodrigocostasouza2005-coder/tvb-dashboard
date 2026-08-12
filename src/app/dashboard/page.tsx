@@ -2,6 +2,7 @@ import { getSessionUser } from "@/lib/auth";
 import {
   getKpiSummary,
   getSalesByDimension,
+  getSalesByDay,
   getStores,
   getMarcas,
   getTabelasPreco,
@@ -19,6 +20,8 @@ import { parseFilters, parseDimension, type RawSearchParams } from "@/lib/filter
 import { FilterBar } from "./filter-bar";
 import { StatTile } from "./stat-tile";
 import { DimensionToggle } from "./dimension-toggle";
+import { SalesTrendChart } from "./sales-trend-chart";
+import { TopBarChart } from "./top-bar-chart";
 
 function formatBRL(value: number) {
   return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -56,9 +59,10 @@ export default async function OverviewPage({
     grupoIn,
   };
   const dimension = parseDimension(rawParams);
-  const [kpi, salesByDimension, stores, marcas, tabelasPreco, syncs, newClients] = await Promise.all([
+  const [kpi, salesByDimension, salesByDay, stores, marcas, tabelasPreco, syncs, newClients] = await Promise.all([
     getKpiSummary(filters),
     getSalesByDimension(filters, dimension),
+    getSalesByDay(filters),
     getStores(allowedStores),
     getMarcas(allowedMarcas),
     getTabelasPreco(allowedTabelasPreco),
@@ -92,37 +96,53 @@ export default async function OverviewPage({
         />
       </section>
 
+      <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
+        <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Vendas ao longo do período</h2>
+        <SalesTrendChart data={salesByDay} showRevenue={showFinancials} />
+      </section>
+
       <section className="mb-6">
-        <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">
-          Top {dimensionLabel.toLowerCase()} {showFinancials ? "por receita" : "por vendas"}
-        </h2>
-        <DimensionToggle basePath="/dashboard" searchParams={rawParams} current={dimension} />
-        <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)]">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
-                <th className="px-4 py-2 font-medium">{dimensionLabel}</th>
-                <th className="px-4 py-2 font-medium">Unidades</th>
-                {showFinancials && <th className="px-4 py-2 font-medium">Receita</th>}
-              </tr>
-            </thead>
-            <tbody>
-              {top10.map((g) => (
-                <tr key={g.key} className="border-b border-[var(--gridline)] last:border-0">
-                  <td className="px-4 py-2 font-medium">{g.key}</td>
-                  <td className="px-4 py-2 tabular-nums">{g.unitsSold.toLocaleString("pt-BR")}</td>
-                  {showFinancials && <td className="px-4 py-2 tabular-nums">{formatBRL(g.revenue)}</td>}
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-sm font-medium text-[var(--text-secondary)]">
+            Top {dimensionLabel.toLowerCase()} {showFinancials ? "por receita" : "por vendas"}
+          </h2>
+          <DimensionToggle basePath="/dashboard" searchParams={rawParams} current={dimension} />
+        </div>
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
+            <TopBarChart
+              data={top10}
+              valueKey={showFinancials ? "revenue" : "unitsSold"}
+              showCurrency={showFinancials}
+            />
+          </div>
+          <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)]">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
+                  <th className="px-4 py-2 font-medium">{dimensionLabel}</th>
+                  <th className="px-4 py-2 font-medium">Unidades</th>
+                  {showFinancials && <th className="px-4 py-2 font-medium">Receita</th>}
                 </tr>
-              ))}
-              {top10.length === 0 && (
-                <tr>
-                  <td colSpan={showFinancials ? 3 : 2} className="px-4 py-6 text-center text-[var(--text-muted)]">
-                    Sem vendas no período/filtro selecionado.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {top10.map((g) => (
+                  <tr key={g.key} className="border-b border-[var(--gridline)] last:border-0">
+                    <td className="px-4 py-2 font-medium">{g.key}</td>
+                    <td className="px-4 py-2 tabular-nums">{g.unitsSold.toLocaleString("pt-BR")}</td>
+                    {showFinancials && <td className="px-4 py-2 tabular-nums">{formatBRL(g.revenue)}</td>}
+                  </tr>
+                ))}
+                {top10.length === 0 && (
+                  <tr>
+                    <td colSpan={showFinancials ? 3 : 2} className="px-4 py-6 text-center text-[var(--text-muted)]">
+                      Sem vendas no período/filtro selecionado.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       </section>
 
