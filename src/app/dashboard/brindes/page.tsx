@@ -5,6 +5,7 @@ import { parseFilters, parseDimension, type RawSearchParams } from "@/lib/filter
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
 import { DimensionToggle } from "../dimension-toggle";
+import { TopBarChart } from "../top-bar-chart";
 import { ExpandableSalesTable } from "../vendas/expandable-sales-table";
 
 function formatBRL(value: number) {
@@ -43,6 +44,17 @@ export default async function BrindesPage({
         Itens dados como brinde (Tipo=Brinde na API) — não entram na contagem de vendas nem de
         devoluções.
       </p>
+      <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
+        <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">
+          Top {dimension === "grupo" ? "grupo" : dimension === "produto" ? "produto" : "tamanho"} em brinde
+        </h2>
+        <TopBarChart
+          data={rows.slice(0, 10)}
+          valueKey={showFinancials ? "revenue" : "unitsSold"}
+          showCurrency={showFinancials}
+        />
+      </section>
+
       <DimensionToggle basePath="/dashboard/brindes" searchParams={rawParams} current={dimension} />
 
       {dimension === "grupo" ? (

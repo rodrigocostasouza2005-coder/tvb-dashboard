@@ -6,6 +6,7 @@ import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
 import { DimensionToggle } from "../dimension-toggle";
 import { PieChart } from "../pie-chart";
+import { MetricBarChart } from "../metric-bar-chart";
 
 function formatBRL(value: number) {
   return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -59,11 +60,19 @@ export default async function EstoqueAtualPage({
         )}
       </section>
 
-      <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
-        <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">% de estoque por armazenador</h2>
-        <PieChart
-          data={porArmazenador.map((p) => ({ label: p.storeName, value: p.quantidade, percentual: p.percentual }))}
-        />
+      <section className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
+          <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">% de estoque por armazenador</h2>
+          <PieChart
+            data={porArmazenador.map((p) => ({ label: p.storeName, value: p.quantidade, percentual: p.percentual }))}
+          />
+        </div>
+        <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
+          <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">
+            Top {dimension === "grupo" ? "grupo" : dimension === "produto" ? "produto" : "tamanho"} em estoque
+          </h2>
+          <MetricBarChart data={rows.slice(0, 10).map((r) => ({ key: r.key, value: r.quantidade }))} />
+        </div>
       </section>
 
       <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)]">

@@ -4,6 +4,7 @@ import { canSeeFinancials, getStoreRestriction, getMarcaRestriction, getTabelaPr
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
+import { MetricBarChart } from "../metric-bar-chart";
 
 function formatBRL(value: number) {
   return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -48,6 +49,18 @@ export default async function ClientesPage({
         Use o filtro de tabela de preço pra separar varejo de atacado. Segmentação e recorrência mais
         avançadas entram numa próxima etapa.
       </p>
+
+      <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
+        <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">
+          Top clientes {showFinancials ? "por receita" : "por unidades"}
+        </h2>
+        <MetricBarChart
+          data={rows.slice(0, 10).map((r) => ({ key: r.cliente, value: showFinancials ? r.receita : r.unidades }))}
+          format={showFinancials ? "currency" : "number"}
+          color="var(--cat-3)"
+        />
+      </section>
+
       <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)]">
         <table className="w-full text-sm">
           <thead>

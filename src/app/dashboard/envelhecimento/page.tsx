@@ -5,6 +5,7 @@ import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
 import { StatTile } from "../stat-tile";
+import { PieChart } from "../pie-chart";
 import { EnvelhecimentoTable } from "./envelhecimento-table";
 
 function ageStatus(dias: number): { label: string; color: string } {
@@ -79,6 +80,21 @@ export default async function EnvelhecimentoPage({
           coberto pela sync — pode ser estoque parado ou só falta de histórico (a sync via API
           começou recentemente). Acompanhe esse número ao longo do tempo.
         </p>
+      )}
+
+      {rows.length > 0 && (
+        <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
+          <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Distribuição por idade</h2>
+          <PieChart
+            data={Object.entries(
+              rows.reduce<Record<string, number>>((acc, r) => {
+                const label = ageStatus(r.diasDesdePrimeiraVenda).label;
+                acc[label] = (acc[label] ?? 0) + 1;
+                return acc;
+              }, {})
+            ).map(([label, value]) => ({ label, value, percentual: (value / rows.length) * 100 }))}
+          />
+        </section>
       )}
 
       <EnvelhecimentoTable rows={rows.map((r) => ({ ...r, status: ageStatus(r.diasDesdePrimeiraVenda) }))} />

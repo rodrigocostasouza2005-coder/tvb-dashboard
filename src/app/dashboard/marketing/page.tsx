@@ -6,6 +6,7 @@ import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
 import { DimensionToggle } from "../dimension-toggle";
 import { statusFor } from "../status-filter";
+import { MetricBarChart } from "../metric-bar-chart";
 
 export default async function MarketingPage({
   searchParams,
@@ -59,6 +60,14 @@ export default async function MarketingPage({
         empurrão. Sell-through vem do lado pra dar contexto — grupos grandes tendem a ter diferença alta
         só pelo tamanho, mesmo vendendo bem.
       </p>
+
+      <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
+        <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Top estoque parado</h2>
+        <MetricBarChart
+          data={ranked.slice(0, 10).map((r) => ({ key: r.key, value: r.pushScore }))}
+          color="var(--status-warning)"
+        />
+      </section>
 
       <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)]">
         <table className="w-full text-sm">

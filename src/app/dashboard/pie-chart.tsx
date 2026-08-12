@@ -1,3 +1,7 @@
+"use client";
+
+import { PieChart as RePieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
+
 const COLORS = [
   "var(--cat-1)",
   "var(--cat-2)",
@@ -21,39 +25,40 @@ export function PieChart({
   const outrosPct = rest.reduce((sum, d) => sum + d.percentual, 0);
   const slices = outros > 0 ? [...top, { label: "Outros", value: outros, percentual: outrosPct }] : top;
 
-  let cumulative = 0;
-
   return (
     <div className="flex flex-wrap items-center gap-6">
-      <svg
-        viewBox="0 0 40 40"
-        width={180}
-        height={180}
-        style={{ transform: "rotate(-90deg)" }}
-        role="img"
-        aria-label="Distribuição de estoque por armazenador"
-      >
-        <circle cx={20} cy={20} r={15.915} fill="none" stroke="var(--gridline)" strokeWidth={8} />
-        {slices.map((s, i) => {
-          const dash = s.percentual;
-          const offset = -cumulative;
-          cumulative += dash;
-          return (
-            <circle
-              key={s.label}
-              cx={20}
-              cy={20}
-              r={15.915}
-              fill="none"
-              stroke={COLORS[i % COLORS.length]}
-              strokeWidth={8}
-              strokeDasharray={`${dash} ${100 - dash}`}
-              strokeDashoffset={offset}
-              pathLength={100}
+      <div style={{ width: 220, height: 220 }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <RePieChart>
+            <Pie
+              data={slices}
+              dataKey="value"
+              nameKey="label"
+              innerRadius="55%"
+              outerRadius="90%"
+              paddingAngle={2}
+              stroke="var(--surface-1)"
+              strokeWidth={2}
+            >
+              {slices.map((s, i) => (
+                <Cell key={s.label} fill={COLORS[i % COLORS.length]} />
+              ))}
+            </Pie>
+            <Tooltip
+              contentStyle={{
+                background: "var(--surface-1)",
+                border: "1px solid var(--border)",
+                borderRadius: 8,
+                fontSize: 12,
+              }}
+              formatter={(value, _name, item) => [
+                `${Number(value ?? 0).toLocaleString("pt-BR")} (${(item.payload?.percentual ?? 0).toFixed(0)}%)`,
+                item.payload?.label ?? "",
+              ]}
             />
-          );
-        })}
-      </svg>
+          </RePieChart>
+        </ResponsiveContainer>
+      </div>
 
       <ul className="flex flex-col gap-1.5 text-sm">
         {slices.map((s, i) => (

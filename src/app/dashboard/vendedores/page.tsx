@@ -4,6 +4,7 @@ import { canSeeFinancials, getStoreRestriction, getMarcaRestriction, getTabelaPr
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
+import { MetricBarChart } from "../metric-bar-chart";
 
 function formatBRL(value: number) {
   return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -62,6 +63,15 @@ export default async function VendedoresPage({
         {stores2.map(([storeName, storeRows]) => (
           <section key={storeName}>
             <h2 className="mb-2 text-sm font-medium text-[var(--text-secondary)]">{storeName}</h2>
+            <div className="mb-3 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
+              <MetricBarChart
+                data={storeRows
+                  .slice(0, 10)
+                  .map((r) => ({ key: r.vendedor, value: showFinancials ? r.receita : r.unidades }))}
+                format={showFinancials ? "currency" : "number"}
+                color="var(--cat-4)"
+              />
+            </div>
             <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)]">
               <table className="w-full text-sm">
                 <thead>

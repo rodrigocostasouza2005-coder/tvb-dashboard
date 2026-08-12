@@ -7,6 +7,7 @@ import { FilterBar } from "../filter-bar";
 import { DimensionToggle } from "../dimension-toggle";
 import { statusFor } from "../status-filter";
 import { SellthroughTable } from "./sellthrough-table";
+import { SellthroughBarChart } from "./sellthrough-bar-chart";
 
 export default async function SellthroughPage({
   searchParams,
@@ -53,6 +54,14 @@ export default async function SellthroughPage({
         Sell-through = vendido / (vendido + estoque atual). Giro = vendido / estoque atual (aproximação
         até termos série histórica de estoque via sync automático).
       </p>
+
+      <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
+        <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">
+          Sell-through por {dimension === "grupo" ? "grupo" : dimension === "produto" ? "produto" : "tamanho"}
+        </h2>
+        <SellthroughBarChart data={withStatus} />
+      </section>
+
       <SellthroughTable
         rows={withStatus}
         dimensionLabel={dimension === "grupo" ? "Grupo" : dimension === "produto" ? "Produto" : "Tamanho"}

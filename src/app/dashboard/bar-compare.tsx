@@ -1,4 +1,12 @@
+"use client";
+
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
+
 type Row = { label: string; a: number; b: number };
+
+function truncate(label: string, max = 18) {
+  return label.length > max ? `${label.slice(0, max - 1)}…` : label;
+}
 
 export function BarCompare({
   rows,
@@ -9,11 +17,20 @@ export function BarCompare({
   labelA: string;
   labelB: string;
 }) {
-  const max = Math.max(1, ...rows.flatMap((r) => [r.a, r.b]));
+  if (rows.length === 0) {
+    return (
+      <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
+        <p className="text-sm text-[var(--text-muted)]">Sem dados para o período/filtro selecionado.</p>
+      </div>
+    );
+  }
+
+  const data = rows.map((r) => ({ ...r, label: truncate(r.label) }));
+  const height = Math.max(data.length * 34, 160);
 
   return (
     <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
-      <div className="mb-4 flex items-center gap-4 text-xs text-[var(--text-secondary)]">
+      <div className="mb-3 flex items-center gap-4 text-xs text-[var(--text-secondary)]">
         <span className="flex items-center gap-1.5">
           <span className="h-2 w-2 rounded-full" style={{ backgroundColor: "var(--series-1)" }} />
           {labelA}
@@ -23,40 +40,32 @@ export function BarCompare({
           {labelB}
         </span>
       </div>
-      <div className="flex flex-col gap-3">
-        {rows.map((r) => (
-          <div key={r.label}>
-            <div className="mb-1 text-xs font-medium text-[var(--text-primary)]">{r.label}</div>
-            <div className="flex flex-col gap-1">
-              <div className="flex items-center gap-2">
-                <div className="h-2 flex-1 rounded-full bg-[var(--gridline)]">
-                  <div
-                    className="h-2 rounded-full"
-                    style={{ width: `${(r.a / max) * 100}%`, backgroundColor: "var(--series-1)" }}
-                  />
-                </div>
-                <span className="w-14 shrink-0 text-right text-xs tabular-nums text-[var(--text-secondary)]">
-                  {r.a.toLocaleString("pt-BR")}
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="h-2 flex-1 rounded-full bg-[var(--gridline)]">
-                  <div
-                    className="h-2 rounded-full"
-                    style={{ width: `${(r.b / max) * 100}%`, backgroundColor: "var(--series-2)" }}
-                  />
-                </div>
-                <span className="w-14 shrink-0 text-right text-xs tabular-nums text-[var(--text-secondary)]">
-                  {r.b.toLocaleString("pt-BR")}
-                </span>
-              </div>
-            </div>
-          </div>
-        ))}
-        {rows.length === 0 && (
-          <p className="text-sm text-[var(--text-muted)]">Sem dados para o período/filtro selecionado.</p>
-        )}
-      </div>
+      <ResponsiveContainer width="100%" height={height}>
+        <BarChart data={data} layout="vertical" margin={{ top: 4, right: 24, left: 0, bottom: 4 }}>
+          <XAxis type="number" hide />
+          <YAxis
+            type="category"
+            dataKey="label"
+            width={140}
+            tick={{ fill: "var(--text-primary)", fontSize: 12 }}
+            axisLine={false}
+            tickLine={false}
+          />
+          <Tooltip
+            cursor={{ fill: "var(--gridline)", opacity: 0.4 }}
+            contentStyle={{
+              background: "var(--surface-1)",
+              border: "1px solid var(--border)",
+              borderRadius: 8,
+              fontSize: 12,
+            }}
+            labelFormatter={(_, payload) => payload?.[0]?.payload?.label ?? ""}
+            formatter={(value) => Number(value ?? 0).toLocaleString("pt-BR")}
+          />
+          <Bar dataKey="a" name={labelA} fill="var(--series-1)" radius={[0, 4, 4, 0]} maxBarSize={12} />
+          <Bar dataKey="b" name={labelB} fill="var(--series-2)" radius={[0, 4, 4, 0]} maxBarSize={12} />
+        </BarChart>
+      </ResponsiveContainer>
     </div>
   );
 }

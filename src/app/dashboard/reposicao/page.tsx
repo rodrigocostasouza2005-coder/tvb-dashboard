@@ -4,6 +4,7 @@ import { getGrupoRestriction, getStoreRestriction } from "@/lib/permissions";
 import { parseFilters, toDateInputValue, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
+import { MetricBarChart } from "../metric-bar-chart";
 
 export default async function ReposicaoPage({
   searchParams,
@@ -43,6 +44,24 @@ export default async function ReposicaoPage({
           Exportar CSV
         </a>
       </div>
+
+      {rows.length > 0 && (
+        <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
+          <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Unidades faltando por loja</h2>
+          <MetricBarChart
+            data={Object.entries(
+              rows.reduce<Record<string, number>>((acc, r) => {
+                acc[r.storeName] = (acc[r.storeName] ?? 0) + r.falta;
+                return acc;
+              }, {})
+            )
+              .map(([key, value]) => ({ key, value }))
+              .sort((a, b) => b.value - a.value)}
+            color="var(--status-critical)"
+          />
+        </section>
+      )}
+
       <div className="overflow-x-auto overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)]">
         <table className="w-full min-w-[900px] text-sm">
           <thead>

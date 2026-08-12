@@ -1,5 +1,13 @@
 import { getSessionUser } from "@/lib/auth";
-import { getSalesByDimension, getSalesByGrupoProduto, getStores, getMarcas, getTabelasPreco } from "@/lib/metrics";
+import {
+  getSalesByDimension,
+  getSalesByGrupoProduto,
+  getSalesByDay,
+  getSalesByDayPerStore,
+  getStores,
+  getMarcas,
+  getTabelasPreco,
+} from "@/lib/metrics";
 import {
   canSeeFinancials,
   getGrupoRestriction,
@@ -11,6 +19,9 @@ import { parseFilters, parseDimension, type RawSearchParams } from "@/lib/filter
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
 import { DimensionToggle } from "../dimension-toggle";
+import { SalesTrendChart } from "../sales-trend-chart";
+import { TopBarChart } from "../top-bar-chart";
+import { StoreCompareChart } from "../store-compare-chart";
 import { ExpandableSalesTable } from "./expandable-sales-table";
 
 function formatBRL(value: number) {
@@ -37,15 +48,18 @@ export default async function VendasPage({
     grupoIn,
   };
 
-  const [rows, produtoRows, stores, marcas, tabelasPreco] = await Promise.all([
+  const [rows, produtoRows, salesByDay, salesByDayPerStore, stores, marcas, tabelasPreco] = await Promise.all([
     getSalesByDimension(filters, dimension),
     dimension === "grupo" ? getSalesByGrupoProduto(filters) : Promise.resolve([]),
+    getSalesByDay(filters),
+    getSalesByDayPerStore(filters),
     getStores(allowedStores),
     getMarcas(allowedMarcas),
     getTabelasPreco(allowedTabelasPreco),
   ]);
   const showFinancials = canSeeFinancials(user.role);
   const totalUnits = rows.reduce((sum, r) => sum + r.unitsSold, 0);
+  const top10 = rows.slice(0, 10);
 
   return (
     <div>
@@ -57,6 +71,26 @@ export default async function VendasPage({
         showTabelaPreco
         filters={filters}
       />
+
+      <section className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
+          <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Vendas ao longo do período</h2>
+          <SalesTrendChart data={salesByDay} showRevenue={showFinancials} />
+        </div>
+        <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
+          <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Comparativo entre lojas</h2>
+          <StoreCompareChart data={salesByDayPerStore.data} series={salesByDayPerStore.series} />
+        </div>
+      </section>
+
+      <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
+        <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">
+          Top {dimension === "grupo" ? "grupo" : dimension === "produto" ? "produto" : "tamanho"}{" "}
+          {showFinancials ? "por receita" : "por vendas"}
+        </h2>
+        <TopBarChart data={top10} valueKey={showFinancials ? "revenue" : "unitsSold"} showCurrency={showFinancials} />
+      </section>
+
       <DimensionToggle basePath="/dashboard/vendas" searchParams={rawParams} current={dimension} />
 
       {dimension === "grupo" ? (
