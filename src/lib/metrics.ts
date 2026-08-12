@@ -205,30 +205,33 @@ function resolveSellThrough(unitsSoldAllTime: number, currentStock: number, prod
 }
 
 export async function getStockVsSales(filters: DashboardFilters, dimension: Dimension = "grupo") {
-  // Sell-through é "quanto do que já existiu já vendeu" — não deve mudar conforme o filtro de
-  // data (Rodrigo notou isso em 2026-08-10). "Vendido no período" e Giro continuam usando o
-  // período escolhido normalmente; só o sellThroughRate usa vendas de todo o histórico.
+  // Sell-through é uma métrica da EMPRESA INTEIRA, não da loja filtrada — não deve mudar nem
+  // com o filtro de data (Rodrigo notou isso em 2026-08-10) nem com o filtro de loja (achado
+  // em 2026-08-12: ele quer o mesmo número não importa qual loja esteja selecionada). Só
+  // "vendido no período", "estoque atual" e giro (as outras colunas) respeitam os filtros.
   const allTimeFilters: DashboardFilters = { ...filters, from: new Date(0), to: new Date() };
+  const empresaToda: DashboardFilters = { ...allTimeFilters, storeIds: undefined };
 
-  // Ordem de produção não é por loja (centralizada na Matriz) — só faz sentido comparar
-  // vendido/produzido quando "vendido" também é da empresa inteira (nenhuma loja específica
-  // filtrada). Filtrando 1 loja, o vendido some (é só daquela loja) mas o produzido continuava
-  // sendo de todo mundo, fazendo o sell-through cair artificialmente (achado pelo Rodrigo em
-  // 2026-08-12: 59% "todas as lojas" virava 22% só filtrando Leblon, no mesmo produto).
-  const todasAsLojas = !filters.storeIds?.length;
-
-  const [sales, salesAllTime, stock, producedByKey] = await Promise.all([
+  const [sales, salesAllTime, stock, salesEmpresaToda, stockEmpresaToda, producedByKey] = await Promise.all([
     getSalesByDimension(filters, dimension),
     getSalesByDimension(allTimeFilters, dimension),
     latestStockSnapshots(filters),
-    todasAsLojas ? getProductionByDimension(filters, dimension) : Promise.resolve(new Map<string, number>()),
+    getSalesByDimension(empresaToda, dimension),
+    latestStockSnapshots(empresaToda),
+    getProductionByDimension(filters, dimension),
   ]);
   const soldAllTimeByKey = new Map(salesAllTime.map((s) => [s.key, s.unitsSold]));
+  const soldEmpresaTodaByKey = new Map(salesEmpresaToda.map((s) => [s.key, s.unitsSold]));
 
   const stockByKey = new Map<string, number>();
   for (const s of stock) {
     const key = dimensionKey(dimension, s);
     stockByKey.set(key, (stockByKey.get(key) ?? 0) + s.quantidadeDisponivel);
+  }
+  const stockEmpresaTodaByKey = new Map<string, number>();
+  for (const s of stockEmpresaToda) {
+    const key = dimensionKey(dimension, s);
+    stockEmpresaTodaByKey.set(key, (stockEmpresaTodaByKey.get(key) ?? 0) + s.quantidadeDisponivel);
   }
 
   const keys = new Set([...sales.map((s) => s.key), ...stockByKey.keys()]);
@@ -239,8 +242,11 @@ export async function getStockVsSales(filters: DashboardFilters, dimension: Dime
       const unitsSold = sale?.unitsSold ?? 0;
       const revenue = sale?.revenue ?? 0;
       const currentStock = stockByKey.get(key) ?? 0;
-      const unitsSoldAllTime = soldAllTimeByKey.get(key) ?? 0;
-      const sellThroughRate = resolveSellThrough(unitsSoldAllTime, currentStock, producedByKey.get(key) ?? 0);
+      const sellThroughRate = resolveSellThrough(
+        soldEmpresaTodaByKey.get(key) ?? 0,
+        stockEmpresaTodaByKey.get(key) ?? 0,
+        producedByKey.get(key) ?? 0
+      );
       // Aproximação: sem série histórica de estoque ainda, usamos o snapshot atual como
       // "estoque médio" do período. Melhora sozinho conforme o /api/sync acumular snapshots.
       const inventoryTurnover = currentStock > 0 ? unitsSold / currentStock : null;
@@ -423,7 +429,11 @@ export async function getStockAging(
   const storeIds = [...new Set(stock.map((s) => s.storeId))];
   const cods = [...new Set(stock.map((s) => s.cod))];
 
-  const [saleAgg, stores] = await Promise.all([
+  // Sell-through é da empresa inteira, não da loja da linha (mesmo motivo do getStockVsSales,
+  // ver comentário lá) — soma vendido/estoque por SKU (cod) em TODAS as lojas, ignorando o
+  // storeId da linha. "Estoque disponível" continua sendo o da loja específica (isso sim é por
+  // loja de propósito, é a coluna que mostra o que tem parado ali).
+  const [saleAgg, saleAggEmpresaToda, stockEmpresaToda, producedAgg, stores] = await Promise.all([
     prisma.sale.groupBy({
       by: ["storeId", "cod"],
       where: {
@@ -435,17 +445,27 @@ export async function getStockAging(
       _max: { saleDate: true },
       _sum: { quantidade: true },
     }),
+    prisma.sale.groupBy({
+      by: ["cod"],
+      where: {
+        cod: { in: cods },
+        ...(filters.tabelasPreco?.length ? { tabelaPreco: { in: filters.tabelasPreco } } : {}),
+      },
+      _sum: { quantidade: true },
+    }),
+    latestStockSnapshots({ grupoIn: filters.grupoIn }),
+    prisma.productionOrder.groupBy({ by: ["cod"], where: { cod: { in: cods } }, _sum: { quantidade: true } }),
     prisma.store.findMany({ where: { id: { in: storeIds } } }),
   ]);
 
   const storeName = new Map(stores.map((s) => [s.id, s.name]));
   const saleByKey = new Map(saleAgg.map((s) => [`${s.storeId}::${s.cod}`, s]));
-  // Sem comparação com ordem de produção aqui de propósito — cada linha dessa tabela já é
-  // sempre por LOJA individual (nunca agregado por empresa), e produção não é por loja
-  // (centralizada na Matriz). Comparar vendido de 1 loja com produção da empresa inteira sempre
-  // dava sell-through artificialmente baixo, mesmo sem filtro nenhum aplicado (achado junto com
-  // o mesmo bug na Pesquisa em 2026-08-12, ver [[project-tvb-dashboard]]). Sempre usa o cálculo
-  // por estoque aqui (produzido=0 força o fallback em resolveSellThrough).
+  const vendidoEmpresaTodaByCod = new Map(saleAggEmpresaToda.map((s) => [s.cod, s._sum.quantidade ?? 0]));
+  const produzidoByCod = new Map(producedAgg.map((p) => [p.cod, p._sum.quantidade ?? 0]));
+  const estoqueEmpresaTodaByCod = new Map<string, number>();
+  for (const s of stockEmpresaToda) {
+    estoqueEmpresaTodaByCod.set(s.cod, (estoqueEmpresaTodaByCod.get(s.cod) ?? 0) + s.quantidadeDisponivel);
+  }
 
   const today = new Date();
   const daysSince = (d: Date | null | undefined) =>
@@ -457,7 +477,11 @@ export async function getStockAging(
       const primeiraVenda = sale?._min.saleDate ?? null;
       const ultimaVenda = sale?._max.saleDate ?? null;
       const totalVendido = sale?._sum.quantidade ?? 0;
-      const sellThroughRate = resolveSellThrough(totalVendido, s.quantidadeDisponivel, 0);
+      const sellThroughRate = resolveSellThrough(
+        vendidoEmpresaTodaByCod.get(s.cod) ?? 0,
+        estoqueEmpresaTodaByCod.get(s.cod) ?? 0,
+        produzidoByCod.get(s.cod) ?? 0
+      );
       return {
         storeName: storeName.get(s.storeId) ?? s.storeId,
         produto: s.produto,
