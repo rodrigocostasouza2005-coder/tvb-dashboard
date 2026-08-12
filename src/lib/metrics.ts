@@ -17,9 +17,9 @@ export type DashboardFilters = {
 function saleWhere(filters: DashboardFilters): Prisma.SaleWhereInput {
   return {
     saleDate: { gte: filters.from, lte: filters.to },
-    ...(filters.storeIds?.length ? { storeId: { in: filters.storeIds } } : {}),
-    ...(filters.marcas?.length ? { marca: { in: filters.marcas } } : {}),
-    ...(filters.tabelasPreco?.length ? { tabelaPreco: { in: filters.tabelasPreco } } : {}),
+    ...(filters.storeIds !== undefined ? { storeId: { in: filters.storeIds } } : {}),
+    ...(filters.marcas !== undefined ? { marca: { in: filters.marcas } } : {}),
+    ...(filters.tabelasPreco !== undefined ? { tabelaPreco: { in: filters.tabelasPreco } } : {}),
     ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
   };
 }
@@ -30,7 +30,7 @@ function stockWhere(filters: Pick<DashboardFilters, "storeIds" | "grupoIn">): Pr
     // na prática é sempre matéria-prima/insumo (etiqueta, zíper, tecido em rolo), nunca produto
     // de verdade à venda. Rodrigo pediu pra tirar do dashboard inteiro.
     grupo: { not: "(sem grupo)" },
-    ...(filters.storeIds?.length ? { storeId: { in: filters.storeIds } } : {}),
+    ...(filters.storeIds !== undefined ? { storeId: { in: filters.storeIds } } : {}),
     ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
   };
 }
@@ -102,8 +102,8 @@ export async function getSalesByGrupoProduto(filters: DashboardFilters) {
 function giftWhere(filters: DashboardFilters): Prisma.GiftWhereInput {
   return {
     giftDate: { gte: filters.from, lte: filters.to },
-    ...(filters.storeIds?.length ? { storeId: { in: filters.storeIds } } : {}),
-    ...(filters.marcas?.length ? { marca: { in: filters.marcas } } : {}),
+    ...(filters.storeIds !== undefined ? { storeId: { in: filters.storeIds } } : {}),
+    ...(filters.marcas !== undefined ? { marca: { in: filters.marcas } } : {}),
     ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
   };
 }
@@ -175,7 +175,7 @@ async function getProductionByDimension(
   dimension: Dimension
 ) {
   const where: Prisma.ProductionOrderWhereInput = {
-    ...(filters.marcas?.length ? { marca: { in: filters.marcas } } : {}),
+    ...(filters.marcas !== undefined ? { marca: { in: filters.marcas } } : {}),
     ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
   };
   const by = dimension === "grupo" ? "grupo" : dimension === "produto" ? "produto" : "tamanho";
@@ -378,9 +378,9 @@ export async function getReplenishment(filters: Pick<DashboardFilters, "storeIds
 export async function getNewClientsCount(filters: DashboardFilters) {
   const where: Prisma.SaleWhereInput = {
     clienteNome: { not: null },
-    ...(filters.storeIds?.length ? { storeId: { in: filters.storeIds } } : {}),
-    ...(filters.marcas?.length ? { marca: { in: filters.marcas } } : {}),
-    ...(filters.tabelasPreco?.length ? { tabelaPreco: { in: filters.tabelasPreco } } : {}),
+    ...(filters.storeIds !== undefined ? { storeId: { in: filters.storeIds } } : {}),
+    ...(filters.marcas !== undefined ? { marca: { in: filters.marcas } } : {}),
+    ...(filters.tabelasPreco !== undefined ? { tabelaPreco: { in: filters.tabelasPreco } } : {}),
     ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
   };
   const firstPurchaseByClient = await prisma.sale.groupBy({
@@ -439,7 +439,7 @@ export async function getStockAging(
       where: {
         storeId: { in: storeIds },
         cod: { in: cods },
-        ...(filters.tabelasPreco?.length ? { tabelaPreco: { in: filters.tabelasPreco } } : {}),
+        ...(filters.tabelasPreco !== undefined ? { tabelaPreco: { in: filters.tabelasPreco } } : {}),
       },
       _min: { saleDate: true },
       _max: { saleDate: true },
@@ -449,7 +449,7 @@ export async function getStockAging(
       by: ["cod"],
       where: {
         cod: { in: cods },
-        ...(filters.tabelasPreco?.length ? { tabelaPreco: { in: filters.tabelasPreco } } : {}),
+        ...(filters.tabelasPreco !== undefined ? { tabelaPreco: { in: filters.tabelasPreco } } : {}),
       },
       _sum: { quantidade: true },
     }),

@@ -26,20 +26,22 @@ export async function getGrupoRestriction(role: Role): Promise<string[] | undefi
   return getPriorityGroups();
 }
 
-// Lojas que o usuário pode ver (undefined = sem restrição) — administrável por usuário em
-// /dashboard/admin (User.allowedStores, vazio = sem restrição, mesmo padrão do allowedTabs).
-// Passar pra parseFilters() e pra getStores()/getAllStores() — trava de verdade (nem aparece
-// como opção de escolher), não é só um valor padrão no filtro.
-export function getStoreRestriction(user: { allowedStores: string[] }): string[] | undefined {
-  return user.allowedStores.length > 0 ? user.allowedStores : undefined;
+// Lojas que o usuário pode ver — administrável por usuário em /dashboard/admin
+// (User.allowedStores). SEMPRE retorna a lista concreta, mesmo vazia — vazio agora significa
+// "não libera loja nenhuma" (default-deny), não mais "sem restrição". Trocado em 2026-08-12 a
+// pedido do Rodrigo: antes vazio = via tudo, ele achou perigoso (usuário novo sem nada marcado
+// via tudo por padrão). Usuários que já existiam antes dessa mudança foram migrados pra ter
+// todas as opções marcadas explicitamente (scripts/migrate-explicit-allowlists.ts), então
+// ninguém perdeu acesso — só usuário novo (ou editado de propósito) começa sem nada liberado.
+export function getStoreRestriction(user: { allowedStores: string[] }): string[] {
+  return user.allowedStores;
 }
 
-// Mesmo padrão de getStoreRestriction, pra Marca e Tabela de Preço (User.allowedMarcas/
-// allowedTabelasPreco, administrável em /dashboard/admin). Pedido do Rodrigo em 2026-08-12.
-export function getMarcaRestriction(user: { allowedMarcas: string[] }): string[] | undefined {
-  return user.allowedMarcas.length > 0 ? user.allowedMarcas : undefined;
+// Mesmo padrão de getStoreRestriction, pra Marca e Tabela de Preço.
+export function getMarcaRestriction(user: { allowedMarcas: string[] }): string[] {
+  return user.allowedMarcas;
 }
 
-export function getTabelaPrecoRestriction(user: { allowedTabelasPreco: string[] }): string[] | undefined {
-  return user.allowedTabelasPreco.length > 0 ? user.allowedTabelasPreco : undefined;
+export function getTabelaPrecoRestriction(user: { allowedTabelasPreco: string[] }): string[] {
+  return user.allowedTabelasPreco;
 }

@@ -20,14 +20,18 @@ export type FilterRestrictions = {
   allowedTabelasPreco?: string[];
 };
 
-// Achado real em 2026-08-12 testando a restrição de Marca: se o usuário restrito tentava forçar
-// um valor NÃO permitido pela URL, o cruzamento dava lista vazia — e o "vazio = sem filtro" lá
-// embaixo (storeIds.length ? storeIds : undefined) removia a restrição inteira, mostrando TUDO
-// em vez de só o permitido. Esse mesmo bug já existia na restrição de Loja original (só nunca
-// tinha sido testado com um valor inválido de propósito). Corrigido: cruzamento vazio cai pro
-// conjunto permitido inteiro, nunca fica vazio quando há restrição — trava de verdade.
-function crossWithAllowed(chosen: string[], allowed: string[] | undefined) {
-  if (!allowed) return chosen;
+// Duas correções aqui, achadas testando a restrição de Marca em 2026-08-12:
+// 1) Se o usuário restrito tentava forçar um valor NÃO permitido pela URL, o cruzamento dava
+//    lista vazia — e "vazio = sem filtro" removia a restrição inteira, mostrando TUDO em vez de
+//    só o permitido (já existia também na restrição de Loja original). Corrigido: cruzamento
+//    vazio cai pro conjunto permitido inteiro (nunca fica vazio quando HÁ restrição).
+// 2) `allowed` agora pode ser uma restrição de verdade "vazio = nada liberado" (default-deny,
+//    pedido do Rodrigo) — só quando `allowed` é genuinamente `undefined` (chamada sem nenhuma
+//    restrição, ex: script local) é que "usuário não escolheu nada" deve virar `undefined`
+//    (sem filtro, mostra tudo). Com `allowed` definido (mesmo `[]`), "não escolheu nada" tem
+//    que usar `allowed` como default, não virar undefined.
+function crossWithAllowed(chosen: string[], allowed: string[] | undefined): string[] | undefined {
+  if (allowed === undefined) return chosen.length ? chosen : undefined;
   if (!chosen.length) return allowed;
   const intersection = chosen.filter((v) => allowed.includes(v));
   return intersection.length ? intersection : allowed;
@@ -67,10 +71,17 @@ export function parseFilters(params: RawSearchParams, restrictions: FilterRestri
   // precisa virar "fim do dia em Brasília" pra incluir o dia inteiro escolhido.
   const to = typeof params.to === "string" && params.to ? brasiliaDayEnd(params.to) : now;
 
+  // NÃO colapsa mais lista vazia pra undefined aqui — desde 2026-08-12, vazio pode significar
+  // de propósito "restrito a nada" (default-deny), e "undefined" passaria batido pelas queries
+  // (storeId/marca/tabelaPreco não filtrados = mostra tudo, o oposto do que se quer). Como toda
+  // página agora sempre passa uma restrição concreta (getStoreRestriction/getMarcaRestriction/
+  // getTabelaPrecoRestriction nunca mais devolvem undefined), esses campos também são sempre
+  // concretos — undefined só sobra pra chamadas que genuinamente não passam restrição nenhuma
+  // (ex: scripts locais chamando parseFilters sem 2º argumento).
   return {
-    storeIds: storeIds.length ? storeIds : undefined,
-    marcas: marcas.length ? marcas : undefined,
-    tabelasPreco: tabelasPreco.length ? tabelasPreco : undefined,
+    storeIds,
+    marcas,
+    tabelasPreco,
     from,
     to,
   };

@@ -95,11 +95,11 @@ export default async function AdminPage() {
     <div>
       <h1 className="mb-1 text-lg font-semibold">Administração</h1>
       <p className="mb-6 text-sm text-[var(--text-muted)]">
-        Crie logins e escolha quais abas cada pessoa pode ver. Deixar todas as caixinhas
+        Crie logins e escolha quais abas cada pessoa pode ver. Deixar todas as caixinhas de aba
         desmarcadas usa o padrão do papel (Admin/Gestão veem tudo, Vendedor não vê Clientes).
-        O mesmo vale pra Loja, Marca e Tabela de Preço: nenhuma marcada = vê tudo. Marcando uma
-        ou mais, a pessoa só vê dado daquelas opções em qualquer aba — nem aparece opção de
-        escolher outra.
+        <strong> Loja, Marca e Tabela de Preço funcionam ao contrário</strong>: nenhuma marcada =
+        a pessoa não vê dado nenhum daquela categoria em nenhuma aba. Marque explicitamente tudo
+        que ela deve poder ver.
       </p>
 
       <section className="mb-8 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
