@@ -314,11 +314,14 @@ export async function runSync() {
     const [results, totalOrdensProducao] = await Promise.all([
       Promise.all(
         clients.map(async (client) => {
+          const t0 = Date.now();
           const { storeByDapicId, primaryStoreId } = await syncArmazenadores(client);
+          const t1 = Date.now();
           const [estoque, priceCatalog] = await Promise.all([
             syncEstoque(client, storeByDapicId),
             fetchPriceCatalog(client),
           ]);
+          const t2 = Date.now();
           // Janela de 1 dia (24h) — cobre com folga o intervalo entre os 2 syncs diários (12h) e
           // reduz o volume processado (menos chamadas de /faturas, que é 1 por fatura pro
           // Site+Atacado). Reduzido de 2 pra 1 dia em 2026-08-12 depois de um clique manual do
@@ -326,12 +329,19 @@ export async function runSync() {
           // sozinho se o último SyncLog tiver mais de 5h) cobre o risco de perder dado mais velho
           // que essa janela.
           const vendas = await syncVendas(client, primaryStoreId, 1, priceCatalog);
+          const t3 = Date.now();
           const faturas = await syncFaturas(client, primaryStoreId, 1, priceCatalog);
+          const t4 = Date.now();
+          // Instrumentação temporária pra achar o gargalo real (2026-08-12) — remover depois.
+          console.log(
+            `[sync-timing] ${client.label}: armazenadores=${t1 - t0}ms estoque+preco=${t2 - t1}ms vendas=${t3 - t2}ms faturas=${t4 - t3}ms total=${t4 - t0}ms`
+          );
           return {
             estoque,
             vendas: vendas.vendas + faturas.vendas,
             devolucoes: vendas.devolucoes,
             brindes: vendas.brindes + faturas.brindes,
+            timing: `${client.label}:arm=${t1 - t0}ms,est+preco=${t2 - t1}ms,vend=${t3 - t2}ms,fat=${t4 - t3}ms,tot=${t4 - t0}ms`,
           };
         })
       ),
@@ -346,7 +356,14 @@ export async function runSync() {
     const totalBrindes = results.reduce((a, r) => a + r.brindes, 0);
 
     await prisma.syncLog.create({
-      data: { source: "STOCK", status: "SUCCESS", recordsSynced: totalEstoque, finishedAt: new Date() },
+      data: {
+        source: "STOCK",
+        status: "SUCCESS",
+        recordsSynced: totalEstoque,
+        // Instrumentação temporária (2026-08-12) — remover depois de achar o gargalo.
+        message: results.map((r) => r.timing).join(" | "),
+        finishedAt: new Date(),
+      },
     });
     await prisma.syncLog.create({
       data: { source: "SALES", status: "SUCCESS", recordsSynced: totalVendas, finishedAt: new Date() },
