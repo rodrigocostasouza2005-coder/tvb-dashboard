@@ -5,7 +5,7 @@ import { createDapicClients, stripReferenciaPrefix, parseDapicDateTime, type Dap
 import { displayGroupFor, sellsProducts } from "@/lib/connectors/armazenadores";
 import { upsertStockSnapshots, type StockSnapshotRow } from "@/lib/connectors/upsert-stock";
 import { upsertProductionOrders, type ProductionOrderRow } from "@/lib/connectors/upsert-production-order";
-import { fetchPriceCatalog, inferTabelaPreco, type PriceCatalog } from "@/lib/connectors/tabela-preco";
+import { fetchPriceCatalogCached, inferTabelaPreco, type PriceCatalog } from "@/lib/connectors/tabela-preco";
 import { sendTelegramMessage } from "@/lib/telegram";
 import { getTopParaIncentivar, getTopVendidosPorLoja } from "@/lib/metrics";
 import type { Prisma } from "@prisma/client";
@@ -319,7 +319,7 @@ export async function runSync() {
           const t1 = Date.now();
           const [estoque, priceCatalog] = await Promise.all([
             syncEstoque(client, storeByDapicId),
-            fetchPriceCatalog(client),
+            fetchPriceCatalogCached(prisma, client),
           ]);
           const t2 = Date.now();
           // Janela de 1 dia (24h) — cobre com folga o intervalo entre os 2 syncs diários (12h) e

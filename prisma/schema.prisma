@@ -216,6 +216,18 @@ model ProductionOrder {
   @@index([grupo])
 }
 
+// Cache do catálogo de /tabelaprecos (preço por SKU por tabela), 1 linha por token/loja. Preço
+// não muda de hora em hora, mas antes buscávamos de novo em TODO sync (2x/dia + botão manual) —
+// achado em 2026-08-12 que isso contribuía pra sync ficar perto do teto de 300s da Vercel
+// (contenção de API rodando 4 lojas em paralelo). Refresh só quando mais velho que
+// PRICE_CATALOG_MAX_AGE_HORAS (ver tabela-preco.ts).
+model PriceCatalogCache {
+  id          String   @id @default(cuid())
+  clientLabel String   @unique
+  data        Json
+  updatedAt   DateTime @updatedAt
+}
+
 // Grupos de produto marcados como prioritários para vendedores (administrável, sem UI ainda).
 model PriorityGroup {
   id    String @id @default(cuid())

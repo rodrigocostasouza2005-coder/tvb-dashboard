@@ -1,3 +1,4 @@
+import type { PrismaClient } from "@prisma/client";
 import type { DapicClient } from "./dapic";
 
 export type PriceCatalog = Map<string, { table: string; valor: number }[]>;
@@ -21,6 +22,27 @@ export async function fetchPriceCatalog(client: DapicClient): Promise<PriceCatal
     }
   }
   return catalog;
+}
+
+const PRICE_CATALOG_MAX_AGE_HORAS = 20;
+
+// Lê o catálogo do cache (PriceCatalogCache) se ainda estiver "fresco"; senão busca na API e
+// atualiza o cache. 20h de folga (não 24h) — cobre um sync 2x/dia (12h de intervalo) sem correr
+// risco de nunca invalidar por causa de arredondamento de horário.
+export async function fetchPriceCatalogCached(prisma: PrismaClient, client: DapicClient): Promise<PriceCatalog> {
+  const cached = await prisma.priceCatalogCache.findUnique({ where: { clientLabel: client.label } });
+  const isFresh = cached && Date.now() - cached.updatedAt.getTime() < PRICE_CATALOG_MAX_AGE_HORAS * 60 * 60 * 1000;
+  if (isFresh) {
+    return new Map(Object.entries(cached.data as Record<string, { table: string; valor: number }[]>));
+  }
+
+  const fresh = await fetchPriceCatalog(client);
+  await prisma.priceCatalogCache.upsert({
+    where: { clientLabel: client.label },
+    create: { clientLabel: client.label, data: Object.fromEntries(fresh) },
+    update: { data: Object.fromEntries(fresh) },
+  });
+  return fresh;
 }
 
 // Tolerância de R$1 — folga pequena o suficiente pra não confundir tabelas diferentes (a menor
