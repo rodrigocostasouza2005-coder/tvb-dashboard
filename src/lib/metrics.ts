@@ -253,6 +253,49 @@ export async function searchStockVsSales(
   return all.filter((r) => r.key.toLowerCase().includes(q));
 }
 
+function sortTamanhos(tamanhos: string[]) {
+  return tamanhos.sort((a, b) => {
+    const na = Number(a);
+    const nb = Number(b);
+    if (!Number.isNaN(na) && !Number.isNaN(nb)) return na - nb;
+    return a.localeCompare(b);
+  });
+}
+
+// Pesquisa sempre por produto, com o estoque aberto por tamanho na mesma linha (pedido do
+// Rodrigo em 2026-08-12 — antes a aba tinha um seletor Grupo/Produto/Tamanho, mas ele queria ver
+// o produto com os tamanhos lado a lado, não trocar de visão). "Total" da quebra por tamanho é a
+// mesma soma que currentStock já mostrava — não é outro número, só decomposto.
+export async function searchStockVsSalesComTamanhos(filters: DashboardFilters, query: string) {
+  const rows = await searchStockVsSales(filters, "produto", query);
+  if (rows.length === 0) return { rows: [], tamanhos: [] as string[] };
+
+  const produtoNames = rows.map((r) => r.key);
+  const stockRows = await prisma.stockSnapshot.groupBy({
+    by: ["produto", "tamanho"],
+    where: { ...stockWhere(filters), produto: { in: produtoNames } },
+    _sum: { quantidadeDisponivel: true },
+  });
+
+  const tamanhoSet = new Set<string>();
+  const porProdutoTamanho = new Map<string, Map<string, number>>();
+  for (const s of stockRows) {
+    const tamanho = s.tamanho && s.tamanho.trim() ? s.tamanho : "—";
+    tamanhoSet.add(tamanho);
+    const map = porProdutoTamanho.get(s.produto) ?? new Map<string, number>();
+    map.set(tamanho, (map.get(tamanho) ?? 0) + (s._sum.quantidadeDisponivel ?? 0));
+    porProdutoTamanho.set(s.produto, map);
+  }
+
+  const tamanhos = sortTamanhos([...tamanhoSet]);
+  const rowsComTamanhos = rows.map((r) => ({
+    ...r,
+    porTamanho: porProdutoTamanho.get(r.key) ?? new Map<string, number>(),
+  }));
+
+  return { rows: rowsComTamanhos, tamanhos };
+}
+
 // Acha a regra de mínimo manual mais específica (com coleção bate antes da genérica).
 function matchMinimumRule(
   rules: { storeId: string; grupo: string; tamanho: string; colecao: string | null; valorMinimo: number }[],

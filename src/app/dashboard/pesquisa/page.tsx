@@ -1,10 +1,9 @@
 import { getSessionUser } from "@/lib/auth";
-import { searchStockVsSales, getStores, getMarcas, getTabelasPreco } from "@/lib/metrics";
+import { searchStockVsSalesComTamanhos, getStores, getMarcas, getTabelasPreco } from "@/lib/metrics";
 import { getGrupoRestriction, getStoreRestriction } from "@/lib/permissions";
-import { parseFilters, parseDimension, type RawSearchParams } from "@/lib/filters";
+import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
-import { DimensionToggle } from "../dimension-toggle";
 
 function statusFor(rate: number | null): { label: string; color: string } {
   if (rate === null) return { label: "—", color: "var(--text-muted)" };
@@ -23,14 +22,13 @@ export default async function PesquisaPage({
   requireTabAccess(user, user.role, "pesquisa");
 
   const rawParams = await searchParams;
-  const dimension = parseDimension(rawParams);
   const query = typeof rawParams.q === "string" ? rawParams.q : "";
   const grupoIn = await getGrupoRestriction(user.role);
   const allowedStores = getStoreRestriction(user);
   const filters = { ...parseFilters(rawParams, allowedStores), grupoIn };
 
-  const [rows, stores, marcas, tabelasPreco] = await Promise.all([
-    searchStockVsSales(filters, dimension, query),
+  const [{ rows, tamanhos }, stores, marcas, tabelasPreco] = await Promise.all([
+    searchStockVsSalesComTamanhos(filters, query),
     getStores(allowedStores),
     getMarcas(),
     getTabelasPreco(),
@@ -46,10 +44,8 @@ export default async function PesquisaPage({
         showTabelaPreco
         filters={filters}
       />
-      <DimensionToggle basePath="/dashboard/pesquisa" searchParams={rawParams} current={dimension} />
 
       <form action="/dashboard/pesquisa" method="GET" className="mb-4 flex gap-2">
-        <input type="hidden" name="dim" value={dimension} />
         {(filters.storeIds ?? []).map((id) => (
           <input key={id} type="hidden" name="store" value={id} />
         ))}
@@ -75,15 +71,18 @@ export default async function PesquisaPage({
         </button>
       </form>
 
-      <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)]">
+      <div className="overflow-x-auto rounded-lg border border-[var(--border)] bg-[var(--surface-1)]">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
-              <th className="px-4 py-2 font-medium">
-                {dimension === "grupo" ? "Grupo" : dimension === "produto" ? "Produto" : "Tamanho"}
-              </th>
+              <th className="px-4 py-2 font-medium">Produto</th>
               <th className="px-4 py-2 font-medium">Vendido no período</th>
-              <th className="px-4 py-2 font-medium">Estoque atual</th>
+              {tamanhos.map((t) => (
+                <th key={t} className="px-3 py-2 text-center font-medium">
+                  {t}
+                </th>
+              ))}
+              <th className="px-4 py-2 font-medium">Total estoque</th>
               <th className="px-4 py-2 font-medium">Sell-through</th>
               <th className="px-4 py-2 font-medium">Status</th>
             </tr>
@@ -95,7 +94,15 @@ export default async function PesquisaPage({
                 <tr key={r.key} className="border-b border-[var(--gridline)] last:border-0">
                   <td className="px-4 py-2 font-medium">{r.key}</td>
                   <td className="px-4 py-2 tabular-nums">{r.unitsSold.toLocaleString("pt-BR")}</td>
-                  <td className="px-4 py-2 tabular-nums">{r.currentStock.toLocaleString("pt-BR")}</td>
+                  {tamanhos.map((t) => {
+                    const qtd = r.porTamanho.get(t) ?? 0;
+                    return (
+                      <td key={t} className="px-3 py-2 text-center tabular-nums text-[var(--text-secondary)]">
+                        {qtd > 0 ? qtd.toLocaleString("pt-BR") : "—"}
+                      </td>
+                    );
+                  })}
+                  <td className="px-4 py-2 tabular-nums font-medium">{r.currentStock.toLocaleString("pt-BR")}</td>
                   <td className="px-4 py-2 tabular-nums">
                     {r.sellThroughRate !== null ? `${r.sellThroughRate.toFixed(0)}%` : "—"}
                   </td>
@@ -110,7 +117,7 @@ export default async function PesquisaPage({
             })}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-4 py-6 text-center text-[var(--text-muted)]">
+                <td colSpan={5 + tamanhos.length} className="px-4 py-6 text-center text-[var(--text-muted)]">
                   {query ? "Nenhum resultado pra essa busca." : "Digite algo pra buscar."}
                 </td>
               </tr>
