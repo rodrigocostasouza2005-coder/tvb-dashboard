@@ -27,8 +27,8 @@ export default function LoginPage() {
           action={formAction}
           className="w-full max-w-sm rounded-xl border border-black/10 bg-[#fcfcfb] p-8 shadow-sm"
         >
-          <h1 className="mb-1 text-xl font-semibold text-[#0b0b0b]">TVB Shorts</h1>
-          <p className="mb-6 text-sm text-[#52514e]">Entrar no dashboard</p>
+          <h1 className="mb-1 text-xl font-semibold text-[#0b0b0b]">TVB Radar</h1>
+          <p className="mb-6 text-sm text-[#52514e]">TVB Shorts · Entrar no painel</p>
 
           <label className="mb-1 block text-sm font-medium text-[#0b0b0b]" htmlFor="email">
             Email

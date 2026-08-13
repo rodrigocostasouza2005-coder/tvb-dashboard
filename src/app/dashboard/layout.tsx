@@ -27,8 +27,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
               <Image src="/tvb-logo.png" alt="TVB Shorts" width={28} height={22} className="rounded-sm" />
             </div>
             <div>
-              <div className="text-sm font-semibold">TVB Shorts</div>
-              <div className="text-xs text-[var(--text-muted)]">Painel de operação</div>
+              <div className="text-sm font-semibold">TVB Radar</div>
+              <div className="text-xs text-[var(--text-muted)]">TVB Shorts · Painel de operação</div>
             </div>
           </div>
           <div className="flex items-center gap-4">
