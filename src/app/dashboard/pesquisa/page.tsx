@@ -93,8 +93,12 @@ export default async function PesquisaPage({
           sellThroughRate: r.sellThroughRate,
           porTamanho: Object.fromEntries(r.porTamanho),
           porLoja: [...r.porLoja.entries()]
-            .map(([loja, qtd]) => ({ loja, qtd }))
-            .sort((a, b) => b.qtd - a.qtd),
+            .map(([loja, porTamanho]) => ({
+              loja,
+              porTamanho: Object.fromEntries(porTamanho),
+              total: [...porTamanho.values()].reduce((sum, v) => sum + v, 0),
+            }))
+            .sort((a, b) => b.total - a.total),
         }))}
         tamanhos={tamanhos}
         emptyMessage={query ? "Nenhum resultado pra essa busca." : "Digite algo pra buscar."}

@@ -8,7 +8,7 @@ type Row = {
   currentStock: number;
   sellThroughRate: number | null;
   porTamanho: Record<string, number>;
-  porLoja: { loja: string; qtd: number }[];
+  porLoja: { loja: string; porTamanho: Record<string, number>; total: number }[];
 };
 
 function statusFor(rate: number | null): { label: string; color: string } {
@@ -62,7 +62,6 @@ export function PesquisaTable({
             const status = statusFor(r.sellThroughRate);
             const pct = r.sellThroughRate ?? 0;
             const isOpen = open.has(r.key);
-            const maxLoja = Math.max(1, ...r.porLoja.map((l) => l.qtd));
             return (
               <Fragment key={r.key}>
                 <tr className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
@@ -120,22 +119,37 @@ export function PesquisaTable({
                 {isOpen && (
                   <tr className="border-b border-[var(--gridline)] bg-[var(--page-plane)] last:border-0">
                     <td colSpan={4 + tamanhos.length} className="px-4 py-3 pl-10">
-                      <div className="flex flex-col gap-1.5">
-                        {r.porLoja.map((l) => (
-                          <div key={l.loja} className="flex items-center gap-3 text-xs">
-                            <span className="w-40 shrink-0 text-[var(--text-secondary)]">{l.loja}</span>
-                            <div className="h-2 flex-1 max-w-xs rounded-full bg-[var(--gridline)]">
-                              <div
-                                className="h-2 rounded-full"
-                                style={{ width: `${(l.qtd / maxLoja) * 100}%`, backgroundColor: "var(--series-1)" }}
-                              />
-                            </div>
-                            <span className="w-12 shrink-0 text-right tabular-nums text-[var(--text-primary)]">
-                              {l.qtd.toLocaleString("pt-BR")}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
+                      <table className="text-xs">
+                        <thead>
+                          <tr className="text-[var(--text-muted)]">
+                            <th className="py-1 pr-4 text-left font-medium">Loja</th>
+                            {tamanhos.map((t) => (
+                              <th key={t} className="px-2 py-1 text-center font-medium">
+                                {t}
+                              </th>
+                            ))}
+                            <th className="py-1 pl-4 text-right font-medium">Total</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {r.porLoja.map((l) => (
+                            <tr key={l.loja}>
+                              <td className="py-1 pr-4 text-[var(--text-secondary)]">{l.loja}</td>
+                              {tamanhos.map((t) => {
+                                const qtd = l.porTamanho[t] ?? 0;
+                                return (
+                                  <td key={t} className="px-2 py-1 text-center tabular-nums text-[var(--text-secondary)]">
+                                    {qtd > 0 ? qtd.toLocaleString("pt-BR") : "—"}
+                                  </td>
+                                );
+                              })}
+                              <td className="py-1 pl-4 text-right tabular-nums font-medium text-[var(--text-primary)]">
+                                {l.total.toLocaleString("pt-BR")}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </td>
                   </tr>
                 )}

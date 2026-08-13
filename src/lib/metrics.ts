@@ -373,7 +373,7 @@ export async function searchStockVsSalesComTamanhos(filters: DashboardFilters, q
       _sum: { quantidadeDisponivel: true },
     }),
     prisma.stockSnapshot.groupBy({
-      by: ["produto", "storeId"],
+      by: ["produto", "storeId", "tamanho"],
       where: { ...stockWhere(filters), produto: { in: produtoNames }, storeId: { in: [...lojaNameByStoreId.keys()] } },
       _sum: { quantidadeDisponivel: true },
     }),
@@ -389,20 +389,25 @@ export async function searchStockVsSalesComTamanhos(filters: DashboardFilters, q
     porProdutoTamanho.set(s.produto, map);
   }
 
-  const porProdutoLoja = new Map<string, Map<string, number>>();
+  // Loja -> tamanho -> quantidade, pra abrir o dropdown da Pesquisa mostrando os dois eixos
+  // juntos (não só o total da loja) — pedido do Rodrigo depois de ver a primeira versão só com total.
+  const porProdutoLoja = new Map<string, Map<string, Map<string, number>>>();
   for (const s of stockPorLojaRows) {
     const lojaNome = lojaNameByStoreId.get(s.storeId);
     if (!lojaNome) continue;
-    const map = porProdutoLoja.get(s.produto) ?? new Map<string, number>();
-    map.set(lojaNome, (map.get(lojaNome) ?? 0) + (s._sum.quantidadeDisponivel ?? 0));
-    porProdutoLoja.set(s.produto, map);
+    const tamanho = s.tamanho && s.tamanho.trim() ? s.tamanho : "—";
+    const porLoja = porProdutoLoja.get(s.produto) ?? new Map<string, Map<string, number>>();
+    const porTamanho = porLoja.get(lojaNome) ?? new Map<string, number>();
+    porTamanho.set(tamanho, (porTamanho.get(tamanho) ?? 0) + (s._sum.quantidadeDisponivel ?? 0));
+    porLoja.set(lojaNome, porTamanho);
+    porProdutoLoja.set(s.produto, porLoja);
   }
 
   const tamanhos = sortTamanhos([...tamanhoSet]);
   const rowsComTamanhos = rows.map((r) => ({
     ...r,
     porTamanho: porProdutoTamanho.get(r.key) ?? new Map<string, number>(),
-    porLoja: porProdutoLoja.get(r.key) ?? new Map<string, number>(),
+    porLoja: porProdutoLoja.get(r.key) ?? new Map<string, Map<string, number>>(),
   }));
 
   return { rows: rowsComTamanhos, tamanhos };
