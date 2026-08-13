@@ -28,7 +28,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
             </div>
             <div>
               <div className="text-sm font-semibold">TVB Radar</div>
-              <div className="text-xs text-[var(--text-muted)]">TVB Shorts · Painel de operação</div>
+              <div className="text-xs text-[var(--text-muted)]">TVB Shorts · Painel TVB Radar</div>
             </div>
           </div>
           <div className="flex items-center gap-4">

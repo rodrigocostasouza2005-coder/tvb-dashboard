@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "TVB Radar",
-  description: "Painel de operação da TVB Shorts",
+  description: "TVB Radar — painel de operação da TVB Shorts",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

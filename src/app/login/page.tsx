@@ -20,6 +20,14 @@ export default function LoginPage() {
           className="object-cover"
           sizes="50vw"
         />
+        <div
+          className="absolute inset-0"
+          style={{ background: "linear-gradient(0deg, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0) 45%)" }}
+        />
+        <div className="absolute bottom-0 left-0 p-10 text-white">
+          <div className="text-3xl font-semibold tracking-tight">TVB Radar</div>
+          <div className="mt-1 text-sm text-white/80">Acompanhe vendas, estoque e sell-through da TVB Shorts em tempo real</div>
+        </div>
       </div>
 
       <div className="flex flex-1 items-center justify-center px-4 py-12">
@@ -28,7 +36,7 @@ export default function LoginPage() {
           className="w-full max-w-sm rounded-xl border border-black/10 bg-[#fcfcfb] p-8 shadow-sm"
         >
           <h1 className="mb-1 text-xl font-semibold text-[#0b0b0b]">TVB Radar</h1>
-          <p className="mb-6 text-sm text-[#52514e]">TVB Shorts · Entrar no painel</p>
+          <p className="mb-6 text-sm text-[#52514e]">TVB Shorts · Entrar no TVB Radar</p>
 
           <label className="mb-1 block text-sm font-medium text-[#0b0b0b]" htmlFor="email">
             Email
