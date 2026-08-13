@@ -778,10 +778,13 @@ export async function getTabelasPreco(allowedTabelasPreco?: string[]) {
   return rows.map((r) => r.tabelaPreco as string).sort();
 }
 
+// Uma linha por fonte (Estoque, Vendas, Devoluções, Produção, Brinde), sempre a mais recente
+// dela — antes pegava só as últimas 4 linhas no total, e como cada sync grava 5 linhas quase
+// juntas, sempre cortava uma fonte fora (Estoque, por ser a primeira gravada no lote).
 export async function getLastSyncs() {
   return prisma.syncLog.findMany({
     orderBy: { startedAt: "desc" },
-    take: 4,
+    distinct: ["source"],
   });
 }
 

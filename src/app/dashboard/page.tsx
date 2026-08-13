@@ -43,6 +43,10 @@ const SOURCE_LABEL: Record<string, string> = {
   GIFTS: "Brinde",
 };
 
+// Ordem fixa de exibição — todo runSync() grava as 5 fontes quase no mesmo instante, então
+// ordenar por horário fica meio aleatório; essa ordem é sempre a mesma, mais fácil de escanear.
+const SOURCE_ORDER = ["SALES", "STOCK", "RETURNS", "PRODUCTION", "GIFTS"];
+
 export default async function OverviewPage({
   searchParams,
 }: {
@@ -156,15 +160,27 @@ export default async function OverviewPage({
       </section>
 
       <section>
-        <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Últimas sincronizações</h2>
-        <ul className="flex flex-wrap gap-3 text-xs text-[var(--text-muted)]">
-          {syncs.map((s) => (
-            <li key={s.id} className="rounded-md border border-[var(--border)] px-3 py-1.5">
-              {SOURCE_LABEL[s.source] ?? s.source}: {formatDateTime(s.startedAt)} —{" "}
-              {s.status === "SUCCESS" ? `ok (${s.recordsSynced})` : "falhou"}
-            </li>
-          ))}
-          {syncs.length === 0 && <li>Nenhuma sincronização registrada ainda.</li>}
+        <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">
+          Sincronizações — todas as fontes
+        </h2>
+        <ul className="flex flex-wrap gap-3 text-xs">
+          {[...syncs]
+            .sort((a, b) => SOURCE_ORDER.indexOf(a.source) - SOURCE_ORDER.indexOf(b.source))
+            .map((s) => (
+              <li
+                key={s.id}
+                className="flex items-center gap-2 rounded-md border border-[var(--border)] px-3 py-1.5 text-[var(--text-muted)]"
+              >
+                <span
+                  className="h-1.5 w-1.5 shrink-0 rounded-full"
+                  style={{ backgroundColor: s.status === "SUCCESS" ? "var(--status-good)" : "var(--status-critical)" }}
+                />
+                <span className="font-medium text-[var(--text-primary)]">{SOURCE_LABEL[s.source] ?? s.source}</span>
+                <span>{formatDateTime(s.startedAt)}</span>
+                <span>{s.status === "SUCCESS" ? `ok (${s.recordsSynced})` : "falhou"}</span>
+              </li>
+            ))}
+          {syncs.length === 0 && <li className="text-[var(--text-muted)]">Nenhuma sincronização registrada ainda.</li>}
         </ul>
       </section>
     </div>
