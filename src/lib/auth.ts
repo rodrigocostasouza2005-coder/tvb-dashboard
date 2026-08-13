@@ -51,6 +51,7 @@ export type SessionUser = {
   allowedStores: string[];
   allowedMarcas: string[];
   allowedTabelasPreco: string[];
+  canSeeFinancials: boolean;
 };
 
 export async function getSessionUser(): Promise<SessionUser | null> {
@@ -74,5 +75,6 @@ export async function getSessionUser(): Promise<SessionUser | null> {
     allowedStores: session.user.allowedStores,
     allowedMarcas: session.user.allowedMarcas,
     allowedTabelasPreco: session.user.allowedTabelasPreco,
+    canSeeFinancials: session.user.canSeeFinancials,
   };
 }

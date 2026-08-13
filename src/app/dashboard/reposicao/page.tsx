@@ -46,7 +46,7 @@ export default async function ReposicaoPage({
       </div>
 
       {rows.length > 0 && (
-        <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
+        <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
           <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Unidades faltando por loja</h2>
           <MetricBarChart
             data={Object.entries(
@@ -62,7 +62,7 @@ export default async function ReposicaoPage({
         </section>
       )}
 
-      <div className="overflow-x-auto overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)]">
+      <div className="overflow-x-auto overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
         <table className="w-full min-w-[900px] text-sm">
           <thead>
             <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">

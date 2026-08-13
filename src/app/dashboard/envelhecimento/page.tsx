@@ -83,7 +83,7 @@ export default async function EnvelhecimentoPage({
       )}
 
       {rows.length > 0 && (
-        <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
+        <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
           <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Distribuição por idade</h2>
           <PieChart
             data={Object.entries(

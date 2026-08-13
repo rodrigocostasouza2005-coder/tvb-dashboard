@@ -78,7 +78,7 @@ export default async function OverviewPage({
       getNewClientsCount(filters),
     ]);
 
-  const showFinancials = canSeeFinancials(user.role);
+  const showFinancials = canSeeFinancials(user);
   const top10 = salesByDimension.slice(0, 10);
   const dimensionLabel = dimension === "produto" ? "Produto" : dimension === "tamanho" ? "Tamanho" : "Grupo";
 
@@ -104,12 +104,12 @@ export default async function OverviewPage({
         />
       </section>
 
-      <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
+      <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
         <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Vendas ao longo do período</h2>
         <SalesTrendChart data={salesByDay} showRevenue={showFinancials} />
       </section>
 
-      <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
+      <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
         <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Comparativo entre lojas</h2>
         <StoreCompareChart data={salesByDayPerStore.data} series={salesByDayPerStore.series} />
       </section>
@@ -122,14 +122,14 @@ export default async function OverviewPage({
           <DimensionToggle basePath="/dashboard" searchParams={rawParams} current={dimension} />
         </div>
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
             <TopBarChart
               data={top10}
               valueKey={showFinancials ? "revenue" : "unitsSold"}
               showCurrency={showFinancials}
             />
           </div>
-          <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)]">
+          <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">

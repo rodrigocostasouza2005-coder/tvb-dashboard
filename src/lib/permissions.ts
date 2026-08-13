@@ -14,8 +14,8 @@ export async function getPriorityGroups(): Promise<string[]> {
   return groups;
 }
 
-export function canSeeFinancials(role: Role) {
-  return role !== "VENDEDOR";
+export function canSeeFinancials(user: { canSeeFinancials: boolean }) {
+  return user.canSeeFinancials;
 }
 
 // Retorna a lista de grupos que o usuário pode ver (undefined = sem restrição).

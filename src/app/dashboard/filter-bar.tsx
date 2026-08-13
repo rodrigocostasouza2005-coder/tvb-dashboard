@@ -60,7 +60,7 @@ export function FilterBar({
     <form
       action={action}
       method="GET"
-      className="mb-6 flex flex-wrap items-end gap-4 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3 text-sm"
+      className="mb-6 flex flex-wrap items-end gap-4 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-3 text-sm"
     >
       <CheckboxGroup
         label="Loja"

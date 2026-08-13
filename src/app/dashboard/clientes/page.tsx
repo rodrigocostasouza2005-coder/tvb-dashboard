@@ -33,7 +33,7 @@ export default async function ClientesPage({
     getMarcas(allowedMarcas),
     getTabelasPreco(allowedTabelasPreco),
   ]);
-  const showFinancials = canSeeFinancials(user.role);
+  const showFinancials = canSeeFinancials(user);
 
   return (
     <div>
@@ -50,7 +50,7 @@ export default async function ClientesPage({
         avançadas entram numa próxima etapa.
       </p>
 
-      <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
+      <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
         <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">
           Top clientes {showFinancials ? "por receita" : "por unidades"}
         </h2>
@@ -61,7 +61,7 @@ export default async function ClientesPage({
         />
       </section>
 
-      <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)]">
+      <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">

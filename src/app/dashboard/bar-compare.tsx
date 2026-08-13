@@ -19,7 +19,7 @@ export function BarCompare({
 }) {
   if (rows.length === 0) {
     return (
-      <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
+      <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
         <p className="text-sm text-[var(--text-muted)]">Sem dados para o período/filtro selecionado.</p>
       </div>
     );
@@ -30,7 +30,7 @@ export function BarCompare({
   const labelStyle = { fill: "var(--text-secondary)", fontSize: 11 };
 
   return (
-    <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
+    <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
       <div className="mb-3 flex items-center gap-4 text-xs text-[var(--text-secondary)]">
         <span className="flex items-center gap-1.5">
           <span className="h-2 w-2 rounded-full" style={{ backgroundColor: "var(--series-1)" }} />

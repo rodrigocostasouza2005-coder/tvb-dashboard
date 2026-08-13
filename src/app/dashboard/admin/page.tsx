@@ -102,7 +102,7 @@ export default async function AdminPage() {
         que ela deve poder ver.
       </p>
 
-      <section className="mb-8 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
+      <section className="mb-8 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
         <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Sincronização</h2>
         <p className="mb-3 text-xs text-[var(--text-muted)]">
           Roda a mesma sincronização do cron das 8h/17h, na hora. Dispara o aviso no Telegram do
@@ -111,7 +111,7 @@ export default async function AdminPage() {
         <ForceSyncButton />
       </section>
 
-      <section className="mb-8 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
+      <section className="mb-8 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
         <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Novo usuário</h2>
         <form action={createUserAction} className="flex flex-col gap-3">
           <div className="flex flex-wrap gap-3">
@@ -151,6 +151,16 @@ export default async function AdminPage() {
               ))}
             </select>
           </div>
+          <label className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
+            <input
+              type="checkbox"
+              name="canSeeFinancials"
+              value="true"
+              defaultChecked={true}
+              className="accent-[var(--series-1)]"
+            />
+            Ver valores financeiros (receita, custo, margem)
+          </label>
           <TabCheckboxes name="tab" checked={new Set()} />
           <StoreCheckboxes name="store" checked={new Set()} stores={stores} />
           <OptionCheckboxes name="marca" checked={new Set()} options={marcas} />
@@ -168,7 +178,7 @@ export default async function AdminPage() {
         {users.map((u) => {
           const effectiveTabs = new Set(u.allowedTabs.length > 0 ? u.allowedTabs : defaultAllowedTabs(u.role));
           return (
-            <div key={u.id} className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
+            <div key={u.id} className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <div className="text-sm font-medium">{u.name}</div>
@@ -208,6 +218,16 @@ export default async function AdminPage() {
                     ))}
                   </select>
                 </div>
+                <label className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
+                  <input
+                    type="checkbox"
+                    name="canSeeFinancials"
+                    value="true"
+                    defaultChecked={u.canSeeFinancials}
+                    className="accent-[var(--series-1)]"
+                  />
+                  Ver valores financeiros (receita, custo, margem)
+                </label>
                 <TabCheckboxes name="tab" checked={effectiveTabs} />
                 <StoreCheckboxes name="store" checked={new Set(u.allowedStores)} stores={stores} />
                 <OptionCheckboxes name="marca" checked={new Set(u.allowedMarcas)} options={marcas} />

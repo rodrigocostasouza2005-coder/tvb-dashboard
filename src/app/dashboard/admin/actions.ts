@@ -35,6 +35,10 @@ function readAllowedTabelasPreco(formData: FormData): string[] {
   return formData.getAll("tabelaPreco").map(String).filter(Boolean);
 }
 
+function readCanSeeFinancials(formData: FormData): boolean {
+  return formData.get("canSeeFinancials") === "true";
+}
+
 export async function createUserAction(formData: FormData) {
   await requireAdmin();
 
@@ -48,12 +52,13 @@ export async function createUserAction(formData: FormData) {
   const allowedStores = readAllowedStores(formData);
   const allowedMarcas = readAllowedMarcas(formData);
   const allowedTabelasPreco = readAllowedTabelasPreco(formData);
+  const canSeeFinancials = readCanSeeFinancials(formData);
 
   if (!name || !email || !password) return;
 
   const passwordHash = await hashPassword(password);
   await prisma.user.create({
-    data: { name, email, passwordHash, role, allowedTabs, allowedStores, allowedMarcas, allowedTabelasPreco },
+    data: { name, email, passwordHash, role, allowedTabs, allowedStores, allowedMarcas, allowedTabelasPreco, canSeeFinancials },
   });
 
   revalidatePath("/dashboard/admin");
@@ -68,11 +73,12 @@ export async function updateUserAction(formData: FormData) {
   const allowedStores = readAllowedStores(formData);
   const allowedMarcas = readAllowedMarcas(formData);
   const allowedTabelasPreco = readAllowedTabelasPreco(formData);
+  const canSeeFinancials = readCanSeeFinancials(formData);
   if (!userId) return;
 
   await prisma.user.update({
     where: { id: userId },
-    data: { role, allowedTabs, allowedStores, allowedMarcas, allowedTabelasPreco },
+    data: { role, allowedTabs, allowedStores, allowedMarcas, allowedTabelasPreco, canSeeFinancials },
   });
 
   revalidatePath("/dashboard/admin");

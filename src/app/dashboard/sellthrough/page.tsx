@@ -55,7 +55,7 @@ export default async function SellthroughPage({
         até termos série histórica de estoque via sync automático).
       </p>
 
-      <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
+      <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
         <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">
           Sell-through por {dimension === "grupo" ? "grupo" : dimension === "produto" ? "produto" : "tamanho"}
         </h2>

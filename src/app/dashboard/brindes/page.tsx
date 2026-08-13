@@ -34,7 +34,7 @@ export default async function BrindesPage({
     getStores(allowedStores),
     getMarcas(allowedMarcas),
   ]);
-  const showFinancials = canSeeFinancials(user.role);
+  const showFinancials = canSeeFinancials(user);
   const totalUnits = rows.reduce((sum, r) => sum + r.unitsSold, 0);
 
   return (
@@ -44,7 +44,7 @@ export default async function BrindesPage({
         Itens dados como brinde (Tipo=Brinde na API) — não entram na contagem de vendas nem de
         devoluções.
       </p>
-      <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
+      <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
         <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">
           Top {dimension === "grupo" ? "grupo" : dimension === "produto" ? "produto" : "tamanho"} em brinde
         </h2>
@@ -66,7 +66,7 @@ export default async function BrindesPage({
           emptyMessage="Sem brinde no período/filtro selecionado."
         />
       ) : (
-        <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)]">
+        <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">

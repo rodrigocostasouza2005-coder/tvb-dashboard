@@ -33,7 +33,7 @@ export default async function VendedoresPage({
     getMarcas(allowedMarcas),
     getTabelasPreco(allowedTabelasPreco),
   ]);
-  const showFinancials = canSeeFinancials(user.role);
+  const showFinancials = canSeeFinancials(user);
 
   // Uma seção por loja (não uma lista só misturando todo mundo) — cada loja com seu próprio
   // ranking. Ordem das lojas por receita total, do mesmo jeito que os vendedores já eram
@@ -63,7 +63,7 @@ export default async function VendedoresPage({
         {stores2.map(([storeName, storeRows]) => (
           <section key={storeName}>
             <h2 className="mb-2 text-sm font-medium text-[var(--text-secondary)]">{storeName}</h2>
-            <div className="mb-3 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
+            <div className="mb-3 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
               <MetricBarChart
                 data={storeRows
                   .slice(0, 10)
@@ -72,7 +72,7 @@ export default async function VendedoresPage({
                 color="var(--cat-4)"
               />
             </div>
-            <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)]">
+            <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">

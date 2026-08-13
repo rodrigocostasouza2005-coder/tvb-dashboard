@@ -42,7 +42,7 @@ export default async function EstoqueMinimoPage() {
         vem do DAPIC na aba Reposição de Lojas.
       </p>
 
-      <section className="mb-8 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
+      <section className="mb-8 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
         <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Nova regra</h2>
         <NovaRegraForm
           stores={stores}
@@ -54,7 +54,7 @@ export default async function EstoqueMinimoPage() {
       </section>
 
       {rules.length > 0 && (
-        <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
+        <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
           <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Regras por loja</h2>
           <MetricBarChart
             data={Object.entries(

@@ -57,7 +57,7 @@ export default async function VendasPage({
     getMarcas(allowedMarcas),
     getTabelasPreco(allowedTabelasPreco),
   ]);
-  const showFinancials = canSeeFinancials(user.role);
+  const showFinancials = canSeeFinancials(user);
   const totalUnits = rows.reduce((sum, r) => sum + r.unitsSold, 0);
   const top10 = rows.slice(0, 10);
 
@@ -73,17 +73,17 @@ export default async function VendasPage({
       />
 
       <section className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
+        <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
           <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Vendas ao longo do período</h2>
           <SalesTrendChart data={salesByDay} showRevenue={showFinancials} />
         </div>
-        <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
+        <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
           <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Comparativo entre lojas</h2>
           <StoreCompareChart data={salesByDayPerStore.data} series={salesByDayPerStore.series} />
         </div>
       </section>
 
-      <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
+      <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
         <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">
           Top {dimension === "grupo" ? "grupo" : dimension === "produto" ? "produto" : "tamanho"}{" "}
           {showFinancials ? "por receita" : "por vendas"}
@@ -101,7 +101,7 @@ export default async function VendasPage({
           showFinancials={showFinancials}
         />
       ) : (
-        <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)]">
+        <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">

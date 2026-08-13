@@ -33,7 +33,7 @@ export default async function EstoqueAtualPage({
     getAllStores(allowedStores),
     getMarcas(),
   ]);
-  const showFinancials = canSeeFinancials(user.role);
+  const showFinancials = canSeeFinancials(user);
   const totalQuantidade = rows.reduce((sum, r) => sum + r.quantidade, 0);
   const totalCusto = rows.reduce((sum, r) => sum + r.valorCusto, 0);
 
@@ -48,12 +48,12 @@ export default async function EstoqueAtualPage({
       </p>
 
       <section className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
+        <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
           <div className="text-xs font-medium text-[var(--text-muted)]">Unidades em estoque</div>
           <div className="mt-1 text-2xl font-semibold tabular-nums">{totalQuantidade.toLocaleString("pt-BR")}</div>
         </div>
         {showFinancials && (
-          <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
             <div className="text-xs font-medium text-[var(--text-muted)]">Valor de custo total</div>
             <div className="mt-1 text-2xl font-semibold tabular-nums">{formatBRL(totalCusto)}</div>
           </div>
@@ -61,13 +61,13 @@ export default async function EstoqueAtualPage({
       </section>
 
       <section className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
+        <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
           <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">% de estoque por armazenador</h2>
           <PieChart
             data={porArmazenador.map((p) => ({ label: p.storeName, value: p.quantidade, percentual: p.percentual }))}
           />
         </div>
-        <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
+        <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
           <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">
             Top {dimension === "grupo" ? "grupo" : dimension === "produto" ? "produto" : "tamanho"} em estoque
           </h2>
@@ -75,7 +75,7 @@ export default async function EstoqueAtualPage({
         </div>
       </section>
 
-      <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)]">
+      <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">

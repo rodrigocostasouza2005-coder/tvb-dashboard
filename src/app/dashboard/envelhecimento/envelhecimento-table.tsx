@@ -47,7 +47,7 @@ export function EnvelhecimentoTable({ rows }: { rows: Row[] }) {
   const visible = filtered.slice(0, 150);
 
   return (
-    <div className="overflow-x-auto overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)]">
+    <div className="overflow-x-auto overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
       <table className="w-full min-w-[900px] text-sm">
         <thead>
           <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">

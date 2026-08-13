@@ -29,6 +29,9 @@ model User {
   // getTabelaPrecoRestriction em lib/permissions.ts). Vazio = sem restrição.
   allowedMarcas String[] @default([])
   allowedTabelasPreco String[] @default([])
+  // Controla se o usuário vê colunas/KPIs financeiros (receita, custo, margem).
+  // true por padrão — só desmarcar no Admin pra quem não deve ver.
+  canSeeFinancials Boolean @default(true)
   createdAt    DateTime @default(now())
 
   sessions Session[]
