@@ -6,6 +6,7 @@ import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
 import { BarCompare } from "../bar-compare";
 import { DimensionToggle } from "../dimension-toggle";
+import { StatTile } from "../stat-tile";
 import { GrupoDrillSelect } from "./grupo-drill-select";
 
 export default async function EstoquePage({
@@ -43,6 +44,11 @@ export default async function EstoquePage({
     getTabelasPreco(allowedTabelasPreco),
   ]);
 
+  const dimensionLabel = effectiveDimension === "produto" ? "Produto" : effectiveDimension === "tamanho" ? "Tamanho" : "Grupo";
+  const totalEstoque = rows.reduce((sum, r) => sum + r.currentStock, 0);
+  const totalVendido = rows.reduce((sum, r) => sum + r.unitsSold, 0);
+  const top40 = rows.slice(0, 40);
+
   return (
     <div>
       <FilterBar
@@ -53,15 +59,70 @@ export default async function EstoquePage({
         showTabelaPreco
         filters={filters}
       />
+
+      <section className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-3">
+        <StatTile label="Estoque atual (total)" value={totalEstoque.toLocaleString("pt-BR")} />
+        <StatTile label="Vendido no período (total)" value={totalVendido.toLocaleString("pt-BR")} />
+        <StatTile label={`${dimensionLabel}s no comparativo`} value={rows.length.toLocaleString("pt-BR")} />
+      </section>
+
       <DimensionToggle basePath="/dashboard/estoque" searchParams={rawParams} current={dimension} />
       {dimension === "grupo" && (
         <GrupoDrillSelect grupos={grupoRows.map((r) => r.key)} current={grupoDrill} />
       )}
-      <BarCompare
-        rows={rows.slice(0, 40).map((r) => ({ label: r.key, a: r.currentStock, b: r.unitsSold }))}
-        labelA="Estoque atual"
-        labelB="Vendido no período"
-      />
+
+      <section className="mb-6">
+        <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">
+          Estoque atual × vendido — top {top40.length} {dimensionLabel.toLowerCase()}s
+        </h2>
+        <BarCompare
+          rows={top40.map((r) => ({ label: r.key, a: r.currentStock, b: r.unitsSold }))}
+          labelA="Estoque atual"
+          labelB="Vendido no período"
+        />
+      </section>
+
+      <section>
+        <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Números exatos</h2>
+        <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)]">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
+                <th className="px-4 py-2 font-medium">{dimensionLabel}</th>
+                <th className="px-4 py-2 font-medium">Estoque atual</th>
+                <th className="px-4 py-2 font-medium">Vendido no período</th>
+                <th className="px-4 py-2 font-medium">Diferença</th>
+              </tr>
+            </thead>
+            <tbody>
+              {top40.map((r) => {
+                const diff = r.currentStock - r.unitsSold;
+                return (
+                  <tr key={r.key} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
+                    <td className="px-4 py-2 font-medium">{r.key}</td>
+                    <td className="px-4 py-2 tabular-nums">{r.currentStock.toLocaleString("pt-BR")}</td>
+                    <td className="px-4 py-2 tabular-nums">{r.unitsSold.toLocaleString("pt-BR")}</td>
+                    <td
+                      className="px-4 py-2 tabular-nums font-medium"
+                      style={{ color: diff < 0 ? "var(--status-critical)" : "var(--text-secondary)" }}
+                    >
+                      {diff > 0 ? "+" : ""}
+                      {diff.toLocaleString("pt-BR")}
+                    </td>
+                  </tr>
+                );
+              })}
+              {top40.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="px-4 py-6 text-center text-[var(--text-muted)]">
+                    Sem dados para o período/filtro selecionado.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </div>
   );
 }

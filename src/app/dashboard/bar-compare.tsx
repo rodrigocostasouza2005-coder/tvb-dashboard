@@ -1,6 +1,6 @@
 "use client";
 
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, LabelList, ResponsiveContainer } from "recharts";
 
 type Row = { label: string; a: number; b: number };
 
@@ -26,7 +26,8 @@ export function BarCompare({
   }
 
   const data = rows.map((r) => ({ ...r, label: truncate(r.label) }));
-  const height = Math.max(data.length * 34, 160);
+  const height = Math.max(data.length * 40, 160);
+  const labelStyle = { fill: "var(--text-secondary)", fontSize: 11 };
 
   return (
     <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
@@ -41,7 +42,7 @@ export function BarCompare({
         </span>
       </div>
       <ResponsiveContainer width="100%" height={height}>
-        <BarChart data={data} layout="vertical" margin={{ top: 4, right: 24, left: 0, bottom: 4 }}>
+        <BarChart data={data} layout="vertical" barGap={4} margin={{ top: 4, right: 36, left: 0, bottom: 4 }}>
           <XAxis type="number" hide />
           <YAxis
             type="category"
@@ -62,8 +63,12 @@ export function BarCompare({
             labelFormatter={(_, payload) => payload?.[0]?.payload?.label ?? ""}
             formatter={(value) => Number(value ?? 0).toLocaleString("pt-BR")}
           />
-          <Bar dataKey="a" name={labelA} fill="var(--series-1)" radius={[0, 4, 4, 0]} maxBarSize={12} />
-          <Bar dataKey="b" name={labelB} fill="var(--series-2)" radius={[0, 4, 4, 0]} maxBarSize={12} />
+          <Bar dataKey="a" name={labelA} fill="var(--series-1)" radius={[0, 4, 4, 0]} maxBarSize={14}>
+            <LabelList dataKey="a" position="right" style={labelStyle} formatter={(v) => Number(v ?? 0).toLocaleString("pt-BR")} />
+          </Bar>
+          <Bar dataKey="b" name={labelB} fill="var(--series-2)" radius={[0, 4, 4, 0]} maxBarSize={14}>
+            <LabelList dataKey="b" position="right" style={labelStyle} formatter={(v) => Number(v ?? 0).toLocaleString("pt-BR")} />
+          </Bar>
         </BarChart>
       </ResponsiveContainer>
     </div>
