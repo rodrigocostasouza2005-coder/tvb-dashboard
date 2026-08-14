@@ -46,8 +46,8 @@ export async function GET(request: NextRequest) {
 
   const header = [
     "Loja",
-    "Produto",
     "Grupo",
+    "Produto",
     "Tamanho",
     "Estoque atual",
     "Estoque mínimo",
@@ -64,8 +64,8 @@ export async function GET(request: NextRequest) {
   for (const r of rows) {
     ws.addRow([
       r.storeName,
-      r.produto,
       r.grupo,
+      r.produto,
       r.tamanho ?? "",
       r.quantidadeDisponivel,
       r.estoqueMinimo,
