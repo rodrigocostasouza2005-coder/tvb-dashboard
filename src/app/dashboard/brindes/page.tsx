@@ -43,9 +43,43 @@ export default async function BrindesPage({
       <FilterBar action="/dashboard/brindes" stores={stores} marcas={marcas} filters={filters} />
       <p className="mb-3 text-xs text-[var(--text-muted)]">
         Itens dados como brinde (Tipo=Brinde na API) — não entram na contagem de vendas nem de
-        devoluções.
+        devoluções. Quem retirou é registrado a partir do próximo sync após o deploy de 14/08/2026.
       </p>
-      <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
+
+      {/* Foco principal: quem retirou */}
+      <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] mb-6">
+        <div className="px-4 py-3 border-b border-[var(--gridline)]">
+          <h2 className="text-sm font-medium text-[var(--text-secondary)]">Quem retirou brindes</h2>
+        </div>
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
+              <th className="px-4 py-2 font-medium">Cliente</th>
+              <th className="px-4 py-2 font-medium">Unidades</th>
+              {showFinancials && <th className="px-4 py-2 font-medium">Valor</th>}
+            </tr>
+          </thead>
+          <tbody>
+            {clienteRows.map((r) => (
+              <tr key={r.cliente} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
+                <td className="px-4 py-2 font-medium">{r.cliente}</td>
+                <td className="px-4 py-2 tabular-nums">{r.unidades.toLocaleString("pt-BR")}</td>
+                {showFinancials && <td className="px-4 py-2 tabular-nums">{formatBRL(r.valor)}</td>}
+              </tr>
+            ))}
+            {clienteRows.length === 0 && (
+              <tr>
+                <td colSpan={showFinancials ? 3 : 2} className="px-4 py-6 text-center text-[var(--text-muted)]">
+                  Nenhum dado disponível — aparece após o próximo sync.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Secundário: breakdown por produto */}
+      <section className="mb-4 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
         <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">
           Top {dimension === "grupo" ? "grupo" : dimension === "produto" ? "produto" : "tamanho"} em brinde
         </h2>
@@ -57,32 +91,6 @@ export default async function BrindesPage({
       </section>
 
       <DimensionToggle basePath="/dashboard/brindes" searchParams={rawParams} current={dimension} />
-
-      {clienteRows.length > 0 && (
-        <section className="mb-6 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-          <div className="px-4 py-3 border-b border-[var(--gridline)]">
-            <h2 className="text-sm font-medium text-[var(--text-secondary)]">Quem retirou brindes</h2>
-          </div>
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
-                <th className="px-4 py-2 font-medium">Cliente</th>
-                <th className="px-4 py-2 font-medium">Unidades</th>
-                {showFinancials && <th className="px-4 py-2 font-medium">Valor</th>}
-              </tr>
-            </thead>
-            <tbody>
-              {clienteRows.map((r) => (
-                <tr key={r.cliente} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
-                  <td className="px-4 py-2 font-medium">{r.cliente}</td>
-                  <td className="px-4 py-2 tabular-nums">{r.unidades.toLocaleString("pt-BR")}</td>
-                  {showFinancials && <td className="px-4 py-2 tabular-nums">{formatBRL(r.valor)}</td>}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
-      )}
 
       {dimension === "grupo" ? (
         <ExpandableSalesTable
