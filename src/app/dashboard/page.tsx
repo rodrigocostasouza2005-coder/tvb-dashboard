@@ -98,6 +98,12 @@ export default async function OverviewPage({
         {showFinancials && <StatTile label="Receita" value={formatBRL(kpi.revenue)} />}
         <StatTile label="Estoque atual" value={kpi.currentStock.toLocaleString("pt-BR")} />
         <StatTile
+          label="Devoluções"
+          value={kpi.unitsReturned.toLocaleString("pt-BR")}
+          subValue={showFinancials ? formatBRL(kpi.valueReturned) : undefined}
+          trend={kpi.unitsReturned > 0 ? "down" : undefined}
+        />
+        <StatTile
           label="Clientes novos"
           value={newClients.toLocaleString("pt-BR")}
           trend={newClients > 0 ? "up" : undefined}

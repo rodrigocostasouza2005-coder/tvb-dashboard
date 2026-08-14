@@ -7,11 +7,13 @@ const STATUS_COLOR: Record<string, string> = {
 export function StatTile({
   label,
   value,
+  subValue,
   status,
   trend,
 }: {
   label: string;
   value: string;
+  subValue?: string;
   status?: "good" | "warning" | "critical";
   // Seta indicando direção — hoje só "up" (verde) é usado (ex: clientes novos > 0).
   trend?: "up" | "down";
@@ -40,6 +42,9 @@ export function StatTile({
           </span>
         )}
       </div>
+      {subValue && (
+        <div className="mt-0.5 text-xs tabular-nums text-[var(--text-muted)]">{subValue}</div>
+      )}
     </div>
   );
 }

@@ -14,6 +14,14 @@ export type DashboardFilters = {
   grupoIn?: string[];
 };
 
+function returnWhere(filters: DashboardFilters): Prisma.ReturnWhereInput {
+  return {
+    returnDate: { gte: filters.from, lte: filters.to },
+    ...(filters.storeIds !== undefined ? { storeId: { in: filters.storeIds } } : {}),
+    ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
+  };
+}
+
 function saleWhere(filters: DashboardFilters): Prisma.SaleWhereInput {
   return {
     saleDate: { gte: filters.from, lte: filters.to },
@@ -36,7 +44,7 @@ function stockWhere(filters: Pick<DashboardFilters, "storeIds" | "grupoIn">): Pr
 }
 
 export async function getKpiSummary(filters: DashboardFilters) {
-  const [salesAgg, stockAgg] = await Promise.all([
+  const [salesAgg, stockAgg, returnsAgg] = await Promise.all([
     prisma.sale.aggregate({
       where: saleWhere(filters),
       _sum: { quantidade: true, valorTotalLiquido: true },
@@ -45,12 +53,18 @@ export async function getKpiSummary(filters: DashboardFilters) {
       where: stockWhere(filters),
       _sum: { quantidadeDisponivel: true },
     }),
+    prisma.return.aggregate({
+      where: returnWhere(filters),
+      _sum: { quantidade: true, valorTotal: true },
+    }),
   ]);
 
   return {
     unitsSold: salesAgg._sum.quantidade ?? 0,
     revenue: salesAgg._sum.valorTotalLiquido ?? 0,
     currentStock: stockAgg._sum.quantidadeDisponivel ?? 0,
+    unitsReturned: returnsAgg._sum.quantidade ?? 0,
+    valueReturned: returnsAgg._sum.valorTotal ?? 0,
   };
 }
 
@@ -219,14 +233,6 @@ export async function getGiftsByGrupoProduto(filters: DashboardFilters) {
       revenue: r._sum.valorTotalLiquido ?? 0,
     }))
     .sort((a, b) => b.unitsSold - a.unitsSold);
-}
-
-function returnWhere(filters: DashboardFilters): Prisma.ReturnWhereInput {
-  return {
-    returnDate: { gte: filters.from, lte: filters.to },
-    ...(filters.storeIds !== undefined ? { storeId: { in: filters.storeIds } } : {}),
-    ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
-  };
 }
 
 async function groupReturnsByDimension(dimension: Dimension, where: Prisma.ReturnWhereInput) {
