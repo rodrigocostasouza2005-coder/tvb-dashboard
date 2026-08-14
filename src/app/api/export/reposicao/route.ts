@@ -4,7 +4,7 @@ import { getSessionUser } from "@/lib/auth";
 import { getReplenishment } from "@/lib/metrics";
 import { getGrupoRestriction } from "@/lib/permissions";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 
 export async function GET(request: NextRequest) {
   const user = await getSessionUser();
@@ -22,6 +22,9 @@ export async function GET(request: NextRequest) {
   const filters = { ...parseFilters(rawParams), grupoIn };
   const rows = await getReplenishment(filters);
 
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet("Reposição");
+
   const header = [
     "Loja",
     "Produto",
@@ -34,13 +37,13 @@ export async function GET(request: NextRequest) {
     "Estoque na origem",
   ];
 
-  // Coluna "Repor" é índice 6 (0-based) → coluna G
-  const REPOR_COL = 6;
+  // Coluna "Repor" é a 7ª (1-based)
+  const REPOR_COL = 7;
 
-  const wb = XLSX.utils.book_new();
-  const wsData = [
-    header,
-    ...rows.map((r) => [
+  ws.addRow(header);
+
+  for (const r of rows) {
+    ws.addRow([
       r.storeName,
       r.produto,
       r.grupo,
@@ -50,23 +53,19 @@ export async function GET(request: NextRequest) {
       r.falta,
       r.origemSugerida,
       r.estoqueNaOrigem,
-    ]),
-  ];
-
-  const ws = XLSX.utils.aoa_to_sheet(wsData);
-
-  // Pintar o cabeçalho e todas as células da coluna "Repor" de amarelo
-  const yellow = { fgColor: { rgb: "FFFF00" } };
-  const numRows = wsData.length;
-  for (let row = 0; row < numRows; row++) {
-    const cellRef = XLSX.utils.encode_cell({ r: row, c: REPOR_COL });
-    if (!ws[cellRef]) ws[cellRef] = { v: row === 0 ? "Repor" : wsData[row][REPOR_COL], t: row === 0 ? "s" : "n" };
-    ws[cellRef].s = { fill: { patternType: "solid", ...yellow } };
+    ]);
   }
 
-  XLSX.utils.book_append_sheet(wb, ws, "Reposição");
+  // Pintar toda a coluna "Repor" de amarelo (cabeçalho + dados)
+  ws.getColumn(REPOR_COL).eachCell((cell) => {
+    cell.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "FFFFFF00" },
+    };
+  });
 
-  const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx", cellStyles: true });
+  const buf = await wb.xlsx.writeBuffer();
 
   return new NextResponse(buf, {
     headers: {
