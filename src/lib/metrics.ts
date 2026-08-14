@@ -187,6 +187,38 @@ export async function getSalesByGrupoProduto(filters: DashboardFilters) {
     .sort((a, b) => b.revenue - a.revenue);
 }
 
+// Vendas por tamanho dentro de cada grupo+produto — 3º nível: grupo → produto → tamanho
+export async function getSalesByGrupoProdutoTamanho(filters: DashboardFilters) {
+  const rows = await prisma.sale.groupBy({
+    by: ["grupo", "produto", "tamanho"],
+    where: saleWhere(filters),
+    _sum: { quantidade: true, valorTotalLiquido: true },
+  });
+  return rows.map((r) => ({
+    grupo: r.grupo,
+    produto: r.produto,
+    key: r.tamanho ?? "—",
+    unitsSold: r._sum.quantidade ?? 0,
+    revenue: r._sum.valorTotalLiquido ?? 0,
+  }));
+}
+
+// Devoluções por tamanho dentro de cada grupo+produto — 3º nível
+export async function getReturnsByGrupoProdutoTamanho(filters: DashboardFilters) {
+  const rows = await prisma.return.groupBy({
+    by: ["grupo", "produto", "tamanho"],
+    where: returnWhere(filters),
+    _sum: { quantidade: true, valorTotal: true },
+  });
+  return rows.map((r) => ({
+    grupo: r.grupo,
+    produto: r.produto,
+    key: r.tamanho ?? "—",
+    unitsReturned: r._sum.quantidade ?? 0,
+    value: r._sum.valorTotal ?? 0,
+  }));
+}
+
 // Vendas por produto dentro de cada tamanho — expandir tamanho → produtos
 export async function getSalesByTamanhoProduto(filters: DashboardFilters) {
   const rows = await prisma.sale.groupBy({
@@ -611,7 +643,7 @@ export async function getReplenishment(filters: Pick<DashboardFilters, "storeIds
       tamanho: s.tamanho,
       quantidadeDisponivel: s.quantidadeDisponivel,
       estoqueMinimo: s.estoqueMinimo as number,
-      falta: (s.estoqueMinimo as number) - s.quantidadeDisponivel,
+      falta: Math.min((s.estoqueMinimo as number) - s.quantidadeDisponivel, cdStockByCod.get(s.cod) ?? 0),
       origemSugerida: cdStore?.name ?? "—",
       estoqueNaOrigem: cdStockByCod.get(s.cod) ?? 0,
     }))
