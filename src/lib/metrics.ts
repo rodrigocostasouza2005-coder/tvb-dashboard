@@ -699,6 +699,64 @@ export async function getTopClientes(filters: DashboardFilters, vendedor?: strin
   });
 }
 
+export async function getMonthlySalesByStore(filters: DashboardFilters) {
+  const rows = await prisma.$queryRaw<{ month: Date; storeId: string; units: bigint; revenue: number }[]>`
+    SELECT
+      DATE_TRUNC('month', ("saleDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo') AS month,
+      "storeId",
+      SUM("quantidade") AS units,
+      SUM("valorTotalLiquido") AS revenue
+    FROM "Sale"
+    WHERE "saleDate" >= ${filters.from}
+      AND "saleDate" <= ${filters.to}
+      ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
+      ${filters.marcas !== undefined ? Prisma.sql`AND "marca" = ANY(${filters.marcas})` : Prisma.empty}
+      ${filters.tabelasPreco !== undefined ? Prisma.sql`AND "tabelaPreco" = ANY(${filters.tabelasPreco})` : Prisma.empty}
+      ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
+    GROUP BY month, "storeId"
+    ORDER BY month ASC
+  `;
+
+  const stores = await prisma.store.findMany({ where: { sellsProducts: true } });
+  const seriesNameByStoreId = new Map(stores.map((s) => [s.id, s.displayGroup ?? s.name]));
+
+  // Agrupa por mês e loja (juntando lojas com mesmo displayGroup)
+  const byMonth = new Map<string, Record<string, number>>();
+  const seriesNames = new Set<string>();
+
+  for (const r of rows) {
+    const storeName = seriesNameByStoreId.get(r.storeId);
+    if (!storeName) continue;
+    const monthStr = new Date(r.month).toISOString().slice(0, 7); // "YYYY-MM"
+    seriesNames.add(storeName);
+    const monthRow = byMonth.get(monthStr) ?? {};
+    monthRow[storeName] = (monthRow[storeName] ?? 0) + Number(r.revenue);
+    byMonth.set(monthStr, monthRow);
+  }
+
+  // Mesmo para unidades
+  const byMonthUnits = new Map<string, Record<string, number>>();
+  for (const r of rows) {
+    const storeName = seriesNameByStoreId.get(r.storeId);
+    if (!storeName) continue;
+    const monthStr = new Date(r.month).toISOString().slice(0, 7);
+    const monthRow = byMonthUnits.get(monthStr) ?? {};
+    monthRow[storeName] = (monthRow[storeName] ?? 0) + Number(r.units);
+    byMonthUnits.set(monthStr, monthRow);
+  }
+
+  const series = [...seriesNames].sort();
+  const months = [...byMonth.keys()].sort();
+
+  const data = months.map((month) => ({
+    month,
+    revenue: byMonth.get(month) ?? {},
+    units: byMonthUnits.get(month) ?? {},
+  }));
+
+  return { data, series };
+}
+
 export async function getVendedores(): Promise<string[]> {
   const rows = await prisma.sale.findMany({
     distinct: ["vendedor"],
