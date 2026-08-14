@@ -31,7 +31,7 @@ export default async function ReposicaoPage({
 
   return (
     <div>
-      <FilterBar action="/dashboard/reposicao" stores={stores} marcas={marcas} filters={filters} showMarca={false} />
+      <FilterBar action="/dashboard/reposicao" stores={stores} marcas={marcas} filters={filters} showMarca={false} showDate={false} />
       <div className="mb-3 flex items-center justify-between">
         <p className="text-xs text-[var(--text-muted)]">
           Mostra itens com estoque abaixo do mínimo e com estoque disponível na origem pra

@@ -43,6 +43,7 @@ export function FilterBar({
   filters,
   showMarca = true,
   showTabelaPreco = false,
+  showDate = true,
 }: {
   action: string;
   stores: Store[];
@@ -51,6 +52,7 @@ export function FilterBar({
   filters: DashboardFilters;
   showMarca?: boolean;
   showTabelaPreco?: boolean;
+  showDate?: boolean;
 }) {
   const selectedStores = new Set(filters.storeIds ?? []);
   const selectedMarcas = new Set(filters.marcas ?? []);
@@ -90,7 +92,7 @@ export function FilterBar({
       {/* Os dois campos de data ficam juntos num bloco só — soltos direto no flex-wrap do
           formulário, eles podiam parar em linhas diferentes (um de cada lado) dependendo da
           largura disponível. */}
-      <div className="flex items-end gap-3">
+      {showDate && <div className="flex items-end gap-3">
         <div className="flex flex-col gap-1">
           <label className="text-xs font-medium text-[var(--text-muted)]" htmlFor="from">
             De
@@ -118,7 +120,7 @@ export function FilterBar({
             style={{ colorScheme: "light dark" }}
           />
         </div>
-      </div>
+      </div>}
 
       <button
         type="submit"
