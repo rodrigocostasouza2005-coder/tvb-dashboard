@@ -35,6 +35,7 @@ export async function GET(request: NextRequest) {
   const grupoIn = await getGrupoRestriction(user.role);
   const filters = { ...parseFilters(rawParams), grupoIn };
   const rows = (await getReplenishment(filters)).slice().sort((a, b) =>
+    a.storeName.localeCompare(b.storeName, "pt-BR") ||
     a.grupo.localeCompare(b.grupo, "pt-BR") ||
     a.produto.localeCompare(b.produto, "pt-BR") ||
     compareTamanho(a.tamanho, b.tamanho)
