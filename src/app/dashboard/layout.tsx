@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { after } from "next/server";
+import { Suspense } from "react";
 import Image from "next/image";
 import { getSessionUser } from "@/lib/auth";
 import { scheduleCatchupSyncIfStale } from "@/lib/self-heal-sync";
@@ -45,7 +46,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
             </form>
           </div>
         </div>
-        <TabNav visibleKeys={visibleKeys} isAdmin={user.role === "ADMIN"} />
+        <Suspense fallback={<nav className="mx-auto flex max-w-7xl flex-wrap gap-1 px-6" />}>
+          <TabNav visibleKeys={visibleKeys} isAdmin={user.role === "ADMIN"} />
+        </Suspense>
       </header>
       <main className="mx-auto max-w-7xl px-6 py-6">{children}</main>
     </div>
