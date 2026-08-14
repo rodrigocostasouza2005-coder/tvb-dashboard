@@ -244,6 +244,16 @@ export class DapicClient {
   fetchTabelaPrecoProdutos(idTabela: number) {
     return this.fetchAllPages<DapicTabelaPrecoProduto>(`/tabelaprecos/${idTabela}/produtos`);
   }
+
+  // Cadastro de clientes — 1 token basta (cd-atacado enxerga todos da empresa).
+  // WhatsApp está sempre vazio nos dados da TVB (confirmado em amostra de 200 clientes em
+  // 2026-08-14), então não guardamos. Telefone e Celular são campos distintos.
+  fetchClientes(dataInicial: string, dataFinal: string) {
+    return this.fetchAllPages<DapicCliente>("/clientes", {
+      DataInicial: dataInicial,
+      DataFinal: dataFinal,
+    });
+  }
 }
 
 export function createDapicClients(): DapicClient[] {
@@ -369,6 +379,16 @@ export type DapicOrdemProducaoProduto = {
   Status: string;
   DataFinalizacaoProducao: string | null;
   DataEntradaCelula: string | null;
+};
+
+// Campos reais de /clientes, confirmados em 2026-08-14. WhatsApp sempre nulo nos dados da TVB.
+export type DapicCliente = {
+  Id: number;
+  NomeRazaoSocial: string;
+  Telefone: string | null;
+  Celular: string | null;
+  WhatsApp: string | null;
+  Email: string | null;
 };
 
 // Campos reais de /faturas, confirmados em 2026-08-10 com o token cd-atacado. Ao contrário de

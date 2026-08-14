@@ -66,6 +66,7 @@ export default async function ClientesPage({
           <thead>
             <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
               <th className="px-4 py-2 font-medium">Cliente</th>
+              <th className="px-4 py-2 font-medium">Contato</th>
               <th className="px-4 py-2 font-medium">Pedidos</th>
               <th className="px-4 py-2 font-medium">Unidades</th>
               {showFinancials && <th className="px-4 py-2 font-medium">Receita</th>}
@@ -75,6 +76,21 @@ export default async function ClientesPage({
             {rows.map((r) => (
               <tr key={r.cliente} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
                 <td className="px-4 py-2 font-medium">{r.cliente}</td>
+                <td className="px-4 py-2">
+                  {r.telefone ? (
+                    <a
+                      href={`tel:${r.telefone}`}
+                      className="text-[var(--series-1)] hover:underline tabular-nums"
+                    >
+                      {r.telefone}
+                    </a>
+                  ) : (
+                    <span className="text-[var(--text-muted)]">—</span>
+                  )}
+                  {r.email && (
+                    <div className="text-xs text-[var(--text-muted)] mt-0.5">{r.email}</div>
+                  )}
+                </td>
                 <td className="px-4 py-2 tabular-nums">{r.pedidos}</td>
                 <td className="px-4 py-2 tabular-nums">{r.unidades}</td>
                 {showFinancials && <td className="px-4 py-2 tabular-nums">{formatBRL(r.receita)}</td>}
@@ -82,7 +98,7 @@ export default async function ClientesPage({
             ))}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={showFinancials ? 4 : 3} className="px-4 py-6 text-center text-[var(--text-muted)]">
+                <td colSpan={showFinancials ? 5 : 4} className="px-4 py-6 text-center text-[var(--text-muted)]">
                   Sem vendas no período/filtro selecionado.
                 </td>
               </tr>

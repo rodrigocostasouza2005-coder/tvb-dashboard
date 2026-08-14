@@ -669,7 +669,7 @@ export async function getTopClientes(filters: DashboardFilters, limit = 30) {
     _count: { _all: true },
   });
 
-  return rows
+  const sorted = rows
     .map((r) => ({
       cliente: r.clienteNome as string,
       pedidos: r._count._all,
@@ -678,6 +678,20 @@ export async function getTopClientes(filters: DashboardFilters, limit = 30) {
     }))
     .sort((a, b) => b.receita - a.receita)
     .slice(0, limit);
+
+  // Enriquece com telefone/email da tabela Client (join por nome)
+  const nomes = sorted.map((r) => r.cliente);
+  const clientesCadastro = await prisma.clienteCadastro.findMany({ where: { nome: { in: nomes } } });
+  const cadastroByNome = new Map(clientesCadastro.map((c) => [c.nome, c]));
+
+  return sorted.map((r) => {
+    const cad = cadastroByNome.get(r.cliente);
+    return {
+      ...r,
+      telefone: cad?.telefone ?? cad?.celular ?? null,
+      email: cad?.email ?? null,
+    };
+  });
 }
 
 export type StoreFilterOption = { id: string; name: string };

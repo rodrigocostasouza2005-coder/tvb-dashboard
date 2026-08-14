@@ -235,6 +235,15 @@ model PriceCatalogCache {
   updatedAt   DateTime @updatedAt
 }
 
+model ClienteCadastro {
+  id       String  @id @default(cuid())
+  dapicId  Int     @unique
+  nome     String  @unique
+  telefone String?
+  celular  String?
+  email    String?
+}
+
 // Grupos de produto marcados como prioritários para vendedores (administrável, sem UI ainda).
 model PriorityGroup {
   id    String @id @default(cuid())

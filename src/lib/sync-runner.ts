@@ -233,6 +233,24 @@ async function syncFaturas(client: DapicClient, storeId: string | null, dias: nu
 // campo certo de filtro de data da API.
 const ORDENS_PRODUCAO_DATA_INICIAL = "2018-01-01";
 
+// Clientes — 1 token basta (cd-atacado enxerga todos). Range amplo pra pegar cadastros novos
+// e atualizar dados (ex: troca de telefone) sem precisar de janela deslizante.
+async function syncClientes(client: DapicClient) {
+  const DATA_INICIAL = "2020-01-01";
+  const dataFinal = toDateStr(new Date());
+  const clientes = await client.fetchClientes(DATA_INICIAL, dataFinal);
+  let count = 0;
+  for (const c of clientes) {
+    await prisma.clienteCadastro.upsert({
+      where: { dapicId: c.Id },
+      update: { nome: c.NomeRazaoSocial, telefone: c.Telefone ?? null, celular: c.Celular ?? null, email: c.Email ?? null },
+      create: { dapicId: c.Id, nome: c.NomeRazaoSocial, telefone: c.Telefone ?? null, celular: c.Celular ?? null, email: c.Email ?? null },
+    });
+    count++;
+  }
+  return count;
+}
+
 async function syncOrdensProducao(client: DapicClient | undefined) {
   if (!client) return 0;
   const linhas = await client.fetchOrdensProducaoProdutos(ORDENS_PRODUCAO_DATA_INICIAL, toDateStr(new Date()));
@@ -344,7 +362,7 @@ export async function runSync() {
     const cdAtacadoClient = clients.find((c) => c.label === "cd-atacado");
     const outrasLojas = clients.filter((c) => c.label !== "cd-atacado");
 
-    const [results, totalOrdensProducao] = await Promise.all([
+    const [results, totalOrdensProducao, totalClientes] = await Promise.all([
       (async () => {
         const outrosResultados = await Promise.all(outrasLojas.map(syncOneClient));
         const cdResultado = cdAtacadoClient ? [await syncOneClient(cdAtacadoClient)] : [];
@@ -353,6 +371,8 @@ export async function runSync() {
       // Não fatal: se o token da matriz ainda não estiver configurado (ex: só em dev, não em
       // produção), syncOrdensProducao devolve 0 sem quebrar o resto da sync.
       syncOrdensProducao(matrizClient).catch(() => 0),
+      // Clientes — 1 token basta, não é fatal se falhar
+      (cdAtacadoClient ? syncClientes(cdAtacadoClient) : Promise.resolve(0)).catch(() => 0),
     ]);
 
     const totalEstoque = results.reduce((a, r) => a + r.estoque, 0);
