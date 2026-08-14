@@ -3,9 +3,13 @@ import {
   getSalesByDimension,
   getSalesByGrupoProduto,
   getSalesByTamanhoProduto,
+  getSalesByProdutoTamanho,
   getSalesByDay,
   getSalesByDayPerStore,
   getReturnsByDimension,
+  getReturnsByGrupoProduto,
+  getReturnsByTamanhoProduto,
+  getReturnsByProdutoTamanho,
   getReturnsByDay,
   getStores,
   getMarcas,
@@ -27,6 +31,7 @@ import { ReturnsTrendChart } from "../returns-trend-chart";
 import { TopBarChart } from "../top-bar-chart";
 import { StoreCompareChart } from "../store-compare-chart";
 import { ExpandableSalesTable } from "./expandable-sales-table";
+import { ExpandableReturnsTable } from "./expandable-returns-table";
 
 function formatBRL(value: number) {
   return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -52,17 +57,28 @@ export default async function VendasPage({
     grupoIn,
   };
 
-  const emptyProdutoRows: Awaited<ReturnType<typeof getSalesByGrupoProduto>> = [];
-  const [rows, produtoRows, salesByDay, salesByDayPerStore, returnRows, returnsByDay, stores, marcas, tabelasPreco] = await Promise.all([
+  const emptySalesSubRows: Awaited<ReturnType<typeof getSalesByGrupoProduto>> = [];
+  const emptyReturnSubRows: Awaited<ReturnType<typeof getReturnsByGrupoProduto>> = [];
+
+  const [rows, salesSubRows, salesByDay, salesByDayPerStore, returnRows, returnSubRows, returnsByDay, stores, marcas, tabelasPreco] = await Promise.all([
     getSalesByDimension(filters, dimension),
     dimension === "grupo"
       ? getSalesByGrupoProduto(filters)
       : dimension === "tamanho"
       ? getSalesByTamanhoProduto(filters)
-      : Promise.resolve(emptyProdutoRows),
+      : dimension === "produto"
+      ? getSalesByProdutoTamanho(filters)
+      : Promise.resolve(emptySalesSubRows),
     getSalesByDay(filters),
     getSalesByDayPerStore(filters),
     getReturnsByDimension(filters, dimension),
+    dimension === "grupo"
+      ? getReturnsByGrupoProduto(filters)
+      : dimension === "tamanho"
+      ? getReturnsByTamanhoProduto(filters)
+      : dimension === "produto"
+      ? getReturnsByProdutoTamanho(filters)
+      : Promise.resolve(emptyReturnSubRows),
     getReturnsByDay(filters),
     getStores(allowedStores),
     getMarcas(allowedMarcas),
@@ -105,47 +121,14 @@ export default async function VendasPage({
 
       <DimensionToggle basePath="/dashboard/vendas" searchParams={rawParams} current={dimension} />
 
-      {dimension === "produto" ? (
-        <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
-                <th className="px-4 py-2 font-medium">Produto</th>
-                <th className="px-4 py-2 font-medium">Unidades</th>
-                <th className="px-4 py-2 font-medium">% do total</th>
-                {showFinancials && <th className="px-4 py-2 font-medium">Receita</th>}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr key={r.key} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
-                  <td className="px-4 py-2 font-medium">{r.key}</td>
-                  <td className="px-4 py-2 tabular-nums">{r.unitsSold.toLocaleString("pt-BR")}</td>
-                  <td className="px-4 py-2 tabular-nums text-[var(--text-secondary)]">
-                    {totalUnits > 0 ? `${((r.unitsSold / totalUnits) * 100).toFixed(1)}%` : "—"}
-                  </td>
-                  {showFinancials && <td className="px-4 py-2 tabular-nums">{formatBRL(r.revenue)}</td>}
-                </tr>
-              ))}
-              {rows.length === 0 && (
-                <tr>
-                  <td colSpan={showFinancials ? 4 : 3} className="px-4 py-6 text-center text-[var(--text-muted)]">
-                    Sem vendas no período/filtro selecionado.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      ) : (
-        <ExpandableSalesTable
-          rows={rows}
-          produtoRows={produtoRows}
-          totalUnits={totalUnits}
-          showFinancials={showFinancials}
-          parentLabel={dimension === "tamanho" ? "Tamanho" : "Grupo"}
-        />
-      )}
+      <ExpandableSalesTable
+        rows={rows}
+        produtoRows={salesSubRows}
+        totalUnits={totalUnits}
+        showFinancials={showFinancials}
+        parentLabel={dimension === "tamanho" ? "Tamanho" : dimension === "produto" ? "Produto" : "Grupo"}
+        subLabel={dimension === "produto" ? "Tamanho" : "Produto"}
+      />
       {/* ── Devoluções ── */}
       <h2 className="mb-3 mt-8 text-base font-semibold">Devoluções</h2>
 
@@ -154,37 +137,13 @@ export default async function VendasPage({
         <ReturnsTrendChart data={returnsByDay} showValue={showFinancials} />
       </section>
 
-      <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
-              <th className="px-4 py-2 font-medium">{dimension === "grupo" ? "Grupo" : dimension === "produto" ? "Produto" : "Tamanho"}</th>
-              <th className="px-4 py-2 font-medium">Unidades devolvidas</th>
-              <th className="px-4 py-2 font-medium">% do total devolvido</th>
-              {showFinancials && <th className="px-4 py-2 font-medium">Valor devolvido</th>}
-            </tr>
-          </thead>
-          <tbody>
-            {returnRows.map((r) => (
-              <tr key={r.key} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
-                <td className="px-4 py-2 font-medium">{r.key}</td>
-                <td className="px-4 py-2 tabular-nums">{r.unitsReturned.toLocaleString("pt-BR")}</td>
-                <td className="px-4 py-2 tabular-nums text-[var(--text-secondary)]">
-                  {totalReturned > 0 ? `${((r.unitsReturned / totalReturned) * 100).toFixed(1)}%` : "—"}
-                </td>
-                {showFinancials && <td className="px-4 py-2 tabular-nums">{formatBRL(r.value)}</td>}
-              </tr>
-            ))}
-            {returnRows.length === 0 && (
-              <tr>
-                <td colSpan={showFinancials ? 4 : 3} className="px-4 py-6 text-center text-[var(--text-muted)]">
-                  Sem devoluções no período/filtro selecionado.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      <ExpandableReturnsTable
+        rows={returnRows}
+        subRows={returnSubRows}
+        totalReturned={totalReturned}
+        showFinancials={showFinancials}
+        parentLabel={dimension === "tamanho" ? "Tamanho" : dimension === "produto" ? "Produto" : "Grupo"}
+      />
     </div>
   );
 }

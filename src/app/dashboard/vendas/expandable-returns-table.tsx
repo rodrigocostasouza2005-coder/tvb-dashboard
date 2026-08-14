@@ -2,39 +2,33 @@
 
 import { Fragment, useState } from "react";
 
-type Row = { key: string; unitsSold: number; revenue: number };
-type ProdutoRow = { grupo: string; key: string; unitsSold: number; revenue: number };
+type Row = { key: string; unitsReturned: number; value: number };
+type SubRow = { grupo: string; key: string; unitsReturned: number; value: number };
 
 function formatBRL(value: number) {
   return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
-// Clicar na seta de um grupo abre uma sub-lista com os produtos daquele grupo, embaixo da
-// linha, sem precisar de nova chamada ao servidor (produtoRows já vem tudo pronto).
-export function ExpandableSalesTable({
+export function ExpandableReturnsTable({
   rows,
-  produtoRows,
-  totalUnits,
+  subRows,
+  totalReturned,
   showFinancials,
-  emptyMessage = "Sem vendas no período/filtro selecionado.",
   parentLabel = "Grupo",
-  subLabel,
 }: {
   rows: Row[];
-  produtoRows: ProdutoRow[];
-  totalUnits: number;
+  subRows: SubRow[];
+  totalReturned: number;
   showFinancials: boolean;
-  emptyMessage?: string;
   parentLabel?: string;
-  subLabel?: string;
 }) {
   const [open, setOpen] = useState<Set<string>>(new Set());
 
-  function toggle(grupo: string) {
+  function toggle(key: string) {
     setOpen((prev) => {
       const next = new Set(prev);
-      if (next.has(grupo)) next.delete(grupo);
-      else next.add(grupo);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
       return next;
     });
   }
@@ -45,15 +39,15 @@ export function ExpandableSalesTable({
         <thead>
           <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
             <th className="px-4 py-2 font-medium">{parentLabel}</th>
-            <th className="px-4 py-2 font-medium">Unidades</th>
-            <th className="px-4 py-2 font-medium">% do total</th>
-            {showFinancials && <th className="px-4 py-2 font-medium">Receita</th>}
+            <th className="px-4 py-2 font-medium">Unidades devolvidas</th>
+            <th className="px-4 py-2 font-medium">% do total devolvido</th>
+            {showFinancials && <th className="px-4 py-2 font-medium">Valor devolvido</th>}
           </tr>
         </thead>
         <tbody>
           {rows.map((r) => {
             const isOpen = open.has(r.key);
-            const produtos = produtoRows.filter((p) => p.grupo === r.key);
+            const children = subRows.filter((s) => s.grupo === r.key);
             return (
               <Fragment key={r.key}>
                 <tr className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
@@ -62,35 +56,35 @@ export function ExpandableSalesTable({
                       type="button"
                       onClick={() => toggle(r.key)}
                       className="flex items-center gap-2 text-left"
-                      disabled={produtos.length === 0}
+                      disabled={children.length === 0}
                     >
                       <span
                         className="inline-block w-3 text-[var(--text-muted)] transition-transform"
                         style={{ transform: isOpen ? "rotate(90deg)" : "rotate(0deg)" }}
                       >
-                        {produtos.length > 0 ? "▸" : ""}
+                        {children.length > 0 ? "▸" : ""}
                       </span>
                       {r.key}
                     </button>
                   </td>
-                  <td className="px-4 py-2 tabular-nums">{r.unitsSold.toLocaleString("pt-BR")}</td>
+                  <td className="px-4 py-2 tabular-nums">{r.unitsReturned.toLocaleString("pt-BR")}</td>
                   <td className="px-4 py-2 tabular-nums text-[var(--text-secondary)]">
-                    {totalUnits > 0 ? `${((r.unitsSold / totalUnits) * 100).toFixed(1)}%` : "—"}
+                    {totalReturned > 0 ? `${((r.unitsReturned / totalReturned) * 100).toFixed(1)}%` : "—"}
                   </td>
-                  {showFinancials && <td className="px-4 py-2 tabular-nums">{formatBRL(r.revenue)}</td>}
+                  {showFinancials && <td className="px-4 py-2 tabular-nums">{formatBRL(r.value)}</td>}
                 </tr>
                 {isOpen &&
-                  produtos.map((p) => (
-                    <tr key={`${r.key}::${p.key}`} className="border-b border-[var(--gridline)] bg-[var(--page-plane)] last:border-0">
-                      <td className="py-1.5 pr-4 pl-10 text-[var(--text-secondary)]">{p.key}</td>
+                  children.map((c) => (
+                    <tr key={`${r.key}::${c.key}`} className="border-b border-[var(--gridline)] bg-[var(--page-plane)] last:border-0">
+                      <td className="py-1.5 pr-4 pl-10 text-[var(--text-secondary)]">{c.key}</td>
                       <td className="px-4 py-1.5 tabular-nums text-[var(--text-secondary)]">
-                        {p.unitsSold.toLocaleString("pt-BR")}
+                        {c.unitsReturned.toLocaleString("pt-BR")}
                       </td>
                       <td className="px-4 py-1.5 tabular-nums text-[var(--text-muted)]">
-                        {totalUnits > 0 ? `${((p.unitsSold / totalUnits) * 100).toFixed(1)}%` : "—"}
+                        {totalReturned > 0 ? `${((c.unitsReturned / totalReturned) * 100).toFixed(1)}%` : "—"}
                       </td>
                       {showFinancials && (
-                        <td className="px-4 py-1.5 tabular-nums text-[var(--text-secondary)]">{formatBRL(p.revenue)}</td>
+                        <td className="px-4 py-1.5 tabular-nums text-[var(--text-secondary)]">{formatBRL(c.value)}</td>
                       )}
                     </tr>
                   ))}
@@ -100,7 +94,7 @@ export function ExpandableSalesTable({
           {rows.length === 0 && (
             <tr>
               <td colSpan={showFinancials ? 4 : 3} className="px-4 py-6 text-center text-[var(--text-muted)]">
-                {emptyMessage}
+                Sem devoluções no período/filtro selecionado.
               </td>
             </tr>
           )}
