@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { Prisma } from "@prisma/client";
+import { randomUUID } from "crypto";
 import { createDapicClients, stripReferenciaPrefix, parseDapicDateTime, type DapicClient } from "@/lib/connectors/dapic";
+// (import type { Prisma } removido abaixo — já importado acima como valor+tipo)
 import { displayGroupFor, sellsProducts } from "@/lib/connectors/armazenadores";
 import { upsertStockSnapshots, type StockSnapshotRow } from "@/lib/connectors/upsert-stock";
 import { upsertProductionOrders, type ProductionOrderRow } from "@/lib/connectors/upsert-production-order";
@@ -9,7 +12,6 @@ import { fetchPriceCatalogCached, inferTabelaPreco, type PriceCatalog } from "@/
 import { sendTelegramMessage } from "@/lib/telegram";
 import { getTopParaIncentivar, getTopVendidosPorLoja } from "@/lib/metrics";
 import { brasiliaDayStart, brasiliaDayEnd, todayBrasiliaStr } from "@/lib/filters";
-import type { Prisma } from "@prisma/client";
 
 // Lógica compartilhada pelas duas rotas de sync (/api/sync e /api/sync-evening) — precisam ser
 // arquivos de rota separados (paths diferentes) porque o plano Hobby da Vercel só permite um
@@ -239,14 +241,23 @@ async function syncClientes(client: DapicClient) {
   const DATA_INICIAL = "2020-01-01";
   const dataFinal = toDateStr(new Date());
   const clientes = await client.fetchClientes(DATA_INICIAL, dataFinal);
+  const BATCH = 500;
   let count = 0;
-  for (const c of clientes) {
-    await prisma.clienteCadastro.upsert({
-      where: { dapicId: c.Id },
-      update: { nome: c.NomeRazaoSocial, telefone: c.Telefone ?? null, celular: c.Celular ?? null, email: c.Email ?? null },
-      create: { dapicId: c.Id, nome: c.NomeRazaoSocial, telefone: c.Telefone ?? null, celular: c.Celular ?? null, email: c.Email ?? null },
-    });
-    count++;
+  for (let i = 0; i < clientes.length; i += BATCH) {
+    const batch = clientes.slice(i, i + BATCH);
+    const values = batch.map(
+      (c) => Prisma.sql`(${randomUUID()}, ${c.Id}, ${c.NomeRazaoSocial}, ${c.Telefone ?? null}, ${c.Celular ?? null}, ${c.Email ?? null})`
+    );
+    await prisma.$executeRaw`
+      INSERT INTO "ClienteCadastro" ("id", "dapicId", "nome", "telefone", "celular", "email")
+      VALUES ${Prisma.join(values)}
+      ON CONFLICT ("dapicId") DO UPDATE SET
+        "nome"     = EXCLUDED."nome",
+        "telefone" = EXCLUDED."telefone",
+        "celular"  = EXCLUDED."celular",
+        "email"    = EXCLUDED."email"
+    `;
+    count += batch.length;
   }
   return count;
 }

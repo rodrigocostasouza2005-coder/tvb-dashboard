@@ -1,16 +1,17 @@
 // Backfill único do cadastro de clientes via /clientes.
-// Idempotente (upsert por dapicId) — pode ser rodado de novo sem duplicar nada.
+// Idempotente (upsert em lote por dapicId) — pode ser rodado de novo sem duplicar nada.
 // Uso: npx tsx scripts/backfill-clientes.ts
 
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, Prisma } from "@prisma/client";
 import { createDapicClients } from "../src/lib/connectors/dapic";
+import { randomUUID } from "crypto";
 
 const directUrl = process.env.DATABASE_URL?.replace("-pooler.", ".");
 const prisma = new PrismaClient(directUrl ? { datasourceUrl: directUrl } : undefined);
 
-// Range amplo pra pegar todos os cadastros históricos.
 const DATA_INICIAL = "2020-01-01";
 const DATA_FINAL = new Date().toISOString().slice(0, 10);
+const BATCH_SIZE = 500;
 
 async function main() {
   // 1 token basta — cd-atacado enxerga todos os clientes da empresa
@@ -21,28 +22,28 @@ async function main() {
   const clientes = await cdClient.fetchClientes(DATA_INICIAL, DATA_FINAL);
   console.log(`Recebidos: ${clientes.length} clientes`);
 
-  let upserted = 0;
-  for (const c of clientes) {
-    await prisma.clienteCadastro.upsert({
-      where: { dapicId: c.Id },
-      update: {
-        nome: c.NomeRazaoSocial,
-        telefone: c.Telefone ?? null,
-        celular: c.Celular ?? null,
-        email: c.Email ?? null,
-      },
-      create: {
-        dapicId: c.Id,
-        nome: c.NomeRazaoSocial,
-        telefone: c.Telefone ?? null,
-        celular: c.Celular ?? null,
-        email: c.Email ?? null,
-      },
-    });
-    upserted++;
+  let total = 0;
+  for (let i = 0; i < clientes.length; i += BATCH_SIZE) {
+    const batch = clientes.slice(i, i + BATCH_SIZE);
+    const values = batch.map(
+      (c) =>
+        Prisma.sql`(${randomUUID()}, ${c.Id}, ${c.NomeRazaoSocial}, ${c.Telefone ?? null}, ${c.Celular ?? null}, ${c.Email ?? null})`
+    );
+
+    await prisma.$executeRaw`
+      INSERT INTO "ClienteCadastro" ("id", "dapicId", "nome", "telefone", "celular", "email")
+      VALUES ${Prisma.join(values)}
+      ON CONFLICT ("dapicId") DO UPDATE SET
+        "nome"     = EXCLUDED."nome",
+        "telefone" = EXCLUDED."telefone",
+        "celular"  = EXCLUDED."celular",
+        "email"    = EXCLUDED."email"
+    `;
+    total += batch.length;
+    process.stdout.write(`\r  ${total}/${clientes.length} inseridos...`);
   }
 
-  console.log(`✓ ${upserted} clientes gravados no banco.`);
+  console.log(`\n✓ ${total} clientes gravados no banco.`);
   await prisma.$disconnect();
 }
 
