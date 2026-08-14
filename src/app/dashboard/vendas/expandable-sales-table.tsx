@@ -10,6 +10,18 @@ function formatBRL(value: number) {
   return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
+const SIZE_ORDER: Record<string, number> = { P: 1, M: 2, G: 3, GG: 4, XG: 5, XGG: 6, "2XG": 7, "3XG": 8 };
+
+function compareTamanho(a: string, b: string): number {
+  const na = parseFloat(a);
+  const nb = parseFloat(b);
+  if (!isNaN(na) && !isNaN(nb)) return na - nb;
+  const oa = SIZE_ORDER[a] ?? 99;
+  const ob = SIZE_ORDER[b] ?? 99;
+  if (oa !== ob) return oa - ob;
+  return a.localeCompare(b, "pt-BR");
+}
+
 export function ExpandableSalesTable({
   rows,
   produtoRows,
@@ -97,7 +109,9 @@ export function ExpandableSalesTable({
                   produtos.map((p) => {
                     const subKey = `${r.key}\x00${p.key}`;
                     const isSubOpen = openSub.has(subKey);
-                    const tamanhos = tamanhoRows?.filter((t) => t.grupo === r.key && t.produto === p.key) ?? [];
+                    const tamanhos = (tamanhoRows?.filter((t) => t.grupo === r.key && t.produto === p.key) ?? [])
+                      .slice()
+                      .sort((a, b) => compareTamanho(a.key, b.key));
                     return (
                       <Fragment key={`${r.key}::${p.key}`}>
                         <tr className="border-b border-[var(--gridline)] bg-[var(--page-plane)] last:border-0 hover:bg-[var(--surface-1)]">
