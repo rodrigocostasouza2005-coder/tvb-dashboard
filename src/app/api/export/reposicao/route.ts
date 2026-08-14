@@ -6,6 +6,20 @@ import { getGrupoRestriction } from "@/lib/permissions";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import ExcelJS from "exceljs";
 
+const SIZE_ORDER: Record<string, number> = { P: 1, M: 2, G: 3, GG: 4, XG: 5, XGG: 6, "2XG": 7, "3XG": 8 };
+
+function compareTamanho(a: string | null, b: string | null): number {
+  const sa = a ?? "";
+  const sb = b ?? "";
+  const na = parseFloat(sa);
+  const nb = parseFloat(sb);
+  if (!isNaN(na) && !isNaN(nb)) return na - nb;
+  const oa = SIZE_ORDER[sa] ?? 99;
+  const ob = SIZE_ORDER[sb] ?? 99;
+  if (oa !== ob) return oa - ob;
+  return sa.localeCompare(sb, "pt-BR");
+}
+
 export async function GET(request: NextRequest) {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -20,7 +34,11 @@ export async function GET(request: NextRequest) {
 
   const grupoIn = await getGrupoRestriction(user.role);
   const filters = { ...parseFilters(rawParams), grupoIn };
-  const rows = await getReplenishment(filters);
+  const rows = (await getReplenishment(filters)).slice().sort((a, b) =>
+    a.grupo.localeCompare(b.grupo, "pt-BR") ||
+    a.produto.localeCompare(b.produto, "pt-BR") ||
+    compareTamanho(a.tamanho, b.tamanho)
+  );
 
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet("Reposição");
