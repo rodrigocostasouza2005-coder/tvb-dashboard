@@ -4,6 +4,8 @@ import {
   getSalesByGrupoProduto,
   getSalesByDay,
   getSalesByDayPerStore,
+  getReturnsByDimension,
+  getReturnsByDay,
   getStores,
   getMarcas,
   getTabelasPreco,
@@ -20,6 +22,7 @@ import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
 import { DimensionToggle } from "../dimension-toggle";
 import { SalesTrendChart } from "../sales-trend-chart";
+import { ReturnsTrendChart } from "../returns-trend-chart";
 import { TopBarChart } from "../top-bar-chart";
 import { StoreCompareChart } from "../store-compare-chart";
 import { ExpandableSalesTable } from "./expandable-sales-table";
@@ -48,17 +51,20 @@ export default async function VendasPage({
     grupoIn,
   };
 
-  const [rows, produtoRows, salesByDay, salesByDayPerStore, stores, marcas, tabelasPreco] = await Promise.all([
+  const [rows, produtoRows, salesByDay, salesByDayPerStore, returnRows, returnsByDay, stores, marcas, tabelasPreco] = await Promise.all([
     getSalesByDimension(filters, dimension),
     dimension === "grupo" ? getSalesByGrupoProduto(filters) : Promise.resolve([]),
     getSalesByDay(filters),
     getSalesByDayPerStore(filters),
+    getReturnsByDimension(filters, dimension),
+    getReturnsByDay(filters),
     getStores(allowedStores),
     getMarcas(allowedMarcas),
     getTabelasPreco(allowedTabelasPreco),
   ]);
   const showFinancials = canSeeFinancials(user);
   const totalUnits = rows.reduce((sum, r) => sum + r.unitsSold, 0);
+  const totalReturned = returnRows.reduce((sum, r) => sum + r.unitsReturned, 0);
   const top10 = rows.slice(0, 10);
 
   return (
@@ -133,6 +139,45 @@ export default async function VendasPage({
           </table>
         </div>
       )}
+      {/* ── Devoluções ── */}
+      <h2 className="mb-3 mt-8 text-base font-semibold">Devoluções</h2>
+
+      <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
+        <h3 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Devoluções ao longo do período</h3>
+        <ReturnsTrendChart data={returnsByDay} showValue={showFinancials} />
+      </section>
+
+      <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
+              <th className="px-4 py-2 font-medium">{dimension === "grupo" ? "Grupo" : dimension === "produto" ? "Produto" : "Tamanho"}</th>
+              <th className="px-4 py-2 font-medium">Unidades devolvidas</th>
+              <th className="px-4 py-2 font-medium">% do total devolvido</th>
+              {showFinancials && <th className="px-4 py-2 font-medium">Valor devolvido</th>}
+            </tr>
+          </thead>
+          <tbody>
+            {returnRows.map((r) => (
+              <tr key={r.key} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
+                <td className="px-4 py-2 font-medium">{r.key}</td>
+                <td className="px-4 py-2 tabular-nums">{r.unitsReturned.toLocaleString("pt-BR")}</td>
+                <td className="px-4 py-2 tabular-nums text-[var(--text-secondary)]">
+                  {totalReturned > 0 ? `${((r.unitsReturned / totalReturned) * 100).toFixed(1)}%` : "—"}
+                </td>
+                {showFinancials && <td className="px-4 py-2 tabular-nums">{formatBRL(r.value)}</td>}
+              </tr>
+            ))}
+            {returnRows.length === 0 && (
+              <tr>
+                <td colSpan={showFinancials ? 4 : 3} className="px-4 py-6 text-center text-[var(--text-muted)]">
+                  Sem devoluções no período/filtro selecionado.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

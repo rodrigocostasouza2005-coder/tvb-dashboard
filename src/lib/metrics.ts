@@ -221,6 +221,58 @@ export async function getGiftsByGrupoProduto(filters: DashboardFilters) {
     .sort((a, b) => b.unitsSold - a.unitsSold);
 }
 
+function returnWhere(filters: DashboardFilters): Prisma.ReturnWhereInput {
+  return {
+    returnDate: { gte: filters.from, lte: filters.to },
+    ...(filters.storeIds !== undefined ? { storeId: { in: filters.storeIds } } : {}),
+    ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
+  };
+}
+
+async function groupReturnsByDimension(dimension: Dimension, where: Prisma.ReturnWhereInput) {
+  switch (dimension) {
+    case "grupo":
+      return prisma.return.groupBy({ by: ["grupo"], where, _sum: { quantidade: true, valorTotal: true } });
+    case "produto":
+      return prisma.return.groupBy({ by: ["produto"], where, _sum: { quantidade: true, valorTotal: true } });
+    case "tamanho":
+      return prisma.return.groupBy({ by: ["tamanho"], where, _sum: { quantidade: true, valorTotal: true } });
+  }
+}
+
+export async function getReturnsByDimension(filters: DashboardFilters, dimension: Dimension = "grupo") {
+  const rows = await groupReturnsByDimension(dimension, returnWhere(filters));
+  return rows
+    .map((r) => ({
+      key: dimensionKey(dimension, r),
+      unitsReturned: r._sum.quantidade ?? 0,
+      value: r._sum.valorTotal ?? 0,
+    }))
+    .sort((a, b) => b.unitsReturned - a.unitsReturned);
+}
+
+// Devoluções agrupadas por dia — usado no gráfico de tendência de devoluções na aba Vendas.
+export async function getReturnsByDay(filters: DashboardFilters) {
+  const rows = await prisma.$queryRaw<{ day: Date; units: bigint; value: number }[]>`
+    SELECT
+      (("returnDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo')::date AS day,
+      SUM("quantidade") AS units,
+      SUM("valorTotal") AS value
+    FROM "Return"
+    WHERE "returnDate" >= ${filters.from}
+      AND "returnDate" <= ${filters.to}
+      ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
+      ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
+    GROUP BY day
+    ORDER BY day ASC
+  `;
+  return rows.map((r) => ({
+    day: new Date(r.day).toISOString().slice(0, 10),
+    unitsReturned: Number(r.units),
+    value: Number(r.value),
+  }));
+}
+
 // Pega o snapshot mais recente por loja+produto (evita somar duplicado se já tivermos
 // vários syncs no histórico).
 // StockSnapshot tem 1 linha por storeId+cod (upsert no sync mantém sempre atualizada, ver
