@@ -604,16 +604,16 @@ function matchMinimumRule(
 }
 
 export async function getReplenishment(filters: Pick<DashboardFilters, "storeIds" | "grupoIn">) {
-  const [stock, minimumRules] = await Promise.all([
+  // Busca tudo em paralelo para reduzir round-trips e evitar P1017 no Neon.
+  const [stock, minimumRules, allStores] = await Promise.all([
     latestStockSnapshots(filters),
     prisma.stockMinimumRule.findMany(),
+    prisma.store.findMany(),
   ]);
-  const storeIds = [...new Set(stock.map((s) => s.storeId))];
-  const stores = await prisma.store.findMany({ where: { id: { in: storeIds } } });
-  const storeName = new Map(stores.map((s) => [s.id, s.name]));
+  const storeName = new Map(allStores.map((s) => [s.id, s.name]));
 
   // A reposição sempre vem do centro de distribuição ("CD" / TVB Site e Atacado).
-  const cdStore = await prisma.store.findFirst({ where: { code: "CD" } });
+  const cdStore = allStores.find((s) => s.code === "CD") ?? null;
   const cdStockByCod = new Map<string, number>();
   if (cdStore) {
     const cdStock = await latestStockSnapshots({ storeIds: [cdStore.id] });
