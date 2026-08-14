@@ -2,12 +2,14 @@ import { getSessionUser } from "@/lib/auth";
 import {
   getSalesByDimension,
   getSalesByGrupoProduto,
+  getSalesByGrupoProdutoTamanho,
   getSalesByTamanhoProduto,
   getSalesByProdutoTamanho,
   getSalesByDay,
   getSalesByDayPerStore,
   getReturnsByDimension,
   getReturnsByGrupoProduto,
+  getReturnsByGrupoProdutoTamanho,
   getReturnsByTamanhoProduto,
   getReturnsByProdutoTamanho,
   getReturnsByDay,
@@ -59,8 +61,10 @@ export default async function VendasPage({
 
   const emptySalesSubRows: Awaited<ReturnType<typeof getSalesByGrupoProduto>> = [];
   const emptyReturnSubRows: Awaited<ReturnType<typeof getReturnsByGrupoProduto>> = [];
+  const emptyTamanhoSalesRows: Awaited<ReturnType<typeof getSalesByGrupoProdutoTamanho>> = [];
+  const emptyTamanhoReturnRows: Awaited<ReturnType<typeof getReturnsByGrupoProdutoTamanho>> = [];
 
-  const [rows, salesSubRows, salesByDay, salesByDayPerStore, returnRows, returnSubRows, returnsByDay, stores, marcas, tabelasPreco] = await Promise.all([
+  const [rows, salesSubRows, salesTamanhoRows, salesByDay, salesByDayPerStore, returnRows, returnSubRows, returnTamanhoRows, returnsByDay, stores, marcas, tabelasPreco] = await Promise.all([
     getSalesByDimension(filters, dimension),
     dimension === "grupo"
       ? getSalesByGrupoProduto(filters)
@@ -69,6 +73,9 @@ export default async function VendasPage({
       : dimension === "produto"
       ? getSalesByProdutoTamanho(filters)
       : Promise.resolve(emptySalesSubRows),
+    dimension === "grupo"
+      ? getSalesByGrupoProdutoTamanho(filters)
+      : Promise.resolve(emptyTamanhoSalesRows),
     getSalesByDay(filters),
     getSalesByDayPerStore(filters),
     getReturnsByDimension(filters, dimension),
@@ -79,6 +86,9 @@ export default async function VendasPage({
       : dimension === "produto"
       ? getReturnsByProdutoTamanho(filters)
       : Promise.resolve(emptyReturnSubRows),
+    dimension === "grupo"
+      ? getReturnsByGrupoProdutoTamanho(filters)
+      : Promise.resolve(emptyTamanhoReturnRows),
     getReturnsByDay(filters),
     getStores(allowedStores),
     getMarcas(allowedMarcas),
@@ -124,6 +134,7 @@ export default async function VendasPage({
       <ExpandableSalesTable
         rows={rows}
         produtoRows={salesSubRows}
+        tamanhoRows={salesTamanhoRows}
         totalUnits={totalUnits}
         showFinancials={showFinancials}
         parentLabel={dimension === "tamanho" ? "Tamanho" : dimension === "produto" ? "Produto" : "Grupo"}
@@ -140,6 +151,7 @@ export default async function VendasPage({
       <ExpandableReturnsTable
         rows={returnRows}
         subRows={returnSubRows}
+        tamanhoRows={returnTamanhoRows}
         totalReturned={totalReturned}
         showFinancials={showFinancials}
         parentLabel={dimension === "tamanho" ? "Tamanho" : dimension === "produto" ? "Produto" : "Grupo"}
