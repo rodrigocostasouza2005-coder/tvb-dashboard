@@ -1,5 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
-import { getTopClientes, getStores, getMarcas, getTabelasPreco } from "@/lib/metrics";
+import { getTopClientes, getStores, getMarcas, getTabelasPreco, getVendedores } from "@/lib/metrics";
 import { canSeeFinancials, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
@@ -22,16 +22,20 @@ export default async function ClientesPage({
   const allowedStores = getStoreRestriction(user);
   const allowedMarcas = getMarcaRestriction(user);
   const allowedTabelasPreco = getTabelaPrecoRestriction(user);
-  const filters = parseFilters(await searchParams, {
+  const rawParams = await searchParams;
+  const filters = parseFilters(rawParams, {
     allowedStoreIds: allowedStores,
     allowedMarcas,
     allowedTabelasPreco,
   });
-  const [rows, stores, marcas, tabelasPreco] = await Promise.all([
-    getTopClientes(filters),
+  const vendedor = typeof rawParams.vendedor === "string" && rawParams.vendedor ? rawParams.vendedor : null;
+
+  const [rows, stores, marcas, tabelasPreco, vendedores] = await Promise.all([
+    getTopClientes(filters, vendedor),
     getStores(allowedStores),
     getMarcas(allowedMarcas),
     getTabelasPreco(allowedTabelasPreco),
+    getVendedores(),
   ]);
   const showFinancials = canSeeFinancials(user);
 
@@ -45,6 +49,28 @@ export default async function ClientesPage({
         showTabelaPreco
         filters={filters}
       />
+      <form method="get" action="/dashboard/clientes" className="mb-3 flex flex-wrap items-center gap-2">
+        {/* Preserva os filtros existentes ao filtrar por vendedor */}
+        {filters.storeIds?.map((id) => <input key={id} type="hidden" name="store" value={id} />)}
+        {filters.marcas?.map((m) => <input key={m} type="hidden" name="marca" value={m} />)}
+        {filters.tabelasPreco?.map((t) => <input key={t} type="hidden" name="tabelaPreco" value={t} />)}
+        {typeof rawParams.from === "string" && rawParams.from && <input type="hidden" name="from" value={rawParams.from} />}
+        {typeof rawParams.to === "string" && rawParams.to && <input type="hidden" name="to" value={rawParams.to} />}
+        <label className="text-xs text-[var(--text-muted)]">Vendedor:</label>
+        <select
+          name="vendedor"
+          defaultValue={vendedor ?? ""}
+          className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-sm outline-none focus:border-[var(--series-1)] focus:ring-1 focus:ring-[var(--series-1)]"
+        >
+          <option value="">Todos</option>
+          {vendedores.map((v) => (
+            <option key={v} value={v}>{v}</option>
+          ))}
+        </select>
+        <button type="submit" className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-3 py-1.5 text-sm hover:bg-[var(--page-plane)]">
+          Filtrar
+        </button>
+      </form>
       <p className="mb-3 text-xs text-[var(--text-muted)]">
         Use o filtro de tabela de preço pra separar varejo de atacado. Segmentação e recorrência mais
         avançadas entram numa próxima etapa.

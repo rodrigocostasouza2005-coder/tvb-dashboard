@@ -661,10 +661,15 @@ export async function getStockAging(
     .sort((a, b) => (b.diasDesdePrimeiraVenda ?? 999999) - (a.diasDesdePrimeiraVenda ?? 999999));
 }
 
-export async function getTopClientes(filters: DashboardFilters, limit = 30) {
+export async function getTopClientes(filters: DashboardFilters, vendedor?: string | null, limit = 30) {
+  const where: Prisma.SaleWhereInput = {
+    ...saleWhere(filters),
+    clienteNome: { not: null },
+    ...(vendedor ? { vendedor } : {}),
+  };
   const rows = await prisma.sale.groupBy({
     by: ["clienteNome"],
-    where: { ...saleWhere(filters), clienteNome: { not: null } },
+    where,
     _sum: { quantidade: true, valorTotalLiquido: true },
     _count: { _all: true },
   });
@@ -692,6 +697,35 @@ export async function getTopClientes(filters: DashboardFilters, limit = 30) {
       email: cad?.email ?? null,
     };
   });
+}
+
+export async function getVendedores(): Promise<string[]> {
+  const rows = await prisma.sale.findMany({
+    distinct: ["vendedor"],
+    select: { vendedor: true },
+    where: { vendedor: { not: null } },
+  });
+  return rows.map((r) => r.vendedor as string).sort();
+}
+
+// Top clientes por brindes recebidos — agrupado por clienteNome na tabela Gift.
+// Só existe histórico de clienteNome nos registros gravados após o deploy de 2026-08-13.
+export async function getGiftsByCliente(filters: DashboardFilters, limit = 30) {
+  const rows = await prisma.gift.groupBy({
+    by: ["clienteNome"],
+    where: { ...giftWhere(filters), clienteNome: { not: null } },
+    _sum: { quantidade: true, valorTotalLiquido: true },
+    _count: { _all: true },
+  });
+  return rows
+    .map((r) => ({
+      cliente: r.clienteNome as string,
+      brindes: r._count._all,
+      unidades: r._sum.quantidade ?? 0,
+      valor: r._sum.valorTotalLiquido ?? 0,
+    }))
+    .sort((a, b) => b.unidades - a.unidades)
+    .slice(0, limit);
 }
 
 export type StoreFilterOption = { id: string; name: string };
@@ -751,6 +785,24 @@ export async function getEstoqueAtual(filters: Pick<DashboardFilters, "storeIds"
 
   return [...byKey.entries()]
     .map(([key, v]) => ({ key, quantidade: v.quantidade, valorCusto: v.valorCusto }))
+    .sort((a, b) => b.quantidade - a.quantidade);
+}
+
+// Produtos dentro de cada grupo — usado pra expandir um grupo na aba Estoque Atual,
+// igual ao padrão getSalesByGrupoProduto/getGiftsByGrupoProduto.
+export async function getEstoqueAtualPorGrupoProduto(filters: Pick<DashboardFilters, "storeIds" | "grupoIn">) {
+  const stock = await latestStockSnapshots(filters);
+  // Chave composta separada — evita depender de split de string no nome do produto.
+  const byKey = new Map<string, { grupo: string; produto: string; quantidade: number; valorCusto: number }>();
+  for (const s of stock) {
+    const mapKey = `${s.grupo}\x00${s.produto}`;
+    const acc = byKey.get(mapKey) ?? { grupo: s.grupo, produto: s.produto, quantidade: 0, valorCusto: 0 };
+    acc.quantidade += s.quantidadeDisponivel;
+    acc.valorCusto += (s.valorCusto ?? 0) * s.quantidadeDisponivel;
+    byKey.set(mapKey, acc);
+  }
+  return [...byKey.values()]
+    .map((v) => ({ grupo: v.grupo, key: v.produto, quantidade: v.quantidade, valorCusto: v.valorCusto }))
     .sort((a, b) => b.quantidade - a.quantidade);
 }
 

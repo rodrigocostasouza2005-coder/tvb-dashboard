@@ -181,6 +181,7 @@ model Gift {
   tamanho           String?
   colecao           String?
   marca             String?
+  clienteNome       String?
   quantidade        Int
   valorTotalLiquido Float
   giftDate          DateTime

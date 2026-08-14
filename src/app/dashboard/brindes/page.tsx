@@ -1,5 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
-import { getGiftsByDimension, getGiftsByGrupoProduto, getStores, getMarcas } from "@/lib/metrics";
+import { getGiftsByDimension, getGiftsByGrupoProduto, getGiftsByCliente, getStores, getMarcas } from "@/lib/metrics";
 import { canSeeFinancials, getGrupoRestriction, getStoreRestriction, getMarcaRestriction } from "@/lib/permissions";
 import { parseFilters, parseDimension, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
@@ -28,9 +28,10 @@ export default async function BrindesPage({
   const allowedMarcas = getMarcaRestriction(user);
   const filters = { ...parseFilters(rawParams, { allowedStoreIds: allowedStores, allowedMarcas }), grupoIn };
 
-  const [rows, produtoRows, stores, marcas] = await Promise.all([
+  const [rows, produtoRows, clienteRows, stores, marcas] = await Promise.all([
     getGiftsByDimension(filters, dimension),
     dimension === "grupo" ? getGiftsByGrupoProduto(filters) : Promise.resolve([]),
+    getGiftsByCliente(filters),
     getStores(allowedStores),
     getMarcas(allowedMarcas),
   ]);
@@ -56,6 +57,32 @@ export default async function BrindesPage({
       </section>
 
       <DimensionToggle basePath="/dashboard/brindes" searchParams={rawParams} current={dimension} />
+
+      {clienteRows.length > 0 && (
+        <section className="mb-6 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+          <div className="px-4 py-3 border-b border-[var(--gridline)]">
+            <h2 className="text-sm font-medium text-[var(--text-secondary)]">Quem retirou brindes</h2>
+          </div>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
+                <th className="px-4 py-2 font-medium">Cliente</th>
+                <th className="px-4 py-2 font-medium">Unidades</th>
+                {showFinancials && <th className="px-4 py-2 font-medium">Valor</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {clienteRows.map((r) => (
+                <tr key={r.cliente} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
+                  <td className="px-4 py-2 font-medium">{r.cliente}</td>
+                  <td className="px-4 py-2 tabular-nums">{r.unidades.toLocaleString("pt-BR")}</td>
+                  {showFinancials && <td className="px-4 py-2 tabular-nums">{formatBRL(r.valor)}</td>}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )}
 
       {dimension === "grupo" ? (
         <ExpandableSalesTable
