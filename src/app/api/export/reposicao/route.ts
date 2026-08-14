@@ -4,11 +4,7 @@ import { getSessionUser } from "@/lib/auth";
 import { getReplenishment } from "@/lib/metrics";
 import { getGrupoRestriction } from "@/lib/permissions";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
-
-function csvEscape(value: string | number) {
-  const s = String(value);
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-}
+import * as XLSX from "xlsx";
 
 export async function GET(request: NextRequest) {
   const user = await getSessionUser();
@@ -33,34 +29,49 @@ export async function GET(request: NextRequest) {
     "Tamanho",
     "Estoque atual",
     "Estoque mínimo",
-    "Falta",
+    "Repor",
     "Origem sugerida",
     "Estoque na origem",
   ];
-  const lines = [header.join(";")];
-  for (const r of rows) {
-    lines.push(
-      [
-        r.storeName,
-        r.produto,
-        r.grupo,
-        r.tamanho ?? "",
-        r.quantidadeDisponivel,
-        r.estoqueMinimo,
-        r.falta,
-        r.origemSugerida,
-        r.estoqueNaOrigem,
-      ]
-        .map(csvEscape)
-        .join(";")
-    );
-  }
-  const csv = "﻿" + lines.join("\r\n"); // BOM pra acentuação abrir certo no Excel
 
-  return new NextResponse(csv, {
+  // Coluna "Repor" é índice 6 (0-based) → coluna G
+  const REPOR_COL = 6;
+
+  const wb = XLSX.utils.book_new();
+  const wsData = [
+    header,
+    ...rows.map((r) => [
+      r.storeName,
+      r.produto,
+      r.grupo,
+      r.tamanho ?? "",
+      r.quantidadeDisponivel,
+      r.estoqueMinimo,
+      r.falta,
+      r.origemSugerida,
+      r.estoqueNaOrigem,
+    ]),
+  ];
+
+  const ws = XLSX.utils.aoa_to_sheet(wsData);
+
+  // Pintar o cabeçalho e todas as células da coluna "Repor" de amarelo
+  const yellow = { fgColor: { rgb: "FFFF00" } };
+  const numRows = wsData.length;
+  for (let row = 0; row < numRows; row++) {
+    const cellRef = XLSX.utils.encode_cell({ r: row, c: REPOR_COL });
+    if (!ws[cellRef]) ws[cellRef] = { v: row === 0 ? "Repor" : wsData[row][REPOR_COL], t: row === 0 ? "s" : "n" };
+    ws[cellRef].s = { fill: { patternType: "solid", ...yellow } };
+  }
+
+  XLSX.utils.book_append_sheet(wb, ws, "Reposição");
+
+  const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx", cellStyles: true });
+
+  return new NextResponse(buf, {
     headers: {
-      "Content-Type": "text/csv; charset=utf-8",
-      "Content-Disposition": `attachment; filename="reposicao-${new Date().toISOString().slice(0, 10)}.csv"`,
+      "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "Content-Disposition": `attachment; filename="reposicao-${new Date().toISOString().slice(0, 10)}.xlsx"`,
     },
   });
 }

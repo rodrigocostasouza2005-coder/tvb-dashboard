@@ -631,9 +631,8 @@ export async function getReplenishment(filters: Pick<DashboardFilters, "storeIds
         s.estoqueMinimo != null &&
         s.quantidadeDisponivel < s.estoqueMinimo &&
         (!cdStore || s.storeId !== cdStore.id) &&
-        // Sem estoque na origem pra puxar = não tem reposição real pra fazer agora, só
-        // polui a lista.
-        (cdStockByCod.get(s.cod) ?? 0) > 0
+        // Menos de 4 unidades na origem = não compensa repor agora.
+        (cdStockByCod.get(s.cod) ?? 0) > 3
     )
     .map((s) => ({
       storeId: s.storeId,
