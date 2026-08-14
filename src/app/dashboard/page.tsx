@@ -1,4 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
+import { requireTabAccess } from "@/lib/tabs";
 import {
   getKpiSummary,
   getSalesByDimension,
@@ -54,6 +55,7 @@ export default async function OverviewPage({
 }) {
   const user = await getSessionUser();
   if (!user) return null;
+  requireTabAccess(user, user.role, "visao-geral");
 
   const grupoIn = await getGrupoRestriction(user.role);
   const allowedStores = getStoreRestriction(user);

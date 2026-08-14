@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import type { Role } from "@prisma/client";
 
 export type TabKey =
+  | "visao-geral"
   | "vendas"
   | "mensal"
   | "brindes"
@@ -17,6 +18,7 @@ export type TabKey =
   | "envelhecimento";
 
 export const TABS: { key: TabKey; label: string; href: string }[] = [
+  { key: "visao-geral", label: "Visão Geral", href: "/dashboard" },
   { key: "vendas", label: "Vendas", href: "/dashboard/vendas" },
   { key: "mensal", label: "Mensal", href: "/dashboard/mensal" },
   { key: "brindes", label: "Brinde", href: "/dashboard/brindes" },
@@ -32,8 +34,6 @@ export const TABS: { key: TabKey; label: string; href: string }[] = [
   { key: "envelhecimento", label: "Envelhecimento", href: "/dashboard/envelhecimento" },
 ];
 
-// "Visão Geral" (/dashboard) não entra na lista — todo usuário logado sempre pode ver ela,
-// é a página de pouso padrão.
 const BLOCKED_BY_DEFAULT_FOR_VENDEDOR: TabKey[] = ["clientes", "vendedores", "estoque-minimo"];
 
 export function defaultAllowedTabs(role: Role): TabKey[] {
@@ -48,7 +48,11 @@ export function hasTabAccess(user: { allowedTabs: string[] }, tab: TabKey, role:
   return allowed.includes(tab);
 }
 
-// Chama no topo de cada página de aba — manda pra Visão Geral se o usuário não tiver acesso.
+// Chama no topo de cada página de aba — redireciona para a primeira aba permitida se não tiver acesso.
 export function requireTabAccess(user: { allowedTabs: string[] }, role: Role, tab: TabKey) {
-  if (!hasTabAccess(user, tab, role)) redirect("/dashboard");
+  if (!hasTabAccess(user, tab, role)) {
+    const allowed = user.allowedTabs.length > 0 ? user.allowedTabs : defaultAllowedTabs(role);
+    const first = TABS.find((t) => allowed.includes(t.key));
+    redirect(first?.href ?? "/dashboard");
+  }
 }
