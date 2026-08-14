@@ -5,6 +5,7 @@ import { getRawStores, getMarcas, getTabelasPreco } from "@/lib/metrics";
 import { TABS, defaultAllowedTabs } from "@/lib/tabs";
 import { createUserAction, updateUserAction, resetPasswordAction, deleteUserAction } from "./actions";
 import { ForceSyncButton } from "./force-sync-button";
+import { SuccessBanner } from "./success-banner";
 
 // A sincronização manual (ForceSyncButton) chama runSync() direto, que pode levar minutos
 // (estoque de 4 lojas + faturas) — sem isso a Server Action tomaria timeout no plano padrão.
@@ -79,10 +80,15 @@ function OptionCheckboxes({ name, checked, options }: { name: string; checked: S
   );
 }
 
-export default async function AdminPage() {
+export default async function AdminPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ ok?: string }>;
+}) {
   const user = await getSessionUser();
   if (!user) return null;
   if (user.role !== "ADMIN") redirect("/dashboard");
+  const { ok } = await searchParams;
 
   const [users, stores, marcas, tabelasPreco] = await Promise.all([
     prisma.user.findMany({ orderBy: { createdAt: "asc" } }),
@@ -93,6 +99,7 @@ export default async function AdminPage() {
 
   return (
     <div>
+      {ok === "1" && <SuccessBanner message="Salvo com sucesso!" />}
       <h1 className="mb-1 text-lg font-semibold">Administração</h1>
       <p className="mb-6 text-sm text-[var(--text-muted)]">
         Crie logins e escolha quais abas cada pessoa pode ver. Deixar todas as caixinhas de aba

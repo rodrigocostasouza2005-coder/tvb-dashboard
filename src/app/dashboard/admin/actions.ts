@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { hashPassword, getSessionUser } from "@/lib/auth";
 import { TABS, type TabKey } from "@/lib/tabs";
@@ -62,6 +63,7 @@ export async function createUserAction(formData: FormData) {
   });
 
   revalidatePath("/dashboard/admin");
+  redirect("/dashboard/admin?ok=1");
 }
 
 export async function updateUserAction(formData: FormData) {
@@ -82,6 +84,7 @@ export async function updateUserAction(formData: FormData) {
   });
 
   revalidatePath("/dashboard/admin");
+  redirect("/dashboard/admin?ok=1");
 }
 
 export async function resetPasswordAction(formData: FormData) {
@@ -95,6 +98,7 @@ export async function resetPasswordAction(formData: FormData) {
   await prisma.user.update({ where: { id: userId }, data: { passwordHash } });
 
   revalidatePath("/dashboard/admin");
+  redirect("/dashboard/admin?ok=1");
 }
 
 export async function deleteUserAction(formData: FormData) {
