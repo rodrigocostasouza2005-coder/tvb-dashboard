@@ -187,6 +187,24 @@ export async function getSalesByGrupoProduto(filters: DashboardFilters) {
     .sort((a, b) => b.revenue - a.revenue);
 }
 
+// Vendas por produto dentro de cada tamanho — mesmo padrão de getSalesByGrupoProduto,
+// usado pra expandir um tamanho e ver quais produtos venderam naquele tamanho.
+export async function getSalesByTamanhoProduto(filters: DashboardFilters) {
+  const rows = await prisma.sale.groupBy({
+    by: ["tamanho", "produto"],
+    where: saleWhere(filters),
+    _sum: { quantidade: true, valorTotalLiquido: true },
+  });
+  return rows
+    .map((r) => ({
+      grupo: r.tamanho ?? "—", // reutiliza o campo "grupo" como chave pai (tamanho)
+      key: r.produto,
+      unitsSold: r._sum.quantidade ?? 0,
+      revenue: r._sum.valorTotalLiquido ?? 0,
+    }))
+    .sort((a, b) => b.revenue - a.revenue);
+}
+
 function giftWhere(filters: DashboardFilters): Prisma.GiftWhereInput {
   return {
     giftDate: { gte: filters.from, lte: filters.to },

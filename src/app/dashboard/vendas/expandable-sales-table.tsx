@@ -17,12 +17,14 @@ export function ExpandableSalesTable({
   totalUnits,
   showFinancials,
   emptyMessage = "Sem vendas no período/filtro selecionado.",
+  parentLabel = "Grupo",
 }: {
   rows: Row[];
   produtoRows: ProdutoRow[];
   totalUnits: number;
   showFinancials: boolean;
   emptyMessage?: string;
+  parentLabel?: string;
 }) {
   const [open, setOpen] = useState<Set<string>>(new Set());
 
@@ -40,7 +42,7 @@ export function ExpandableSalesTable({
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
-            <th className="px-4 py-2 font-medium">Grupo</th>
+            <th className="px-4 py-2 font-medium">{parentLabel}</th>
             <th className="px-4 py-2 font-medium">Unidades</th>
             <th className="px-4 py-2 font-medium">% do total</th>
             {showFinancials && <th className="px-4 py-2 font-medium">Receita</th>}

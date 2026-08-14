@@ -2,6 +2,7 @@ import { getSessionUser } from "@/lib/auth";
 import {
   getSalesByDimension,
   getSalesByGrupoProduto,
+  getSalesByTamanhoProduto,
   getSalesByDay,
   getSalesByDayPerStore,
   getReturnsByDimension,
@@ -51,9 +52,14 @@ export default async function VendasPage({
     grupoIn,
   };
 
+  const emptyProdutoRows: Awaited<ReturnType<typeof getSalesByGrupoProduto>> = [];
   const [rows, produtoRows, salesByDay, salesByDayPerStore, returnRows, returnsByDay, stores, marcas, tabelasPreco] = await Promise.all([
     getSalesByDimension(filters, dimension),
-    dimension === "grupo" ? getSalesByGrupoProduto(filters) : Promise.resolve([]),
+    dimension === "grupo"
+      ? getSalesByGrupoProduto(filters)
+      : dimension === "tamanho"
+      ? getSalesByTamanhoProduto(filters)
+      : Promise.resolve(emptyProdutoRows),
     getSalesByDay(filters),
     getSalesByDayPerStore(filters),
     getReturnsByDimension(filters, dimension),
@@ -99,19 +105,12 @@ export default async function VendasPage({
 
       <DimensionToggle basePath="/dashboard/vendas" searchParams={rawParams} current={dimension} />
 
-      {dimension === "grupo" ? (
-        <ExpandableSalesTable
-          rows={rows}
-          produtoRows={produtoRows}
-          totalUnits={totalUnits}
-          showFinancials={showFinancials}
-        />
-      ) : (
+      {dimension === "produto" ? (
         <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
-                <th className="px-4 py-2 font-medium">{dimension === "produto" ? "Produto" : "Tamanho"}</th>
+                <th className="px-4 py-2 font-medium">Produto</th>
                 <th className="px-4 py-2 font-medium">Unidades</th>
                 <th className="px-4 py-2 font-medium">% do total</th>
                 {showFinancials && <th className="px-4 py-2 font-medium">Receita</th>}
@@ -138,6 +137,14 @@ export default async function VendasPage({
             </tbody>
           </table>
         </div>
+      ) : (
+        <ExpandableSalesTable
+          rows={rows}
+          produtoRows={produtoRows}
+          totalUnits={totalUnits}
+          showFinancials={showFinancials}
+          parentLabel={dimension === "tamanho" ? "Tamanho" : "Grupo"}
+        />
       )}
       {/* ── Devoluções ── */}
       <h2 className="mb-3 mt-8 text-base font-semibold">Devoluções</h2>
