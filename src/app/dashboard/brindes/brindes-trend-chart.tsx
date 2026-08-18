@@ -5,11 +5,13 @@ import {
 } from "recharts";
 
 const SERIES_COLORS = [
-  "var(--series-1)",
-  "var(--series-2)",
-  "var(--series-3)",
-  "var(--series-4)",
-  "var(--series-5)",
+  "#2a78d6", // azul
+  "#eb6834", // laranja
+  "#22a06b", // verde
+  "#9b59b6", // roxo
+  "#e74c3c", // vermelho
+  "#f39c12", // amarelo
+  "#1abc9c", // teal
 ];
 
 function formatDay(day: string) {
