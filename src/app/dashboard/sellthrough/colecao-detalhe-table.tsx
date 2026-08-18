@@ -62,7 +62,7 @@ export function ColecaoDetalheTable({ rows }: { rows: ProdutoRow[] }) {
         <thead>
           <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
             <th className="px-4 py-2 font-medium">Grupo / Produto</th>
-            <th className="px-4 py-2 font-medium">Produzido</th>
+            <th className="px-4 py-2 font-medium">Total disponível</th>
             <th className="px-4 py-2 font-medium">Vendas</th>
             <th className="px-4 py-2 font-medium">Devoluções</th>
             <th className="px-4 py-2 font-medium">Brinde</th>

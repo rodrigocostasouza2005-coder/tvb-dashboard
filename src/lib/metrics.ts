@@ -514,53 +514,44 @@ export async function getStockVsSales(filters: DashboardFilters, dimension: Dime
 // Sellthrough por coleção: vendido_total / produzido_total, sem filtro de data.
 // Produzido = ordens de produção (fonte mais correta que estoque+vendido).
 export async function getSellthroughByColecao(filters: Pick<DashboardFilters, "storeIds" | "marcas" | "grupoIn">) {
-  const prodBaseWhere: Prisma.ProductionOrderWhereInput = {
-    // Sem filtro de colecao — o DAPIC às vezes retorna Colecao: null mesmo para produtos que
-    // pertencem a uma coleção. Buscamos TODA a produção por produto e mapeamos via produtoColecao.
-    grupo: { not: "(sem grupo)" },
-    ...(filters.marcas !== undefined ? { marca: { in: filters.marcas } } : {}),
-    ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
-  };
+  // Fórmula: ST = saida / (estoque_atual + saida)
+  // onde saida = vendas - devoluções + brindes
+  // Não depende de ordens de produção (que têm dados incompletos no DAPIC).
 
   const saleWhereColl = {
     colecao: { not: null as string | null },
     ...(filters.marcas !== undefined ? { marca: { in: filters.marcas } } : {}),
     ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
   };
+  const stockWhereColl = {
+    colecao: { not: null as string | null },
+    grupo: { not: "(sem grupo)" },
+    ...(filters.storeIds !== undefined ? { storeId: { in: filters.storeIds } } : {}),
+    ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
+  };
 
-  const [producedByProduto, sold, gifted, returned, prodOrderProdutos] = await Promise.all([
-    // Produção agrupada por produto (sem filtro de colecao) — captura também ordens com colecao null
-    prisma.productionOrder.groupBy({ by: ["produto"], where: prodBaseWhere, _sum: { quantidade: true } }),
+  const [sold, gifted, stock, returned, prodOrderProdutos] = await Promise.all([
     prisma.sale.groupBy({ by: ["colecao"], where: saleWhereColl, _sum: { quantidade: true, valorTotalLiquido: true } }),
     prisma.gift.groupBy({ by: ["colecao"], where: saleWhereColl, _sum: { quantidade: true } }),
-    // Return não tem colecao — agrupa por produto e cruza com colecao via ProductionOrder
+    // Estoque atual agrupado por colecao
+    prisma.stockSnapshot.groupBy({ by: ["colecao"], where: stockWhereColl, _sum: { quantidadeDisponivel: true } }),
+    // Return não tem colecao — mapeia via produto
     prisma.return.groupBy({
       by: ["produto"],
       where: { ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}) },
       _sum: { quantidade: true },
     }),
-    // Mapa produto → colecao via ProductionOrder onde colecao está preenchida
-    prisma.productionOrder.findMany({
-      where: {
-        colecao: { not: null },
-        ...(filters.marcas !== undefined ? { marca: { in: filters.marcas } } : {}),
-        ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
-      },
+    // Mapa produto → colecao via Sale (que sempre tem colecao quando vem da API)
+    prisma.sale.findMany({
+      where: { colecao: { not: null }, ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}) },
       select: { produto: true, colecao: true },
       distinct: ["produto"],
     }),
   ]);
 
-  // Mapa produto → colecao (via ProductionOrder onde colecao está preenchida)
+  // Mapa produto → colecao para cruzar devoluções
   const produtoColecao = new Map<string, string>();
   for (const r of prodOrderProdutos) if (r.colecao) produtoColecao.set(r.produto, r.colecao);
-
-  // Soma produção por colecao — inclui ordens com colecao null mapeadas pelo produto
-  const producedByColecao = new Map<string, number>();
-  for (const r of producedByProduto) {
-    const col = produtoColecao.get(r.produto);
-    if (col) producedByColecao.set(col, (producedByColecao.get(col) ?? 0) + (r._sum.quantidade ?? 0));
-  }
 
   const returnedByColecao = new Map<string, number>();
   for (const r of returned) {
@@ -570,25 +561,27 @@ export async function getSellthroughByColecao(filters: Pick<DashboardFilters, "s
 
   const soldByColecao = new Map(sold.map((r) => [r.colecao ?? "—", { units: r._sum.quantidade ?? 0, revenue: r._sum.valorTotalLiquido ?? 0 }]));
   const giftedByColecao = new Map(gifted.map((r) => [r.colecao ?? "—", r._sum.quantidade ?? 0]));
+  const stockByColecao = new Map(stock.map((r) => [r.colecao ?? "—", r._sum.quantidadeDisponivel ?? 0]));
 
-  const colecoes = new Set([...producedByColecao.keys(), ...soldByColecao.keys()]);
+  const colecoes = new Set([...soldByColecao.keys(), ...stockByColecao.keys()]);
 
   return [...colecoes]
     .map((colecao) => {
-      const produzido = producedByColecao.get(colecao) ?? 0;
       const { units: vendido = 0, revenue = 0 } = soldByColecao.get(colecao) ?? {};
       const brinde = giftedByColecao.get(colecao) ?? 0;
       const devolvido = returnedByColecao.get(colecao) ?? 0;
+      const estoque = stockByColecao.get(colecao) ?? 0;
       const saida = vendido - devolvido + brinde;
-      const sellThroughRate = produzido > 0 ? (saida / produzido) * 100 : null;
-      return { key: colecao, vendido, devolvido, brinde, saida, produzido, revenue, sellThroughRate };
+      const denominador = estoque + saida;
+      const sellThroughRate = denominador > 0 ? (saida / denominador) * 100 : null;
+      return { key: colecao, vendido, devolvido, brinde, saida, produzido: denominador, revenue, sellThroughRate };
     })
     .filter((r) => r.produzido > 0)
     .sort((a, b) => (b.sellThroughRate ?? 0) - (a.sellThroughRate ?? 0));
 }
 
 // Detalhe de sellthrough por coleção: grupo → produto, incluindo brindes.
-// Sem filtro de data — cobre toda a vida da coleção.
+// Fórmula: ST = saida / (estoque_atual + saida), onde saida = vendas - devoluções + brindes.
 export async function getSellthroughColecaoDetalhe(
   filters: Pick<DashboardFilters, "marcas" | "grupoIn">,
   colecao?: string
@@ -599,64 +592,43 @@ export async function getSellthroughColecaoDetalhe(
     ...(filters.marcas !== undefined ? { marca: { in: filters.marcas } } : {}),
     ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
   };
-  const marcaGrupoWhere = {
-    ...(filters.marcas !== undefined ? { marca: { in: filters.marcas } } : {}),
-    ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
-  };
 
-  // 1ª rodada: vendas/brindes filtrados por colecao + mapa produto→grupo da colecao selecionada
-  const [sold, gifted, prodOrderProdutos] = await Promise.all([
+  const [sold, gifted, returned, stock] = await Promise.all([
     prisma.sale.groupBy({ by: ["grupo", "produto"], where: saleGiftWhere, _sum: { quantidade: true, valorTotalLiquido: true } }),
     prisma.gift.groupBy({ by: ["grupo", "produto"], where: saleGiftWhere, _sum: { quantidade: true } }),
-    // Produtos que pertencem à(s) colecao(ões) selecionada(s)
-    prisma.productionOrder.findMany({
-      where: { ...colecaoFilter, ...marcaGrupoWhere },
-      select: { produto: true, grupo: true },
-      distinct: ["produto"],
-    }),
-  ]);
-
-  // Conjunto de produtos da colecao — usado para filtrar produção (que pode ter colecao null)
-  const produtosColecao = new Map<string, string>(); // produto → grupo
-  for (const r of prodOrderProdutos) produtosColecao.set(r.produto, r.grupo);
-  // Também adiciona produtos que aparecem em vendas da colecao
-  for (const r of sold) if (!produtosColecao.has(r.produto)) produtosColecao.set(r.produto, r.grupo);
-
-  const produtosArr = [...produtosColecao.keys()];
-
-  // 2ª rodada: produção e devoluções filtradas pelos produtos da colecao (sem filtro de colecao)
-  const [produced, returned] = await Promise.all([
-    prisma.productionOrder.groupBy({
-      by: ["grupo", "produto"],
-      where: { produto: { in: produtosArr }, ...marcaGrupoWhere },
-      _sum: { quantidade: true },
-    }),
     prisma.return.groupBy({
       by: ["grupo", "produto"],
-      where: { produto: { in: produtosArr }, ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}) },
+      where: {
+        produto: { in: await prisma.sale.findMany({ where: saleGiftWhere, select: { produto: true }, distinct: ["produto"] }).then((r) => r.map((s) => s.produto)) },
+        ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
+      },
       _sum: { quantidade: true },
+    }),
+    // Estoque atual por grupo+produto para a coleção selecionada
+    prisma.stockSnapshot.groupBy({
+      by: ["grupo", "produto"],
+      where: {
+        ...colecaoFilter,
+        grupo: { not: "(sem grupo)" },
+        ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
+      },
+      _sum: { quantidadeDisponivel: true },
     }),
   ]);
 
-  type ProdRow = { grupo: string; produto: string; produzido: number; vendido: number; brinde: number; devolvido: number; revenue: number };
+  type ProdRow = { grupo: string; produto: string; estoque: number; vendido: number; brinde: number; devolvido: number; revenue: number };
   const map = new Map<string, ProdRow>();
 
-  for (const r of produced) {
-    const k = `${r.grupo}\x00${r.produto}`;
-    const cur = map.get(k) ?? { grupo: r.grupo, produto: r.produto, produzido: 0, vendido: 0, brinde: 0, devolvido: 0, revenue: 0 };
-    cur.produzido += r._sum.quantidade ?? 0;
-    map.set(k, cur);
-  }
   for (const r of sold) {
     const k = `${r.grupo}\x00${r.produto}`;
-    const cur = map.get(k) ?? { grupo: r.grupo, produto: r.produto, produzido: 0, vendido: 0, brinde: 0, devolvido: 0, revenue: 0 };
+    const cur = map.get(k) ?? { grupo: r.grupo, produto: r.produto, estoque: 0, vendido: 0, brinde: 0, devolvido: 0, revenue: 0 };
     cur.vendido += r._sum.quantidade ?? 0;
     cur.revenue += r._sum.valorTotalLiquido ?? 0;
     map.set(k, cur);
   }
   for (const r of gifted) {
     const k = `${r.grupo}\x00${r.produto}`;
-    const cur = map.get(k) ?? { grupo: r.grupo, produto: r.produto, produzido: 0, vendido: 0, brinde: 0, devolvido: 0, revenue: 0 };
+    const cur = map.get(k) ?? { grupo: r.grupo, produto: r.produto, estoque: 0, vendido: 0, brinde: 0, devolvido: 0, revenue: 0 };
     cur.brinde += r._sum.quantidade ?? 0;
     map.set(k, cur);
   }
@@ -665,14 +637,29 @@ export async function getSellthroughColecaoDetalhe(
     const cur = map.get(k);
     if (cur) cur.devolvido += r._sum.quantidade ?? 0;
   }
+  for (const r of stock) {
+    const k = `${r.grupo}\x00${r.produto}`;
+    const cur = map.get(k);
+    if (cur) cur.estoque += r._sum.quantidadeDisponivel ?? 0;
+  }
 
   return [...map.values()]
-    .filter((r) => r.produzido > 0)
-    .map((r) => ({
-      ...r,
-      saida: r.vendido - r.devolvido + r.brinde,
-      sellThroughRate: r.produzido > 0 ? ((r.vendido - r.devolvido + r.brinde) / r.produzido) * 100 : null,
-    }))
+    .filter((r) => r.vendido > 0 || r.estoque > 0)
+    .map((r) => {
+      const saida = r.vendido - r.devolvido + r.brinde;
+      const denominador = r.estoque + saida;
+      return {
+        grupo: r.grupo,
+        produto: r.produto,
+        produzido: denominador,
+        vendido: r.vendido,
+        devolvido: r.devolvido,
+        brinde: r.brinde,
+        saida,
+        revenue: r.revenue,
+        sellThroughRate: denominador > 0 ? (saida / denominador) * 100 : null,
+      };
+    })
     .sort((a, b) => a.grupo.localeCompare(b.grupo, "pt-BR") || a.produto.localeCompare(b.produto, "pt-BR"));
 }
 

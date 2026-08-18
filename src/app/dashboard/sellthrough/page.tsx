@@ -68,7 +68,7 @@ export default async function SellthroughPage({
         <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
           <p className="text-xs text-[var(--text-muted)]">Sell-through geral</p>
           <p className="mt-1 text-2xl font-bold">{stGeral != null ? `${stGeral.toFixed(1)}%` : "—"}</p>
-          <p className="text-xs text-[var(--text-muted)]">(vendas - devoluções + brindes) / produzido</p>
+          <p className="text-xs text-[var(--text-muted)]">saída / (estoque atual + saída)</p>
         </div>
         <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
           <p className="text-xs text-[var(--text-muted)]">Produzido</p>
@@ -87,7 +87,7 @@ export default async function SellthroughPage({
       {/* Tabela de coleções — ordenada por sell-through */}
       <h2 className="mb-3 text-base font-semibold">Sell-through por coleção</h2>
       <p className="mb-3 text-xs text-[var(--text-muted)]">
-        Sell-through = (vendido + brinde) / produzido. Sem filtro de data — cobre toda a vida de cada coleção.
+        Sell-through = saída / (estoque atual + saída), onde saída = vendas − devoluções + brindes. Cobre toda a vida de cada coleção.
       </p>
       <ColecaoSellthroughTable rows={colecaoRows} />
 
