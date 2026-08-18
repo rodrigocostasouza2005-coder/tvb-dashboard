@@ -526,27 +526,31 @@ export async function getSellthroughByColecao(filters: Pick<DashboardFilters, "s
     ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
   };
 
-  const [produced, sold, gifted, returned] = await Promise.all([
+  const [produced, sold, gifted, returned, prodOrderProdutos] = await Promise.all([
     prisma.productionOrder.groupBy({ by: ["colecao"], where, _sum: { quantidade: true } }),
     prisma.sale.groupBy({ by: ["colecao"], where: saleWhereColl, _sum: { quantidade: true, valorTotalLiquido: true } }),
     prisma.gift.groupBy({ by: ["colecao"], where: saleWhereColl, _sum: { quantidade: true } }),
-    // Return não tem colecao — agrupa por produto e cruza com colecao via vendas depois
+    // Return não tem colecao — agrupa por produto e cruza com colecao via ProductionOrder
     prisma.return.groupBy({
       by: ["produto"],
       where: { ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}) },
       _sum: { quantidade: true },
     }),
+    // Mapa produto → colecao via ProductionOrder (fonte autoritária — Sale.colecao pode ser null)
+    prisma.productionOrder.findMany({
+      where: {
+        colecao: { not: null },
+        ...(filters.marcas !== undefined ? { marca: { in: filters.marcas } } : {}),
+        ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
+      },
+      select: { produto: true, colecao: true },
+      distinct: ["produto"],
+    }),
   ]);
 
-  // Mapa produto → colecao (via Sales)
+  // Mapa produto → colecao (via ProductionOrder)
   const produtoColecao = new Map<string, string>();
-  for (const s of sold) { /* skip — agrupado por colecao aqui */ }
-  const saleByProduto = await prisma.sale.findMany({
-    where: { colecao: { not: null }, ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}) },
-    select: { produto: true, colecao: true },
-    distinct: ["produto"],
-  });
-  for (const r of saleByProduto) if (r.colecao) produtoColecao.set(r.produto, r.colecao);
+  for (const r of prodOrderProdutos) if (r.colecao) produtoColecao.set(r.produto, r.colecao);
 
   const returnedByColecao = new Map<string, number>();
   for (const r of returned) {
