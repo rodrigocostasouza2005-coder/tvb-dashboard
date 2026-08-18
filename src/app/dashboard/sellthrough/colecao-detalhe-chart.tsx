@@ -32,7 +32,7 @@ export function ColecaoDetalheChart({ rows }: { rows: Row[] }) {
 
   const visible = showAll ? sorted : sorted.slice(0, 20);
   const data = visible.map((r) => ({ name: r.produto, value: r.sellThroughRate ?? 0 }));
-  const height = Math.max(320, data.length * 28);
+  const barWidth = Math.max(32, Math.min(60, 900 / data.length));
 
   return (
     <div>
@@ -47,20 +47,23 @@ export function ColecaoDetalheChart({ rows }: { rows: Row[] }) {
           </button>
         </div>
       )}
-    <ResponsiveContainer width="100%" height={height}>
-      <BarChart data={data} layout="vertical" margin={{ top: 4, right: 40, left: 8, bottom: 4 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="var(--gridline)" horizontal={false} />
+    <ResponsiveContainer width="100%" height={320}>
+      <BarChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 80 }} barSize={barWidth}>
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--gridline)" vertical={false} />
         <XAxis
-          type="number"
+          dataKey="name"
+          tick={{ fontSize: 10, fill: "var(--text-secondary)" }}
+          angle={-45}
+          textAnchor="end"
+          interval={0}
+        />
+        <YAxis
           domain={[0, 100]}
           tickFormatter={(v) => `${v}%`}
           tick={{ fontSize: 11, fill: "var(--text-muted)" }}
-        />
-        <YAxis
-          type="category"
-          dataKey="name"
-          width={160}
-          tick={{ fontSize: 11, fill: "var(--text-secondary)" }}
+          axisLine={false}
+          tickLine={false}
+          width={36}
         />
         <Tooltip
           formatter={(value) => [`${Number(value).toFixed(1)}%`, "Sell-through"]}
@@ -71,7 +74,7 @@ export function ColecaoDetalheChart({ rows }: { rows: Row[] }) {
             fontSize: 12,
           }}
         />
-        <Bar dataKey="value" radius={[0, 3, 3, 0]}>
+        <Bar dataKey="value" radius={[3, 3, 0, 0]}>
           {data.map((entry, i) => (
             <Cell key={i} fill={barColor(entry.value)} />
           ))}
