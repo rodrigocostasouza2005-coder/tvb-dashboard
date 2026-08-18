@@ -514,8 +514,10 @@ export async function getStockVsSales(filters: DashboardFilters, dimension: Dime
 // Sellthrough por coleção: vendido_total / produzido_total, sem filtro de data.
 // Produzido = ordens de produção (fonte mais correta que estoque+vendido).
 export async function getSellthroughByColecao(filters: Pick<DashboardFilters, "storeIds" | "marcas" | "grupoIn">) {
-  const where: Prisma.ProductionOrderWhereInput = {
-    colecao: { not: null },
+  const prodBaseWhere: Prisma.ProductionOrderWhereInput = {
+    // Sem filtro de colecao — o DAPIC às vezes retorna Colecao: null mesmo para produtos que
+    // pertencem a uma coleção. Buscamos TODA a produção por produto e mapeamos via produtoColecao.
+    grupo: { not: "(sem grupo)" },
     ...(filters.marcas !== undefined ? { marca: { in: filters.marcas } } : {}),
     ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
   };
@@ -526,8 +528,9 @@ export async function getSellthroughByColecao(filters: Pick<DashboardFilters, "s
     ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
   };
 
-  const [produced, sold, gifted, returned, prodOrderProdutos] = await Promise.all([
-    prisma.productionOrder.groupBy({ by: ["colecao"], where, _sum: { quantidade: true } }),
+  const [producedByProduto, sold, gifted, returned, prodOrderProdutos] = await Promise.all([
+    // Produção agrupada por produto (sem filtro de colecao) — captura também ordens com colecao null
+    prisma.productionOrder.groupBy({ by: ["produto"], where: prodBaseWhere, _sum: { quantidade: true } }),
     prisma.sale.groupBy({ by: ["colecao"], where: saleWhereColl, _sum: { quantidade: true, valorTotalLiquido: true } }),
     prisma.gift.groupBy({ by: ["colecao"], where: saleWhereColl, _sum: { quantidade: true } }),
     // Return não tem colecao — agrupa por produto e cruza com colecao via ProductionOrder
@@ -536,7 +539,7 @@ export async function getSellthroughByColecao(filters: Pick<DashboardFilters, "s
       where: { ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}) },
       _sum: { quantidade: true },
     }),
-    // Mapa produto → colecao via ProductionOrder (fonte autoritária — Sale.colecao pode ser null)
+    // Mapa produto → colecao via ProductionOrder onde colecao está preenchida
     prisma.productionOrder.findMany({
       where: {
         colecao: { not: null },
@@ -548,9 +551,16 @@ export async function getSellthroughByColecao(filters: Pick<DashboardFilters, "s
     }),
   ]);
 
-  // Mapa produto → colecao (via ProductionOrder)
+  // Mapa produto → colecao (via ProductionOrder onde colecao está preenchida)
   const produtoColecao = new Map<string, string>();
   for (const r of prodOrderProdutos) if (r.colecao) produtoColecao.set(r.produto, r.colecao);
+
+  // Soma produção por colecao — inclui ordens com colecao null mapeadas pelo produto
+  const producedByColecao = new Map<string, number>();
+  for (const r of producedByProduto) {
+    const col = produtoColecao.get(r.produto);
+    if (col) producedByColecao.set(col, (producedByColecao.get(col) ?? 0) + (r._sum.quantidade ?? 0));
+  }
 
   const returnedByColecao = new Map<string, number>();
   for (const r of returned) {
@@ -558,7 +568,6 @@ export async function getSellthroughByColecao(filters: Pick<DashboardFilters, "s
     if (col) returnedByColecao.set(col, (returnedByColecao.get(col) ?? 0) + (r._sum.quantidade ?? 0));
   }
 
-  const producedByColecao = new Map(produced.map((r) => [r.colecao ?? "—", r._sum.quantidade ?? 0]));
   const soldByColecao = new Map(sold.map((r) => [r.colecao ?? "—", { units: r._sum.quantidade ?? 0, revenue: r._sum.valorTotalLiquido ?? 0 }]));
   const giftedByColecao = new Map(gifted.map((r) => [r.colecao ?? "—", r._sum.quantidade ?? 0]));
 
@@ -585,21 +594,48 @@ export async function getSellthroughColecaoDetalhe(
   colecao?: string
 ) {
   const colecaoFilter = colecao ? { colecao } : { colecao: { not: null as string | null } };
-  const baseWhere = {
+  const saleGiftWhere = {
     ...colecaoFilter,
     ...(filters.marcas !== undefined ? { marca: { in: filters.marcas } } : {}),
     ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
   };
-
-  const returnWhereColl = {
+  const marcaGrupoWhere = {
+    ...(filters.marcas !== undefined ? { marca: { in: filters.marcas } } : {}),
     ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
   };
 
-  const [produced, sold, gifted, returned] = await Promise.all([
-    prisma.productionOrder.groupBy({ by: ["grupo", "produto", "colecao"], where: baseWhere, _sum: { quantidade: true } }),
-    prisma.sale.groupBy({ by: ["grupo", "produto", "colecao"], where: baseWhere, _sum: { quantidade: true, valorTotalLiquido: true } }),
-    prisma.gift.groupBy({ by: ["grupo", "produto", "colecao"], where: baseWhere, _sum: { quantidade: true } }),
-    prisma.return.groupBy({ by: ["grupo", "produto"], where: returnWhereColl, _sum: { quantidade: true } }),
+  // 1ª rodada: vendas/brindes filtrados por colecao + mapa produto→grupo da colecao selecionada
+  const [sold, gifted, prodOrderProdutos] = await Promise.all([
+    prisma.sale.groupBy({ by: ["grupo", "produto"], where: saleGiftWhere, _sum: { quantidade: true, valorTotalLiquido: true } }),
+    prisma.gift.groupBy({ by: ["grupo", "produto"], where: saleGiftWhere, _sum: { quantidade: true } }),
+    // Produtos que pertencem à(s) colecao(ões) selecionada(s)
+    prisma.productionOrder.findMany({
+      where: { ...colecaoFilter, ...marcaGrupoWhere },
+      select: { produto: true, grupo: true },
+      distinct: ["produto"],
+    }),
+  ]);
+
+  // Conjunto de produtos da colecao — usado para filtrar produção (que pode ter colecao null)
+  const produtosColecao = new Map<string, string>(); // produto → grupo
+  for (const r of prodOrderProdutos) produtosColecao.set(r.produto, r.grupo);
+  // Também adiciona produtos que aparecem em vendas da colecao
+  for (const r of sold) if (!produtosColecao.has(r.produto)) produtosColecao.set(r.produto, r.grupo);
+
+  const produtosArr = [...produtosColecao.keys()];
+
+  // 2ª rodada: produção e devoluções filtradas pelos produtos da colecao (sem filtro de colecao)
+  const [produced, returned] = await Promise.all([
+    prisma.productionOrder.groupBy({
+      by: ["grupo", "produto"],
+      where: { produto: { in: produtosArr }, ...marcaGrupoWhere },
+      _sum: { quantidade: true },
+    }),
+    prisma.return.groupBy({
+      by: ["grupo", "produto"],
+      where: { produto: { in: produtosArr }, ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}) },
+      _sum: { quantidade: true },
+    }),
   ]);
 
   type ProdRow = { grupo: string; produto: string; produzido: number; vendido: number; brinde: number; devolvido: number; revenue: number };
