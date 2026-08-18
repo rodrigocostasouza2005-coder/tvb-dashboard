@@ -21,17 +21,17 @@ function barColor(rate: number | null) {
 }
 
 export function ColecaoDetalheChart({ rows }: { rows: Row[] }) {
-  const top = rows
+  const sorted = rows
     .filter((r) => r.sellThroughRate != null)
-    .sort((a, b) => (b.sellThroughRate ?? 0) - (a.sellThroughRate ?? 0))
-    .slice(0, 20);
+    .sort((a, b) => (b.sellThroughRate ?? 0) - (a.sellThroughRate ?? 0));
 
-  if (top.length === 0) return null;
+  if (sorted.length === 0) return null;
 
-  const data = top.map((r) => ({ name: r.produto, value: r.sellThroughRate ?? 0 }));
+  const data = sorted.map((r) => ({ name: r.produto, value: r.sellThroughRate ?? 0 }));
+  const height = Math.max(320, data.length * 28);
 
   return (
-    <ResponsiveContainer width="100%" height={320}>
+    <ResponsiveContainer width="100%" height={height}>
       <BarChart data={data} layout="vertical" margin={{ top: 4, right: 40, left: 8, bottom: 4 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="var(--gridline)" horizontal={false} />
         <XAxis

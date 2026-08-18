@@ -113,7 +113,7 @@ export default async function SellthroughPage({
 
       {detalheRows.length > 0 && (
         <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
-          <h3 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Sell-through por produto (top 20)</h3>
+          <h3 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Sell-through por produto</h3>
           <ColecaoDetalheChart rows={detalheRows} />
         </section>
       )}
