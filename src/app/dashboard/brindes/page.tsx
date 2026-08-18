@@ -1,5 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
-import { getGiftsByDimension, getGiftsByGrupoProduto, getGiftsByCliente, getStores, getMarcas } from "@/lib/metrics";
+import { getGiftsByDimension, getGiftsByGrupoProduto, getGiftsByCliente, getGiftsByDayByStore, getStores, getMarcas } from "@/lib/metrics";
 import { canSeeFinancials, getGrupoRestriction, getStoreRestriction, getMarcaRestriction } from "@/lib/permissions";
 import { parseFilters, parseDimension, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
@@ -7,6 +7,7 @@ import { FilterBar } from "../filter-bar";
 import { DimensionToggle } from "../dimension-toggle";
 import { TopBarChart } from "../top-bar-chart";
 import { ExpandableSalesTable } from "../vendas/expandable-sales-table";
+import { BrindesTrendChart } from "./brindes-trend-chart";
 
 function formatBRL(value: number) {
   return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -28,10 +29,11 @@ export default async function BrindesPage({
   const allowedMarcas = getMarcaRestriction(user);
   const filters = { ...parseFilters(rawParams, { allowedStoreIds: allowedStores, allowedMarcas }), grupoIn };
 
-  const [rows, produtoRows, clienteRows, stores, marcas] = await Promise.all([
+  const [rows, produtoRows, clienteRows, trendResult, stores, marcas] = await Promise.all([
     getGiftsByDimension(filters, dimension),
     dimension === "grupo" ? getGiftsByGrupoProduto(filters) : Promise.resolve([]),
     getGiftsByCliente(filters),
+    getGiftsByDayByStore(filters),
     getStores(allowedStores),
     getMarcas(allowedMarcas),
   ]);
@@ -45,6 +47,12 @@ export default async function BrindesPage({
         Itens dados como brinde (Tipo=Brinde na API) — não entram na contagem de vendas nem de
         devoluções. Quem retirou é registrado a partir do próximo sync após o deploy de 14/08/2026.
       </p>
+
+      {/* Gráfico de brindes por dia × filial */}
+      <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
+        <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Brindes por dia — por filial</h2>
+        <BrindesTrendChart data={trendResult.data} stores={trendResult.stores} />
+      </section>
 
       {/* Foco principal: quem retirou */}
       <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] mb-6">

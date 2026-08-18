@@ -1089,6 +1089,39 @@ export async function getGiftsByCliente(filters: DashboardFilters, limit = 30) {
     .slice(0, limit);
 }
 
+// Retorna brindes por dia × filial — usado no gráfico de tendência da aba Brindes.
+// Formato: [{ day: "2026-08-01", [storeName]: units, ... }, ...]
+export async function getGiftsByDayByStore(filters: DashboardFilters) {
+  const rows = await prisma.gift.findMany({
+    where: giftWhere(filters),
+    select: { giftDate: true, quantidade: true, storeId: true, store: { select: { name: true, displayGroup: true } } },
+  });
+
+  // Agrupa por dia + store (usa displayGroup se existir, senão name)
+  const map = new Map<string, Map<string, number>>();
+  for (const r of rows) {
+    const day = r.giftDate.toISOString().slice(0, 10);
+    const storeName = r.store.displayGroup ?? r.store.name;
+    if (!map.has(day)) map.set(day, new Map());
+    const dayMap = map.get(day)!;
+    dayMap.set(storeName, (dayMap.get(storeName) ?? 0) + r.quantidade);
+  }
+
+  // Conjunto de todas as lojas
+  const storeNames = [...new Set(rows.map((r) => r.store.displayGroup ?? r.store.name))].sort();
+
+  // Converte para array de objetos { day, [storeName]: units }
+  const result = [...map.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([day, dayMap]) => {
+      const obj: Record<string, string | number> = { day };
+      for (const s of storeNames) obj[s] = dayMap.get(s) ?? 0;
+      return obj;
+    });
+
+  return { data: result, stores: storeNames };
+}
+
 export type StoreFilterOption = { id: string; name: string };
 
 // Junta lojas com o mesmo displayGroup (ex: CD + ATACADO) numa única opção de filtro —
