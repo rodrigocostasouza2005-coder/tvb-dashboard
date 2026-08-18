@@ -33,38 +33,52 @@ async function withRetry<T>(fn: () => Promise<T>, attempts = 6): Promise<T> {
 
 async function main() {
   const clients = createDapicClients();
-  const matriz = clients.find((c) => c.label === "matriz");
+  const matriz = clients.find((c) => c.label === "matriz") ?? clients[0];
   if (!matriz) {
-    console.log("Token da matriz não configurado em DAPIC_CREDENTIALS.");
+    console.log("Nenhum token DAPIC configurado em DAPIC_CREDENTIALS ou DAPIC_TOKEN_INTEGRACAO.");
     process.exit(1);
   }
 
+  console.log(`Usando token: ${matriz.label}`);
   console.log(`Buscando /ordensproducao/produtos de ${DATA_INICIAL} a ${DATA_FINAL}...`);
   const linhas = await withRetry(() => matriz.fetchOrdensProducaoProdutos(DATA_INICIAL, DATA_FINAL));
   console.log(`${linhas.length} linhas recebidas, gravando...`);
 
-  const rows: ProductionOrderRow[] = linhas
-    .filter((l) => l.IdGradeProduto != null)
-    .map((l) => ({
-      idOrdemProducao: l.IdOrdemProducao,
-      cod: String(l.IdGradeProduto),
-      ordemProducao: l.OrdemProducao,
-      referencia: l.Referencia,
-      produto: l.Produto,
-      cor: l.Cor ?? null,
-      tamanho: l.Tamanho ?? null,
-      grupo: l.Grupo ?? "(sem grupo)",
-      marca: l.Marca ?? null,
-      colecao: l.Colecao ?? null,
-      quantidade: l.Quantidade,
-      quantidadeOriginal: l.QuantidadeOriginal,
-      status: l.Status,
-      dataFinalizacaoProducao: l.DataFinalizacaoProducao ? parseDapicDateTime(l.DataFinalizacaoProducao) : null,
-      dataEntradaCelula: l.DataEntradaCelula ? parseDapicDateTime(l.DataEntradaCelula) : null,
-    }));
+  // O DAPIC retorna múltiplas linhas por (IdOrdemProducao, IdGradeProduto) com qtds parciais.
+  // Precisamos SOMAR antes de upsertarmos, senão o banco fica só com o último valor.
+  const aggregated = new Map<string, ProductionOrderRow>();
+  for (const l of linhas.filter((l) => l.IdGradeProduto != null)) {
+    const key = `${l.IdOrdemProducao}\x00${l.IdGradeProduto}`;
+    const existing = aggregated.get(key);
+    if (existing) {
+      existing.quantidade += l.Quantidade;
+      existing.quantidadeOriginal += l.QuantidadeOriginal;
+      if (!existing.colecao && l.Colecao) existing.colecao = l.Colecao;
+    } else {
+      aggregated.set(key, {
+        idOrdemProducao: l.IdOrdemProducao,
+        cod: String(l.IdGradeProduto),
+        ordemProducao: l.OrdemProducao,
+        referencia: l.Referencia,
+        produto: l.Produto,
+        cor: l.Cor ?? null,
+        tamanho: l.Tamanho ?? null,
+        grupo: l.Grupo ?? "(sem grupo)",
+        marca: l.Marca ?? null,
+        colecao: l.Colecao ?? null,
+        quantidade: l.Quantidade,
+        quantidadeOriginal: l.QuantidadeOriginal,
+        status: l.Status,
+        dataFinalizacaoProducao: l.DataFinalizacaoProducao ? parseDapicDateTime(l.DataFinalizacaoProducao) : null,
+        dataEntradaCelula: l.DataEntradaCelula ? parseDapicDateTime(l.DataEntradaCelula) : null,
+      });
+    }
+  }
+  const rows = [...aggregated.values()];
+  console.log(`${linhas.length} linhas da API -> ${rows.length} após agregação por ordem+grade`);
 
   const gravadas = await withRetry(() => upsertProductionOrders(prisma, rows));
-  console.log(`${rows.length} linhas -> ${gravadas} gravadas (deduplicadas por idOrdemProducao+cod).`);
+  console.log(`${gravadas} registros gravados/atualizados no banco.`);
 
   await prisma.syncLog.create({
     data: {

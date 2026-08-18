@@ -395,7 +395,7 @@ export async function runSync() {
       })(),
       // Não fatal: se o token da matriz ainda não estiver configurado (ex: só em dev, não em
       // produção), syncOrdensProducao devolve 0 sem quebrar o resto da sync.
-      syncOrdensProducao(matrizClient).catch(() => 0),
+      syncOrdensProducao(matrizClient).catch((e) => { console.error("[syncOrdensProducao] falhou:", e?.message ?? e); return 0; }),
       // Clientes — 1 token basta, não é fatal se falhar
       (cdAtacadoClient ? syncClientes(cdAtacadoClient) : Promise.resolve(0)).catch(() => 0),
     ]);
