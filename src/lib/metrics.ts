@@ -546,6 +546,86 @@ export async function getSellthroughByColecao(filters: Pick<DashboardFilters, "s
     .sort((a, b) => (b.sellThroughRate ?? 0) - (a.sellThroughRate ?? 0));
 }
 
+// Detalhe de sellthrough por coleção: grupo → produto, incluindo brindes.
+// Sem filtro de data — cobre toda a vida da coleção.
+export async function getSellthroughColecaoDetalhe(
+  filters: Pick<DashboardFilters, "marcas" | "grupoIn">,
+  colecao?: string
+) {
+  const colecaoFilter = colecao ? { colecao } : { colecao: { not: null as string | null } };
+  const baseWhere = {
+    ...colecaoFilter,
+    ...(filters.marcas !== undefined ? { marca: { in: filters.marcas } } : {}),
+    ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
+  };
+
+  const [produced, sold, gifted] = await Promise.all([
+    prisma.productionOrder.groupBy({
+      by: ["grupo", "produto", "colecao"],
+      where: baseWhere,
+      _sum: { quantidade: true },
+    }),
+    prisma.sale.groupBy({
+      by: ["grupo", "produto", "colecao"],
+      where: baseWhere,
+      _sum: { quantidade: true, valorTotalLiquido: true },
+    }),
+    prisma.gift.groupBy({
+      by: ["grupo", "produto", "colecao"],
+      where: baseWhere,
+      _sum: { quantidade: true },
+    }),
+  ]);
+
+  // Agrega por grupo+produto (somando todas as coleções se não filtrado)
+  type ProdRow = { grupo: string; produto: string; produzido: number; vendido: number; brinde: number; revenue: number };
+  const map = new Map<string, ProdRow>();
+
+  for (const r of produced) {
+    const k = `${r.grupo}\x00${r.produto}`;
+    const cur = map.get(k) ?? { grupo: r.grupo, produto: r.produto, produzido: 0, vendido: 0, brinde: 0, revenue: 0 };
+    cur.produzido += r._sum.quantidade ?? 0;
+    map.set(k, cur);
+  }
+  for (const r of sold) {
+    const k = `${r.grupo}\x00${r.produto}`;
+    const cur = map.get(k) ?? { grupo: r.grupo, produto: r.produto, produzido: 0, vendido: 0, brinde: 0, revenue: 0 };
+    cur.vendido += r._sum.quantidade ?? 0;
+    cur.revenue += r._sum.valorTotalLiquido ?? 0;
+    map.set(k, cur);
+  }
+  for (const r of gifted) {
+    const k = `${r.grupo}\x00${r.produto}`;
+    const cur = map.get(k) ?? { grupo: r.grupo, produto: r.produto, produzido: 0, vendido: 0, brinde: 0, revenue: 0 };
+    cur.brinde += r._sum.quantidade ?? 0;
+    map.set(k, cur);
+  }
+
+  return [...map.values()]
+    .filter((r) => r.produzido > 0)
+    .map((r) => ({
+      ...r,
+      saida: r.vendido + r.brinde,
+      sellThroughRate: r.produzido > 0 ? ((r.vendido + r.brinde) / r.produzido) * 100 : null,
+    }))
+    .sort((a, b) => a.grupo.localeCompare(b.grupo, "pt-BR") || a.produto.localeCompare(b.produto, "pt-BR"));
+}
+
+// Lista de coleções disponíveis para o filtro
+export async function getColecoes(filters: Pick<DashboardFilters, "marcas" | "grupoIn">) {
+  const rows = await prisma.productionOrder.findMany({
+    where: {
+      colecao: { not: null },
+      ...(filters.marcas !== undefined ? { marca: { in: filters.marcas } } : {}),
+      ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
+    },
+    select: { colecao: true },
+    distinct: ["colecao"],
+    orderBy: { colecao: "asc" },
+  });
+  return rows.map((r) => r.colecao).filter(Boolean) as string[];
+}
+
 export async function searchStockVsSales(
   filters: DashboardFilters,
   dimension: Dimension,
