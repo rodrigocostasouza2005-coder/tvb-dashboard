@@ -8,6 +8,7 @@ type ProdutoRow = {
   produto: string;
   produzido: number;
   vendido: number;
+  devolvido: number;
   brinde: number;
   saida: number;
   sellThroughRate: number | null;
@@ -42,11 +43,12 @@ export function ColecaoDetalheTable({ rows }: { rows: ProdutoRow[] }) {
   }
 
   // Agrega por grupo
-  const grupos = new Map<string, { produzido: number; vendido: number; brinde: number; saida: number }>();
+  const grupos = new Map<string, { produzido: number; vendido: number; devolvido: number; brinde: number; saida: number }>();
   for (const r of rows) {
-    const cur = grupos.get(r.grupo) ?? { produzido: 0, vendido: 0, brinde: 0, saida: 0 };
+    const cur = grupos.get(r.grupo) ?? { produzido: 0, vendido: 0, devolvido: 0, brinde: 0, saida: 0 };
     cur.produzido += r.produzido;
     cur.vendido += r.vendido;
+    cur.devolvido += r.devolvido;
     cur.brinde += r.brinde;
     cur.saida += r.saida;
     grupos.set(r.grupo, cur);
@@ -62,8 +64,9 @@ export function ColecaoDetalheTable({ rows }: { rows: ProdutoRow[] }) {
             <th className="px-4 py-2 font-medium">Grupo / Produto</th>
             <th className="px-4 py-2 font-medium">Produzido</th>
             <th className="px-4 py-2 font-medium">Vendas</th>
+            <th className="px-4 py-2 font-medium">Devoluções</th>
             <th className="px-4 py-2 font-medium">Brinde</th>
-            <th className="px-4 py-2 font-medium">Saída total</th>
+            <th className="px-4 py-2 font-medium">Saída líquida</th>
             <th className="px-4 py-2 font-medium">Sell-through</th>
           </tr>
         </thead>
@@ -92,6 +95,7 @@ export function ColecaoDetalheTable({ rows }: { rows: ProdutoRow[] }) {
                   </td>
                   <td className="px-4 py-2 tabular-nums">{g.produzido.toLocaleString("pt-BR")}</td>
                   <td className="px-4 py-2 tabular-nums">{g.vendido.toLocaleString("pt-BR")}</td>
+                  <td className="px-4 py-2 tabular-nums text-[var(--text-secondary)]">{g.devolvido.toLocaleString("pt-BR")}</td>
                   <td className="px-4 py-2 tabular-nums text-[var(--text-secondary)]">{g.brinde.toLocaleString("pt-BR")}</td>
                   <td className="px-4 py-2 tabular-nums font-medium">{g.saida.toLocaleString("pt-BR")}</td>
                   <td className="px-4 py-2">{stBadge(grupoRate)}</td>
@@ -102,6 +106,7 @@ export function ColecaoDetalheTable({ rows }: { rows: ProdutoRow[] }) {
                       <td className="py-1.5 pr-4 pl-10 text-[var(--text-secondary)]">{p.produto}</td>
                       <td className="px-4 py-1.5 tabular-nums text-[var(--text-secondary)]">{p.produzido.toLocaleString("pt-BR")}</td>
                       <td className="px-4 py-1.5 tabular-nums text-[var(--text-secondary)]">{p.vendido.toLocaleString("pt-BR")}</td>
+                      <td className="px-4 py-1.5 tabular-nums text-[var(--text-muted)]">{p.devolvido.toLocaleString("pt-BR")}</td>
                       <td className="px-4 py-1.5 tabular-nums text-[var(--text-muted)]">{p.brinde.toLocaleString("pt-BR")}</td>
                       <td className="px-4 py-1.5 tabular-nums text-[var(--text-secondary)]">{p.saida.toLocaleString("pt-BR")}</td>
                       <td className="px-4 py-1.5">{stBadge(p.sellThroughRate)}</td>
@@ -112,7 +117,7 @@ export function ColecaoDetalheTable({ rows }: { rows: ProdutoRow[] }) {
           })}
           {rows.length === 0 && (
             <tr>
-              <td colSpan={6} className="px-4 py-6 text-center text-[var(--text-muted)]">
+              <td colSpan={7} className="px-4 py-6 text-center text-[var(--text-muted)]">
                 Nenhum dado encontrado.
               </td>
             </tr>

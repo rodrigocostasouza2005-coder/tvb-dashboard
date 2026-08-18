@@ -5,6 +5,9 @@ import { statusFor } from "../status-filter";
 type Row = {
   key: string;
   vendido: number;
+  devolvido: number;
+  brinde: number;
+  saida: number;
   produzido: number;
   revenue: number;
   sellThroughRate: number | null;
@@ -25,23 +28,24 @@ export function ColecaoSellthroughTable({ rows }: { rows: Row[] }) {
           <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
             <th className="px-4 py-2 font-medium">Coleção</th>
             <th className="px-4 py-2 font-medium">Produzido</th>
-            <th className="px-4 py-2 font-medium">Vendido</th>
-            <th className="px-4 py-2 font-medium">Em estoque</th>
+            <th className="px-4 py-2 font-medium">Vendas</th>
+            <th className="px-4 py-2 font-medium">Devoluções</th>
+            <th className="px-4 py-2 font-medium">Brindes</th>
+            <th className="px-4 py-2 font-medium">Saída líquida</th>
             <th className="px-4 py-2 font-medium">Sell-through</th>
           </tr>
         </thead>
         <tbody>
           {rows.map((r) => {
             const status = statusFor(r.sellThroughRate).key ?? "neutral";
-            const emEstoque = r.produzido - r.vendido;
             return (
               <tr key={r.key} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
                 <td className="px-4 py-2 font-medium">{r.key}</td>
                 <td className="px-4 py-2 tabular-nums">{r.produzido.toLocaleString("pt-BR")}</td>
                 <td className="px-4 py-2 tabular-nums">{r.vendido.toLocaleString("pt-BR")}</td>
-                <td className="px-4 py-2 tabular-nums text-[var(--text-secondary)]">
-                  {emEstoque >= 0 ? emEstoque.toLocaleString("pt-BR") : "—"}
-                </td>
+                <td className="px-4 py-2 tabular-nums text-[var(--text-secondary)]">{r.devolvido.toLocaleString("pt-BR")}</td>
+                <td className="px-4 py-2 tabular-nums text-[var(--text-secondary)]">{r.brinde.toLocaleString("pt-BR")}</td>
+                <td className="px-4 py-2 tabular-nums font-medium">{r.saida.toLocaleString("pt-BR")}</td>
                 <td className="px-4 py-2">
                   <span className={`inline-block rounded px-2 py-0.5 text-xs font-semibold tabular-nums ${STATUS_STYLE[status]}`}>
                     {r.sellThroughRate != null ? `${r.sellThroughRate.toFixed(1)}%` : "—"}
@@ -52,7 +56,7 @@ export function ColecaoSellthroughTable({ rows }: { rows: Row[] }) {
           })}
           {rows.length === 0 && (
             <tr>
-              <td colSpan={5} className="px-4 py-6 text-center text-[var(--text-muted)]">
+              <td colSpan={7} className="px-4 py-6 text-center text-[var(--text-muted)]">
                 Nenhuma coleção encontrada — verifique se as ordens de produção estão sincronizadas.
               </td>
             </tr>

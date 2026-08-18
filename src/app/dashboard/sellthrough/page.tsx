@@ -68,7 +68,7 @@ export default async function SellthroughPage({
         <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
           <p className="text-xs text-[var(--text-muted)]">Sell-through geral</p>
           <p className="mt-1 text-2xl font-bold">{stGeral != null ? `${stGeral.toFixed(1)}%` : "—"}</p>
-          <p className="text-xs text-[var(--text-muted)]">(vendas + brindes) / produzido</p>
+          <p className="text-xs text-[var(--text-muted)]">(vendas - devoluções + brindes) / produzido</p>
         </div>
         <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
           <p className="text-xs text-[var(--text-muted)]">Produzido</p>
