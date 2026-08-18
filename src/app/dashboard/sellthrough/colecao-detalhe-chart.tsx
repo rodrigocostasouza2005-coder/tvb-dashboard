@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import {
   BarChart,
   Bar,
@@ -21,16 +22,31 @@ function barColor(rate: number | null) {
 }
 
 export function ColecaoDetalheChart({ rows }: { rows: Row[] }) {
+  const [showAll, setShowAll] = useState(false);
+
   const sorted = rows
     .filter((r) => r.sellThroughRate != null)
     .sort((a, b) => (b.sellThroughRate ?? 0) - (a.sellThroughRate ?? 0));
 
   if (sorted.length === 0) return null;
 
-  const data = sorted.map((r) => ({ name: r.produto, value: r.sellThroughRate ?? 0 }));
+  const visible = showAll ? sorted : sorted.slice(0, 20);
+  const data = visible.map((r) => ({ name: r.produto, value: r.sellThroughRate ?? 0 }));
   const height = Math.max(320, data.length * 28);
 
   return (
+    <div>
+      {sorted.length > 20 && (
+        <div className="mb-3 flex justify-end">
+          <button
+            type="button"
+            onClick={() => setShowAll((v) => !v)}
+            className="rounded-md border border-[var(--border)] px-3 py-1 text-xs text-[var(--text-secondary)] hover:bg-[var(--page-plane)]"
+          >
+            {showAll ? `Mostrar top 20` : `Ver todos (${sorted.length})`}
+          </button>
+        </div>
+      )}
     <ResponsiveContainer width="100%" height={height}>
       <BarChart data={data} layout="vertical" margin={{ top: 4, right: 40, left: 8, bottom: 4 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="var(--gridline)" horizontal={false} />
@@ -62,5 +78,6 @@ export function ColecaoDetalheChart({ rows }: { rows: Row[] }) {
         </Bar>
       </BarChart>
     </ResponsiveContainer>
+    </div>
   );
 }
