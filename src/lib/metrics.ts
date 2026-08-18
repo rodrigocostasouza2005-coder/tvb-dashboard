@@ -453,7 +453,7 @@ async function getProductionByDimension(
 // Rodrigo em 2026-08-11 depois de eu mostrar os números reais de cobertura/inconsistência.
 function resolveSellThrough(unitsSoldAllTime: number, currentStock: number, produzido: number) {
   if (produzido > 0 && produzido >= unitsSoldAllTime) {
-    return (unitsSoldAllTime / produzido) * 100;
+    return Math.min((unitsSoldAllTime / produzido) * 100, 100);
   }
   return unitsSoldAllTime + currentStock > 0
     ? (unitsSoldAllTime / (unitsSoldAllTime + currentStock)) * 100
@@ -546,7 +546,7 @@ export async function getSellthroughByColecao(filters: Pick<DashboardFilters, "s
     .map((colecao) => {
       const produzido = producedByColecao.get(colecao) ?? 0;
       const { units: vendido = 0, revenue = 0 } = soldByColecao.get(colecao) ?? {};
-      const sellThroughRate = produzido > 0 ? (vendido / produzido) * 100 : null;
+      const sellThroughRate = produzido > 0 ? Math.min((vendido / produzido) * 100, 100) : null;
       return { key: colecao, vendido, produzido, revenue, sellThroughRate };
     })
     .filter((r) => r.produzido > 0)
@@ -613,7 +613,7 @@ export async function getSellthroughColecaoDetalhe(
     .map((r) => ({
       ...r,
       saida: r.vendido + r.brinde,
-      sellThroughRate: r.produzido > 0 ? ((r.vendido + r.brinde) / r.produzido) * 100 : null,
+      sellThroughRate: r.produzido > 0 ? Math.min(((r.vendido + r.brinde) / r.produzido) * 100, 100) : null,
     }))
     .sort((a, b) => a.grupo.localeCompare(b.grupo, "pt-BR") || a.produto.localeCompare(b.produto, "pt-BR"));
 }
