@@ -267,26 +267,38 @@ async function syncClientes(client: DapicClient) {
 async function syncOrdensProducao(client: DapicClient | undefined) {
   if (!client) return 0;
   const linhas = await client.fetchOrdensProducaoProdutos(ORDENS_PRODUCAO_DATA_INICIAL, toDateStr(new Date()));
-  const rows: ProductionOrderRow[] = linhas
-    .filter((l) => l.IdGradeProduto != null)
-    .map((l) => ({
-      idOrdemProducao: l.IdOrdemProducao,
-      cod: String(l.IdGradeProduto),
-      ordemProducao: l.OrdemProducao,
-      referencia: l.Referencia,
-      produto: l.Produto,
-      cor: l.Cor ?? null,
-      tamanho: l.Tamanho ?? null,
-      grupo: l.Grupo ?? "(sem grupo)",
-      marca: l.Marca ?? null,
-      colecao: l.Colecao ?? null,
-      quantidade: l.Quantidade,
-      quantidadeOriginal: l.QuantidadeOriginal,
-      status: l.Status,
-      dataFinalizacaoProducao: l.DataFinalizacaoProducao ? parseDapicDateTime(l.DataFinalizacaoProducao) : null,
-      dataEntradaCelula: l.DataEntradaCelula ? parseDapicDateTime(l.DataEntradaCelula) : null,
-    }));
-  return upsertProductionOrders(prisma, rows);
+  // O DAPIC retorna múltiplas linhas para o mesmo (IdOrdemProducao, IdGradeProduto) com
+  // quantidades parciais — precisamos SOMAR antes de upsertarmos (não sobrescrever).
+  const aggregated = new Map<string, ProductionOrderRow>();
+  for (const l of linhas.filter((l) => l.IdGradeProduto != null)) {
+    const key = `${l.IdOrdemProducao}\x00${l.IdGradeProduto}`;
+    const existing = aggregated.get(key);
+    if (existing) {
+      existing.quantidade += l.Quantidade;
+      existing.quantidadeOriginal += l.QuantidadeOriginal;
+      // Preferir colecao preenchida se uma das linhas tiver
+      if (!existing.colecao && l.Colecao) existing.colecao = l.Colecao;
+    } else {
+      aggregated.set(key, {
+        idOrdemProducao: l.IdOrdemProducao,
+        cod: String(l.IdGradeProduto),
+        ordemProducao: l.OrdemProducao,
+        referencia: l.Referencia,
+        produto: l.Produto,
+        cor: l.Cor ?? null,
+        tamanho: l.Tamanho ?? null,
+        grupo: l.Grupo ?? "(sem grupo)",
+        marca: l.Marca ?? null,
+        colecao: l.Colecao ?? null,
+        quantidade: l.Quantidade,
+        quantidadeOriginal: l.QuantidadeOriginal,
+        status: l.Status,
+        dataFinalizacaoProducao: l.DataFinalizacaoProducao ? parseDapicDateTime(l.DataFinalizacaoProducao) : null,
+        dataEntradaCelula: l.DataEntradaCelula ? parseDapicDateTime(l.DataEntradaCelula) : null,
+      });
+    }
+  }
+  return upsertProductionOrders(prisma, [...aggregated.values()]);
 }
 
 function formatProduto(pos: number, p: string, estoque: number, vendido: number) {
