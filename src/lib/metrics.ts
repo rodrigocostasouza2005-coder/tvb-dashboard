@@ -150,6 +150,8 @@ async function groupSalesByDimension(dimension: Dimension, where: Prisma.SaleWhe
       return prisma.sale.groupBy({ by: ["produto"], where, _sum: { quantidade: true, valorTotalLiquido: true } });
     case "tamanho":
       return prisma.sale.groupBy({ by: ["tamanho"], where, _sum: { quantidade: true, valorTotalLiquido: true } });
+    case "colecao":
+      return prisma.sale.groupBy({ by: ["colecao"], where, _sum: { quantidade: true, valorTotalLiquido: true } });
   }
 }
 
@@ -321,6 +323,8 @@ async function groupGiftsByDimension(dimension: Dimension, where: Prisma.GiftWhe
       return prisma.gift.groupBy({ by: ["produto"], where, _sum: { quantidade: true, valorTotalLiquido: true } });
     case "tamanho":
       return prisma.gift.groupBy({ by: ["tamanho"], where, _sum: { quantidade: true, valorTotalLiquido: true } });
+    case "colecao":
+      return prisma.gift.groupBy({ by: ["colecao"], where, _sum: { quantidade: true, valorTotalLiquido: true } });
   }
 }
 
@@ -360,6 +364,9 @@ async function groupReturnsByDimension(dimension: Dimension, where: Prisma.Retur
       return prisma.return.groupBy({ by: ["produto"], where, _sum: { quantidade: true, valorTotal: true } });
     case "tamanho":
       return prisma.return.groupBy({ by: ["tamanho"], where, _sum: { quantidade: true, valorTotal: true } });
+    case "colecao":
+      // Return não tem campo colecao — retorna vazio para evitar erro de tipo.
+      return [] as Awaited<ReturnType<typeof prisma.return.groupBy>>;
   }
 }
 
@@ -367,9 +374,9 @@ export async function getReturnsByDimension(filters: DashboardFilters, dimension
   const rows = await groupReturnsByDimension(dimension, returnWhere(filters));
   return rows
     .map((r) => ({
-      key: dimensionKey(dimension, r),
-      unitsReturned: r._sum.quantidade ?? 0,
-      value: r._sum.valorTotal ?? 0,
+      key: dimensionKey(dimension, r as Parameters<typeof dimensionKey>[1]),
+      unitsReturned: (r._sum?.quantidade ?? 0),
+      value: (r._sum?.valorTotal ?? 0),
     }))
     .sort((a, b) => b.unitsReturned - a.unitsReturned);
 }
