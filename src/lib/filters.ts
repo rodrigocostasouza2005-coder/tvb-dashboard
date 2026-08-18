@@ -89,7 +89,7 @@ export function parseFilters(params: RawSearchParams, restrictions: FilterRestri
 
 export function parseDimension(params: RawSearchParams): Dimension {
   const v = typeof params.dim === "string" ? params.dim : "grupo";
-  return v === "produto" || v === "tamanho" ? v : "grupo";
+  return v === "produto" || v === "tamanho" || v === "colecao" ? v : "grupo";
 }
 
 // Usa o dia em horário de Brasília, não UTC (senão o campo podia voltar mostrando o dia errado

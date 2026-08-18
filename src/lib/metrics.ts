@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 
-export type Dimension = "grupo" | "produto" | "tamanho";
+export type Dimension = "grupo" | "produto" | "tamanho" | "colecao";
 
 export type DashboardFilters = {
   storeIds?: string[];
@@ -153,8 +153,8 @@ async function groupSalesByDimension(dimension: Dimension, where: Prisma.SaleWhe
   }
 }
 
-function dimensionKey(dimension: Dimension, row: { grupo?: string; produto?: string; tamanho?: string | null }) {
-  const v = dimension === "grupo" ? row.grupo : dimension === "produto" ? row.produto : row.tamanho;
+function dimensionKey(dimension: Dimension, row: { grupo?: string; produto?: string; tamanho?: string | null; colecao?: string | null }) {
+  const v = dimension === "grupo" ? row.grupo : dimension === "produto" ? row.produto : dimension === "tamanho" ? row.tamanho : row.colecao;
   return v && v.trim() ? v : "—";
 }
 
@@ -427,7 +427,7 @@ async function getProductionByDimension(
     ...(filters.marcas !== undefined ? { marca: { in: filters.marcas } } : {}),
     ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
   };
-  const by = dimension === "grupo" ? "grupo" : dimension === "produto" ? "produto" : "tamanho";
+  const by = dimension === "grupo" ? "grupo" : dimension === "produto" ? "produto" : dimension === "tamanho" ? "tamanho" : "colecao";
   const rows = await prisma.productionOrder.groupBy({ by: [by], where, _sum: { quantidade: true } });
   const map = new Map<string, number>();
   for (const r of rows) {
@@ -502,6 +502,48 @@ export async function getStockVsSales(filters: DashboardFilters, dimension: Dime
       return { key, unitsSold, revenue, currentStock, sellThroughRate, inventoryTurnover };
     })
     .sort((a, b) => b.unitsSold - a.unitsSold);
+}
+
+// Sellthrough por coleção: vendido_total / produzido_total, sem filtro de data.
+// Produzido = ordens de produção (fonte mais correta que estoque+vendido).
+export async function getSellthroughByColecao(filters: Pick<DashboardFilters, "storeIds" | "marcas" | "grupoIn">) {
+  const where: Prisma.ProductionOrderWhereInput = {
+    colecao: { not: null },
+    ...(filters.marcas !== undefined ? { marca: { in: filters.marcas } } : {}),
+    ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
+  };
+
+  const [produced, sold] = await Promise.all([
+    prisma.productionOrder.groupBy({
+      by: ["colecao"],
+      where,
+      _sum: { quantidade: true },
+    }),
+    prisma.sale.groupBy({
+      by: ["colecao"],
+      where: {
+        colecao: { not: null },
+        ...(filters.marcas !== undefined ? { marca: { in: filters.marcas } } : {}),
+        ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
+      },
+      _sum: { quantidade: true, valorTotalLiquido: true },
+    }),
+  ]);
+
+  const producedByColecao = new Map(produced.map((r) => [r.colecao ?? "—", r._sum.quantidade ?? 0]));
+  const soldByColecao = new Map(sold.map((r) => [r.colecao ?? "—", { units: r._sum.quantidade ?? 0, revenue: r._sum.valorTotalLiquido ?? 0 }]));
+
+  const colecoes = new Set([...producedByColecao.keys(), ...soldByColecao.keys()]);
+
+  return [...colecoes]
+    .map((colecao) => {
+      const produzido = producedByColecao.get(colecao) ?? 0;
+      const { units: vendido = 0, revenue = 0 } = soldByColecao.get(colecao) ?? {};
+      const sellThroughRate = produzido > 0 ? (vendido / produzido) * 100 : null;
+      return { key: colecao, vendido, produzido, revenue, sellThroughRate };
+    })
+    .filter((r) => r.produzido > 0)
+    .sort((a, b) => (b.sellThroughRate ?? 0) - (a.sellThroughRate ?? 0));
 }
 
 export async function searchStockVsSales(

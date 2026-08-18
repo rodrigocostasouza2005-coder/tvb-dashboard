@@ -2,10 +2,11 @@ import Link from "next/link";
 import type { Dimension } from "@/lib/metrics";
 import type { RawSearchParams } from "@/lib/filters";
 
-const OPTIONS: { value: Dimension; label: string }[] = [
+const OPTIONS: { value: Dimension; label: string; sellthroughOnly?: boolean }[] = [
   { value: "grupo", label: "Grupo de produto" },
   { value: "produto", label: "Produto" },
   { value: "tamanho", label: "Tamanho" },
+  { value: "colecao", label: "Coleção", sellthroughOnly: true },
 ];
 
 function buildHref(basePath: string, searchParams: RawSearchParams, dim: Dimension) {
@@ -23,14 +24,17 @@ export function DimensionToggle({
   basePath,
   searchParams,
   current,
+  showColecao = false,
 }: {
   basePath: string;
   searchParams: RawSearchParams;
   current: Dimension;
+  showColecao?: boolean;
 }) {
+  const options = OPTIONS.filter((o) => !o.sellthroughOnly || showColecao);
   return (
     <div className="mb-4 flex gap-1">
-      {OPTIONS.map((opt) => (
+      {options.map((opt) => (
         <Link
           key={opt.value}
           href={buildHref(basePath, searchParams, opt.value)}
