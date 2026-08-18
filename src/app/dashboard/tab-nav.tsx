@@ -26,7 +26,6 @@ export function TabNav({ visibleKeys, isAdmin }: { visibleKeys: TabKey[]; isAdmi
   })();
 
   const links = [
-    { href: "/dashboard", label: "Visão Geral" },
     ...TABS.filter((t) => visible.has(t.key)),
     ...(isAdmin ? [{ href: "/dashboard/admin", label: "Admin" }] : []),
   ];
