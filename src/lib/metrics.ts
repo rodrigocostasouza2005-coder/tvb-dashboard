@@ -571,7 +571,7 @@ export async function getSellthroughByColecao(filters: Pick<DashboardFilters, "s
       const brinde = giftedByColecao.get(colecao) ?? 0;
       const devolvido = returnedByColecao.get(colecao) ?? 0;
       const saida = vendido - devolvido + brinde;
-      const sellThroughRate = produzido > 0 ? Math.min((saida / produzido) * 100, 100) : null;
+      const sellThroughRate = produzido > 0 ? (saida / produzido) * 100 : null;
       return { key: colecao, vendido, devolvido, brinde, saida, produzido, revenue, sellThroughRate };
     })
     .filter((r) => r.produzido > 0)
@@ -635,7 +635,7 @@ export async function getSellthroughColecaoDetalhe(
     .map((r) => ({
       ...r,
       saida: r.vendido - r.devolvido + r.brinde,
-      sellThroughRate: r.produzido > 0 ? Math.min(((r.vendido - r.devolvido + r.brinde) / r.produzido) * 100, 100) : null,
+      sellThroughRate: r.produzido > 0 ? ((r.vendido - r.devolvido + r.brinde) / r.produzido) * 100 : null,
     }))
     .sort((a, b) => a.grupo.localeCompare(b.grupo, "pt-BR") || a.produto.localeCompare(b.produto, "pt-BR"));
 }
