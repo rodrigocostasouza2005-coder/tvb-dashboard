@@ -34,6 +34,7 @@ export default async function CoberturaPage({
   const critico = rows.filter((r) => r.status === "critico").length;
   const atencao = rows.filter((r) => r.status === "atencao").length;
   const ok = rows.filter((r) => r.status === "ok").length;
+  const excesso = rows.filter((r) => r.status === "excesso").length;
   const semVenda = rows.filter((r) => r.status === "sem-venda").length;
 
   return (
@@ -50,24 +51,28 @@ export default async function CoberturaPage({
       />
       <p className="mb-3 text-xs text-[var(--text-muted)]">
         Mostra quantos <strong>dias de venda restam</strong> em cada SKU, com base na média de
-        vendas dos últimos 30 dias. Crítico = menos de 7 dias. Atenção = menos de 30 dias.
+        vendas dos últimos 30 dias. Crítico &lt; 7 dias · Atenção 7–30 dias · OK 30–60 dias · Excesso &gt; 60 dias.
       </p>
 
-      <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-5">
         <StatTile
           label="Crítico (< 7 dias)"
           value={String(critico)}
           status={critico > 0 ? "critical" : "good"}
         />
         <StatTile
-          label="Atenção (< 30 dias)"
+          label="Atenção (7–30 dias)"
           value={String(atencao)}
           status={atencao > 0 ? "warning" : "good"}
         />
         <StatTile
-          label="OK (≥ 30 dias)"
+          label="OK (30–60 dias)"
           value={String(ok)}
           status="good"
+        />
+        <StatTile
+          label="Excesso (> 60 dias)"
+          value={String(excesso)}
         />
         <StatTile
           label="Sem venda recente"

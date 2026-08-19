@@ -12,13 +12,14 @@ type Row = {
   vendas30d: number;
   avgDailySales: number;
   diasCobertura: number | null;
-  status: "critico" | "atencao" | "ok" | "sem-venda";
+  status: "critico" | "atencao" | "ok" | "excesso" | "sem-venda";
 };
 
 const STATUS_COLOR: Record<Row["status"], string> = {
   critico: "#ef4444",
   atencao: "#f59e0b",
   ok: "#22c55e",
+  excesso: "#6366f1",
   "sem-venda": "var(--text-muted)",
 };
 
@@ -26,6 +27,7 @@ const STATUS_LABEL: Record<Row["status"], string> = {
   critico: "Crítico",
   atencao: "Atenção",
   ok: "OK",
+  excesso: "Excesso",
   "sem-venda": "Sem venda",
 };
 
@@ -70,12 +72,13 @@ export function CoberturaTable({ rows }: { rows: Row[] }) {
           diasCobertura === null ? "sem-venda"
           : diasCobertura < 7 ? "critico"
           : diasCobertura < 30 ? "atencao"
-          : "ok";
+          : diasCobertura <= 60 ? "ok"
+          : "excesso";
         map.set(key, { ...cur, estoque, vendas30d, avgDailySales, diasCobertura, status });
       }
     }
     return [...map.values()].sort((a, b) => {
-      const order = { critico: 0, atencao: 1, ok: 2, "sem-venda": 3 };
+      const order = { critico: 0, atencao: 1, ok: 2, excesso: 3, "sem-venda": 4 };
       if (order[a.status] !== order[b.status]) return order[a.status] - order[b.status];
       return (a.diasCobertura ?? 9999) - (b.diasCobertura ?? 9999);
     });
@@ -94,6 +97,7 @@ export function CoberturaTable({ rows }: { rows: Row[] }) {
     { key: "critico", label: "Crítico" },
     { key: "atencao", label: "Atenção" },
     { key: "ok", label: "OK" },
+    { key: "excesso", label: "Excesso" },
     { key: "sem-venda", label: "Sem venda" },
   ];
 
@@ -188,7 +192,7 @@ export function CoberturaTable({ rows }: { rows: Row[] }) {
               const color = STATUS_COLOR[r.status];
               const barWidth =
                 r.diasCobertura !== null
-                  ? Math.min((r.diasCobertura / 60) * 100, 100)
+                  ? Math.min((r.diasCobertura / 90) * 100, 100)
                   : 20;
               return (
                 <tr

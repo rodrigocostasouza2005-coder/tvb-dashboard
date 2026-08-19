@@ -1332,8 +1332,8 @@ export async function getTopParaIncentivar(dias = 30, limit = 10) {
 }
 
 // Cobertura de estoque: pra cada SKU com estoque > 0, calcula quantos dias de venda restam
-// com base na média de vendas dos últimos 30 dias. Status: crítico < 7 dias, atenção < 30 dias,
-// ok >= 30 dias, sem-venda se não vendeu nada no período.
+// com base na média de vendas dos últimos 30 dias. Status: crítico < 7 dias, atenção 7-30 dias,
+// ok 30-60 dias, excesso > 60 dias, sem-venda se não vendeu nada no período.
 export async function getStockCoverage(
   filters: Pick<DashboardFilters, "storeIds" | "grupoIn" | "tabelasPreco">
 ) {
@@ -1363,21 +1363,23 @@ export async function getStockCoverage(
   const storeName = new Map(stores.map((s) => [s.id, s.name]));
   const salesByKey = new Map(saleAgg.map((s) => [`${s.storeId}::${s.cod}`, s._sum.quantidade ?? 0]));
 
-  const statusOrder = { critico: 0, atencao: 1, ok: 2, "sem-venda": 3 } as const;
+  const statusOrder = { critico: 0, atencao: 1, ok: 2, excesso: 3, "sem-venda": 4 } as const;
 
   return stock
     .map((s) => {
       const vendas30d = salesByKey.get(`${s.storeId}::${s.cod}`) ?? 0;
       const avgDailySales = vendas30d / 30;
       const diasCobertura = avgDailySales > 0 ? Math.round(s.quantidadeDisponivel / avgDailySales) : null;
-      const status: "critico" | "atencao" | "ok" | "sem-venda" =
+      const status: "critico" | "atencao" | "ok" | "excesso" | "sem-venda" =
         diasCobertura === null
           ? "sem-venda"
           : diasCobertura < 7
           ? "critico"
           : diasCobertura < 30
           ? "atencao"
-          : "ok";
+          : diasCobertura <= 60
+          ? "ok"
+          : "excesso";
       return {
         storeName: storeName.get(s.storeId) ?? s.storeId,
         produto: s.produto,
