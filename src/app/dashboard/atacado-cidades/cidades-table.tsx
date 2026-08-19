@@ -24,8 +24,15 @@ export function CidadesTable({ rows }: { rows: CidadeRow[] }) {
   const [sortCol, setSortCol] = useState<SortCol>("receita");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [estadoFiltro, setEstadoFiltro] = useState("");
+  const [cidadeFiltro, setCidadeFiltro] = useState("");
 
   const estados = useMemo(() => [...new Set(rows.map((r) => r.estado))].sort(), [rows]);
+
+  const cidadesDoEstado = useMemo(
+    () =>
+      [...new Set(rows.filter((r) => estadoFiltro === "" || r.estado === estadoFiltro).map((r) => r.cidade))].sort(),
+    [rows, estadoFiltro]
+  );
 
   function handleSort(col: SortCol) {
     if (col === sortCol) {
@@ -42,8 +49,13 @@ export function CidadesTable({ rows }: { rows: CidadeRow[] }) {
   }
 
   const filtered = useMemo(
-    () => rows.filter((r) => estadoFiltro === "" || r.estado === estadoFiltro),
-    [rows, estadoFiltro]
+    () =>
+      rows.filter(
+        (r) =>
+          (estadoFiltro === "" || r.estado === estadoFiltro) &&
+          (cidadeFiltro === "" || r.cidade === cidadeFiltro)
+      ),
+    [rows, estadoFiltro, cidadeFiltro]
   );
 
   const sorted = useMemo(() => {
@@ -84,17 +96,27 @@ export function CidadesTable({ rows }: { rows: CidadeRow[] }) {
               <select
                 className={selectClass}
                 value={estadoFiltro}
-                onChange={(e) => setEstadoFiltro(e.target.value)}
+                onChange={(e) => { setEstadoFiltro(e.target.value); setCidadeFiltro(""); }}
               >
-                <option value="">Todos</option>
+                <option value="">Todos os estados</option>
                 {estados.map((e) => (
-                  <option key={e} value={e}>
-                    {e}
-                  </option>
+                  <option key={e} value={e}>{e}</option>
                 ))}
               </select>
             </th>
-            <th className="px-4 py-1.5" colSpan={4}></th>
+            <th className="px-4 py-1.5">
+              <select
+                className={selectClass}
+                value={cidadeFiltro}
+                onChange={(e) => setCidadeFiltro(e.target.value)}
+              >
+                <option value="">Todas as cidades</option>
+                {cidadesDoEstado.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </th>
+            <th className="px-4 py-1.5" colSpan={3}></th>
           </tr>
         </thead>
         <tbody>
