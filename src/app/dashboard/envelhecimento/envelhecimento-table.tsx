@@ -16,6 +16,18 @@ type Row = {
   status: { label: string; color: string };
 };
 
+type AggRow = {
+  storeName: string;
+  produto: string;
+  colecao: string | null;
+  estoque: number;
+  primeiraVenda: Date | null;
+  ultimaVenda: Date | null;
+  dias: number;
+  sellThroughRate: number | null;
+  status: { label: string; color: string };
+};
+
 const selectClass =
   "w-full rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1 text-xs text-[var(--text-primary)]";
 
@@ -23,21 +35,67 @@ function formatDate(d: Date | null) {
   return d ? new Date(d).toLocaleDateString("pt-BR") : "—";
 }
 
+function ageStatus(dias: number): { label: string; color: string } {
+  if (dias <= 30) return { label: "Novo", color: "var(--status-good)" };
+  if (dias <= 60) return { label: "Atenção", color: "var(--status-warning)" };
+  if (dias <= 90) return { label: "Velho", color: "var(--status-serious)" };
+  return { label: "Muito velho", color: "var(--status-critical)" };
+}
+
 export function EnvelhecimentoTable({ rows }: { rows: Row[] }) {
   const [loja, setLoja] = useState("");
   const [produto, setProduto] = useState("");
-  const [tamanho, setTamanho] = useState("");
   const [status, setStatus] = useState("");
   const [colecoesSel, setColecoesSel] = useState<Set<string>>(new Set());
 
   const lojas = useMemo(() => [...new Set(rows.map((r) => r.storeName))].sort(), [rows]);
-  const produtos = useMemo(() => [...new Set(rows.map((r) => r.produto))].sort(), [rows]);
-  const tamanhos = useMemo(() => [...new Set(rows.map((r) => r.tamanho ?? "—"))].sort(), [rows]);
-  const statusOptions = useMemo(() => [...new Set(rows.map((r) => r.status.label))].sort(), [rows]);
-  const colecoes = useMemo(
-    () => [...new Set(rows.map((r) => r.colecao ?? "—"))].sort(),
-    [rows]
-  );
+  const colecoes = useMemo(() => [...new Set(rows.map((r) => r.colecao ?? "—"))].sort(), [rows]);
+
+  // Agrega por loja + produto
+  const aggRows = useMemo<AggRow[]>(() => {
+    const map = new Map<string, AggRow>();
+    for (const r of rows) {
+      const key = `${r.storeName}\x00${r.produto}`;
+      const cur = map.get(key);
+      if (!cur) {
+        map.set(key, {
+          storeName: r.storeName,
+          produto: r.produto,
+          colecao: r.colecao,
+          estoque: r.quantidadeDisponivel,
+          primeiraVenda: r.primeiraVenda,
+          ultimaVenda: r.ultimaVenda,
+          dias: r.diasDesdePrimeiraVenda,
+          sellThroughRate: r.sellThroughRate,
+          status: r.status,
+        });
+      } else {
+        cur.estoque += r.quantidadeDisponivel;
+        // menor data de 1ª venda → produto mais antigo no mercado
+        if (r.primeiraVenda && (!cur.primeiraVenda || r.primeiraVenda < cur.primeiraVenda)) {
+          cur.primeiraVenda = r.primeiraVenda;
+          cur.dias = r.diasDesdePrimeiraVenda;
+          cur.status = ageStatus(r.diasDesdePrimeiraVenda);
+        }
+        // maior data de última venda
+        if (r.ultimaVenda && (!cur.ultimaVenda || r.ultimaVenda > cur.ultimaVenda)) {
+          cur.ultimaVenda = r.ultimaVenda;
+        }
+        // ST: média ponderada pelo estoque
+        if (r.sellThroughRate !== null) {
+          if (cur.sellThroughRate === null) {
+            cur.sellThroughRate = r.sellThroughRate;
+          } else {
+            cur.sellThroughRate = (cur.sellThroughRate + r.sellThroughRate) / 2;
+          }
+        }
+      }
+    }
+    return [...map.values()].sort((a, b) => b.dias - a.dias);
+  }, [rows]);
+
+  const produtos = useMemo(() => [...new Set(aggRows.map((r) => r.produto))].sort(), [aggRows]);
+  const statusOptions = useMemo(() => [...new Set(aggRows.map((r) => r.status.label))].sort(), [aggRows]);
 
   function toggleColecao(c: string) {
     setColecoesSel((prev) => {
@@ -47,15 +105,14 @@ export function EnvelhecimentoTable({ rows }: { rows: Row[] }) {
     });
   }
 
-  const filtered = rows.filter(
+  const filtered = aggRows.filter(
     (r) =>
       (loja === "" || r.storeName === loja) &&
       (produto === "" || r.produto === produto) &&
-      (tamanho === "" || (r.tamanho ?? "—") === tamanho) &&
       (status === "" || r.status.label === status) &&
       (colecoesSel.size === 0 || colecoesSel.has(r.colecao ?? "—"))
   );
-  const visible = filtered.slice(0, 150);
+  const visible = filtered.slice(0, 200);
 
   return (
     <div>
@@ -90,12 +147,11 @@ export function EnvelhecimentoTable({ rows }: { rows: Row[] }) {
       </div>
 
       <div className="overflow-x-auto overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-        <table className="w-full min-w-[900px] text-sm">
+        <table className="w-full min-w-[800px] text-sm">
           <thead>
             <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
               <th className="px-4 py-2 font-medium">Loja</th>
               <th className="px-4 py-2 font-medium">Produto</th>
-              <th className="px-4 py-2 font-medium">Tamanho</th>
               <th className="px-4 py-2 font-medium">Estoque</th>
               <th className="px-4 py-2 font-medium">1ª venda</th>
               <th className="px-4 py-2 font-medium">Dias desde 1ª venda</th>
@@ -116,13 +172,8 @@ export function EnvelhecimentoTable({ rows }: { rows: Row[] }) {
                   {produtos.map((p) => <option key={p} value={p}>{p}</option>)}
                 </select>
               </th>
-              <th className="px-4 py-1.5">
-                <select className={selectClass} value={tamanho} onChange={(e) => setTamanho(e.target.value)}>
-                  <option value="">Todos</option>
-                  {tamanhos.map((t) => <option key={t} value={t}>{t}</option>)}
-                </select>
-              </th>
               <th className="px-4 py-1.5" colSpan={4}></th>
+              <th className="px-4 py-1.5"></th>
               <th className="px-4 py-1.5">
                 <select className={selectClass} value={status} onChange={(e) => setStatus(e.target.value)}>
                   <option value="">Todos</option>
@@ -136,10 +187,9 @@ export function EnvelhecimentoTable({ rows }: { rows: Row[] }) {
               <tr key={i} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
                 <td className="px-4 py-2">{r.storeName}</td>
                 <td className="px-4 py-2 font-medium">{r.produto}</td>
-                <td className="px-4 py-2">{r.tamanho ?? "—"}</td>
-                <td className="px-4 py-2 tabular-nums">{r.quantidadeDisponivel}</td>
+                <td className="px-4 py-2 tabular-nums">{r.estoque}</td>
                 <td className="px-4 py-2">{formatDate(r.primeiraVenda)}</td>
-                <td className="px-4 py-2 tabular-nums">{r.diasDesdePrimeiraVenda}</td>
+                <td className="px-4 py-2 tabular-nums">{r.dias}</td>
                 <td className="px-4 py-2">{formatDate(r.ultimaVenda)}</td>
                 <td className="px-4 py-2 tabular-nums">
                   {r.sellThroughRate !== null ? `${r.sellThroughRate.toFixed(0)}%` : "—"}
@@ -154,7 +204,7 @@ export function EnvelhecimentoTable({ rows }: { rows: Row[] }) {
             ))}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={9} className="px-4 py-6 text-center text-[var(--text-muted)]">
+                <td colSpan={8} className="px-4 py-6 text-center text-[var(--text-muted)]">
                   Nenhum item bate com esse filtro.
                 </td>
               </tr>
@@ -162,6 +212,9 @@ export function EnvelhecimentoTable({ rows }: { rows: Row[] }) {
           </tbody>
         </table>
       </div>
+      <p className="mt-2 text-xs text-[var(--text-muted)]">
+        Mostrando {visible.length} de {filtered.length} produtos
+      </p>
     </div>
   );
 }
