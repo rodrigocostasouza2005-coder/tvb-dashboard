@@ -57,6 +57,7 @@ export default async function EnvelhecimentoPage({
         marcas={marcas}
         tabelasPreco={tabelasPreco}
         showTabelaPreco
+        showDate={false}
         filters={filters}
         showMarca={false}
       />
