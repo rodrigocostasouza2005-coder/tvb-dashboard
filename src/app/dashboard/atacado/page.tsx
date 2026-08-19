@@ -1,6 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
-import { getAtacadoVendas, getTabelasPreco } from "@/lib/metrics";
-import { getTabelaPrecoRestriction } from "@/lib/permissions";
+import { getAtacadoVendas } from "@/lib/metrics";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
@@ -18,13 +17,9 @@ export default async function AtacadoPage({
   if (!user) return null;
   requireTabAccess(user, user.role, "atacado");
 
-  const allowedTabelasPreco = getTabelaPrecoRestriction(user);
-  const filters = parseFilters(await searchParams, { allowedTabelasPreco });
+  const filters = parseFilters(await searchParams, {});
 
-  const [data, tabelasPreco] = await Promise.all([
-    getAtacadoVendas(filters),
-    getTabelasPreco(allowedTabelasPreco),
-  ]);
+  const data = await getAtacadoVendas(filters);
 
   const { kpis, byDay, topProdutos } = data;
 
@@ -34,9 +29,8 @@ export default async function AtacadoPage({
         action="/dashboard/atacado"
         stores={[]}
         marcas={[]}
-        tabelasPreco={tabelasPreco}
+        tabelasPreco={[]}
         showMarca={false}
-        showTabelaPreco
         showDate
         filters={filters}
       />
