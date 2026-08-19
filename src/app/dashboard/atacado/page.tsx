@@ -6,6 +6,7 @@ import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
 import { StatTile } from "../stat-tile";
 import { AtacadoTrendChart } from "./atacado-trend-chart";
+import { AtacadoGruposChart } from "./atacado-grupos-chart";
 import { AtacadoProdutosTable } from "./atacado-produtos-table";
 
 export default async function AtacadoPage({
@@ -58,8 +59,13 @@ export default async function AtacadoPage({
         <AtacadoTrendChart data={byDay} />
       </section>
 
+      <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
+        <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Receita por grupo (top 12)</h2>
+        <AtacadoGruposChart rows={topProdutos} />
+      </section>
+
       <section className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
-        <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Top produtos</h2>
+        <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Detalhe por grupo e produto</h2>
         <AtacadoProdutosTable rows={topProdutos} />
       </section>
     </div>

@@ -12,10 +12,14 @@ export function BarCompare({
   rows,
   labelA,
   labelB,
+  colorA,
+  colorB,
 }: {
   rows: Row[];
   labelA: string;
   labelB: string;
+  colorA?: string;
+  colorB?: string;
 }) {
   if (rows.length === 0) {
     return (
@@ -28,16 +32,18 @@ export function BarCompare({
   const data = rows.map((r) => ({ ...r, label: truncate(r.label) }));
   const height = Math.max(data.length * 40, 160);
   const labelStyle = { fill: "var(--text-secondary)", fontSize: 11 };
+  const fillA = colorA ?? "var(--series-1)";
+  const fillB = colorB ?? "var(--series-2)";
 
   return (
     <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
       <div className="mb-3 flex items-center gap-4 text-xs text-[var(--text-secondary)]">
         <span className="flex items-center gap-1.5">
-          <span className="h-2 w-2 rounded-full" style={{ backgroundColor: "var(--series-1)" }} />
+          <span className="h-2 w-2 rounded-full" style={{ backgroundColor: fillA }} />
           {labelA}
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="h-2 w-2 rounded-full" style={{ backgroundColor: "var(--series-2)" }} />
+          <span className="h-2 w-2 rounded-full" style={{ backgroundColor: fillB }} />
           {labelB}
         </span>
       </div>
@@ -63,10 +69,10 @@ export function BarCompare({
             labelFormatter={(_, payload) => payload?.[0]?.payload?.label ?? ""}
             formatter={(value) => Number(value ?? 0).toLocaleString("pt-BR")}
           />
-          <Bar dataKey="a" name={labelA} fill="var(--series-1)" radius={[0, 4, 4, 0]} maxBarSize={14}>
+          <Bar dataKey="a" name={labelA} fill={fillA} radius={[0, 4, 4, 0]} maxBarSize={14}>
             <LabelList dataKey="a" position="right" style={labelStyle} formatter={(v) => Number(v ?? 0).toLocaleString("pt-BR")} />
           </Bar>
-          <Bar dataKey="b" name={labelB} fill="var(--series-2)" radius={[0, 4, 4, 0]} maxBarSize={14}>
+          <Bar dataKey="b" name={labelB} fill={fillB} radius={[0, 4, 4, 0]} maxBarSize={14}>
             <LabelList dataKey="b" position="right" style={labelStyle} formatter={(v) => Number(v ?? 0).toLocaleString("pt-BR")} />
           </Bar>
         </BarChart>

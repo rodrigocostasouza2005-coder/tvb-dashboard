@@ -1,5 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
-import { getStockVsSales, getStores, getMarcas, getTabelasPreco } from "@/lib/metrics";
+import { getStockVsSales, getTotalStock, getStores, getMarcas, getTabelasPreco } from "@/lib/metrics";
 import { getGrupoRestriction, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
 import { parseFilters, parseDimension, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
@@ -36,8 +36,9 @@ export default async function EstoquePage({
   const effectiveFilters = grupoDrill ? { ...filters, grupoIn: [grupoDrill] } : filters;
   const effectiveDimension = grupoDrill ? "produto" : dimension;
 
-  const [rows, grupoRows, stores, marcas, tabelasPreco] = await Promise.all([
+  const [rows, totalEstoque, grupoRows, stores, marcas, tabelasPreco] = await Promise.all([
     getStockVsSales(effectiveFilters, effectiveDimension),
+    getTotalStock({ storeIds: filters.storeIds, grupoIn: filters.grupoIn }),
     dimension === "grupo" ? getStockVsSales(filters, "grupo") : Promise.resolve([]),
     getStores(allowedStores),
     getMarcas(allowedMarcas),
@@ -45,7 +46,6 @@ export default async function EstoquePage({
   ]);
 
   const dimensionLabel = effectiveDimension === "produto" ? "Produto" : effectiveDimension === "tamanho" ? "Tamanho" : "Grupo";
-  const totalEstoque = rows.reduce((sum, r) => sum + r.currentStock, 0);
   const totalVendido = rows.reduce((sum, r) => sum + r.unitsSold, 0);
   const top40 = rows.slice(0, 40);
 
@@ -79,6 +79,8 @@ export default async function EstoquePage({
           rows={top40.map((r) => ({ label: r.key, a: r.currentStock, b: r.unitsSold }))}
           labelA="Estoque atual"
           labelB="Vendido no período"
+          colorA="#eb6834"
+          colorB="#2a78d6"
         />
       </section>
 

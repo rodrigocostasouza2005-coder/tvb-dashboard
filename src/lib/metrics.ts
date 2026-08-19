@@ -405,6 +405,16 @@ export async function getReturnsByDay(filters: DashboardFilters) {
 
 // Pega o snapshot mais recente por loja+produto (evita somar duplicado se já tivermos
 // vários syncs no histórico).
+// Total de estoque atual sem filtro de data — usado para o card "Estoque atual" na aba
+// Estoque × Vendas, onde a data filtra vendas mas não deve mudar o snapshot de estoque.
+export async function getTotalStock(filters: Pick<DashboardFilters, "storeIds" | "grupoIn">) {
+  const result = await prisma.stockSnapshot.aggregate({
+    where: stockWhere(filters),
+    _sum: { quantidadeDisponivel: true },
+  });
+  return result._sum.quantidadeDisponivel ?? 0;
+}
+
 // StockSnapshot tem 1 linha por storeId+cod (upsert no sync mantém sempre atualizada, ver
 // upsertStockSnapshots) — não tem mais duplicata histórica pra dedupar aqui.
 async function latestStockSnapshots(filters: Pick<DashboardFilters, "storeIds" | "grupoIn">) {

@@ -1,6 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
-import { getAtacadoCidades, getTabelasPreco } from "@/lib/metrics";
-import { getTabelaPrecoRestriction } from "@/lib/permissions";
+import { getAtacadoCidades } from "@/lib/metrics";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
@@ -17,13 +16,9 @@ export default async function AtacadoCidadesPage({
   if (!user) return null;
   requireTabAccess(user, user.role, "atacado-cidades");
 
-  const allowedTabelasPreco = getTabelaPrecoRestriction(user);
-  const filters = parseFilters(await searchParams, { allowedTabelasPreco });
+  const filters = parseFilters(await searchParams, {});
 
-  const [data, tabelasPreco] = await Promise.all([
-    getAtacadoCidades(filters),
-    getTabelasPreco(allowedTabelasPreco),
-  ]);
+  const data = await getAtacadoCidades(filters);
 
   const totalReceita = data.rows.reduce((sum, r) => sum + r.receita, 0);
 
@@ -33,9 +28,8 @@ export default async function AtacadoCidadesPage({
         action="/dashboard/atacado-cidades"
         stores={[]}
         marcas={[]}
-        tabelasPreco={tabelasPreco}
+        tabelasPreco={[]}
         showMarca={false}
-        showTabelaPreco
         showDate
         filters={filters}
       />
