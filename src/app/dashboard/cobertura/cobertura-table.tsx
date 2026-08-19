@@ -52,9 +52,38 @@ export function CoberturaTable({ rows }: { rows: Row[] }) {
     });
   }
 
-  const filtered = rows.filter(
+  // Quando "agrupado": soma estoque+vendas de todas as lojas por produto+tamanho
+  const baseRows = useMemo(() => {
+    if (loja !== "__agrupado__") return rows;
+    const map = new Map<string, Row>();
+    for (const r of rows) {
+      const key = `${r.produto}\x00${r.tamanho ?? ""}`;
+      const cur = map.get(key);
+      if (!cur) {
+        map.set(key, { ...r, storeName: "Todas as lojas" });
+      } else {
+        const estoque = cur.estoque + r.estoque;
+        const vendas30d = cur.vendas30d + r.vendas30d;
+        const avgDailySales = vendas30d / 30;
+        const diasCobertura = avgDailySales > 0 ? Math.round(estoque / avgDailySales) : null;
+        const status: Row["status"] =
+          diasCobertura === null ? "sem-venda"
+          : diasCobertura < 7 ? "critico"
+          : diasCobertura < 30 ? "atencao"
+          : "ok";
+        map.set(key, { ...cur, estoque, vendas30d, avgDailySales, diasCobertura, status });
+      }
+    }
+    return [...map.values()].sort((a, b) => {
+      const order = { critico: 0, atencao: 1, ok: 2, "sem-venda": 3 };
+      if (order[a.status] !== order[b.status]) return order[a.status] - order[b.status];
+      return (a.diasCobertura ?? 9999) - (b.diasCobertura ?? 9999);
+    });
+  }, [rows, loja]);
+
+  const filtered = baseRows.filter(
     (r) =>
-      (loja === "" || r.storeName === loja) &&
+      (loja === "" || loja === "__agrupado__" || r.storeName === loja) &&
       (statusFiltro === "" || r.status === statusFiltro) &&
       (colecoesSel.size === 0 || colecoesSel.has(r.colecao ?? "—"))
   );
@@ -142,7 +171,8 @@ export function CoberturaTable({ rows }: { rows: Row[] }) {
                   value={loja}
                   onChange={(e) => setLoja(e.target.value)}
                 >
-                  <option value="">Todas</option>
+                  <option value="">Todas (por loja)</option>
+                  <option value="__agrupado__">Todas (agrupado)</option>
                   {lojas.map((l) => (
                     <option key={l} value={l}>
                       {l}
