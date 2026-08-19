@@ -938,6 +938,7 @@ export async function getStockAging(
         storeName: storeName.get(s.storeId) ?? s.storeId,
         produto: s.produto,
         grupo: s.grupo,
+        colecao: s.colecao ?? null,
         tamanho: s.tamanho,
         quantidadeDisponivel: s.quantidadeDisponivel,
         primeiraVenda,
