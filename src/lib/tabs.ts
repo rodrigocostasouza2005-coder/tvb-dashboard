@@ -16,6 +16,9 @@ export type TabKey =
   | "marketing"
   | "estoque-minimo"
   | "envelhecimento"
+  | "atacado"
+  | "atacado-cidades"
+  | "atacado-clientes"
   | "cobertura";
 
 export const TABS: { key: TabKey; label: string; href: string }[] = [
@@ -33,6 +36,9 @@ export const TABS: { key: TabKey; label: string; href: string }[] = [
   { key: "marketing", label: "Marketing", href: "/dashboard/marketing" },
   { key: "estoque-minimo", label: "Estoque Mínimo", href: "/dashboard/estoque-minimo" },
   { key: "envelhecimento", label: "Envelhecimento", href: "/dashboard/envelhecimento" },
+  { key: "atacado", label: "Atacado — Vendas", href: "/dashboard/atacado" },
+  { key: "atacado-cidades", label: "Atacado — Cidades", href: "/dashboard/atacado-cidades" },
+  { key: "atacado-clientes", label: "Atacado — Clientes", href: "/dashboard/atacado-clientes" },
   { key: "cobertura", label: "Cobertura", href: "/dashboard/cobertura" },
 ];
 

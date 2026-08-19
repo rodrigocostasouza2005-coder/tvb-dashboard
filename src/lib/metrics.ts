@@ -1404,6 +1404,132 @@ export async function getStockCoverage(
     });
 }
 
+export async function getAtacadoVendas(filters: DashboardFilters) {
+  const cdStore = await prisma.store.findFirst({ where: { code: "CD" } });
+  if (!cdStore) return { kpis: { receita: 0, pedidos: 0, unidades: 0, ticketMedio: 0 }, byDay: [], topProdutos: [] };
+
+  const where: Prisma.SaleWhereInput = {
+    storeId: cdStore.id,
+    saleDate: { gte: filters.from, lte: filters.to },
+    ...(filters.tabelasPreco !== undefined ? { tabelaPreco: { in: filters.tabelasPreco } } : {}),
+  };
+
+  const [agg, byDayRaw, topGrupos] = await Promise.all([
+    prisma.sale.aggregate({ where, _sum: { quantidade: true, valorTotalLiquido: true }, _count: { dapicVendaId: true } }),
+    prisma.$queryRaw<{ day: Date; units: bigint; revenue: number }[]>`
+      SELECT
+        (("saleDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo')::date AS day,
+        SUM("quantidade") AS units,
+        SUM("valorTotalLiquido") AS revenue
+      FROM "Sale"
+      WHERE "storeId" = ${cdStore.id}
+        AND "saleDate" >= ${filters.from}
+        AND "saleDate" <= ${filters.to}
+        ${filters.tabelasPreco !== undefined ? Prisma.sql`AND "tabelaPreco" = ANY(${filters.tabelasPreco})` : Prisma.empty}
+      GROUP BY day ORDER BY day ASC
+    `,
+    prisma.sale.groupBy({
+      by: ["grupo", "produto"],
+      where,
+      _sum: { quantidade: true, valorTotalLiquido: true },
+      orderBy: { _sum: { valorTotalLiquido: "desc" } },
+      take: 50,
+    }),
+  ]);
+
+  const pedidos = await prisma.sale.findMany({ where, select: { dapicVendaId: true }, distinct: ["dapicVendaId"] }).then(r => r.length);
+
+  const receita = agg._sum.valorTotalLiquido ?? 0;
+  const unidades = agg._sum.quantidade ?? 0;
+
+  return {
+    kpis: { receita, pedidos, unidades, ticketMedio: pedidos > 0 ? receita / pedidos : 0 },
+    byDay: byDayRaw.map(r => ({ day: new Date(r.day).toISOString().slice(0, 10), units: Number(r.units), revenue: Number(r.revenue) })),
+    topProdutos: topGrupos.map(r => ({ grupo: r.grupo, produto: r.produto, unidades: r._sum.quantidade ?? 0, receita: r._sum.valorTotalLiquido ?? 0 })),
+  };
+}
+
+export async function getAtacadoCidades(filters: DashboardFilters) {
+  const cdStore = await prisma.store.findFirst({ where: { code: "CD" } });
+  if (!cdStore) return { rows: [], totalCidades: 0, totalEstados: 0 };
+
+  const where: Prisma.SaleWhereInput = {
+    storeId: cdStore.id,
+    saleDate: { gte: filters.from, lte: filters.to },
+    cidade: { not: null },
+    ...(filters.tabelasPreco !== undefined ? { tabelaPreco: { in: filters.tabelasPreco } } : {}),
+  };
+
+  const rows = await prisma.sale.groupBy({
+    by: ["cidade", "estado"],
+    where,
+    _sum: { quantidade: true, valorTotalLiquido: true },
+    _count: { dapicVendaId: true },
+    orderBy: { _sum: { valorTotalLiquido: "desc" } },
+  });
+
+  const mapped = rows.map(r => ({
+    cidade: r.cidade ?? "—",
+    estado: r.estado ?? "—",
+    unidades: r._sum.quantidade ?? 0,
+    receita: r._sum.valorTotalLiquido ?? 0,
+    pedidos: r._count.dapicVendaId,
+  }));
+
+  return {
+    rows: mapped,
+    totalCidades: new Set(mapped.map(r => r.cidade)).size,
+    totalEstados: new Set(mapped.map(r => r.estado)).size,
+  };
+}
+
+export async function getAtacadoClientes(filters: DashboardFilters) {
+  const cdStore = await prisma.store.findFirst({ where: { code: "CD" } });
+  if (!cdStore) return { rows: [], totalClientes: 0, novosNoPeriodo: 0 };
+
+  const where: Prisma.SaleWhereInput = {
+    storeId: cdStore.id,
+    saleDate: { gte: filters.from, lte: filters.to },
+    clienteNome: { not: null },
+    ...(filters.tabelasPreco !== undefined ? { tabelaPreco: { in: filters.tabelasPreco } } : {}),
+  };
+
+  const [rows, primeiraVendaGeral] = await Promise.all([
+    prisma.sale.groupBy({
+      by: ["clienteNome", "cidade", "estado"],
+      where,
+      _sum: { quantidade: true, valorTotalLiquido: true },
+      _count: { dapicVendaId: true },
+      _max: { saleDate: true },
+      _min: { saleDate: true },
+      orderBy: { _sum: { valorTotalLiquido: "desc" } },
+    }),
+    prisma.sale.groupBy({
+      by: ["clienteNome"],
+      where: { storeId: cdStore.id, saleDate: { lt: filters.from }, clienteNome: { not: null } },
+      _count: { id: true },
+    }),
+  ]);
+
+  const clientesAntigos = new Set(primeiraVendaGeral.map(r => r.clienteNome));
+
+  const mapped = rows.map(r => ({
+    clienteNome: r.clienteNome ?? "—",
+    cidade: r.cidade ?? "—",
+    estado: r.estado ?? "—",
+    pedidos: r._count.dapicVendaId,
+    unidades: r._sum.quantidade ?? 0,
+    receita: r._sum.valorTotalLiquido ?? 0,
+    ultimaCompra: r._max.saleDate,
+    primeiraCompra: r._min.saleDate,
+    isNovo: !clientesAntigos.has(r.clienteNome),
+  }));
+
+  const novosNoPeriodo = mapped.filter(r => r.isNovo).length;
+
+  return { rows: mapped, totalClientes: mapped.length, novosNoPeriodo };
+}
+
 // Os produtos mais vendidos em cada loja desde um horário de corte (o momento da sync
 // anterior, tipicamente) — pro aviso do bot mostrar "o que vendeu desde a última atualização".
 export async function getTopVendidosPorLoja(desde: Date, ate: Date, limit = 3) {
