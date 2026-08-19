@@ -1331,6 +1331,77 @@ export async function getTopParaIncentivar(dias = 30, limit = 10) {
     .slice(0, limit);
 }
 
+// Cobertura de estoque: pra cada SKU com estoque > 0, calcula quantos dias de venda restam
+// com base na média de vendas dos últimos 30 dias. Status: crítico < 7 dias, atenção < 30 dias,
+// ok >= 30 dias, sem-venda se não vendeu nada no período.
+export async function getStockCoverage(
+  filters: Pick<DashboardFilters, "storeIds" | "grupoIn" | "tabelasPreco">
+) {
+  const stock = (await latestStockSnapshots(filters)).filter((s) => s.quantidadeDisponivel > 0);
+  if (stock.length === 0) return [];
+
+  const storeIds = [...new Set(stock.map((s) => s.storeId))];
+  const cods = [...new Set(stock.map((s) => s.cod))];
+
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+  const [saleAgg, stores] = await Promise.all([
+    prisma.sale.groupBy({
+      by: ["storeId", "cod"],
+      where: {
+        storeId: { in: storeIds },
+        cod: { in: cods },
+        saleDate: { gte: thirtyDaysAgo },
+        ...(filters.tabelasPreco !== undefined ? { tabelaPreco: { in: filters.tabelasPreco } } : {}),
+      },
+      _sum: { quantidade: true },
+    }),
+    prisma.store.findMany({ where: { id: { in: storeIds } } }),
+  ]);
+
+  const storeName = new Map(stores.map((s) => [s.id, s.name]));
+  const salesByKey = new Map(saleAgg.map((s) => [`${s.storeId}::${s.cod}`, s._sum.quantidade ?? 0]));
+
+  const statusOrder = { critico: 0, atencao: 1, ok: 2, "sem-venda": 3 } as const;
+
+  return stock
+    .map((s) => {
+      const vendas30d = salesByKey.get(`${s.storeId}::${s.cod}`) ?? 0;
+      const avgDailySales = vendas30d / 30;
+      const diasCobertura = avgDailySales > 0 ? Math.round(s.quantidadeDisponivel / avgDailySales) : null;
+      const status: "critico" | "atencao" | "ok" | "sem-venda" =
+        diasCobertura === null
+          ? "sem-venda"
+          : diasCobertura < 7
+          ? "critico"
+          : diasCobertura < 30
+          ? "atencao"
+          : "ok";
+      return {
+        storeName: storeName.get(s.storeId) ?? s.storeId,
+        produto: s.produto,
+        colecao: s.colecao ?? null,
+        grupo: s.grupo,
+        tamanho: s.tamanho,
+        estoque: s.quantidadeDisponivel,
+        vendas30d,
+        avgDailySales,
+        diasCobertura,
+        status,
+      };
+    })
+    .sort((a, b) => {
+      const orderDiff = statusOrder[a.status] - statusOrder[b.status];
+      if (orderDiff !== 0) return orderDiff;
+      // within group: ascending diasCobertura (nulls last within sem-venda)
+      if (a.diasCobertura === null && b.diasCobertura === null) return 0;
+      if (a.diasCobertura === null) return 1;
+      if (b.diasCobertura === null) return -1;
+      return a.diasCobertura - b.diasCobertura;
+    });
+}
+
 // Os produtos mais vendidos em cada loja desde um horário de corte (o momento da sync
 // anterior, tipicamente) — pro aviso do bot mostrar "o que vendeu desde a última atualização".
 export async function getTopVendidosPorLoja(desde: Date, ate: Date, limit = 3) {

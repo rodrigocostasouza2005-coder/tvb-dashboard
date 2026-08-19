@@ -15,7 +15,8 @@ export type TabKey =
   | "vendedores"
   | "marketing"
   | "estoque-minimo"
-  | "envelhecimento";
+  | "envelhecimento"
+  | "cobertura";
 
 export const TABS: { key: TabKey; label: string; href: string }[] = [
   { key: "visao-geral", label: "Visão Geral", href: "/dashboard" },
@@ -32,6 +33,7 @@ export const TABS: { key: TabKey; label: string; href: string }[] = [
   { key: "marketing", label: "Marketing", href: "/dashboard/marketing" },
   { key: "estoque-minimo", label: "Estoque Mínimo", href: "/dashboard/estoque-minimo" },
   { key: "envelhecimento", label: "Envelhecimento", href: "/dashboard/envelhecimento" },
+  { key: "cobertura", label: "Cobertura", href: "/dashboard/cobertura" },
 ];
 
 const BLOCKED_BY_DEFAULT_FOR_VENDEDOR: TabKey[] = ["clientes", "vendedores", "estoque-minimo"];
