@@ -291,6 +291,7 @@ async function syncParcelas(client: DapicClient) {
         valorMulta: p.ValorMulta,
         valorJuros: p.ValorJuros,
         nossoNumeroBoleto: p.NossoNumeroBoleto ?? null,
+        planoConta: p.PlanoConta ?? null,
       })),
       skipDuplicates: true,
     });

@@ -43,8 +43,9 @@ const selectClass =
 
 export function InadimplenciaTable({ parcelas }: { parcelas: ParcelaVencida[] }) {
   const [search, setSearch] = useState("");
-  // Padrão: Boleto — são os clientes atacado que pagam via Inter
-  const [formaPgtoFiltro, setFormaPgtoFiltro] = useState("Boleto");
+  // Padrão: 4.1.4 = clientes atacado B2B (Inter). "todas" mostra tudo.
+  const [planoFiltro, setPlanoFiltro] = useState("4.1.4");
+  const [formaPgtoFiltro, setFormaPgtoFiltro] = useState("");
 
   const formasPgto = useMemo(
     () => [...new Set(parcelas.map((p) => p.formaPagamento))].sort(),
@@ -54,11 +55,12 @@ export function InadimplenciaTable({ parcelas }: { parcelas: ParcelaVencida[] })
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return parcelas.filter((p) => {
+      if (planoFiltro !== "" && p.planoConta !== planoFiltro) return false;
       if (formaPgtoFiltro !== "" && p.formaPagamento !== formaPgtoFiltro) return false;
       if (q === "") return true;
       return p.pessoa.toLowerCase().includes(q) || p.conta.toLowerCase().includes(q);
     });
-  }, [parcelas, search, formaPgtoFiltro]);
+  }, [parcelas, search, planoFiltro, formaPgtoFiltro]);
 
   const visible = filtered.slice(0, LIMIT);
 
@@ -73,6 +75,15 @@ export function InadimplenciaTable({ parcelas }: { parcelas: ParcelaVencida[] })
           placeholder="Buscar cliente ou conta..."
           className="w-full max-w-xs rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-3 py-1.5 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
         />
+        <select
+          className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-sm text-[var(--text-primary)]"
+          value={planoFiltro}
+          onChange={(e) => setPlanoFiltro(e.target.value)}
+        >
+          <option value="4.1.4">Atacado (Inter)</option>
+          <option value="4.1.3">Site varejo</option>
+          <option value="">Todos</option>
+        </select>
         <select
           className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-sm text-[var(--text-primary)]"
           value={formaPgtoFiltro}

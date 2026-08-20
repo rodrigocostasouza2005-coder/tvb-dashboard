@@ -15,6 +15,7 @@ export type ParcelaVencida = {
   valorJuros: number;
   numeroParcela: number;
   nossoNumeroBoleto: string | null;
+  planoConta: string | null;
 };
 
 export async function getInadimplencia(): Promise<{
@@ -48,6 +49,7 @@ export async function getInadimplencia(): Promise<{
     valorJuros: p.valorJuros,
     numeroParcela: p.numeroParcela,
     nossoNumeroBoleto: p.nossoNumeroBoleto,
+    planoConta: p.planoConta,
   }));
 
   // Sort: mais atrasado primeiro

@@ -243,9 +243,11 @@ model Parcela {
   valorMulta        Float
   valorJuros        Float
   nossoNumeroBoleto String?
+  planoConta        String?   // "4.1.4" = atacado B2B, "4.1.3" = site varejo
 
   @@index([dataVencimento])
   @@index([formaPagamento])
+  @@index([planoConta])
 }
 
 // Cache do catálogo de /tabelaprecos (preço por SKU por tabela), 1 linha por token/loja. Preço

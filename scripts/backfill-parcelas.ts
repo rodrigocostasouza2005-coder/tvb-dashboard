@@ -43,6 +43,7 @@ async function main() {
         valorMulta: p.ValorMulta,
         valorJuros: p.ValorJuros,
         nossoNumeroBoleto: p.NossoNumeroBoleto ?? null,
+        planoConta: p.PlanoConta ?? null,
       })),
       skipDuplicates: true,
     });

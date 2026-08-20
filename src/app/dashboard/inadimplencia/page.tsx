@@ -11,8 +11,8 @@ export default async function InadimplenciaPage() {
 
   const { parcelas } = await getInadimplencia();
 
-  // Cards mostram só Boleto (padrão da tabela = atacado/Inter)
-  const boletoOnly = parcelas.filter((p) => p.formaPagamento === "Boleto");
+  // Cards mostram só atacado B2B (planoConta 4.1.4 = clientes atacado Inter)
+  const boletoOnly = parcelas.filter((p) => p.planoConta === "4.1.4");
   const totalEmAberto = boletoOnly.reduce((s, p) => s + p.valorAberto, 0);
   const totalParcelas = boletoOnly.length;
   const totalClientes = new Set(boletoOnly.map((p) => p.pessoa)).size;
@@ -21,7 +21,7 @@ export default async function InadimplenciaPage() {
     <div>
       <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
         <StatTile
-          label="Valor em aberto (Boleto)"
+          label="Valor em aberto (Atacado)"
           value={totalEmAberto.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
           status={totalEmAberto > 0 ? "critical" : "good"}
         />
