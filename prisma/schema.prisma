@@ -224,6 +224,30 @@ model ProductionOrder {
   @@index([grupo])
 }
 
+// Parcelas em aberto do DAPIC (/contas/parcelas, Status=Aberta). Tabela é truncada e
+// reinserida a cada sync — snapshot do momento atual de inadimplência, não histórico.
+model Parcela {
+  id                String   @id @default(cuid())
+  idParcela         Int      @unique
+  idConta           Int
+  status            String
+  dataEmissao       DateTime
+  dataVencimento    DateTime
+  conta             String
+  formaPagamento    String
+  pessoa            String
+  numeroParcela     Int
+  valor             Float
+  valorPago         Float
+  valorAberto       Float
+  valorMulta        Float
+  valorJuros        Float
+  nossoNumeroBoleto String?
+
+  @@index([dataVencimento])
+  @@index([formaPagamento])
+}
+
 // Cache do catálogo de /tabelaprecos (preço por SKU por tabela), 1 linha por token/loja. Preço
 // não muda de hora em hora, mas antes buscávamos de novo em TODO sync (2x/dia + botão manual) —
 // achado em 2026-08-12 que isso contribuía pra sync ficar perto do teto de 300s da Vercel

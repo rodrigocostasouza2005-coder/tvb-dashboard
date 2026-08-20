@@ -264,6 +264,41 @@ async function syncClientes(client: DapicClient) {
   return count;
 }
 
+async function syncParcelas(client: DapicClient) {
+  // Busca só Status=Aberta desde 2024 — cobre inadimplência ativa sem histórico longo.
+  // Trunca a tabela antes de reinserir: snapshot atual, não acúmulo histórico.
+  const parcelas = await client.fetchParcelas("2024-01-01", toDateStr(new Date()), "Aberta");
+  await prisma.parcela.deleteMany({});
+  if (parcelas.length === 0) return 0;
+  const BATCH = 500;
+  let count = 0;
+  for (let i = 0; i < parcelas.length; i += BATCH) {
+    const batch = parcelas.slice(i, i + BATCH);
+    await prisma.parcela.createMany({
+      data: batch.map((p) => ({
+        idParcela: p.IdParcela,
+        idConta: p.IdConta,
+        status: p.Status,
+        dataEmissao: parseDapicDateTime(p.DataEmissao),
+        dataVencimento: parseDapicDateTime(p.DataVencimento),
+        conta: p.Conta,
+        formaPagamento: p.FormaPagamento,
+        pessoa: p.Pessoa,
+        numeroParcela: p.Parcela,
+        valor: p.Valor,
+        valorPago: p.ValorPago,
+        valorAberto: p.ValorAberto,
+        valorMulta: p.ValorMulta,
+        valorJuros: p.ValorJuros,
+        nossoNumeroBoleto: p.NossoNumeroBoleto ?? null,
+      })),
+      skipDuplicates: true,
+    });
+    count += batch.length;
+  }
+  return count;
+}
+
 async function syncOrdensProducao(client: DapicClient | undefined) {
   if (!client) return 0;
   const linhas = await client.fetchOrdensProducaoProdutos(ORDENS_PRODUCAO_DATA_INICIAL, toDateStr(new Date()));
@@ -398,6 +433,8 @@ export async function runSync() {
       syncOrdensProducao(matrizClient).catch((e) => { console.error("[syncOrdensProducao] falhou:", e?.message ?? e); return 0; }),
       // Clientes — 1 token basta, não é fatal se falhar
       (cdAtacadoClient ? syncClientes(cdAtacadoClient) : Promise.resolve(0)).catch(() => 0),
+      // Parcelas em aberto (inadimplência) — não é fatal se falhar
+      (cdAtacadoClient ? syncParcelas(cdAtacadoClient) : Promise.resolve(0)).catch((e) => { console.error("[syncParcelas] falhou:", e?.message ?? e); return 0; }),
     ]);
 
     const totalEstoque = results.reduce((a, r) => a + r.estoque, 0);
