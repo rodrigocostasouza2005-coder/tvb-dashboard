@@ -1540,6 +1540,72 @@ export async function getAtacadoClientes(filters: DashboardFilters) {
   return { rows: mapped, totalClientes: mapped.length, novosNoPeriodo };
 }
 
+export async function getClienteRetencaoPorMes(filters: DashboardFilters) {
+  const cdStore = await prisma.store.findFirst({ where: { code: "CD" } });
+  if (!cdStore) return { months: [], compraram1x: 0, compraramMaisde1x: 0 };
+
+  const [salesInPeriod, allTimeFirst] = await Promise.all([
+    prisma.sale.findMany({
+      where: {
+        storeId: cdStore.id,
+        saleDate: { gte: filters.from, lte: filters.to },
+        clienteNome: { not: null },
+      },
+      select: { clienteNome: true, saleDate: true, dapicVendaId: true },
+    }),
+    prisma.sale.groupBy({
+      by: ["clienteNome"],
+      where: { storeId: cdStore.id, clienteNome: { not: null }, saleDate: { lte: filters.to } },
+      _min: { saleDate: true },
+    }),
+  ]);
+
+  const firstPurchaseMonth = new Map<string, string>();
+  for (const r of allTimeFirst) {
+    if (r.clienteNome && r._min.saleDate) {
+      firstPurchaseMonth.set(r.clienteNome, r._min.saleDate.toISOString().slice(0, 7));
+    }
+  }
+
+  // Cards: quantos clientes compraram exatamente 1x vs +1x no período
+  const pedidosPorCliente = new Map<string, Set<number>>();
+  for (const s of salesInPeriod) {
+    if (!s.clienteNome) continue;
+    const set = pedidosPorCliente.get(s.clienteNome) ?? new Set();
+    set.add(s.dapicVendaId);
+    pedidosPorCliente.set(s.clienteNome, set);
+  }
+  let compraram1x = 0;
+  let compraramMaisde1x = 0;
+  for (const [, pedidos] of pedidosPorCliente) {
+    if (pedidos.size === 1) compraram1x++;
+    else compraramMaisde1x++;
+  }
+
+  // Gráfico: clientes únicos por mês, separados em novos vs recorrentes
+  const monthClientMap = new Map<string, Set<string>>();
+  for (const s of salesInPeriod) {
+    if (!s.clienteNome) continue;
+    const monthKey = s.saleDate.toISOString().slice(0, 7);
+    const set = monthClientMap.get(monthKey) ?? new Set();
+    set.add(s.clienteNome);
+    monthClientMap.set(monthKey, set);
+  }
+
+  const months = [...monthClientMap.entries()].sort().map(([month, clients]) => {
+    let novos = 0;
+    let recorrentes = 0;
+    for (const cliente of clients) {
+      const fp = firstPurchaseMonth.get(cliente);
+      if (!fp || fp === month) novos++;
+      else recorrentes++;
+    }
+    return { month, novos, recorrentes };
+  });
+
+  return { months, compraram1x, compraramMaisde1x };
+}
+
 // Os produtos mais vendidos em cada loja desde um horário de corte (o momento da sync
 // anterior, tipicamente) — pro aviso do bot mostrar "o que vendeu desde a última atualização".
 export async function getTopVendidosPorLoja(desde: Date, ate: Date, limit = 3) {
