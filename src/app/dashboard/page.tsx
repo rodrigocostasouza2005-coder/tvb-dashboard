@@ -97,7 +97,14 @@ export default async function OverviewPage({
 
       <section className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
         <StatTile label="Unidades vendidas" value={kpi.unitsSold.toLocaleString("pt-BR")} />
-        {showFinancials && <StatTile label="Receita" value={formatBRL(kpi.revenue)} />}
+        {showFinancials && <StatTile label="Receita bruta" value={formatBRL(kpi.revenue)} />}
+        {showFinancials && (
+          <StatTile
+            label="Receita líquida"
+            value={formatBRL(kpi.revenue - kpi.valueReturned)}
+            subValue={`devoluções: ${formatBRL(kpi.valueReturned)}`}
+          />
+        )}
         <StatTile label="Estoque atual" value={kpi.currentStock.toLocaleString("pt-BR")} />
         <StatTile
           label="Devoluções"
