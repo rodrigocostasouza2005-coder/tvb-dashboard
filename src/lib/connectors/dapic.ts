@@ -258,10 +258,11 @@ export class DapicClient {
   // Parcelas/contas a receber — usado para inadimplência. O filtro DataInicial/DataFinal
   // parece filtrar por DataEmissao, então para pegar todas as parcelas vencidas em aberto
   // basta usar um range amplo (ex: 2020-01-01 até hoje).
-  fetchParcelas(dataInicial: string, dataFinal: string) {
+  fetchParcelas(dataInicial: string, dataFinal: string, status?: string) {
     return this.fetchAllPages<DapicParcela>("/contas/parcelas", {
       DataInicial: dataInicial,
       DataFinal: dataFinal,
+      ...(status ? { Status: status } : {}),
     });
   }
 }

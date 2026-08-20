@@ -43,7 +43,8 @@ const selectClass =
 
 export function InadimplenciaTable({ parcelas }: { parcelas: ParcelaVencida[] }) {
   const [search, setSearch] = useState("");
-  const [formaPgtoFiltro, setFormaPgtoFiltro] = useState("");
+  // Padrão: Boleto — são os clientes atacado que pagam via Inter
+  const [formaPgtoFiltro, setFormaPgtoFiltro] = useState("Boleto");
 
   const formasPgto = useMemo(
     () => [...new Set(parcelas.map((p) => p.formaPagamento))].sort(),

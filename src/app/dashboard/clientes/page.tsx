@@ -1,10 +1,12 @@
 import { getSessionUser } from "@/lib/auth";
-import { getTopClientes, getStores, getMarcas, getTabelasPreco, getVendedores } from "@/lib/metrics";
+import { getTopClientes, getStores, getMarcas, getTabelasPreco, getVendedores, getClienteRetencaoVarejo } from "@/lib/metrics";
 import { canSeeFinancials, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
 import { MetricBarChart } from "../metric-bar-chart";
+import { StatTile } from "../stat-tile";
+import { ClienteRetencaoChart } from "./cliente-retencao-chart";
 
 function formatBRL(value: number) {
   return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -30,12 +32,13 @@ export default async function ClientesPage({
   });
   const vendedor = typeof rawParams.vendedor === "string" && rawParams.vendedor ? rawParams.vendedor : null;
 
-  const [rows, stores, marcas, tabelasPreco, vendedores] = await Promise.all([
+  const [rows, stores, marcas, tabelasPreco, vendedores, retencao] = await Promise.all([
     getTopClientes(filters, vendedor),
     getStores(allowedStores),
     getMarcas(allowedMarcas),
     getTabelasPreco(allowedTabelasPreco),
     getVendedores(),
+    getClienteRetencaoVarejo(filters),
   ]);
   const showFinancials = canSeeFinancials(user);
 
@@ -71,10 +74,21 @@ export default async function ClientesPage({
           Filtrar
         </button>
       </form>
-      <p className="mb-3 text-xs text-[var(--text-muted)]">
-        Use o filtro de tabela de preço pra separar varejo de atacado. Segmentação e recorrência mais
-        avançadas entram numa próxima etapa.
-      </p>
+      <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-2">
+        <StatTile label="Compraram 1x" value={retencao.compraram1x.toLocaleString("pt-BR")} />
+        <StatTile
+          label="Compraram +1x"
+          value={retencao.compraramMaisde1x.toLocaleString("pt-BR")}
+          trend={retencao.compraramMaisde1x > 0 ? "up" : undefined}
+        />
+      </div>
+
+      {retencao.months.length > 1 && (
+        <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
+          <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Retenção — novos vs recorrentes por mês</h2>
+          <ClienteRetencaoChart data={retencao.months} />
+        </section>
+      )}
 
       <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
         <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">

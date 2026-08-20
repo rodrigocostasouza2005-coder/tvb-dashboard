@@ -9,18 +9,20 @@ export default async function InadimplenciaPage() {
   if (!user) return null;
   requireTabAccess(user, user.role, "inadimplencia");
 
-  const { parcelas, totalEmAberto, totalClientes, totalParcelas } =
-    await getInadimplencia();
+  const { parcelas } = await getInadimplencia();
+
+  // Cards mostram só Boleto (padrão da tabela = atacado/Inter)
+  const boletoOnly = parcelas.filter((p) => p.formaPagamento === "Boleto");
+  const totalEmAberto = boletoOnly.reduce((s, p) => s + p.valorAberto, 0);
+  const totalParcelas = boletoOnly.length;
+  const totalClientes = new Set(boletoOnly.map((p) => p.pessoa)).size;
 
   return (
     <div>
       <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
         <StatTile
-          label="Valor em aberto"
-          value={totalEmAberto.toLocaleString("pt-BR", {
-            style: "currency",
-            currency: "BRL",
-          })}
+          label="Valor em aberto (Boleto)"
+          value={totalEmAberto.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
           status={totalEmAberto > 0 ? "critical" : "good"}
         />
         <StatTile
