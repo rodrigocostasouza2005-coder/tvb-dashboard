@@ -254,6 +254,16 @@ export class DapicClient {
       DataFinal: dataFinal,
     });
   }
+
+  // Parcelas/contas a receber — usado para inadimplência. O filtro DataInicial/DataFinal
+  // parece filtrar por DataEmissao, então para pegar todas as parcelas vencidas em aberto
+  // basta usar um range amplo (ex: 2020-01-01 até hoje).
+  fetchParcelas(dataInicial: string, dataFinal: string) {
+    return this.fetchAllPages<DapicParcela>("/contas/parcelas", {
+      DataInicial: dataInicial,
+      DataFinal: dataFinal,
+    });
+  }
 }
 
 export function createDapicClients(): DapicClient[] {
@@ -447,4 +457,24 @@ export type DapicTabelaPreco = {
 export type DapicTabelaPrecoProduto = {
   IdGradeProduto: number;
   Valor: number;
+};
+
+export type DapicParcela = {
+  IdParcela: number;
+  IdConta: number;
+  Status: string;
+  DataEmissao: string;
+  DataVencimento: string;
+  Conta: string;
+  FormaPagamento: string;
+  Pessoa: string;
+  PlanoConta: string | null;
+  Parcela: number;
+  Valor: number;
+  ValorPago: number;
+  ValorAberto: number;
+  ValorMulta: number;
+  ValorJuros: number;
+  Observacoes: string | null;
+  NossoNumeroBoleto: string | null;
 };

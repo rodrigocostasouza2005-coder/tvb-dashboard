@@ -19,7 +19,8 @@ export type TabKey =
   | "atacado"
   | "atacado-cidades"
   | "atacado-clientes"
-  | "cobertura";
+  | "cobertura"
+  | "inadimplencia";
 
 export const TABS: { key: TabKey; label: string; href: string }[] = [
   { key: "visao-geral", label: "Visão Geral", href: "/dashboard" },
@@ -40,6 +41,7 @@ export const TABS: { key: TabKey; label: string; href: string }[] = [
   { key: "atacado-cidades", label: "Atacado — Cidades", href: "/dashboard/atacado-cidades" },
   { key: "atacado-clientes", label: "Atacado — Clientes", href: "/dashboard/atacado-clientes" },
   { key: "cobertura", label: "Cobertura", href: "/dashboard/cobertura" },
+  { key: "inadimplencia", label: "Inadimplência", href: "/dashboard/inadimplencia" },
 ];
 
 const BLOCKED_BY_DEFAULT_FOR_VENDEDOR: TabKey[] = ["clientes", "vendedores", "estoque-minimo"];
