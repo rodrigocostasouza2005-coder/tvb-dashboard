@@ -83,13 +83,6 @@ export default async function ClientesPage({
         />
       </div>
 
-      {retencao.months.length > 1 && (
-        <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
-          <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Retenção — novos vs recorrentes por mês</h2>
-          <ClienteRetencaoChart data={retencao.months} />
-        </section>
-      )}
-
       <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
         <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">
           Top clientes {showFinancials ? "por receita" : "por unidades"}
@@ -101,7 +94,7 @@ export default async function ClientesPage({
         />
       </section>
 
-      <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+      <div className="mb-6 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
@@ -146,6 +139,13 @@ export default async function ClientesPage({
           </tbody>
         </table>
       </div>
+
+      {retencao.months.length > 1 && (
+        <section className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
+          <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Retenção — novos vs recorrentes por mês</h2>
+          <ClienteRetencaoChart data={retencao.months} />
+        </section>
+      )}
     </div>
   );
 }
