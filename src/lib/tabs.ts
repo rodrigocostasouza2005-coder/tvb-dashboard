@@ -66,7 +66,7 @@ export const TABS: TabEntry[] = [
   { key: "mensal", label: "Mensal", href: "/dashboard/mensal", group: "outros" },
 
   // back in nav
-  { key: "estoque", label: "Estoque × Vendas", href: "/dashboard/estoque", group: "estoque" },
+  { key: "estoque", label: "Estoque × Vendas", href: "/dashboard/estoque", group: "vendas" },
   { key: "marketing", label: "Marketing", href: "/dashboard/marketing", group: "marketing" },
 ];
 
