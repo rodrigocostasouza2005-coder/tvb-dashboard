@@ -17,7 +17,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
   after(() => scheduleCatchupSyncIfStale());
 
   const allowed = user.allowedTabs.length > 0 ? user.allowedTabs : defaultAllowedTabs(user.role);
-  const visibleKeys = TABS.filter((t) => allowed.includes(t.key)).map((t) => t.key);
+  const visibleKeys = TABS.filter(
+    (t): t is Extract<typeof t, { key: NonNullable<(typeof t)["key"]> }> =>
+      t.key !== undefined && allowed.includes(t.key)
+  ).map((t) => t.key);
 
   return (
     <div className="min-h-screen bg-[var(--page-plane)] text-[var(--text-primary)]">

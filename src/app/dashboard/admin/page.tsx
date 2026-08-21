@@ -14,9 +14,10 @@ export const maxDuration = 300;
 const ROLES = ["ADMIN", "GESTAO", "VENDEDOR"] as const;
 
 function TabCheckboxes({ name, checked }: { name: string; checked: Set<string> }) {
+  const keyedTabs = TABS.filter((t): t is Extract<typeof t, { key: NonNullable<(typeof t)["key"]> }> => t.key !== undefined);
   return (
     <div className="flex flex-wrap gap-x-3 gap-y-1">
-      {TABS.map((t) => (
+      {keyedTabs.map((t) => (
         <label key={t.key} className="flex items-center gap-1 text-xs text-[var(--text-secondary)]">
           <input
             type="checkbox"
