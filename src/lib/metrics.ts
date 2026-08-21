@@ -75,6 +75,39 @@ export async function getKpiSummary(filters: DashboardFilters) {
   };
 }
 
+export type Canal = "todos" | "b2b" | "b2c";
+
+// B2B = Tabela atacado (só isso, sem fallback de null). B2C = tudo mais (varejo, Black
+// Friday, Promoção, e vendas sem tabela inferida) — decisão do Rodrigo em 2026-08-21: não
+// existe um campo "canal" de verdade, tabela de preço é o proxy mais próximo disponível.
+function canalWhere(canal: Canal): Prisma.SaleWhereInput {
+  if (canal === "b2b") return { tabelaPreco: "Tabela atacado" };
+  if (canal === "b2c") return { OR: [{ tabelaPreco: { not: "Tabela atacado" } }, { tabelaPreco: null }] };
+  return {};
+}
+
+// KPIs pra Lâmina Mensal: além de unidades/receita, conta pedidos distintos (pra ticket
+// médio = receita líquida / nº de pedidos, não / peças) e separa por canal B2B/B2C.
+// Devoluções NÃO são segmentadas por canal — o backfill histórico de Return não tem
+// tabelaPreco preenchido (mesma limitação de saleWhere/returnWhere), então o valor devolvido
+// aqui é sempre do período inteiro, independente do canal selecionado.
+export async function getMonthlySnapshotKpi(filters: DashboardFilters, canal: Canal = "todos") {
+  const where: Prisma.SaleWhereInput = { AND: [saleWhere(filters), canalWhere(canal)] };
+  const [salesAgg, orderRows, returnsAgg] = await Promise.all([
+    prisma.sale.aggregate({ where, _sum: { quantidade: true, valorTotalLiquido: true } }),
+    prisma.sale.groupBy({ by: ["storeId", "dapicVendaId"], where }),
+    prisma.return.aggregate({ where: returnWhere(filters), _sum: { quantidade: true, valorTotal: true } }),
+  ]);
+
+  return {
+    unitsBruta: salesAgg._sum.quantidade ?? 0,
+    revenueBruta: salesAgg._sum.valorTotalLiquido ?? 0,
+    orderCount: orderRows.length,
+    unitsReturned: returnsAgg._sum.quantidade ?? 0,
+    valueReturned: returnsAgg._sum.valorTotal ?? 0,
+  };
+}
+
 // Vendas agrupadas por dia (horário de Brasília) dentro do período filtrado — usado pro
 // gráfico de tendência da Visão Geral. Agrupar por dia em SQL é mais simples que em JS aqui
 // porque saleDate é timestamp; usa AT TIME ZONE pra não cair no dia errado perto da meia-noite
@@ -167,8 +200,9 @@ function dimensionKey(dimension: Dimension, row: { grupo?: string; produto?: str
   return v && v.trim() ? v : "—";
 }
 
-export async function getSalesByDimension(filters: DashboardFilters, dimension: Dimension = "grupo") {
-  const rows = await groupSalesByDimension(dimension, saleWhere(filters));
+export async function getSalesByDimension(filters: DashboardFilters, dimension: Dimension = "grupo", canal: Canal = "todos") {
+  const where: Prisma.SaleWhereInput = canal === "todos" ? saleWhere(filters) : { AND: [saleWhere(filters), canalWhere(canal)] };
+  const rows = await groupSalesByDimension(dimension, where);
   return rows
     .map((r) => ({
       key: dimensionKey(dimension, r),

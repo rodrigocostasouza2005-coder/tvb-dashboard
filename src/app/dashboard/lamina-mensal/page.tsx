@@ -1,22 +1,30 @@
 import { getSessionUser } from "@/lib/auth";
-import { getKpiSummary, getMonthlySalesByStore, getSalesByDimension, type DashboardFilters } from "@/lib/metrics";
+import { getMonthlySnapshotKpi, getMonthlySalesByStore, getSalesByDimension, type DashboardFilters, type Canal } from "@/lib/metrics";
 import { canSeeFinancials, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction, getGrupoRestriction } from "@/lib/permissions";
 import { brasiliaDayStart, brasiliaDayEnd, todayBrasiliaStr, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { StatTile } from "../stat-tile";
 import { TrendChart } from "./trend-chart";
 
+const DATA_START_MONTH = "2025-09";
+
 function formatBRL(value: number) {
   return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
+const MONTH_NAMES = [
+  "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+  "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
+];
+
 function formatMonthLabel(monthStr: string) {
   const [year, m] = monthStr.split("-");
-  const months = [
-    "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
-    "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
-  ];
-  return `${months[parseInt(m) - 1]} de ${year}`;
+  return `${MONTH_NAMES[parseInt(m) - 1]} de ${year}`;
+}
+
+function formatMonthShort(monthStr: string) {
+  const [year, m] = monthStr.split("-");
+  return `${MONTH_NAMES[parseInt(m) - 1].slice(0, 3)}/${year.slice(2)}`;
 }
 
 function pct(current: number, prev: number) {
@@ -40,6 +48,26 @@ function shiftMonth(monthStr: string, delta: number) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
+function allMonthsSince(startMonth: string, endMonth: string) {
+  const months: string[] = [];
+  let cursor = startMonth;
+  while (cursor <= endMonth) {
+    months.push(cursor);
+    cursor = shiftMonth(cursor, 1);
+  }
+  return months.reverse();
+}
+
+function trendPoint(change: number | null) {
+  if (change === null) return undefined;
+  return change >= 0 ? ("good" as const) : ("critical" as const);
+}
+
+function changeLabel(change: number | null, compareLabel: string) {
+  if (change === null) return undefined;
+  return `${change >= 0 ? "▲" : "▼"} ${Math.abs(change).toFixed(1)}% vs ${compareLabel}`;
+}
+
 export default async function LaminaMensalPage({
   searchParams,
 }: {
@@ -50,9 +78,14 @@ export default async function LaminaMensalPage({
   requireTabAccess(user, user.role, "lamina-mensal");
 
   const rawParams = await searchParams;
+  const todayMonth = todayBrasiliaStr(new Date()).slice(0, 7);
   const month = typeof rawParams.month === "string" && /^\d{4}-\d{2}$/.test(rawParams.month)
     ? rawParams.month
-    : todayBrasiliaStr(new Date()).slice(0, 7);
+    : todayMonth;
+  const compareMonth = typeof rawParams.compare === "string" && /^\d{4}-\d{2}$/.test(rawParams.compare)
+    ? rawParams.compare
+    : shiftMonth(month, -1);
+  const canal: Canal = rawParams.canal === "b2b" || rawParams.canal === "b2c" ? rawParams.canal : "todos";
 
   const grupoIn = await getGrupoRestriction(user.role);
   const allowedStores = getStoreRestriction(user);
@@ -67,20 +100,19 @@ export default async function LaminaMensalPage({
   };
 
   const { from: curFrom, to: curTo } = monthRange(month);
-  const prevMonth = shiftMonth(month, -1);
-  const { from: prevFrom, to: prevTo } = monthRange(prevMonth);
+  const { from: cmpFrom, to: cmpTo } = monthRange(compareMonth);
   const trendStartMonth = shiftMonth(month, -5);
   const { from: trendFrom } = monthRange(trendStartMonth);
 
   const curFilters: DashboardFilters = { ...baseRestriction, from: curFrom, to: curTo };
-  const prevFilters: DashboardFilters = { ...baseRestriction, from: prevFrom, to: prevTo };
+  const cmpFilters: DashboardFilters = { ...baseRestriction, from: cmpFrom, to: cmpTo };
   const trendFilters: DashboardFilters = { ...baseRestriction, from: trendFrom, to: curTo };
 
-  const [curKpi, prevKpi, trendRaw, topProdutos] = await Promise.all([
-    getKpiSummary(curFilters),
-    getKpiSummary(prevFilters),
+  const [curKpi, cmpKpi, trendRaw, topProdutos] = await Promise.all([
+    getMonthlySnapshotKpi(curFilters, canal),
+    getMonthlySnapshotKpi(cmpFilters, canal),
     getMonthlySalesByStore(trendFilters),
-    getSalesByDimension(curFilters, "produto"),
+    getSalesByDimension(curFilters, "produto", canal),
   ]);
 
   const showFinancials = canSeeFinancials(user);
@@ -90,77 +122,155 @@ export default async function LaminaMensalPage({
     revenue: trendRaw.series.reduce((s, k) => s + (d.revenue[k] ?? 0), 0),
   }));
 
-  const revenueChange = pct(curKpi.revenue, prevKpi.revenue);
-  const unitsChange = pct(curKpi.unitsSold, prevKpi.unitsSold);
-  const curTicket = curKpi.unitsSold > 0 ? curKpi.revenue / curKpi.unitsSold : 0;
-  const prevTicket = prevKpi.unitsSold > 0 ? prevKpi.revenue / prevKpi.unitsSold : 0;
-  const ticketChange = pct(curTicket, prevTicket);
-  const devolucaoRate = curKpi.revenue > 0 ? (curKpi.valueReturned / curKpi.revenue) * 100 : 0;
+  // Devoluções não são segmentadas por canal (limitação real do dado, ver getMonthlySnapshotKpi)
+  // — então "líquida" só faz sentido em "todos". Filtrando B2B/B2C, o total de devolução do
+  // período inteiro pode ser maior que a receita daquele canal sozinho e dar número negativo.
+  const showLiquida = canal === "todos";
+  const curRevenueLiquida = curKpi.revenueBruta - curKpi.valueReturned;
+  const cmpRevenueLiquida = cmpKpi.revenueBruta - cmpKpi.valueReturned;
+  const curUnitsLiquida = curKpi.unitsBruta - curKpi.unitsReturned;
+  const cmpUnitsLiquida = cmpKpi.unitsBruta - cmpKpi.unitsReturned;
+  const curTicketBase = showLiquida ? curRevenueLiquida : curKpi.revenueBruta;
+  const cmpTicketBase = showLiquida ? cmpRevenueLiquida : cmpKpi.revenueBruta;
+  const curTicket = curKpi.orderCount > 0 ? curTicketBase / curKpi.orderCount : 0;
+  const cmpTicket = cmpKpi.orderCount > 0 ? cmpTicketBase / cmpKpi.orderCount : 0;
+
+  const revenueBrutaChange = pct(curKpi.revenueBruta, cmpKpi.revenueBruta);
+  const revenueLiquidaChange = pct(curRevenueLiquida, cmpRevenueLiquida);
+  const unitsBrutaChange = pct(curKpi.unitsBruta, cmpKpi.unitsBruta);
+  const unitsLiquidaChange = pct(curUnitsLiquida, cmpUnitsLiquida);
+  const ticketChange = pct(curTicket, cmpTicket);
+  const ordersChange = pct(curKpi.orderCount, cmpKpi.orderCount);
+
+  const compareLabel = formatMonthShort(compareMonth);
 
   const top5 = topProdutos.slice(0, 5);
   const maxRevenue = Math.max(1, ...top5.map((p) => p.revenue));
 
-  const isCurrentMonth = month === todayBrasiliaStr(new Date()).slice(0, 7);
+  const isCurrentMonth = month === todayMonth;
+  const monthOptions = allMonthsSince(DATA_START_MONTH, todayMonth);
+
+  const baseQuery = (overrides: Record<string, string>) => {
+    const params = new URLSearchParams({ month, compare: compareMonth, canal, ...overrides });
+    return `/dashboard/lamina-mensal?${params.toString()}`;
+  };
 
   return (
     <div className="mx-auto max-w-3xl">
       {/* Cabeçalho estilo lâmina */}
-      <div className="mb-6 flex items-center justify-between border-b border-[var(--border)] pb-4">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border)] pb-4">
         <div>
           <h1 className="text-lg font-semibold text-[var(--text-primary)]">TVB Shorts — Lâmina Mensal</h1>
           <p className="text-sm text-[var(--text-secondary)]">{formatMonthLabel(month)}</p>
         </div>
         <div className="flex items-center gap-2 text-sm">
-          <a
-            href={`/dashboard/lamina-mensal?month=${shiftMonth(month, -1)}`}
-            className="rounded-md border border-[var(--border)] px-2 py-1 text-[var(--text-secondary)] hover:bg-[var(--page-plane)]"
-          >
-            ← {formatMonthLabel(prevMonth).split(" de ")[0]}
+          <a href={baseQuery({ month: shiftMonth(month, -1) })} className="rounded-md border border-[var(--border)] px-2 py-1 text-[var(--text-secondary)] hover:bg-[var(--page-plane)]">
+            ← {formatMonthShort(shiftMonth(month, -1))}
           </a>
           {!isCurrentMonth && (
-            <a
-              href={`/dashboard/lamina-mensal?month=${shiftMonth(month, 1)}`}
-              className="rounded-md border border-[var(--border)] px-2 py-1 text-[var(--text-secondary)] hover:bg-[var(--page-plane)]"
-            >
-              {formatMonthLabel(shiftMonth(month, 1)).split(" de ")[0]} →
+            <a href={baseQuery({ month: shiftMonth(month, 1) })} className="rounded-md border border-[var(--border)] px-2 py-1 text-[var(--text-secondary)] hover:bg-[var(--page-plane)]">
+              {formatMonthShort(shiftMonth(month, 1))} →
             </a>
           )}
         </div>
       </div>
 
+      {/* Controles: comparar com / canal */}
+      <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
+        <form method="get" action="/dashboard/lamina-mensal" className="flex items-end gap-2 text-sm">
+          <input type="hidden" name="month" value={month} />
+          <input type="hidden" name="canal" value={canal} />
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-[var(--text-muted)]">Comparar com</span>
+            <select
+              name="compare"
+              defaultValue={compareMonth}
+              className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-[var(--text-primary)]"
+            >
+              {monthOptions.filter((m) => m !== month).map((m) => (
+                <option key={m} value={m}>{formatMonthLabel(m)}</option>
+              ))}
+            </select>
+          </label>
+          <button type="submit" className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-3 py-1.5 text-[var(--text-secondary)] hover:bg-[var(--page-plane)]">
+            Comparar
+          </button>
+        </form>
+
+        <div className="flex gap-1">
+          {([
+            { value: "todos", label: "Todos" },
+            { value: "b2b", label: "B2B (atacado)" },
+            { value: "b2c", label: "B2C (varejo)" },
+          ] as const).map((opt) => (
+            <a
+              key={opt.value}
+              href={baseQuery({ canal: opt.value })}
+              className={`rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
+                canal === opt.value
+                  ? "border-[var(--series-1)] bg-[var(--series-1)] text-white"
+                  : "border-[var(--border)] bg-[var(--surface-1)] text-[var(--text-secondary)] hover:bg-[var(--page-plane)]"
+              }`}
+            >
+              {opt.label}
+            </a>
+          ))}
+        </div>
+      </div>
+
       {/* KPIs principais */}
-      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        {showFinancials && (
+      {showFinancials && (
+        <div className="mb-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
           <StatTile
-            label="Receita do mês"
-            value={formatBRL(curKpi.revenue)}
-            subValue={revenueChange !== null ? `${revenueChange >= 0 ? "▲" : "▼"} ${Math.abs(revenueChange).toFixed(1)}% vs mês ant.` : undefined}
-            status={revenueChange !== null ? (revenueChange >= 0 ? "good" : "critical") : undefined}
+            label="Receita bruta"
+            value={formatBRL(curKpi.revenueBruta)}
+            subValue={changeLabel(revenueBrutaChange, compareLabel)}
+            status={trendPoint(revenueBrutaChange)}
           />
-        )}
-        <StatTile
-          label="Unidades vendidas"
-          value={curKpi.unitsSold.toLocaleString("pt-BR")}
-          subValue={unitsChange !== null ? `${unitsChange >= 0 ? "▲" : "▼"} ${Math.abs(unitsChange).toFixed(1)}% vs mês ant.` : undefined}
-          status={unitsChange !== null ? (unitsChange >= 0 ? "good" : "critical") : undefined}
-        />
-        {showFinancials && (
+          {showLiquida && (
+            <StatTile
+              label="Receita líquida"
+              value={formatBRL(curRevenueLiquida)}
+              subValue={changeLabel(revenueLiquidaChange, compareLabel)}
+              status={trendPoint(revenueLiquidaChange)}
+            />
+          )}
           <StatTile
             label="Ticket médio"
             value={formatBRL(curTicket)}
-            subValue={ticketChange !== null ? `${ticketChange >= 0 ? "▲" : "▼"} ${Math.abs(ticketChange).toFixed(1)}% vs mês ant.` : undefined}
-            status={ticketChange !== null ? (ticketChange >= 0 ? "good" : "critical") : undefined}
+            subValue={changeLabel(ticketChange, compareLabel)}
+            status={trendPoint(ticketChange)}
           />
-        )}
-        {showFinancials && (
+        </div>
+      )}
+      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
+        <StatTile
+          label="Peças brutas"
+          value={curKpi.unitsBruta.toLocaleString("pt-BR")}
+          subValue={changeLabel(unitsBrutaChange, compareLabel)}
+          status={trendPoint(unitsBrutaChange)}
+        />
+        {showLiquida && (
           <StatTile
-            label="Devoluções"
-            value={`${devolucaoRate.toFixed(1)}%`}
-            subValue="do faturamento do mês"
-            status={devolucaoRate <= 5 ? "good" : devolucaoRate <= 10 ? "warning" : "critical"}
+            label="Peças líquidas"
+            value={curUnitsLiquida.toLocaleString("pt-BR")}
+            subValue={changeLabel(unitsLiquidaChange, compareLabel)}
+            status={trendPoint(unitsLiquidaChange)}
           />
         )}
+        <StatTile
+          label="Pedidos"
+          value={curKpi.orderCount.toLocaleString("pt-BR")}
+          subValue={changeLabel(ordersChange, compareLabel)}
+          status={trendPoint(ordersChange)}
+        />
       </div>
+
+      {canal !== "todos" && (
+        <p className="mb-6 -mt-3 text-xs text-[var(--text-muted)]">
+          * Receita/peças líquidas não aparecem por canal — devoluções ainda não são segmentadas em B2B/B2C, só o total do período inteiro. Ticket médio acima usa receita bruta (não líquida) por esse motivo. Os demais valores são só de {canal === "b2b" ? "B2B" : "B2C"}.
+        </p>
+      )}
 
       {/* Tendência */}
       {showFinancials && trendData.length >= 2 && (
@@ -172,7 +282,7 @@ export default async function LaminaMensalPage({
 
       {/* Top produtos */}
       <section className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-        <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Top 5 produtos do mês</h2>
+        <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Principais produtos faturados</h2>
         {top5.length === 0 ? (
           <p className="text-sm text-[var(--text-muted)]">Sem vendas no período.</p>
         ) : (
