@@ -90,7 +90,7 @@ export async function getSalesByDay(filters: DashboardFilters) {
       AND "saleDate" <= ${filters.to}
       ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
       ${filters.marcas !== undefined ? Prisma.sql`AND "marca" = ANY(${filters.marcas})` : Prisma.empty}
-      ${filters.tabelasPreco !== undefined ? Prisma.sql`AND "tabelaPreco" = ANY(${filters.tabelasPreco})` : Prisma.empty}
+      ${filters.tabelasPreco !== undefined ? Prisma.sql`AND ("tabelaPreco" = ANY(${filters.tabelasPreco}) OR "tabelaPreco" IS NULL)` : Prisma.empty}
       ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
     GROUP BY day
     ORDER BY day ASC
@@ -120,7 +120,7 @@ export async function getSalesByDayPerStore(filters: DashboardFilters) {
       AND "saleDate" <= ${filters.to}
       ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
       ${filters.marcas !== undefined ? Prisma.sql`AND "marca" = ANY(${filters.marcas})` : Prisma.empty}
-      ${filters.tabelasPreco !== undefined ? Prisma.sql`AND "tabelaPreco" = ANY(${filters.tabelasPreco})` : Prisma.empty}
+      ${filters.tabelasPreco !== undefined ? Prisma.sql`AND ("tabelaPreco" = ANY(${filters.tabelasPreco}) OR "tabelaPreco" IS NULL)` : Prisma.empty}
       ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
     GROUP BY day, "storeId"
     ORDER BY day ASC
@@ -1019,7 +1019,7 @@ export async function getMonthlySalesByStore(filters: DashboardFilters) {
       AND "saleDate" <= ${filters.to}
       ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
       ${filters.marcas !== undefined ? Prisma.sql`AND "marca" = ANY(${filters.marcas})` : Prisma.empty}
-      ${filters.tabelasPreco !== undefined ? Prisma.sql`AND "tabelaPreco" = ANY(${filters.tabelasPreco})` : Prisma.empty}
+      ${filters.tabelasPreco !== undefined ? Prisma.sql`AND ("tabelaPreco" = ANY(${filters.tabelasPreco}) OR "tabelaPreco" IS NULL)` : Prisma.empty}
       ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
     GROUP BY month, "storeId"
     ORDER BY month ASC
@@ -1442,7 +1442,7 @@ export async function getAtacadoVendas(filters: DashboardFilters) {
       WHERE "storeId" = ${cdStore.id}
         AND "saleDate" >= ${filters.from}
         AND "saleDate" <= ${filters.to}
-        ${filters.tabelasPreco !== undefined ? Prisma.sql`AND "tabelaPreco" = ANY(${filters.tabelasPreco})` : Prisma.empty}
+        ${filters.tabelasPreco !== undefined ? Prisma.sql`AND ("tabelaPreco" = ANY(${filters.tabelasPreco}) OR "tabelaPreco" IS NULL)` : Prisma.empty}
       GROUP BY day ORDER BY day ASC
     `,
     prisma.sale.groupBy({
