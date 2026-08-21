@@ -4,6 +4,7 @@ import { canSeeFinancials, getGrupoRestriction, getStoreRestriction, getMarcaRes
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
+import { ParetoChart } from "./pareto-chart";
 
 function formatBRL(v: number) {
   return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -195,6 +196,7 @@ export default async function CurvaAbcPage({
         ))}
       </div>
 
+      {showFinancials && <ParetoChart rows={porGrupo} />}
       <AbcTable
         title="Curva ABC por Grupo"
         rows={porGrupo}
@@ -202,6 +204,7 @@ export default async function CurvaAbcPage({
         nameLabel="Grupo"
       />
 
+      {showFinancials && <ParetoChart rows={porProduto} />}
       <AbcTable
         title="Curva ABC por Produto"
         rows={porProduto}
