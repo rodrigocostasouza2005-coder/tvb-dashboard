@@ -20,7 +20,9 @@ export type TabKey =
   | "atacado-cidades"
   | "atacado-clientes"
   | "cobertura"
-  | "inadimplencia";
+  | "inadimplencia"
+  | "top-mais-vendidos"
+  | "top-menos-vendidos";
 
 export type TabGroup = "visao-geral" | "vendas" | "estoque" | "atacado" | "marketing" | "pesquisa" | "outros";
 
@@ -56,8 +58,8 @@ export const TABS: TabEntry[] = [
 
   // marketing
   { key: "clientes", label: "Clientes", href: "/dashboard/clientes", group: "marketing" },
-  { label: "Top 10 mais vendidos", group: "marketing", todo: true },
-  { label: "Top 10 menos vendidos", group: "marketing", todo: true },
+  { key: "top-mais-vendidos", label: "Top 10 mais vendidos", href: "/dashboard/top-mais-vendidos", group: "marketing" },
+  { key: "top-menos-vendidos", label: "Top 10 menos vendidos", href: "/dashboard/top-menos-vendidos", group: "marketing" },
 
   // pesquisa (direct link, like visao-geral)
   { key: "pesquisa", label: "Pesquisa", href: "/dashboard/pesquisa", group: "pesquisa" },
