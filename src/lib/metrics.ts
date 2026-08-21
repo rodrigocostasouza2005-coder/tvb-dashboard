@@ -18,6 +18,8 @@ function returnWhere(filters: DashboardFilters): Prisma.ReturnWhereInput {
   return {
     returnDate: { gte: filters.from, lte: filters.to },
     ...(filters.storeIds !== undefined ? { storeId: { in: filters.storeIds } } : {}),
+    ...(filters.marcas !== undefined ? { marca: { in: filters.marcas } } : {}),
+    ...(filters.tabelasPreco !== undefined ? { tabelaPreco: { in: filters.tabelasPreco } } : {}),
     ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
   };
 }

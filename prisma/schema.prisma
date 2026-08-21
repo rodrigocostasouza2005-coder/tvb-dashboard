@@ -153,6 +153,8 @@ model Return {
   grupo        String
   cor          String?
   tamanho      String?
+  marca        String?
+  tabelaPreco  String?
   quantidade   Int
   valorTotal   Float
   returnDate   DateTime
@@ -165,6 +167,8 @@ model Return {
 
   @@unique([storeId, dapicVendaId, itemIndex])
   @@index([storeId, returnDate])
+  @@index([marca])
+  @@index([tabelaPreco])
 }
 
 // Item "Tipo=Brinde" (vendaspdv/faturas) — antes era descartado no sync. Pedido do Rodrigo em

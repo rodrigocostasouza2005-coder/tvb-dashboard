@@ -11,7 +11,7 @@ const FILTER_PARAMS = ["from", "to", "store", "marca", "tabelaPreco"];
 
 // Nav-only groups — tabs in these groups are NOT shown in the dropdown nav
 // (they still exist as pages; access control still applies)
-const NAV_HIDDEN_KEYS = new Set<TabKey>(["mensal", "estoque", "marketing", "estoque-minimo"]);
+const NAV_HIDDEN_KEYS = new Set<TabKey>(["mensal"]);
 
 export function TabNav({ visibleKeys, isAdmin }: { visibleKeys: TabKey[]; isAdmin: boolean }) {
   const pathname = usePathname();

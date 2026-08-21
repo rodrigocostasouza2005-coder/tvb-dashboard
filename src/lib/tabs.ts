@@ -22,7 +22,7 @@ export type TabKey =
   | "cobertura"
   | "inadimplencia";
 
-export type TabGroup = "visao-geral" | "vendas" | "estoque" | "atacado" | "marketing" | "outros";
+export type TabGroup = "visao-geral" | "vendas" | "estoque" | "atacado" | "marketing" | "pesquisa" | "outros";
 
 export type TabEntry =
   | { key: TabKey; label: string; href: string; group: TabGroup; todo?: false }
@@ -35,6 +35,7 @@ export const TABS: TabEntry[] = [
   // vendas
   { key: "vendas", label: "Família/produto/tamanho", href: "/dashboard/vendas", group: "vendas" },
   { key: "vendedores", label: "Por vendedor", href: "/dashboard/vendedores", group: "vendas" },
+  { key: "brindes", label: "Brinde", href: "/dashboard/brindes", group: "vendas" },
   { label: "Curva ABC", group: "vendas", todo: true },
   { label: "Comparativo vs. meta/ano ant.", group: "vendas", todo: true },
 
@@ -44,6 +45,7 @@ export const TABS: TabEntry[] = [
   { key: "sellthrough", label: "Sell-through", href: "/dashboard/sellthrough", group: "estoque" },
   { key: "envelhecimento", label: "Envelhecimento", href: "/dashboard/envelhecimento", group: "estoque" },
   { key: "reposicao", label: "Reposição de lojas", href: "/dashboard/reposicao", group: "estoque" },
+  { key: "estoque-minimo", label: "Estoque Mínimo", href: "/dashboard/estoque-minimo", group: "estoque" },
   { label: "Mapa de compras best sellers", group: "estoque", todo: true },
 
   // atacado
@@ -57,15 +59,15 @@ export const TABS: TabEntry[] = [
   { label: "Top 10 mais vendidos", group: "marketing", todo: true },
   { label: "Top 10 menos vendidos", group: "marketing", todo: true },
 
-  // outros
-  { key: "brindes", label: "Brinde", href: "/dashboard/brindes", group: "outros" },
-  { key: "pesquisa", label: "Pesquisa", href: "/dashboard/pesquisa", group: "outros" },
+  // pesquisa (direct link, like visao-geral)
+  { key: "pesquisa", label: "Pesquisa", href: "/dashboard/pesquisa", group: "pesquisa" },
 
   // not in nav but still have keys (keep for access control)
   { key: "mensal", label: "Mensal", href: "/dashboard/mensal", group: "outros" },
-  { key: "estoque", label: "Estoque × Vendas", href: "/dashboard/estoque", group: "outros" },
+
+  // back in nav
+  { key: "estoque", label: "Estoque × Vendas", href: "/dashboard/estoque", group: "estoque" },
   { key: "marketing", label: "Marketing", href: "/dashboard/marketing", group: "marketing" },
-  { key: "estoque-minimo", label: "Estoque Mínimo", href: "/dashboard/estoque-minimo", group: "outros" },
 ];
 
 export const GROUPS: { key: TabGroup; label: string; single?: boolean }[] = [
@@ -74,7 +76,7 @@ export const GROUPS: { key: TabGroup; label: string; single?: boolean }[] = [
   { key: "estoque", label: "Estoque" },
   { key: "atacado", label: "Atacado" },
   { key: "marketing", label: "Marketing" },
-  { key: "outros", label: "…" },
+  { key: "pesquisa", label: "Pesquisa", single: true },
 ];
 
 const BLOCKED_BY_DEFAULT_FOR_VENDEDOR: TabKey[] = ["clientes", "vendedores", "estoque-minimo"];
