@@ -30,7 +30,11 @@ function saleWhere(filters: DashboardFilters): Prisma.SaleWhereInput {
     saleDate: { gte: filters.from, lte: filters.to },
     ...(filters.storeIds !== undefined ? { storeId: { in: filters.storeIds } } : {}),
     ...(filters.marcas !== undefined ? { marca: { in: filters.marcas } } : {}),
-    ...(filters.tabelasPreco !== undefined ? { tabelaPreco: { in: filters.tabelasPreco } } : {}),
+    // tabelaPreco: inclui null (= registros antigos sem tabela inferida) junto com os valores
+    // permitidos — null não é "tabela proibida", é só dado que ainda não foi preenchido.
+    ...(filters.tabelasPreco !== undefined
+      ? { OR: [{ tabelaPreco: { in: filters.tabelasPreco } }, { tabelaPreco: null }] }
+      : {}),
     ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
   };
 }
