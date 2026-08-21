@@ -15,11 +15,12 @@ export type DashboardFilters = {
 };
 
 function returnWhere(filters: DashboardFilters): Prisma.ReturnWhereInput {
+  // marca e tabelaPreco ainda não estão populados nos registros históricos de devolução
+  // (backfill pendente) — filtrar por esses campos zeraria todas as devoluções. Por ora
+  // só filtramos por loja, período e grupo (que já existiam antes).
   return {
     returnDate: { gte: filters.from, lte: filters.to },
     ...(filters.storeIds !== undefined ? { storeId: { in: filters.storeIds } } : {}),
-    ...(filters.marcas !== undefined ? { marca: { in: filters.marcas } } : {}),
-    ...(filters.tabelasPreco !== undefined ? { tabelaPreco: { in: filters.tabelasPreco } } : {}),
     ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
   };
 }
