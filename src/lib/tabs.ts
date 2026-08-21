@@ -22,7 +22,8 @@ export type TabKey =
   | "cobertura"
   | "inadimplencia"
   | "top-mais-vendidos"
-  | "top-menos-vendidos";
+  | "top-menos-vendidos"
+  | "curva-abc";
 
 export type TabGroup = "visao-geral" | "vendas" | "estoque" | "atacado" | "marketing" | "pesquisa" | "outros";
 
@@ -38,7 +39,7 @@ export const TABS: TabEntry[] = [
   { key: "vendas", label: "Família/produto/tamanho", href: "/dashboard/vendas", group: "vendas" },
   { key: "vendedores", label: "Por vendedor", href: "/dashboard/vendedores", group: "vendas" },
   { key: "brindes", label: "Brinde", href: "/dashboard/brindes", group: "vendas" },
-  { label: "Curva ABC", group: "vendas", todo: true },
+  { key: "curva-abc", label: "Curva ABC", href: "/dashboard/curva-abc", group: "vendas" },
   { label: "Comparativo vs. meta/ano ant.", group: "vendas", todo: true },
 
   // estoque

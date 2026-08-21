@@ -5,7 +5,6 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { hashPassword, getSessionUser } from "@/lib/auth";
 import { TABS, type TabKey } from "@/lib/tabs";
-import { runSync } from "@/lib/sync-runner";
 import type { Role } from "@prisma/client";
 
 async function requireAdmin() {
@@ -116,21 +115,29 @@ export async function deleteUserAction(formData: FormData) {
   revalidatePath("/dashboard/admin");
 }
 
-// runSync() já dispara o aviso no Telegram sozinho (sucesso ou falha) — não precisa duplicar
-// aqui. Pedido do Rodrigo em 2026-08-12: botão pra não precisar esperar o cron das 8h/17h.
+// Fire-and-forget: dispara a sync via POST /api/sync (que tem maxDuration=300 próprio) e
+// retorna imediatamente — o botão não trava mais a página. O Telegram avisa quando terminar.
 export async function forceSyncAction(): Promise<{ ok: boolean; message: string }> {
   await requireAdmin();
-  try {
-    const response = await runSync();
-    const data = await response.json();
-    if (data.ok) {
-      return {
-        ok: true,
-        message: `Sincronizado: ${data.estoque} estoque, ${data.vendas} vendas, ${data.devolucoes} devoluções, ${data.brindes} brindes, ${data.ordensProducao} ordens de produção. Aviso enviado no Telegram.`,
-      };
-    }
-    return { ok: false, message: data.error ?? "Falha desconhecida na sincronização." };
-  } catch (e) {
-    return { ok: false, message: e instanceof Error ? e.message : String(e) };
-  }
+
+  const secret = process.env.CRON_SECRET;
+  if (!secret) return { ok: false, message: "CRON_SECRET não configurado." };
+
+  // Determina a URL base: em produção usa VERCEL_URL, localmente usa localhost.
+  const host = process.env.VERCEL_URL
+    ? `https://${process.env.VERCEL_URL}`
+    : "http://localhost:3000";
+
+  // Dispara sem await — a requisição roda no seu próprio ciclo de vida no Vercel.
+  fetch(`${host}/api/sync`, {
+    method: "POST",
+    headers: { "x-cron-secret": secret },
+  }).catch(() => {
+    // Erro de rede não deve travar a UI; o Telegram já vai avisar se a sync falhar.
+  });
+
+  return {
+    ok: true,
+    message: "Sincronização iniciada! Você vai receber um aviso no Telegram quando terminar.",
+  };
 }

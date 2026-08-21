@@ -6,6 +6,7 @@
 
 import { PrismaClient, type Prisma } from "@prisma/client";
 import { createDapicClients, parseDapicDateTime, type DapicClient } from "../src/lib/connectors/dapic";
+import { fetchPriceCatalogCached, inferTabelaPreco } from "../src/lib/connectors/tabela-preco";
 import { sendTelegramMessage } from "../src/lib/telegram";
 
 const directUrl = process.env.DATABASE_URL?.replace("-pooler.", ".");
@@ -50,6 +51,8 @@ async function backfillLoja(client: DapicClient) {
     return { vendas: 0, devolucoes: 0 };
   }
 
+  const priceCatalog = await fetchPriceCatalogCached(prisma, client);
+
   console.log(`[${client.label}] buscando /vendaspdv de ${DATA_INICIAL} a ${DATA_FINAL}...`);
   const vendasPdv = await withRetry(() => client.fetchVendasPdv(DATA_INICIAL, DATA_FINAL));
   console.log(`[${client.label}] ${vendasPdv.length} vendas/pedidos recebidos, gravando...`);
@@ -93,6 +96,8 @@ async function backfillLoja(client: DapicClient) {
           grupo: item.Grupo ?? "(sem grupo)",
           cor: item.Cor ?? null,
           tamanho: item.Tamanho ?? null,
+          marca: item.Marca ?? null,
+          tabelaPreco: inferTabelaPreco(cod, item.ValorUnitario, priceCatalog),
           quantidade: item.Quantidade,
           valorTotal: item.ValorLiquido,
           returnDate: saleDate,

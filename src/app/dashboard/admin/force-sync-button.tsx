@@ -22,7 +22,7 @@ export function ForceSyncButton() {
         disabled={isPending}
         className="w-fit rounded-md bg-[var(--series-1)] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
       >
-        {isPending ? "Sincronizando... (pode levar alguns minutos)" : "Forçar atualização agora"}
+        {isPending ? "Disparando..." : "Forçar atualização agora"}
       </button>
       {state.message && (
         <p
