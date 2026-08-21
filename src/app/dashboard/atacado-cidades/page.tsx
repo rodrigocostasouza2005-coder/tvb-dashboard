@@ -6,7 +6,7 @@ import { FilterBar } from "../filter-bar";
 import { StatTile } from "../stat-tile";
 import { CidadesChart } from "./cidades-chart";
 import { CidadesTable } from "./cidades-table";
-import { BrazilMap } from "./brazil-map";
+import { BrazilMap } from "../brazil-map";
 
 export default async function AtacadoCidadesPage({
   searchParams,

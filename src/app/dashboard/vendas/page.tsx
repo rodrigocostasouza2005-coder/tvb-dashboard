@@ -16,6 +16,7 @@ import {
   getStores,
   getMarcas,
   getTabelasPreco,
+  getAtacadoCidades,
 } from "@/lib/metrics";
 import {
   canSeeFinancials,
@@ -32,6 +33,7 @@ import { SalesTrendChart } from "../sales-trend-chart";
 import { ReturnsTrendChart } from "../returns-trend-chart";
 import { TopBarChart } from "../top-bar-chart";
 import { StoreCompareChart } from "../store-compare-chart";
+import { BrazilMap } from "../brazil-map";
 import { ExpandableSalesTable } from "./expandable-sales-table";
 import { ExpandableReturnsTable } from "./expandable-returns-table";
 
@@ -58,13 +60,19 @@ export default async function VendasPage({
     ...parseFilters(rawParams, { allowedStoreIds: allowedStores, allowedMarcas, allowedTabelasPreco }),
     grupoIn,
   };
+  const showFinancials = canSeeFinancials(user);
+  // "Mapa de vendas" só cobre o canal Site (varejo dentro de Site+Atacado) — é o único canal
+  // com cobertura de cidade praticamente completa (lojas físicas só tem ~50%, cliente avulso
+  // sem cadastro não tem endereço). Respeita a mesma restrição de tabela de preço do usuário.
+  const canSeeSiteMap = showFinancials && allowedTabelasPreco.includes("Tabela varejo");
+  const emptyAtacadoCidades: Awaited<ReturnType<typeof getAtacadoCidades>> = { rows: [], totalCidades: 0, totalEstados: 0 };
 
   const emptySalesSubRows: Awaited<ReturnType<typeof getSalesByGrupoProduto>> = [];
   const emptyReturnSubRows: Awaited<ReturnType<typeof getReturnsByGrupoProduto>> = [];
   const emptyTamanhoSalesRows: Awaited<ReturnType<typeof getSalesByGrupoProdutoTamanho>> = [];
   const emptyTamanhoReturnRows: Awaited<ReturnType<typeof getReturnsByGrupoProdutoTamanho>> = [];
 
-  const [rows, salesSubRows, salesTamanhoRows, salesByDay, salesByDayPerStore, returnRows, returnSubRows, returnTamanhoRows, returnsByDay, stores, marcas, tabelasPreco] = await Promise.all([
+  const [rows, salesSubRows, salesTamanhoRows, salesByDay, salesByDayPerStore, returnRows, returnSubRows, returnTamanhoRows, returnsByDay, stores, marcas, tabelasPreco, siteCidades] = await Promise.all([
     getSalesByDimension(filters, dimension),
     dimension === "grupo"
       ? getSalesByGrupoProduto(filters)
@@ -93,11 +101,18 @@ export default async function VendasPage({
     getStores(allowedStores),
     getMarcas(allowedMarcas),
     getTabelasPreco(allowedTabelasPreco),
+    canSeeSiteMap ? getAtacadoCidades({ ...filters, tabelasPreco: ["Tabela varejo"] }) : Promise.resolve(emptyAtacadoCidades),
   ]);
-  const showFinancials = canSeeFinancials(user);
   const totalUnits = rows.reduce((sum, r) => sum + r.unitsSold, 0);
   const totalReturned = returnRows.reduce((sum, r) => sum + r.unitsReturned, 0);
   const top10 = rows.slice(0, 10);
+
+  const siteEstadoMap = new Map<string, { receita: number; unidades: number }>();
+  for (const r of siteCidades.rows) {
+    const prev = siteEstadoMap.get(r.estado) ?? { receita: 0, unidades: 0 };
+    siteEstadoMap.set(r.estado, { receita: prev.receita + r.receita, unidades: prev.unidades + r.unidades });
+  }
+  const siteEstadoRows = [...siteEstadoMap.entries()].map(([estado, v]) => ({ estado, ...v }));
 
   return (
     <div>
@@ -120,6 +135,16 @@ export default async function VendasPage({
           <StoreCompareChart data={salesByDayPerStore.data} series={salesByDayPerStore.series} />
         </div>
       </section>
+
+      {canSeeSiteMap && siteEstadoRows.length > 0 && (
+        <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
+          <h2 className="mb-1 text-sm font-medium text-[var(--text-secondary)]">Mapa de vendas — Site</h2>
+          <p className="mb-3 text-xs text-[var(--text-muted)]">
+            Só o canal varejo do site (endereço de entrega). Lojas físicas não entram — a maior parte da venda avulsa não tem cidade cadastrada.
+          </p>
+          <BrazilMap rows={siteEstadoRows} />
+        </section>
+      )}
 
       <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
         <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">
