@@ -386,9 +386,6 @@ export default async function LaminaMensalPage({
                           {telefone}
                         </a>
                       )}
-                      {c.vendedor && (
-                        <span className="shrink-0 text-xs text-[var(--text-muted)]">vendedor: {c.vendedor}</span>
-                      )}
                     </span>
                     <span className="shrink-0 text-right text-xs tabular-nums text-[var(--text-secondary)]">
                       <span title="Receita bruta">{formatBRL(c.receitaBruta)}</span>

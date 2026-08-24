@@ -46,7 +46,7 @@ export default async function VendedoresPage({
     byStore.set(r.storeName, list);
   }
   const stores2 = [...byStore.entries()].sort(
-    ([, a], [, b]) => b.reduce((s, r) => s + r.receita, 0) - a.reduce((s, r) => s + r.receita, 0)
+    ([, a], [, b]) => b.reduce((s, r) => s + r.receitaBruta, 0) - a.reduce((s, r) => s + r.receitaBruta, 0)
   );
 
   return (
@@ -70,7 +70,7 @@ export default async function VendedoresPage({
               <MetricBarChart
                 data={storeRows
                   .slice(0, 10)
-                  .map((r) => ({ key: r.vendedor, value: showFinancials ? r.receita : r.unidades }))}
+                  .map((r) => ({ key: r.vendedor, value: showFinancials ? r.receitaBruta : r.unidades }))}
                 format={showFinancials ? "currency" : "number"}
                 color="var(--cat-4)"
               />
@@ -84,6 +84,7 @@ export default async function VendedoresPage({
                     <th className="px-4 py-2 font-medium">Vendas</th>
                     <th className="px-4 py-2 font-medium">Unidades brutas</th>
                     {showFinancials && <th className="px-4 py-2 font-medium">Receita bruta</th>}
+                    {showFinancials && <th className="px-4 py-2 font-medium">Receita líquida</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -93,7 +94,8 @@ export default async function VendedoresPage({
                       <td className="px-4 py-2 font-medium">{r.vendedor}</td>
                       <td className="px-4 py-2 tabular-nums">{r.pedidos}</td>
                       <td className="px-4 py-2 tabular-nums">{r.unidades.toLocaleString("pt-BR")}</td>
-                      {showFinancials && <td className="px-4 py-2 tabular-nums">{formatBRL(r.receita)}</td>}
+                      {showFinancials && <td className="px-4 py-2 tabular-nums">{formatBRL(r.receitaBruta)}</td>}
+                      {showFinancials && <td className="px-4 py-2 tabular-nums">{formatBRL(r.receitaLiquida)}</td>}
                     </tr>
                   ))}
                 </tbody>

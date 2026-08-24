@@ -921,27 +921,63 @@ export async function getNewClientsCount(filters: DashboardFilters) {
   ).length;
 }
 
-export async function getVendedorRanking(filters: DashboardFilters) {
-  const rows = await prisma.sale.groupBy({
-    by: ["storeId", "vendedor"],
-    where: { ...saleWhere(filters), vendedor: { not: null } },
-    _sum: { quantidade: true, valorTotalLiquido: true },
-    _count: { _all: true },
+// Devoluções não têm vendedor no schema, mas dapicVendaId é o mesmo id da venda original —
+// junta de volta com Sale (storeId+dapicVendaId) pra descobrir de qual vendedor foi cada
+// devolução. Chave storeId::vendedor porque o mesmo vendedor pode aparecer em mais de uma loja.
+async function getValorDevolvidoPorVendedor(filters: Pick<DashboardFilters, "storeIds" | "grupoIn" | "from" | "to">) {
+  const returns = await prisma.return.findMany({
+    where: { ...returnWhere(filters), dapicVendaId: { not: null } },
+    select: { storeId: true, dapicVendaId: true, valorTotal: true },
   });
+  if (returns.length === 0) return new Map<string, number>();
+
+  const dapicVendaIds = [...new Set(returns.map((r) => r.dapicVendaId as number))];
+  const storeIds = [...new Set(returns.map((r) => r.storeId))];
+  const sales = await prisma.sale.findMany({
+    where: { storeId: { in: storeIds }, dapicVendaId: { in: dapicVendaIds }, vendedor: { not: null } },
+    select: { storeId: true, dapicVendaId: true, vendedor: true },
+  });
+  const vendedorByVenda = new Map(sales.map((s) => [`${s.storeId}::${s.dapicVendaId}`, s.vendedor as string]));
+
+  const devolvidoPorVendedor = new Map<string, number>();
+  for (const r of returns) {
+    const vendedor = vendedorByVenda.get(`${r.storeId}::${r.dapicVendaId}`);
+    if (!vendedor) continue;
+    const key = `${r.storeId}::${vendedor}`;
+    devolvidoPorVendedor.set(key, (devolvidoPorVendedor.get(key) ?? 0) + r.valorTotal);
+  }
+  return devolvidoPorVendedor;
+}
+
+export async function getVendedorRanking(filters: DashboardFilters) {
+  const [rows, devolvidoPorVendedor] = await Promise.all([
+    prisma.sale.groupBy({
+      by: ["storeId", "vendedor"],
+      where: { ...saleWhere(filters), vendedor: { not: null } },
+      _sum: { quantidade: true, valorTotalLiquido: true },
+      _count: { _all: true },
+    }),
+    getValorDevolvidoPorVendedor(filters),
+  ]);
 
   const storeIds = [...new Set(rows.map((r) => r.storeId))];
   const stores = await prisma.store.findMany({ where: { id: { in: storeIds } } });
   const storeName = new Map(stores.map((s) => [s.id, s.name]));
 
   return rows
-    .map((r) => ({
-      vendedor: r.vendedor as string,
-      storeName: storeName.get(r.storeId) ?? r.storeId,
-      pedidos: r._count._all,
-      unidades: r._sum.quantidade ?? 0,
-      receita: r._sum.valorTotalLiquido ?? 0,
-    }))
-    .sort((a, b) => b.receita - a.receita);
+    .map((r) => {
+      const receitaBruta = r._sum.valorTotalLiquido ?? 0;
+      const devolvido = devolvidoPorVendedor.get(`${r.storeId}::${r.vendedor}`) ?? 0;
+      return {
+        vendedor: r.vendedor as string,
+        storeName: storeName.get(r.storeId) ?? r.storeId,
+        pedidos: r._count._all,
+        unidades: r._sum.quantidade ?? 0,
+        receitaBruta,
+        receitaLiquida: receitaBruta - devolvido,
+      };
+    })
+    .sort((a, b) => b.receitaBruta - a.receitaBruta);
 }
 
 // Envelhecimento de estoque: pra cada item com estoque > 0, olha o histórico TODO de vendas
@@ -1072,7 +1108,7 @@ export async function getTopClientes(
     ...(vendedor ? { vendedor } : {}),
     ...(canal !== "todos" ? { AND: [canalWhere(canal)] } : {}),
   };
-  const [rows, devolvidoPorCliente, vendedorRows] = await Promise.all([
+  const [rows, devolvidoPorCliente] = await Promise.all([
     prisma.sale.groupBy({
       by: ["clienteNome"],
       where,
@@ -1080,22 +1116,7 @@ export async function getTopClientes(
       _count: { _all: true },
     }),
     liquido && canal !== "b2b" ? getValorDevolvidoPorCliente(filters) : Promise.resolve(new Map<string, number>()),
-    // Vendedor "principal" de cada cliente — quem mais faturou em cima dele no período, já que
-    // um cliente pode ter sido atendido por mais de um vendedor.
-    prisma.sale.groupBy({ by: ["clienteNome", "vendedor"], where, _sum: { valorTotalLiquido: true } }),
   ]);
-
-  const vendedorPrincipalPorCliente = new Map<string, string>();
-  const melhorReceitaPorCliente = new Map<string, number>();
-  for (const r of vendedorRows) {
-    const cliente = r.clienteNome as string;
-    if (!r.vendedor) continue;
-    const rev = r._sum.valorTotalLiquido ?? 0;
-    if (rev > (melhorReceitaPorCliente.get(cliente) ?? -1)) {
-      melhorReceitaPorCliente.set(cliente, rev);
-      vendedorPrincipalPorCliente.set(cliente, r.vendedor);
-    }
-  }
 
   const sorted = rows
     .map((r) => {
@@ -1104,7 +1125,6 @@ export async function getTopClientes(
       const devolvido = devolvidoPorCliente.get(cliente) ?? 0;
       return {
         cliente,
-        vendedor: vendedorPrincipalPorCliente.get(cliente) ?? null,
         pedidos: r._count._all,
         unidades: r._sum.quantidade ?? 0,
         receitaBruta,

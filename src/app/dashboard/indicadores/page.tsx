@@ -86,7 +86,10 @@ export default async function IndicadoresPage({
       revenueLiquida,
       unitsBruta: k.unitsBruta,
       unitsLiquida,
-      ticketMedio: k.orderCount > 0 ? revenueLiquida / k.orderCount : 0,
+      // Ticket médio usa BRUTA, não líquida — mesma lógica da Lâmina Mensal: devolução do mês
+      // pode ser de um pedido de mês anterior, então dividir líquida pelo número de pedidos
+      // DESSE mês puxava o ticket pra baixo sem relação real com os pedidos contados.
+      ticketMedio: k.orderCount > 0 ? k.revenueBruta / k.orderCount : 0,
       devolucaoPct: k.revenueBruta > 0 ? (k.valueReturned / k.revenueBruta) * 100 : 0,
     };
   });
