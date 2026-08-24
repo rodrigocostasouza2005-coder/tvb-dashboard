@@ -24,9 +24,10 @@ export type TabKey =
   | "top-mais-vendidos"
   | "top-menos-vendidos"
   | "curva-abc"
-  | "lamina-mensal";
+  | "lamina-mensal"
+  | "indicadores";
 
-export type TabGroup = "visao-geral" | "vendas" | "estoque" | "atacado" | "marketing" | "pesquisa" | "lamina" | "outros";
+export type TabGroup = "visao-geral" | "vendas" | "estoque" | "atacado" | "marketing" | "pesquisa" | "lamina" | "indicadores" | "outros";
 
 export type TabEntry =
   | { key: TabKey; label: string; href: string; group: TabGroup; todo?: false }
@@ -38,6 +39,9 @@ export const TABS: TabEntry[] = [
 
   // lamina mensal (direct link, like visao-geral)
   { key: "lamina-mensal", label: "Lâmina Mensal", href: "/dashboard/lamina-mensal", group: "lamina" },
+
+  // indicadores no tempo (direct link, like visao-geral)
+  { key: "indicadores", label: "Indicadores no Tempo", href: "/dashboard/indicadores", group: "indicadores" },
 
   // vendas
   { key: "vendas", label: "Família/produto/tamanho", href: "/dashboard/vendas", group: "vendas" },
@@ -80,6 +84,7 @@ export const TABS: TabEntry[] = [
 export const GROUPS: { key: TabGroup; label: string; single?: boolean }[] = [
   { key: "visao-geral", label: "Visão Geral", single: true },
   { key: "lamina", label: "Lâmina Mensal", single: true },
+  { key: "indicadores", label: "Indicadores no Tempo", single: true },
   { key: "vendas", label: "Vendas" },
   { key: "estoque", label: "Estoque" },
   { key: "atacado", label: "Atacado" },

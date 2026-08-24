@@ -61,6 +61,13 @@ export default async function ClientesPage({
   ]);
   const showFinancials = canSeeFinancials(user);
 
+  const exportAniversariantesParams = new URLSearchParams();
+  for (const id of filters.storeIds ?? []) exportAniversariantesParams.append("store", id);
+  for (const m of filters.marcas ?? []) exportAniversariantesParams.append("marca", m);
+  for (const t of filters.tabelasPreco ?? []) exportAniversariantesParams.append("tabelaPreco", t);
+  if (vendedor) exportAniversariantesParams.set("vendedor", vendedor);
+  exportAniversariantesParams.set("aniversarioMes", String(aniversarioMes));
+
   return (
     <div>
       <FilterBar
@@ -193,6 +200,12 @@ export default async function ClientesPage({
               Ver
             </button>
           </form>
+          <a
+            href={`/api/export/aniversariantes?${exportAniversariantesParams.toString()}`}
+            className="rounded-md border border-[var(--border)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--page-plane)]"
+          >
+            Exportar Excel
+          </a>
         </div>
 
         {aniversariantes.length === 0 ? (
