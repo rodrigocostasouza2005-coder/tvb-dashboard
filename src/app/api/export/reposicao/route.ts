@@ -33,7 +33,9 @@ export async function GET(request: NextRequest) {
   }
 
   const grupoIn = await getGrupoRestriction(user.role);
-  const filters = { ...parseFilters(rawParams), grupoIn };
+  const colecaoParam = rawParams.colecao;
+  const colecaoIn = Array.isArray(colecaoParam) ? colecaoParam : typeof colecaoParam === "string" && colecaoParam ? [colecaoParam] : undefined;
+  const filters = { ...parseFilters(rawParams), grupoIn, colecaoIn };
   const rows = (await getReplenishment(filters)).slice().sort((a, b) =>
     a.storeName.localeCompare(b.storeName, "pt-BR") ||
     a.grupo.localeCompare(b.grupo, "pt-BR") ||
@@ -46,6 +48,7 @@ export async function GET(request: NextRequest) {
 
   const header = [
     "Loja",
+    "Coleção",
     "Grupo",
     "Produto",
     "Tamanho",
@@ -56,14 +59,15 @@ export async function GET(request: NextRequest) {
     "Estoque na origem",
   ];
 
-  // Coluna "Repor" é a 7ª (1-based)
-  const REPOR_COL = 7;
+  // Coluna "Repor" é a 8ª (1-based)
+  const REPOR_COL = 8;
 
   ws.addRow(header);
 
   for (const r of rows) {
     ws.addRow([
       r.storeName,
+      r.colecao ?? "",
       r.grupo,
       r.produto,
       r.tamanho ?? "",

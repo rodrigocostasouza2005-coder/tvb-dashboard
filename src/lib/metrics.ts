@@ -830,13 +830,16 @@ function matchMinimumRule(
   return generic?.valorMinimo ?? null;
 }
 
-export async function getReplenishment(filters: Pick<DashboardFilters, "storeIds" | "grupoIn">) {
+export async function getReplenishment(filters: Pick<DashboardFilters, "storeIds" | "grupoIn"> & { colecaoIn?: string[] }) {
   // Busca tudo em paralelo para reduzir round-trips e evitar P1017 no Neon.
-  const [stock, minimumRules, allStores] = await Promise.all([
+  const [stockAll, minimumRules, allStores] = await Promise.all([
     latestStockSnapshots(filters),
     prisma.stockMinimumRule.findMany(),
     prisma.store.findMany(),
   ]);
+  // Filtro de coleção é pós-fetch (StockSnapshot já vem com colecao selecionado) — evita
+  // mexer em stockWhere(), que é usado em vários outros lugares sem esse conceito.
+  const stock = filters.colecaoIn?.length ? stockAll.filter((s) => s.colecao && filters.colecaoIn!.includes(s.colecao)) : stockAll;
   const storeName = new Map(allStores.map((s) => [s.id, s.name]));
 
   // A reposição sempre vem do centro de distribuição ("CD" / TVB Site e Atacado).
@@ -866,6 +869,7 @@ export async function getReplenishment(filters: Pick<DashboardFilters, "storeIds
       storeName: storeName.get(s.storeId) ?? s.storeId,
       produto: s.produto,
       grupo: s.grupo,
+      colecao: s.colecao,
       tamanho: s.tamanho,
       quantidadeDisponivel: s.quantidadeDisponivel,
       estoqueMinimo: s.estoqueMinimo as number,
