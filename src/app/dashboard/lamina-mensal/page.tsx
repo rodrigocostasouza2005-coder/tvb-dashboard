@@ -1,7 +1,7 @@
 import { getSessionUser } from "@/lib/auth";
-import { getMonthlySnapshotKpi, getMonthlySalesByStore, getSalesByDimension, type DashboardFilters, type Canal } from "@/lib/metrics";
+import { getMonthlySnapshotKpi, getMonthlySalesByStore, getSalesByDimension, getStores, type DashboardFilters, type Canal } from "@/lib/metrics";
 import { canSeeFinancials, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction, getGrupoRestriction } from "@/lib/permissions";
-import { brasiliaDayStart, brasiliaDayEnd, todayBrasiliaStr, type RawSearchParams } from "@/lib/filters";
+import { parseFilters, brasiliaDayStart, brasiliaDayEnd, todayBrasiliaStr, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { StatTile } from "../stat-tile";
 import { TrendChart } from "./trend-chart";
@@ -92,8 +92,14 @@ export default async function LaminaMensalPage({
   const allowedMarcas = getMarcaRestriction(user);
   const allowedTabelasPreco = getTabelaPrecoRestriction(user);
 
+  // Reaproveita a mesma lógica de seleção+permissão de loja do resto do dashboard (parâmetro
+  // "store", grupos "id1|id2" expandidos, cruzado com o que o usuário pode ver) — só usa o
+  // storeIds daqui, from/to são recalculados abaixo a partir do mês escolhido.
+  const selectedStoreIds = parseFilters(rawParams, { allowedStoreIds: allowedStores }).storeIds ?? allowedStores;
+  const storeOptions = await getStores(allowedStores);
+
   const baseRestriction = {
-    storeIds: allowedStores,
+    storeIds: selectedStoreIds,
     marcas: allowedMarcas,
     tabelasPreco: allowedTabelasPreco,
     grupoIn,
@@ -147,10 +153,30 @@ export default async function LaminaMensalPage({
   const isCurrentMonth = month === todayMonth;
   const monthOptions = allMonthsSince(DATA_START_MONTH, todayMonth);
 
+  // Toggle multi-select de loja (mesmo param "store" que o resto do dashboard usa) — clicar
+  // adiciona/remove aquela loja da seleção, mantendo as outras já marcadas.
+  const rawStoreSelection = Array.isArray(rawParams.store) ? rawParams.store : rawParams.store ? [rawParams.store] : [];
+
+  // Preserva a seleção de loja em qualquer outro link (mês/comparar/canal) — só troca o
+  // parâmetro pedido em overrides.
   const baseQuery = (overrides: Record<string, string>) => {
     const params = new URLSearchParams({ month, compare: compareMonth, canal, ...overrides });
+    for (const v of rawStoreSelection) params.append("store", v);
     return `/dashboard/lamina-mensal?${params.toString()}`;
   };
+
+  function storeToggleHref(optionId: string) {
+    const next = rawStoreSelection.includes(optionId)
+      ? rawStoreSelection.filter((v) => v !== optionId)
+      : [...rawStoreSelection, optionId];
+    const params = new URLSearchParams({ month, compare: compareMonth, canal });
+    for (const v of next) params.append("store", v);
+    return `/dashboard/lamina-mensal?${params.toString()}`;
+  }
+  const allStoresHref = (() => {
+    const params = new URLSearchParams({ month, compare: compareMonth, canal });
+    return `/dashboard/lamina-mensal?${params.toString()}`;
+  })();
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -177,6 +203,9 @@ export default async function LaminaMensalPage({
         <form method="get" action="/dashboard/lamina-mensal" className="flex items-end gap-2 text-sm">
           <input type="hidden" name="month" value={month} />
           <input type="hidden" name="canal" value={canal} />
+          {rawStoreSelection.map((v) => (
+            <input key={v} type="hidden" name="store" value={v} />
+          ))}
           <label className="flex flex-col gap-1">
             <span className="text-xs text-[var(--text-muted)]">Comparar com</span>
             <select
@@ -214,6 +243,35 @@ export default async function LaminaMensalPage({
           ))}
         </div>
       </div>
+
+      {storeOptions.length > 1 && (
+        <div className="mb-6 flex flex-wrap items-center gap-1.5 -mt-3">
+          <span className="mr-1 text-xs text-[var(--text-muted)]">Loja:</span>
+          <a
+            href={allStoresHref}
+            className={`rounded-md border px-2.5 py-1 text-xs font-medium transition-colors ${
+              rawStoreSelection.length === 0
+                ? "border-[var(--series-1)] bg-[var(--series-1)] text-white"
+                : "border-[var(--border)] bg-[var(--surface-1)] text-[var(--text-secondary)] hover:bg-[var(--page-plane)]"
+            }`}
+          >
+            Todas
+          </a>
+          {storeOptions.map((s) => (
+            <a
+              key={s.id}
+              href={storeToggleHref(s.id)}
+              className={`rounded-md border px-2.5 py-1 text-xs font-medium transition-colors ${
+                rawStoreSelection.includes(s.id)
+                  ? "border-[var(--series-1)] bg-[var(--series-1)] text-white"
+                  : "border-[var(--border)] bg-[var(--surface-1)] text-[var(--text-secondary)] hover:bg-[var(--page-plane)]"
+              }`}
+            >
+              {s.name}
+            </a>
+          ))}
+        </div>
+      )}
 
       {/* KPIs principais */}
       {showFinancials && (
