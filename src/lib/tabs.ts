@@ -48,6 +48,7 @@ export const TABS: TabEntry[] = [
 
   // estoque
   { key: "estoque-atual", label: "Por família/produto/tamanho", href: "/dashboard/estoque-atual", group: "estoque" },
+  { key: "estoque", label: "Estoque × Vendas", href: "/dashboard/estoque", group: "estoque" },
   { key: "cobertura", label: "Cobertura", href: "/dashboard/cobertura", group: "estoque" },
   { key: "sellthrough", label: "Sell-through", href: "/dashboard/sellthrough", group: "estoque" },
   { key: "envelhecimento", label: "Envelhecimento", href: "/dashboard/envelhecimento", group: "estoque" },
@@ -73,7 +74,6 @@ export const TABS: TabEntry[] = [
   { key: "mensal", label: "Mensal", href: "/dashboard/mensal", group: "outros" },
 
   // back in nav
-  { key: "estoque", label: "Estoque × Vendas", href: "/dashboard/estoque", group: "vendas" },
   { key: "marketing", label: "Marketing", href: "/dashboard/marketing", group: "marketing" },
 ];
 
