@@ -366,7 +366,7 @@ export default async function LaminaMensalPage({
 
       {showFinancials && (
         <section className="mt-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-          <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Top 5 clientes do mês (bruta · líquida)</h2>
+          <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Top 5 clientes do mês</h2>
           {topClientes.length === 0 ? (
             <p className="text-sm text-[var(--text-muted)]">Sem clientes identificados no período.</p>
           ) : (
@@ -387,10 +387,8 @@ export default async function LaminaMensalPage({
                         </a>
                       )}
                     </span>
-                    <span className="shrink-0 text-right text-xs tabular-nums text-[var(--text-secondary)]">
-                      <span title="Receita bruta">{formatBRL(c.receitaBruta)}</span>
-                      {" · "}
-                      <span className="text-[var(--text-primary)]" title="Receita líquida">{formatBRL(c.receitaLiquida)} líq.</span>
+                    <span className="shrink-0 text-right text-xs tabular-nums text-[var(--text-primary)]">
+                      {formatBRL(c.receitaLiquida)}
                     </span>
                   </li>
                 );
