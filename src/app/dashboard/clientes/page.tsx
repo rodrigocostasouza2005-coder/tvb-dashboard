@@ -57,7 +57,7 @@ export default async function ClientesPage({
     getTabelasPreco(allowedTabelasPreco),
     getVendedores(),
     getClienteRetencaoVarejo(filters),
-    getAniversariantesDoMes(aniversarioMes),
+    getAniversariantesDoMes(filters, vendedor, aniversarioMes),
   ]);
   const showFinancials = canSeeFinancials(user);
 
