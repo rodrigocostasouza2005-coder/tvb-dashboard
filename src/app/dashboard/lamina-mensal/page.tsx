@@ -122,18 +122,15 @@ export default async function LaminaMensalPage({
     revenue: trendRaw.series.reduce((s, k) => s + (d.revenue[k] ?? 0), 0),
   }));
 
-  // Devoluções não são segmentadas por canal (limitação real do dado, ver getMonthlySnapshotKpi)
-  // — então "líquida" só faz sentido em "todos". Filtrando B2B/B2C, o total de devolução do
-  // período inteiro pode ser maior que a receita daquele canal sozinho e dar número negativo.
-  const showLiquida = canal === "todos";
+  // Devolução é sempre B2C (confirmado pelo Rodrigo) — getMonthlySnapshotKpi já zera
+  // valueReturned/unitsReturned quando canal="b2b", então líquida = bruta nesse caso
+  // automaticamente, sem precisar de um caso especial aqui.
   const curRevenueLiquida = curKpi.revenueBruta - curKpi.valueReturned;
   const cmpRevenueLiquida = cmpKpi.revenueBruta - cmpKpi.valueReturned;
   const curUnitsLiquida = curKpi.unitsBruta - curKpi.unitsReturned;
   const cmpUnitsLiquida = cmpKpi.unitsBruta - cmpKpi.unitsReturned;
-  const curTicketBase = showLiquida ? curRevenueLiquida : curKpi.revenueBruta;
-  const cmpTicketBase = showLiquida ? cmpRevenueLiquida : cmpKpi.revenueBruta;
-  const curTicket = curKpi.orderCount > 0 ? curTicketBase / curKpi.orderCount : 0;
-  const cmpTicket = cmpKpi.orderCount > 0 ? cmpTicketBase / cmpKpi.orderCount : 0;
+  const curTicket = curKpi.orderCount > 0 ? curRevenueLiquida / curKpi.orderCount : 0;
+  const cmpTicket = cmpKpi.orderCount > 0 ? cmpRevenueLiquida / cmpKpi.orderCount : 0;
 
   const revenueBrutaChange = pct(curKpi.revenueBruta, cmpKpi.revenueBruta);
   const revenueLiquidaChange = pct(curRevenueLiquida, cmpRevenueLiquida);
@@ -227,14 +224,12 @@ export default async function LaminaMensalPage({
             subValue={changeLabel(revenueBrutaChange, compareLabel)}
             status={trendPoint(revenueBrutaChange)}
           />
-          {showLiquida && (
-            <StatTile
-              label="Receita líquida"
-              value={formatBRL(curRevenueLiquida)}
-              subValue={changeLabel(revenueLiquidaChange, compareLabel)}
-              status={trendPoint(revenueLiquidaChange)}
-            />
-          )}
+          <StatTile
+            label="Receita líquida"
+            value={formatBRL(curRevenueLiquida)}
+            subValue={changeLabel(revenueLiquidaChange, compareLabel)}
+            status={trendPoint(revenueLiquidaChange)}
+          />
           <StatTile
             label="Ticket médio"
             value={formatBRL(curTicket)}
@@ -250,14 +245,12 @@ export default async function LaminaMensalPage({
           subValue={changeLabel(unitsBrutaChange, compareLabel)}
           status={trendPoint(unitsBrutaChange)}
         />
-        {showLiquida && (
-          <StatTile
-            label="Peças líquidas"
-            value={curUnitsLiquida.toLocaleString("pt-BR")}
-            subValue={changeLabel(unitsLiquidaChange, compareLabel)}
-            status={trendPoint(unitsLiquidaChange)}
-          />
-        )}
+        <StatTile
+          label="Peças líquidas"
+          value={curUnitsLiquida.toLocaleString("pt-BR")}
+          subValue={changeLabel(unitsLiquidaChange, compareLabel)}
+          status={trendPoint(unitsLiquidaChange)}
+        />
         <StatTile
           label="Pedidos"
           value={curKpi.orderCount.toLocaleString("pt-BR")}
@@ -266,9 +259,9 @@ export default async function LaminaMensalPage({
         />
       </div>
 
-      {canal !== "todos" && (
+      {canal === "b2b" && (
         <p className="mb-6 -mt-3 text-xs text-[var(--text-muted)]">
-          * Receita/peças líquidas não aparecem por canal — devoluções ainda não são segmentadas em B2B/B2C, só o total do período inteiro. Ticket médio acima usa receita bruta (não líquida) por esse motivo. Os demais valores são só de {canal === "b2b" ? "B2B" : "B2C"}.
+          * B2B não tem devolução (é sempre B2C) — líquida = bruta nessa visão.
         </p>
       )}
 

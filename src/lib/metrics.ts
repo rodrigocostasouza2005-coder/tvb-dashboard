@@ -88,15 +88,17 @@ function canalWhere(canal: Canal): Prisma.SaleWhereInput {
 
 // KPIs pra Lâmina Mensal: além de unidades/receita, conta pedidos distintos (pra ticket
 // médio = receita líquida / nº de pedidos, não / peças) e separa por canal B2B/B2C.
-// Devoluções NÃO são segmentadas por canal — o backfill histórico de Return não tem
-// tabelaPreco preenchido (mesma limitação de saleWhere/returnWhere), então o valor devolvido
-// aqui é sempre do período inteiro, independente do canal selecionado.
+// Devolução é sempre B2C (confirmado pelo Rodrigo em 2026-08-21, não precisa segmentar por
+// tabelaPreco) — então em "todos" e "b2c" o valor devolvido do período inteiro é aplicado
+// normalmente; em "b2b" não há devolução nenhuma (líquida = bruta).
 export async function getMonthlySnapshotKpi(filters: DashboardFilters, canal: Canal = "todos") {
   const where: Prisma.SaleWhereInput = { AND: [saleWhere(filters), canalWhere(canal)] };
   const [salesAgg, orderRows, returnsAgg] = await Promise.all([
     prisma.sale.aggregate({ where, _sum: { quantidade: true, valorTotalLiquido: true } }),
     prisma.sale.groupBy({ by: ["storeId", "dapicVendaId"], where }),
-    prisma.return.aggregate({ where: returnWhere(filters), _sum: { quantidade: true, valorTotal: true } }),
+    canal === "b2b"
+      ? Promise.resolve({ _sum: { quantidade: 0, valorTotal: 0 } })
+      : prisma.return.aggregate({ where: returnWhere(filters), _sum: { quantidade: true, valorTotal: true } }),
   ]);
 
   return {

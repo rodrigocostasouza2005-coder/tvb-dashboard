@@ -9,7 +9,7 @@ import { fetchPriceCatalogCached, inferTabelaPreco } from "../src/lib/connectors
 import { sendTelegramMessage } from "../src/lib/telegram";
 
 const FLUSH_EVERY = 300;
-const CONCURRENCY = 6; // 1 chamada por fatura é o gargalo — paraleliza pra não levar horas
+const CONCURRENCY = 14; // 1 chamada por fatura é o gargalo — paraleliza pra não levar horas
 
 const directUrl = process.env.DATABASE_URL?.replace("-pooler.", ".");
 const prisma = new PrismaClient(directUrl ? { datasourceUrl: directUrl } : undefined);
