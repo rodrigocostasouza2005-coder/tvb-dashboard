@@ -1,5 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
-import { getMonthlySnapshotKpi, getMonthlySalesByStore, getSalesByDimension, getTopClientes, getStores, type DashboardFilters, type Canal } from "@/lib/metrics";
+import { getMonthlySnapshotKpi, getMonthlySalesByStore, getMonthlyReturnsTotal, getSalesByDimension, getReturnsByDimension, netByReturns, getTopClientes, getStores, type DashboardFilters, type Canal } from "@/lib/metrics";
 import { canSeeFinancials, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction, getGrupoRestriction } from "@/lib/permissions";
 import { parseFilters, brasiliaDayStart, brasiliaDayEnd, todayBrasiliaStr, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
@@ -118,18 +118,24 @@ export default async function LaminaMensalPage({
 
   const showFinancials = canSeeFinancials(user);
 
-  const [curKpi, cmpKpi, trendRaw, topProdutos, topClientes] = await Promise.all([
+  const [curKpi, cmpKpi, trendRaw, returnsPorMes, topProdutosBruta, returnsPorProduto, topClientes] = await Promise.all([
     getMonthlySnapshotKpi(curFilters, canal),
     getMonthlySnapshotKpi(cmpFilters, canal),
     getMonthlySalesByStore(trendFilters, canal),
+    canal !== "b2b" ? getMonthlyReturnsTotal(trendFilters) : Promise.resolve(new Map<string, number>()),
     getSalesByDimension(curFilters, "produto", canal),
+    canal !== "b2b" ? getReturnsByDimension(curFilters, "produto") : Promise.resolve([]),
     showFinancials ? getTopClientes(curFilters, null, 5, canal, true) : Promise.resolve([]),
   ]);
 
-  const trendData = trendRaw.data.map((d) => ({
-    month: d.month,
-    revenue: trendRaw.series.reduce((s, k) => s + (d.revenue[k] ?? 0), 0),
-  }));
+  // Devolução é sempre B2C — quando canal="b2b" nem buscamos devolução acima (líquida = bruta).
+  const topProdutos = netByReturns(topProdutosBruta, returnsPorProduto).sort((a, b) => b.revenue - a.revenue);
+
+  const trendData = trendRaw.data.map((d) => {
+    const bruta = trendRaw.series.reduce((s, k) => s + (d.revenue[k] ?? 0), 0);
+    const devolvido = returnsPorMes.get(d.month) ?? 0;
+    return { month: d.month, revenue: bruta - devolvido };
+  });
 
   // Devolução é sempre B2C (confirmado pelo Rodrigo) — getMonthlySnapshotKpi já zera
   // valueReturned/unitsReturned quando canal="b2b", então líquida = bruta nesse caso
@@ -335,14 +341,14 @@ export default async function LaminaMensalPage({
       {/* Tendência */}
       {showFinancials && trendData.length >= 2 && (
         <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-          <h2 className="mb-1 text-sm font-medium text-[var(--text-secondary)]">Tendência de receita bruta (últimos 6 meses)</h2>
+          <h2 className="mb-1 text-sm font-medium text-[var(--text-secondary)]">Tendência de receita líquida (últimos 6 meses)</h2>
           <TrendChart data={trendData} />
         </section>
       )}
 
       {/* Top produtos */}
       <section className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-        <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Principais produtos faturados (receita bruta)</h2>
+        <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Principais produtos faturados (receita líquida)</h2>
         {top5.length === 0 ? (
           <p className="text-sm text-[var(--text-muted)]">Sem vendas no período.</p>
         ) : (

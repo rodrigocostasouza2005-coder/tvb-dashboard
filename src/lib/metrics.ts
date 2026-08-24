@@ -1238,6 +1238,25 @@ export async function getMonthlySalesByStore(filters: DashboardFilters, canal: C
   return { data, series };
 }
 
+// Devolução total por mês (sem quebrar por loja) — usado pra netar a tendência de receita da
+// Lâmina Mensal contra bruta. Devolução é sempre B2C (confirmado pelo Rodrigo), então quando
+// canal="b2b" o chamador nem chama isso (líquida = bruta nesse caso).
+export async function getMonthlyReturnsTotal(filters: Pick<DashboardFilters, "storeIds" | "grupoIn" | "from" | "to">) {
+  const rows = await prisma.$queryRaw<{ month: Date; value: number }[]>`
+    SELECT
+      DATE_TRUNC('month', ("returnDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo') AS month,
+      SUM("valorTotal") AS value
+    FROM "Return"
+    WHERE "returnDate" >= ${filters.from}
+      AND "returnDate" <= ${filters.to}
+      ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
+      ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
+    GROUP BY month
+    ORDER BY month ASC
+  `;
+  return new Map(rows.map((r) => [new Date(r.month).toISOString().slice(0, 7), Number(r.value)]));
+}
+
 export async function getVendedores(): Promise<string[]> {
   const rows = await prisma.sale.findMany({
     distinct: ["vendedor"],
