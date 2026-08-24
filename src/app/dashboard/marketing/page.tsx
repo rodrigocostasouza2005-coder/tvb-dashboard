@@ -78,7 +78,7 @@ export default async function MarketingPage({
               </th>
               <th className="px-4 py-2 font-medium">Estoque − Vendas</th>
               <th className="px-4 py-2 font-medium">Estoque atual</th>
-              <th className="px-4 py-2 font-medium">Vendido</th>
+              <th className="px-4 py-2 font-medium">Vendido (bruto)</th>
               <th className="px-4 py-2 font-medium">Sell-through</th>
             </tr>
           </thead>

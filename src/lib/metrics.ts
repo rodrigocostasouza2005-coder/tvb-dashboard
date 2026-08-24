@@ -3,6 +3,25 @@ import { Prisma } from "@prisma/client";
 
 export type Dimension = "grupo" | "produto" | "tamanho" | "colecao";
 
+// Desconta devolução de linhas de venda já agrupadas por chave (produto/grupo/tamanho) — vira
+// líquida. Usado onde o Rodrigo pediu explicitamente pra não mostrar bruta (Estoque × Vendas,
+// Top mais/menos vendidos, em 2026-08-24). Some é feita fora daqui (getReturnsByDimension /
+// getReturnsByGrupoProduto), essa função só junta e subtrai pela mesma chave.
+export function netByReturns<T extends { key: string; unitsSold: number; revenue: number }>(
+  sold: T[],
+  returned: { key: string; unitsReturned: number; value: number }[]
+): T[] {
+  const retByKey = new Map(returned.map((r) => [r.key, r]));
+  return sold.map((s) => {
+    const r = retByKey.get(s.key);
+    return {
+      ...s,
+      unitsSold: s.unitsSold - (r?.unitsReturned ?? 0),
+      revenue: s.revenue - (r?.value ?? 0),
+    };
+  });
+}
+
 export type DashboardFilters = {
   storeIds?: string[];
   marcas?: string[];
@@ -1009,11 +1028,12 @@ export async function getStockAging(
     .sort((a, b) => (b.diasDesdePrimeiraVenda ?? 999999) - (a.diasDesdePrimeiraVenda ?? 999999));
 }
 
-export async function getTopClientes(filters: DashboardFilters, vendedor?: string | null, limit = 30) {
+export async function getTopClientes(filters: DashboardFilters, vendedor?: string | null, limit = 30, canal: Canal = "todos") {
   const where: Prisma.SaleWhereInput = {
     ...saleWhere(filters),
     clienteNome: { not: null },
     ...(vendedor ? { vendedor } : {}),
+    ...(canal !== "todos" ? { AND: [canalWhere(canal)] } : {}),
   };
   const rows = await prisma.sale.groupBy({
     by: ["clienteNome"],

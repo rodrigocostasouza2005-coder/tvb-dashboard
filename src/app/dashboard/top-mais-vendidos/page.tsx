@@ -1,5 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
-import { getSalesByGrupoProduto, getStores, getMarcas, getTabelasPreco } from "@/lib/metrics";
+import { getSalesByGrupoProduto, getReturnsByGrupoProduto, netByReturns, getStores, getMarcas, getTabelasPreco } from "@/lib/metrics";
 import { canSeeFinancials, getGrupoRestriction, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
@@ -31,12 +31,16 @@ export default async function TopMaisVendidosPage({
     grupoIn,
   };
 
-  const [allRows, stores, marcas, tabelasPreco] = await Promise.all([
+  const [allRowsBrutas, returns, stores, marcas, tabelasPreco] = await Promise.all([
     getSalesByGrupoProduto(filters),
+    getReturnsByGrupoProduto(filters),
     getStores(allowedStores),
     getMarcas(allowedMarcas),
     getTabelasPreco(allowedTabelasPreco),
   ]);
+  // Líquido (desconta devolução) — pedido do Rodrigo em 2026-08-24. Reordena depois de
+  // descontar, já que a devolução pode mudar quem é "mais vendido" de verdade.
+  const allRows = netByReturns(allRowsBrutas, returns).sort((a, b) => b.revenue - a.revenue);
 
   const showFinancials = canSeeFinancials(user);
   const top = allRows.slice(0, LIMIT);
@@ -54,7 +58,7 @@ export default async function TopMaisVendidosPage({
 
       <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
         <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">
-          Top {LIMIT} produtos {showFinancials ? "por receita" : "por unidades"}
+          Top {LIMIT} produtos {showFinancials ? "por receita líquida" : "por unidades líquidas"}
         </h2>
         <MetricBarChart
           data={top.map((r) => ({ key: r.key, value: showFinancials ? r.revenue : r.unitsSold }))}
@@ -70,8 +74,8 @@ export default async function TopMaisVendidosPage({
               <th className="px-4 py-2 font-medium">#</th>
               <th className="px-4 py-2 font-medium">Grupo</th>
               <th className="px-4 py-2 font-medium">Produto</th>
-              <th className="px-4 py-2 font-medium text-right">Unidades brutas</th>
-              {showFinancials && <th className="px-4 py-2 font-medium text-right">Receita bruta</th>}
+              <th className="px-4 py-2 font-medium text-right">Unidades líquidas</th>
+              {showFinancials && <th className="px-4 py-2 font-medium text-right">Receita líquida</th>}
             </tr>
           </thead>
           <tbody>

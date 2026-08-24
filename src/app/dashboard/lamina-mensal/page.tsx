@@ -1,5 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
-import { getMonthlySnapshotKpi, getMonthlySalesByStore, getSalesByDimension, getStores, type DashboardFilters, type Canal } from "@/lib/metrics";
+import { getMonthlySnapshotKpi, getMonthlySalesByStore, getSalesByDimension, getTopClientes, getStores, type DashboardFilters, type Canal } from "@/lib/metrics";
 import { canSeeFinancials, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction, getGrupoRestriction } from "@/lib/permissions";
 import { parseFilters, brasiliaDayStart, brasiliaDayEnd, todayBrasiliaStr, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
@@ -114,14 +114,15 @@ export default async function LaminaMensalPage({
   const cmpFilters: DashboardFilters = { ...baseRestriction, from: cmpFrom, to: cmpTo };
   const trendFilters: DashboardFilters = { ...baseRestriction, from: trendFrom, to: curTo };
 
-  const [curKpi, cmpKpi, trendRaw, topProdutos] = await Promise.all([
+  const showFinancials = canSeeFinancials(user);
+
+  const [curKpi, cmpKpi, trendRaw, topProdutos, topClientes] = await Promise.all([
     getMonthlySnapshotKpi(curFilters, canal),
     getMonthlySnapshotKpi(cmpFilters, canal),
     getMonthlySalesByStore(trendFilters),
     getSalesByDimension(curFilters, "produto", canal),
+    showFinancials ? getTopClientes(curFilters, null, 5, canal) : Promise.resolve([]),
   ]);
-
-  const showFinancials = canSeeFinancials(user);
 
   const trendData = trendRaw.data.map((d) => ({
     month: d.month,
@@ -359,6 +360,29 @@ export default async function LaminaMensalPage({
           </ul>
         )}
       </section>
+
+      {showFinancials && (
+        <section className="mt-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+          <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Top 5 clientes do mês (receita bruta)</h2>
+          {topClientes.length === 0 ? (
+            <p className="text-sm text-[var(--text-muted)]">Sem clientes identificados no período.</p>
+          ) : (
+            <ul className="flex flex-col gap-2">
+              {topClientes.map((c, i) => (
+                <li key={c.cliente} className="flex items-center justify-between gap-3">
+                  <span className="flex items-center gap-3 truncate">
+                    <span className="w-4 shrink-0 text-xs font-medium text-[var(--text-muted)]">{i + 1}</span>
+                    <span className="truncate text-sm text-[var(--text-primary)]">{c.cliente}</span>
+                  </span>
+                  <span className="shrink-0 text-right text-xs tabular-nums text-[var(--text-secondary)]">
+                    {formatBRL(c.receita)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
 
       <p className="mt-6 text-center text-xs text-[var(--text-muted)]">
         TVB Radar — gerado em {new Date().toLocaleDateString("pt-BR")}

@@ -1,5 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
-import { getStockVsSales, getTotalStock, getStores, getMarcas, getTabelasPreco } from "@/lib/metrics";
+import { getStockVsSales, getReturnsByDimension, netByReturns, getTotalStock, getStores, getMarcas, getTabelasPreco } from "@/lib/metrics";
 import { getGrupoRestriction, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
 import { parseFilters, parseDimension, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
@@ -36,14 +36,17 @@ export default async function EstoquePage({
   const effectiveFilters = grupoDrill ? { ...filters, grupoIn: [grupoDrill] } : filters;
   const effectiveDimension = grupoDrill ? "produto" : dimension;
 
-  const [rows, totalEstoque, grupoRows, stores, marcas, tabelasPreco] = await Promise.all([
+  const [rowsBrutas, returns, totalEstoque, grupoRows, stores, marcas, tabelasPreco] = await Promise.all([
     getStockVsSales(effectiveFilters, effectiveDimension),
+    getReturnsByDimension(effectiveFilters, effectiveDimension),
     getTotalStock({ storeIds: filters.storeIds, grupoIn: filters.grupoIn }),
     dimension === "grupo" ? getStockVsSales(filters, "grupo") : Promise.resolve([]),
     getStores(allowedStores),
     getMarcas(allowedMarcas),
     getTabelasPreco(allowedTabelasPreco),
   ]);
+  // Vendido líquido (desconta devolução) — pedido do Rodrigo em 2026-08-24.
+  const rows = netByReturns(rowsBrutas, returns).sort((a, b) => b.unitsSold - a.unitsSold);
 
   const dimensionLabel = effectiveDimension === "produto" ? "Produto" : effectiveDimension === "tamanho" ? "Tamanho" : "Grupo";
   const totalVendido = rows.reduce((sum, r) => sum + r.unitsSold, 0);
@@ -62,7 +65,7 @@ export default async function EstoquePage({
 
       <section className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-3">
         <StatTile label="Estoque atual (total)" value={totalEstoque.toLocaleString("pt-BR")} />
-        <StatTile label="Vendido no período (total)" value={totalVendido.toLocaleString("pt-BR")} />
+        <StatTile label="Vendido no período (líquido) (total)" value={totalVendido.toLocaleString("pt-BR")} />
         <StatTile label={`${dimensionLabel}s no comparativo`} value={rows.length.toLocaleString("pt-BR")} />
       </section>
 
@@ -78,7 +81,7 @@ export default async function EstoquePage({
         <BarCompare
           rows={top40.map((r) => ({ label: r.key, a: r.currentStock, b: r.unitsSold }))}
           labelA="Estoque atual"
-          labelB="Vendido no período"
+          labelB="Vendido no período (líquido)"
           colorA="#eb6834"
           colorB="#2a78d6"
         />
@@ -92,7 +95,7 @@ export default async function EstoquePage({
               <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
                 <th className="px-4 py-2 font-medium">{dimensionLabel}</th>
                 <th className="px-4 py-2 font-medium">Estoque atual</th>
-                <th className="px-4 py-2 font-medium">Vendido no período</th>
+                <th className="px-4 py-2 font-medium">Vendido no período (líquido)</th>
                 <th className="px-4 py-2 font-medium">Diferença</th>
               </tr>
             </thead>
