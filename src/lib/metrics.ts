@@ -184,6 +184,41 @@ export async function getSalesByDayPerStore(filters: DashboardFilters) {
   return { data, series };
 }
 
+// Mesma forma de getSalesByDayPerStore, mas por canal (B2B/B2C) em vez de loja — pra comparar
+// os dois ao longo do tempo. Usa receita (não peças): ticket B2B x B2C é tão diferente que
+// unidades sozinhas não representam bem o peso de cada canal.
+export async function getSalesByDayPerCanal(filters: DashboardFilters) {
+  const rows = await prisma.$queryRaw<{ day: Date; canal: string; revenue: number }[]>`
+    SELECT
+      (("saleDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo')::date AS day,
+      CASE WHEN "tabelaPreco" = 'Tabela atacado' THEN 'B2B' ELSE 'B2C' END AS canal,
+      SUM("valorTotalLiquido") AS revenue
+    FROM "Sale"
+    WHERE "saleDate" >= ${filters.from}
+      AND "saleDate" <= ${filters.to}
+      ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
+      ${filters.marcas !== undefined ? Prisma.sql`AND "marca" = ANY(${filters.marcas})` : Prisma.empty}
+      ${filters.tabelasPreco !== undefined ? Prisma.sql`AND ("tabelaPreco" = ANY(${filters.tabelasPreco}) OR "tabelaPreco" IS NULL)` : Prisma.empty}
+      ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
+    GROUP BY day, canal
+    ORDER BY day ASC
+  `;
+
+  const byDay = new Map<string, Record<string, number>>();
+  for (const r of rows) {
+    const day = new Date(r.day).toISOString().slice(0, 10);
+    const dayRow = byDay.get(day) ?? {};
+    dayRow[r.canal] = (dayRow[r.canal] ?? 0) + Number(r.revenue);
+    byDay.set(day, dayRow);
+  }
+
+  const data = [...byDay.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([day, values]) => ({ day, ...values }));
+
+  return { data, series: ["B2B", "B2C"] };
+}
+
 async function groupSalesByDimension(dimension: Dimension, where: Prisma.SaleWhereInput) {
   switch (dimension) {
     case "grupo":

@@ -135,8 +135,11 @@ export default async function LaminaMensalPage({
   const cmpRevenueLiquida = cmpKpi.revenueBruta - cmpKpi.valueReturned;
   const curUnitsLiquida = curKpi.unitsBruta - curKpi.unitsReturned;
   const cmpUnitsLiquida = cmpKpi.unitsBruta - cmpKpi.unitsReturned;
-  const curTicket = curKpi.orderCount > 0 ? curRevenueLiquida / curKpi.orderCount : 0;
-  const cmpTicket = cmpKpi.orderCount > 0 ? cmpRevenueLiquida / cmpKpi.orderCount : 0;
+  // Ticket médio usa BRUTA, não líquida — devolução do mês pode ser de um pedido de mês
+  // anterior (returnDate != saleDate do pedido original), então dividir líquida pelo número
+  // de pedidos DESSE mês puxava o ticket pra baixo sem relação real com os pedidos contados.
+  const curTicket = curKpi.orderCount > 0 ? curKpi.revenueBruta / curKpi.orderCount : 0;
+  const cmpTicket = cmpKpi.orderCount > 0 ? cmpKpi.revenueBruta / cmpKpi.orderCount : 0;
 
   const revenueBrutaChange = pct(curKpi.revenueBruta, cmpKpi.revenueBruta);
   const revenueLiquidaChange = pct(curRevenueLiquida, cmpRevenueLiquida);
