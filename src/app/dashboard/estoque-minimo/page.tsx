@@ -18,13 +18,16 @@ export default async function EstoqueMinimoPage() {
   requireTabAccess(user, user.role, "estoque-minimo");
   if (user.role === "VENDEDOR") redirect("/dashboard");
 
-  const [rules, stores, colecoes, grupos, tamanhosPorGrupo] = await Promise.all([
+  const [rules, allStores, colecoes, grupos, tamanhosPorGrupo] = await Promise.all([
     getMinimumRules(),
     getRawStores(),
     getDistinctColecoes(),
     getDistinctGrupos(),
     getTamanhosPorGrupo(),
   ]);
+  // Regra de estoque mínimo é só pras lojas de venda — armazéns/Defeito/Bonificação/etc não
+  // fazem sentido aqui (Rodrigo confirmou em 2026-08-24).
+  const stores = allStores.filter((s) => s.sellsProducts);
   const existingRules = rules.map((r) => ({
     storeId: r.storeId,
     grupo: r.grupo,

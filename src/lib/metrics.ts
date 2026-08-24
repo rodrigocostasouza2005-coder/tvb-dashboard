@@ -1044,6 +1044,22 @@ export async function getTopClientes(filters: DashboardFilters, vendedor?: strin
   });
 }
 
+// Aniversariantes de um mês específico (1-12), independente do ano de nascimento — pra
+// campanha de aniversário. Vem direto de ClienteCadastro, não de Sale (não depende de ter
+// comprado num período específico). Ordenado pelo dia do mês.
+export async function getAniversariantesDoMes(month: number) {
+  const clientes = await prisma.$queryRaw<
+    { id: string; nome: string; telefone: string | null; celular: string | null; email: string | null; dataNascimento: Date }[]
+  >`
+    SELECT "id", "nome", "telefone", "celular", "email", "dataNascimento"
+    FROM "ClienteCadastro"
+    WHERE "dataNascimento" IS NOT NULL
+      AND EXTRACT(MONTH FROM "dataNascimento") = ${month}
+    ORDER BY EXTRACT(DAY FROM "dataNascimento") ASC
+  `;
+  return clientes;
+}
+
 export async function getMonthlySalesByStore(filters: DashboardFilters) {
   const rows = await prisma.$queryRaw<{ month: Date; storeId: string; units: bigint; revenue: number }[]>`
     SELECT

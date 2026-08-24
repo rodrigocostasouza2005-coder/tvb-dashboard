@@ -1,12 +1,17 @@
 import { getSessionUser } from "@/lib/auth";
-import { getTopClientes, getStores, getMarcas, getTabelasPreco, getVendedores, getClienteRetencaoVarejo } from "@/lib/metrics";
+import { getTopClientes, getStores, getMarcas, getTabelasPreco, getVendedores, getClienteRetencaoVarejo, getAniversariantesDoMes } from "@/lib/metrics";
 import { canSeeFinancials, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
-import { parseFilters, type RawSearchParams } from "@/lib/filters";
+import { parseFilters, todayBrasiliaStr, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
 import { MetricBarChart } from "../metric-bar-chart";
 import { StatTile } from "../stat-tile";
 import { ClienteRetencaoChart } from "./cliente-retencao-chart";
+
+const MONTH_NAMES = [
+  "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+  "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
+];
 
 function formatBRL(value: number) {
   return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -15,6 +20,10 @@ function formatBRL(value: number) {
 function formatDataNascimento(d: Date | null) {
   if (!d) return null;
   return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "UTC" });
+}
+
+function diaDoMes(d: Date) {
+  return d.getUTCDate();
 }
 
 export default async function ClientesPage({
@@ -36,14 +45,19 @@ export default async function ClientesPage({
     allowedTabelasPreco,
   });
   const vendedor = typeof rawParams.vendedor === "string" && rawParams.vendedor ? rawParams.vendedor : null;
+  const aniversarioMesParsed = typeof rawParams.aniversarioMes === "string" ? parseInt(rawParams.aniversarioMes, 10) : NaN;
+  const aniversarioMes = aniversarioMesParsed >= 1 && aniversarioMesParsed <= 12
+    ? aniversarioMesParsed
+    : parseInt(todayBrasiliaStr(new Date()).slice(5, 7), 10);
 
-  const [rows, stores, marcas, tabelasPreco, vendedores, retencao] = await Promise.all([
+  const [rows, stores, marcas, tabelasPreco, vendedores, retencao, aniversariantes] = await Promise.all([
     getTopClientes(filters, vendedor),
     getStores(allowedStores),
     getMarcas(allowedMarcas),
     getTabelasPreco(allowedTabelasPreco),
     getVendedores(),
     getClienteRetencaoVarejo(filters),
+    getAniversariantesDoMes(aniversarioMes),
   ]);
   const showFinancials = canSeeFinancials(user);
 
@@ -150,11 +164,71 @@ export default async function ClientesPage({
       </div>
 
       {retencao.months.length > 1 && (
-        <section className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
+        <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
           <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Retenção — novos vs recorrentes por mês</h2>
           <ClienteRetencaoChart data={retencao.months} />
         </section>
       )}
+
+      <section className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-sm font-medium text-[var(--text-secondary)]">
+            Aniversariantes de {MONTH_NAMES[aniversarioMes - 1]} ({aniversariantes.length})
+          </h2>
+          <form method="get" action="/dashboard/clientes" className="flex items-center gap-2 text-sm">
+            {filters.storeIds?.map((id) => <input key={id} type="hidden" name="store" value={id} />)}
+            {filters.marcas?.map((m) => <input key={m} type="hidden" name="marca" value={m} />)}
+            {filters.tabelasPreco?.map((t) => <input key={t} type="hidden" name="tabelaPreco" value={t} />)}
+            {vendedor && <input type="hidden" name="vendedor" value={vendedor} />}
+            <select
+              name="aniversarioMes"
+              defaultValue={String(aniversarioMes)}
+              className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 outline-none focus:border-[var(--series-1)] focus:ring-1 focus:ring-[var(--series-1)]"
+            >
+              {MONTH_NAMES.map((name, i) => (
+                <option key={name} value={i + 1}>{name}</option>
+              ))}
+            </select>
+            <button type="submit" className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-3 py-1.5 hover:bg-[var(--page-plane)]">
+              Ver
+            </button>
+          </form>
+        </div>
+
+        {aniversariantes.length === 0 ? (
+          <p className="text-sm text-[var(--text-muted)]">Ninguém com data de nascimento cadastrada nesse mês.</p>
+        ) : (
+          <div className="max-h-96 overflow-y-auto overflow-x-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
+                  <th className="px-4 py-2 font-medium">Dia</th>
+                  <th className="px-4 py-2 font-medium">Cliente</th>
+                  <th className="px-4 py-2 font-medium">Contato</th>
+                </tr>
+              </thead>
+              <tbody>
+                {aniversariantes.map((c) => (
+                  <tr key={c.id} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
+                    <td className="px-4 py-2 tabular-nums font-medium">{diaDoMes(c.dataNascimento)}</td>
+                    <td className="px-4 py-2">{c.nome}</td>
+                    <td className="px-4 py-2">
+                      {c.telefone || c.celular ? (
+                        <a href={`tel:${c.telefone ?? c.celular}`} className="text-[var(--series-1)] hover:underline tabular-nums">
+                          {c.telefone ?? c.celular}
+                        </a>
+                      ) : (
+                        <span className="text-[var(--text-muted)]">—</span>
+                      )}
+                      {c.email && <div className="text-xs text-[var(--text-muted)] mt-0.5">{c.email}</div>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
     </div>
   );
 }
