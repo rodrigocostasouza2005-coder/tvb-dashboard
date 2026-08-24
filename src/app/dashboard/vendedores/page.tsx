@@ -81,7 +81,6 @@ export default async function VendedoresPage({
                   <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
                     <th className="px-4 py-2 font-medium">#</th>
                     <th className="px-4 py-2 font-medium">Vendedor</th>
-                    <th className="px-4 py-2 font-medium">Vendas</th>
                     <th className="px-4 py-2 font-medium">Unidades líquidas</th>
                     {showFinancials && <th className="px-4 py-2 font-medium">Receita líquida</th>}
                   </tr>
@@ -91,7 +90,6 @@ export default async function VendedoresPage({
                     <tr key={r.vendedor} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
                       <td className="px-4 py-2 text-[var(--text-muted)]">{i + 1}</td>
                       <td className="px-4 py-2 font-medium">{r.vendedor}</td>
-                      <td className="px-4 py-2 tabular-nums">{r.pedidos}</td>
                       <td className="px-4 py-2 tabular-nums">{r.unidadesLiquidas.toLocaleString("pt-BR")}</td>
                       {showFinancials && <td className="px-4 py-2 tabular-nums">{formatBRL(r.receitaLiquida)}</td>}
                     </tr>
