@@ -70,7 +70,7 @@ export default async function VendedoresPage({
               <MetricBarChart
                 data={storeRows
                   .slice(0, 10)
-                  .map((r) => ({ key: r.vendedor, value: showFinancials ? r.receitaLiquida : r.unidades }))}
+                  .map((r) => ({ key: r.vendedor, value: showFinancials ? r.receitaLiquida : r.unidadesLiquidas }))}
                 format={showFinancials ? "currency" : "number"}
                 color="var(--cat-4)"
               />
@@ -82,7 +82,7 @@ export default async function VendedoresPage({
                     <th className="px-4 py-2 font-medium">#</th>
                     <th className="px-4 py-2 font-medium">Vendedor</th>
                     <th className="px-4 py-2 font-medium">Vendas</th>
-                    <th className="px-4 py-2 font-medium">Unidades brutas</th>
+                    <th className="px-4 py-2 font-medium">Unidades líquidas</th>
                     {showFinancials && <th className="px-4 py-2 font-medium">Receita líquida</th>}
                   </tr>
                 </thead>
@@ -92,7 +92,7 @@ export default async function VendedoresPage({
                       <td className="px-4 py-2 text-[var(--text-muted)]">{i + 1}</td>
                       <td className="px-4 py-2 font-medium">{r.vendedor}</td>
                       <td className="px-4 py-2 tabular-nums">{r.pedidos}</td>
-                      <td className="px-4 py-2 tabular-nums">{r.unidades.toLocaleString("pt-BR")}</td>
+                      <td className="px-4 py-2 tabular-nums">{r.unidadesLiquidas.toLocaleString("pt-BR")}</td>
                       {showFinancials && <td className="px-4 py-2 tabular-nums">{formatBRL(r.receitaLiquida)}</td>}
                     </tr>
                   ))}

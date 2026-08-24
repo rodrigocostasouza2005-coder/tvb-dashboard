@@ -924,12 +924,12 @@ export async function getNewClientsCount(filters: DashboardFilters) {
 // Devoluções não têm vendedor no schema, mas dapicVendaId é o mesmo id da venda original —
 // junta de volta com Sale (storeId+dapicVendaId) pra descobrir de qual vendedor foi cada
 // devolução. Chave storeId::vendedor porque o mesmo vendedor pode aparecer em mais de uma loja.
-async function getValorDevolvidoPorVendedor(filters: Pick<DashboardFilters, "storeIds" | "grupoIn" | "from" | "to">) {
+async function getDevolvidoPorVendedor(filters: Pick<DashboardFilters, "storeIds" | "grupoIn" | "from" | "to">) {
   const returns = await prisma.return.findMany({
     where: { ...returnWhere(filters), dapicVendaId: { not: null } },
-    select: { storeId: true, dapicVendaId: true, valorTotal: true },
+    select: { storeId: true, dapicVendaId: true, valorTotal: true, quantidade: true },
   });
-  if (returns.length === 0) return new Map<string, number>();
+  if (returns.length === 0) return new Map<string, { valor: number; unidades: number }>();
 
   const dapicVendaIds = [...new Set(returns.map((r) => r.dapicVendaId as number))];
   const storeIds = [...new Set(returns.map((r) => r.storeId))];
@@ -939,12 +939,13 @@ async function getValorDevolvidoPorVendedor(filters: Pick<DashboardFilters, "sto
   });
   const vendedorByVenda = new Map(sales.map((s) => [`${s.storeId}::${s.dapicVendaId}`, s.vendedor as string]));
 
-  const devolvidoPorVendedor = new Map<string, number>();
+  const devolvidoPorVendedor = new Map<string, { valor: number; unidades: number }>();
   for (const r of returns) {
     const vendedor = vendedorByVenda.get(`${r.storeId}::${r.dapicVendaId}`);
     if (!vendedor) continue;
     const key = `${r.storeId}::${vendedor}`;
-    devolvidoPorVendedor.set(key, (devolvidoPorVendedor.get(key) ?? 0) + r.valorTotal);
+    const cur = devolvidoPorVendedor.get(key) ?? { valor: 0, unidades: 0 };
+    devolvidoPorVendedor.set(key, { valor: cur.valor + r.valorTotal, unidades: cur.unidades + r.quantidade });
   }
   return devolvidoPorVendedor;
 }
@@ -957,7 +958,7 @@ export async function getVendedorRanking(filters: DashboardFilters) {
       _sum: { quantidade: true, valorTotalLiquido: true },
       _count: { _all: true },
     }),
-    getValorDevolvidoPorVendedor(filters),
+    getDevolvidoPorVendedor(filters),
   ]);
 
   const storeIds = [...new Set(rows.map((r) => r.storeId))];
@@ -967,14 +968,16 @@ export async function getVendedorRanking(filters: DashboardFilters) {
   return rows
     .map((r) => {
       const receitaBruta = r._sum.valorTotalLiquido ?? 0;
-      const devolvido = devolvidoPorVendedor.get(`${r.storeId}::${r.vendedor}`) ?? 0;
+      const unidadesBrutas = r._sum.quantidade ?? 0;
+      const devolvido = devolvidoPorVendedor.get(`${r.storeId}::${r.vendedor}`) ?? { valor: 0, unidades: 0 };
       return {
         vendedor: r.vendedor as string,
         storeName: storeName.get(r.storeId) ?? r.storeId,
         pedidos: r._count._all,
-        unidades: r._sum.quantidade ?? 0,
+        unidadesBrutas,
+        unidadesLiquidas: unidadesBrutas - devolvido.unidades,
         receitaBruta,
-        receitaLiquida: receitaBruta - devolvido,
+        receitaLiquida: receitaBruta - devolvido.valor,
       };
     })
     .sort((a, b) => b.receitaBruta - a.receitaBruta);
