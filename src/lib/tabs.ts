@@ -27,7 +27,7 @@ export type TabKey =
   | "lamina-mensal"
   | "indicadores";
 
-export type TabGroup = "visao-geral" | "vendas" | "estoque" | "atacado" | "marketing" | "pesquisa" | "lamina" | "indicadores" | "outros";
+export type TabGroup = "visao-geral" | "vendas" | "estoque" | "atacado" | "marketing" | "pesquisa" | "lamina" | "outros";
 
 export type TabEntry =
   | { key: TabKey; label: string; href: string; group: TabGroup; todo?: false }
@@ -40,14 +40,12 @@ export const TABS: TabEntry[] = [
   // lamina mensal (direct link, like visao-geral)
   { key: "lamina-mensal", label: "Lâmina Mensal", href: "/dashboard/lamina-mensal", group: "lamina" },
 
-  // indicadores no tempo (direct link, like visao-geral)
-  { key: "indicadores", label: "Indicadores no Tempo", href: "/dashboard/indicadores", group: "indicadores" },
-
   // vendas
   { key: "vendas", label: "Família/produto/tamanho", href: "/dashboard/vendas", group: "vendas" },
   { key: "vendedores", label: "Por vendedor", href: "/dashboard/vendedores", group: "vendas" },
   { key: "brindes", label: "Brinde", href: "/dashboard/brindes", group: "vendas" },
   { key: "curva-abc", label: "Curva ABC", href: "/dashboard/curva-abc", group: "vendas" },
+  { key: "indicadores", label: "Indicadores no Tempo", href: "/dashboard/indicadores", group: "vendas" },
   { label: "Comparativo vs. meta/ano ant.", group: "vendas", todo: true },
 
   // estoque
@@ -84,7 +82,6 @@ export const TABS: TabEntry[] = [
 export const GROUPS: { key: TabGroup; label: string; single?: boolean }[] = [
   { key: "visao-geral", label: "Visão Geral", single: true },
   { key: "lamina", label: "Lâmina Mensal", single: true },
-  { key: "indicadores", label: "Indicadores no Tempo", single: true },
   { key: "vendas", label: "Vendas" },
   { key: "estoque", label: "Estoque" },
   { key: "atacado", label: "Atacado" },
