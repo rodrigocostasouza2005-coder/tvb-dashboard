@@ -26,6 +26,7 @@ export default async function SellthroughPage({
   requireTabAccess(user, user.role, "sellthrough");
 
   const rawParams = await searchParams;
+  const filtrosOpen = rawParams.filtros === "1";
   const colecaoParam = typeof rawParams.colecao === "string" && rawParams.colecao ? rawParams.colecao : undefined;
 
   const grupoIn = await getGrupoRestriction(user.role);
@@ -54,7 +55,7 @@ export default async function SellthroughPage({
 
   return (
     <div>
-      <CollapsibleFilters>
+      <CollapsibleFilters defaultOpen={filtrosOpen}>
         <FilterBar
           action="/dashboard/sellthrough"
           stores={stores}

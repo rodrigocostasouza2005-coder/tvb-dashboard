@@ -40,6 +40,7 @@ export default async function ClientesPage({
   const allowedMarcas = getMarcaRestriction(user);
   const allowedTabelasPreco = getTabelaPrecoRestriction(user);
   const rawParams = await searchParams;
+  const filtrosOpen = rawParams.filtros === "1";
   const filters = parseFilters(rawParams, {
     allowedStoreIds: allowedStores,
     allowedMarcas,
@@ -71,7 +72,7 @@ export default async function ClientesPage({
 
   return (
     <div>
-      <CollapsibleFilters>
+      <CollapsibleFilters defaultOpen={filtrosOpen}>
         <FilterBar
           action="/dashboard/clientes"
           stores={stores}

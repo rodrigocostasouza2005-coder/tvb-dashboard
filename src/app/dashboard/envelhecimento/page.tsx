@@ -24,6 +24,7 @@ export default async function EnvelhecimentoPage({
   const user = await getSessionUser();
   if (!user) return null;
   requireTabAccess(user, user.role, "envelhecimento");
+  const filtrosOpen = (await searchParams).filtros === "1";
 
   const grupoIn = await getGrupoRestriction(user.role);
   const allowedStores = getStoreRestriction(user);
@@ -52,7 +53,7 @@ export default async function EnvelhecimentoPage({
 
   return (
     <div>
-      <CollapsibleFilters>
+      <CollapsibleFilters defaultOpen={filtrosOpen}>
         <FilterBar
           action="/dashboard/envelhecimento"
           stores={stores}

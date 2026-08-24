@@ -45,6 +45,7 @@ export default async function IndicadoresPage({
   requireTabAccess(user, user.role, "indicadores");
 
   const rawParams = await searchParams;
+  const filtrosOpen = rawParams.filtros === "1";
   const todayMonth = todayBrasiliaStr(new Date()).slice(0, 7);
   const canal: Canal = rawParams.canal === "b2b" || rawParams.canal === "b2c" ? rawParams.canal : "todos";
 
@@ -103,7 +104,7 @@ export default async function IndicadoresPage({
 
   return (
     <div>
-      <CollapsibleFilters>
+      <CollapsibleFilters defaultOpen={filtrosOpen}>
         <FilterBar
           action="/dashboard/indicadores"
           stores={stores}

@@ -20,6 +20,7 @@ export default async function EstoquePage({
   requireTabAccess(user, user.role, "estoque");
 
   const rawParams = await searchParams;
+  const filtrosOpen = rawParams.filtros === "1";
   const dimension = parseDimension(rawParams);
   const grupoIn = await getGrupoRestriction(user.role);
   const allowedStores = getStoreRestriction(user);
@@ -55,7 +56,7 @@ export default async function EstoquePage({
 
   return (
     <div>
-      <CollapsibleFilters>
+      <CollapsibleFilters defaultOpen={filtrosOpen}>
         <FilterBar
           action="/dashboard/estoque"
           stores={stores}

@@ -35,6 +35,7 @@ export default async function MensalPage({
   const allowedMarcas = getMarcaRestriction(user);
   const allowedTabelasPreco = getTabelaPrecoRestriction(user);
   const rawParams = await searchParams;
+  const filtrosOpen = rawParams.filtros === "1";
 
   // Default: últimos 12 meses completos (1º dia do mês, 12 meses atrás)
   const hasFrom = typeof rawParams.from === "string" && rawParams.from;
@@ -79,7 +80,7 @@ export default async function MensalPage({
 
   return (
     <div>
-      <CollapsibleFilters>
+      <CollapsibleFilters defaultOpen={filtrosOpen}>
         <FilterBar
           action="/dashboard/mensal"
           stores={stores}

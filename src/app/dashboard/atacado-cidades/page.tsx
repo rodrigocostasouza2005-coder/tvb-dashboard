@@ -17,6 +17,7 @@ export default async function AtacadoCidadesPage({
   const user = await getSessionUser();
   if (!user) return null;
   requireTabAccess(user, user.role, "atacado-cidades");
+  const filtrosOpen = (await searchParams).filtros === "1";
 
   const filters = parseFilters(await searchParams, {});
 
@@ -35,7 +36,7 @@ export default async function AtacadoCidadesPage({
 
   return (
     <div>
-      <CollapsibleFilters>
+      <CollapsibleFilters defaultOpen={filtrosOpen}>
         <FilterBar
           action="/dashboard/atacado-cidades"
           stores={[]}

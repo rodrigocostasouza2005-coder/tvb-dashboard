@@ -52,6 +52,7 @@ export default async function VendasPage({
   requireTabAccess(user, user.role, "vendas");
 
   const rawParams = await searchParams;
+  const filtrosOpen = rawParams.filtros === "1";
   const dimension = parseDimension(rawParams);
   const grupoIn = await getGrupoRestriction(user.role);
   const allowedStores = getStoreRestriction(user);
@@ -117,7 +118,7 @@ export default async function VendasPage({
 
   return (
     <div>
-      <CollapsibleFilters>
+      <CollapsibleFilters defaultOpen={filtrosOpen}>
         <FilterBar
           action="/dashboard/vendas"
           stores={stores}

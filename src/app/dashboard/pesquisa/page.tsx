@@ -26,6 +26,7 @@ export default async function PesquisaPage({
   requireTabAccess(user, user.role, "pesquisa");
 
   const rawParams = await searchParams;
+  const filtrosOpen = rawParams.filtros === "1";
   const query = typeof rawParams.q === "string" ? rawParams.q : "";
   const grupoIn = await getGrupoRestriction(user.role);
   const allowedStores = getStoreRestriction(user);
@@ -47,7 +48,7 @@ export default async function PesquisaPage({
 
   return (
     <div>
-      <CollapsibleFilters>
+      <CollapsibleFilters defaultOpen={filtrosOpen}>
         <FilterBar
           action="/dashboard/pesquisa"
           stores={stores}

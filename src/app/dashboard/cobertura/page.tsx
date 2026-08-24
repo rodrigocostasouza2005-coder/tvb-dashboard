@@ -16,6 +16,7 @@ export default async function CoberturaPage({
   const user = await getSessionUser();
   if (!user) return null;
   requireTabAccess(user, user.role, "cobertura");
+  const filtrosOpen = (await searchParams).filtros === "1";
 
   const grupoIn = await getGrupoRestriction(user.role);
   const allowedStores = getStoreRestriction(user);
@@ -40,7 +41,7 @@ export default async function CoberturaPage({
 
   return (
     <div>
-      <CollapsibleFilters>
+      <CollapsibleFilters defaultOpen={filtrosOpen}>
         <FilterBar
           action="/dashboard/cobertura"
           stores={stores}

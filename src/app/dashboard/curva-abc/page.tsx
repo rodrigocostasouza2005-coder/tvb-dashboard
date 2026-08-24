@@ -131,6 +131,7 @@ export default async function CurvaAbcPage({
   requireTabAccess(user, user.role, "curva-abc");
 
   const rawParams = await searchParams;
+  const filtrosOpen = rawParams.filtros === "1";
   const grupoIn = await getGrupoRestriction(user.role);
   const allowedStores = getStoreRestriction(user);
   const allowedMarcas = getMarcaRestriction(user);
@@ -172,7 +173,7 @@ export default async function CurvaAbcPage({
 
   return (
     <div>
-      <CollapsibleFilters>
+      <CollapsibleFilters defaultOpen={filtrosOpen}>
         <FilterBar
           action="/dashboard/curva-abc"
           stores={stores}

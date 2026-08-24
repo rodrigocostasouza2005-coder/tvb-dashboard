@@ -17,6 +17,7 @@ export default async function AtacadoPage({
   const user = await getSessionUser();
   if (!user) return null;
   requireTabAccess(user, user.role, "atacado");
+  const filtrosOpen = (await searchParams).filtros === "1";
 
   const filters = parseFilters(await searchParams, {});
 
@@ -28,7 +29,7 @@ export default async function AtacadoPage({
 
   return (
     <div>
-      <CollapsibleFilters>
+      <CollapsibleFilters defaultOpen={filtrosOpen}>
         <FilterBar
           action="/dashboard/atacado"
           stores={[]}

@@ -17,6 +17,7 @@ export default async function ReposicaoPage({
   requireTabAccess(user, user.role, "reposicao");
 
   const rawParams = await searchParams;
+  const filtrosOpen = rawParams.filtros === "1";
   const grupoIn = await getGrupoRestriction(user.role);
   const allowedStores = getStoreRestriction(user);
   const colecaoSelecionada = Array.isArray(rawParams.colecao)
@@ -59,7 +60,7 @@ export default async function ReposicaoPage({
 
   return (
     <div>
-      <CollapsibleFilters>
+      <CollapsibleFilters defaultOpen={filtrosOpen}>
         <FilterBar action="/dashboard/reposicao" stores={stores} marcas={marcas} filters={filters} showMarca={false} showDate={false} />
       </CollapsibleFilters>
 

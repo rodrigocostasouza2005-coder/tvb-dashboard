@@ -24,6 +24,7 @@ export default async function BrindesPage({
   requireTabAccess(user, user.role, "brindes");
 
   const rawParams = await searchParams;
+  const filtrosOpen = rawParams.filtros === "1";
   const dimension = parseDimension(rawParams);
   const grupoIn = await getGrupoRestriction(user.role);
   const allowedStores = getStoreRestriction(user);
@@ -43,7 +44,7 @@ export default async function BrindesPage({
 
   return (
     <div>
-      <CollapsibleFilters>
+      <CollapsibleFilters defaultOpen={filtrosOpen}>
         <FilterBar action="/dashboard/brindes" stores={stores} marcas={marcas} filters={filters} />
       </CollapsibleFilters>
       <p className="mb-3 text-xs text-[var(--text-muted)]">

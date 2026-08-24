@@ -19,6 +19,7 @@ export default async function VendedoresPage({
   const user = await getSessionUser();
   if (!user) return null;
   requireTabAccess(user, user.role, "vendedores");
+  const filtrosOpen = (await searchParams).filtros === "1";
 
   const allowedStores = getStoreRestriction(user);
   const allowedMarcas = getMarcaRestriction(user);
@@ -51,7 +52,7 @@ export default async function VendedoresPage({
 
   return (
     <div>
-      <CollapsibleFilters>
+      <CollapsibleFilters defaultOpen={filtrosOpen}>
         <FilterBar
           action="/dashboard/vendedores"
           stores={stores}

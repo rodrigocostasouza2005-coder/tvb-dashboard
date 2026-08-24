@@ -82,6 +82,10 @@ export function FilterBar({
       method="GET"
       className="mb-6 flex flex-wrap items-start gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-3 text-sm"
     >
+      {/* Se o Aplicar veio daqui, o painel de filtros estava aberto — mantém aberto na
+          próxima página em vez de fechar (CollapsibleFilters lê isso via searchParams). */}
+      <input type="hidden" name="filtros" value="1" />
+
       <FilterDropdown label="Loja" count={selectedStores.size}>
         <CheckboxList name="store" options={stores.map((s) => ({ value: s.id, label: s.name }))} selected={selectedStores} />
       </FilterDropdown>

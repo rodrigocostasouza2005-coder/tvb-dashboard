@@ -19,6 +19,7 @@ export default async function MarketingPage({
   requireTabAccess(user, user.role, "marketing");
 
   const rawParams = await searchParams;
+  const filtrosOpen = rawParams.filtros === "1";
   const dimension = parseDimension(rawParams);
   const grupoIn = await getGrupoRestriction(user.role);
   const allowedStores = getStoreRestriction(user);
@@ -43,7 +44,7 @@ export default async function MarketingPage({
 
   return (
     <div>
-      <CollapsibleFilters>
+      <CollapsibleFilters defaultOpen={filtrosOpen}>
         <FilterBar
           action="/dashboard/marketing"
           stores={stores}

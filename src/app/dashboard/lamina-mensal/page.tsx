@@ -79,6 +79,7 @@ export default async function LaminaMensalPage({
   requireTabAccess(user, user.role, "lamina-mensal");
 
   const rawParams = await searchParams;
+  const filtrosOpen = rawParams.filtros === "1";
   const todayMonth = todayBrasiliaStr(new Date()).slice(0, 7);
   const month = typeof rawParams.month === "string" && /^\d{4}-\d{2}$/.test(rawParams.month)
     ? rawParams.month
@@ -174,12 +175,12 @@ export default async function LaminaMensalPage({
     const next = rawStoreSelection.includes(optionId)
       ? rawStoreSelection.filter((v) => v !== optionId)
       : [...rawStoreSelection, optionId];
-    const params = new URLSearchParams({ month, compare: compareMonth, canal });
+    const params = new URLSearchParams({ month, compare: compareMonth, canal, filtros: "1" });
     for (const v of next) params.append("store", v);
     return `/dashboard/lamina-mensal?${params.toString()}`;
   }
   const allStoresHref = (() => {
-    const params = new URLSearchParams({ month, compare: compareMonth, canal });
+    const params = new URLSearchParams({ month, compare: compareMonth, canal, filtros: "1" });
     return `/dashboard/lamina-mensal?${params.toString()}`;
   })();
 
@@ -204,11 +205,12 @@ export default async function LaminaMensalPage({
       </div>
 
       {/* Controles: comparar com / canal / loja */}
-      <CollapsibleFilters>
+      <CollapsibleFilters defaultOpen={filtrosOpen}>
         <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
           <form method="get" action="/dashboard/lamina-mensal" className="flex items-end gap-2 text-sm">
             <input type="hidden" name="month" value={month} />
             <input type="hidden" name="canal" value={canal} />
+            <input type="hidden" name="filtros" value="1" />
             {rawStoreSelection.map((v) => (
               <input key={v} type="hidden" name="store" value={v} />
             ))}
@@ -237,7 +239,7 @@ export default async function LaminaMensalPage({
             ] as const).map((opt) => (
               <a
                 key={opt.value}
-                href={baseQuery({ canal: opt.value })}
+                href={baseQuery({ canal: opt.value, filtros: "1" })}
                 className={`rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
                   canal === opt.value
                     ? "border-[var(--series-1)] bg-[var(--series-1)] text-white"

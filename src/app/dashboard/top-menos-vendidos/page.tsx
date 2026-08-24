@@ -23,6 +23,7 @@ export default async function TopMenosVendidosPage({
   requireTabAccess(user, user.role, "top-menos-vendidos");
 
   const rawParams = await searchParams;
+  const filtrosOpen = rawParams.filtros === "1";
   const grupoIn = await getGrupoRestriction(user.role);
   const allowedStores = getStoreRestriction(user);
   const allowedMarcas = getMarcaRestriction(user);
@@ -52,7 +53,7 @@ export default async function TopMenosVendidosPage({
 
   return (
     <div>
-      <CollapsibleFilters>
+      <CollapsibleFilters defaultOpen={filtrosOpen}>
         <FilterBar
           action="/dashboard/top-menos-vendidos"
           stores={stores}
