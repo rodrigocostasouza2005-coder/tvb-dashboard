@@ -3,6 +3,7 @@ import { getAtacadoCidades } from "@/lib/metrics";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
+import { CollapsibleFilters } from "../collapsible-filters";
 import { StatTile } from "../stat-tile";
 import { CidadesChart } from "./cidades-chart";
 import { CidadesTable } from "./cidades-table";
@@ -34,15 +35,17 @@ export default async function AtacadoCidadesPage({
 
   return (
     <div>
-      <FilterBar
-        action="/dashboard/atacado-cidades"
-        stores={[]}
-        marcas={[]}
-        tabelasPreco={[]}
-        showMarca={false}
-        showDate
-        filters={filters}
-      />
+      <CollapsibleFilters>
+        <FilterBar
+          action="/dashboard/atacado-cidades"
+          stores={[]}
+          marcas={[]}
+          tabelasPreco={[]}
+          showMarca={false}
+          showDate
+          filters={filters}
+        />
+      </CollapsibleFilters>
 
       <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
         <StatTile label="Cidades atendidas" value={String(data.totalCidades)} />

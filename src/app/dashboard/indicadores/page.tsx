@@ -4,6 +4,7 @@ import { canSeeFinancials, getStoreRestriction, getMarcaRestriction, getTabelaPr
 import { parseFilters, brasiliaDayStart, brasiliaDayEnd, todayBrasiliaStr, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
+import { CollapsibleFilters } from "../collapsible-filters";
 import { IndicatorChart } from "./indicator-chart";
 
 const DATA_START_MONTH = "2025-09";
@@ -99,15 +100,17 @@ export default async function IndicadoresPage({
 
   return (
     <div>
-      <FilterBar
-        action="/dashboard/indicadores"
-        stores={stores}
-        marcas={marcas}
-        tabelasPreco={tabelasPreco}
-        showTabelaPreco
-        showDate={false}
-        filters={{ ...baseRestriction, from: brasiliaDayStart(DATA_START_MONTH + "-01"), to: new Date() }}
-      />
+      <CollapsibleFilters>
+        <FilterBar
+          action="/dashboard/indicadores"
+          stores={stores}
+          marcas={marcas}
+          tabelasPreco={tabelasPreco}
+          showTabelaPreco
+          showDate={false}
+          filters={{ ...baseRestriction, from: brasiliaDayStart(DATA_START_MONTH + "-01"), to: new Date() }}
+        />
+      </CollapsibleFilters>
 
       <div className="mb-6 flex gap-1">
         {([

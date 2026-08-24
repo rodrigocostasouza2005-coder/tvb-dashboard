@@ -4,6 +4,7 @@ import { canSeeFinancials, getStoreRestriction, getMarcaRestriction, getTabelaPr
 import { parseFilters, type RawSearchParams, toDateInputValue } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
+import { CollapsibleFilters } from "../collapsible-filters";
 import { MonthlyChart } from "./monthly-chart";
 
 function formatBRL(value: number) {
@@ -78,14 +79,16 @@ export default async function MensalPage({
 
   return (
     <div>
-      <FilterBar
-        action="/dashboard/mensal"
-        stores={stores}
-        marcas={marcas}
-        tabelasPreco={tabelasPreco}
-        showTabelaPreco
-        filters={filters}
-      />
+      <CollapsibleFilters>
+        <FilterBar
+          action="/dashboard/mensal"
+          stores={stores}
+          marcas={marcas}
+          tabelasPreco={tabelasPreco}
+          showTabelaPreco
+          filters={filters}
+        />
+      </CollapsibleFilters>
 
       {/* Toggle receita / unidades */}
       <div className="mb-4 flex gap-1">

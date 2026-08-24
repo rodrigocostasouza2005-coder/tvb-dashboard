@@ -3,6 +3,7 @@ import { getAtacadoVendas } from "@/lib/metrics";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
+import { CollapsibleFilters } from "../collapsible-filters";
 import { StatTile } from "../stat-tile";
 import { AtacadoTrendChart } from "./atacado-trend-chart";
 import { AtacadoGruposChart } from "./atacado-grupos-chart";
@@ -27,15 +28,17 @@ export default async function AtacadoPage({
 
   return (
     <div>
-      <FilterBar
-        action="/dashboard/atacado"
-        stores={[]}
-        marcas={[]}
-        tabelasPreco={[]}
-        showMarca={false}
-        showDate
-        filters={filters}
-      />
+      <CollapsibleFilters>
+        <FilterBar
+          action="/dashboard/atacado"
+          stores={[]}
+          marcas={[]}
+          tabelasPreco={[]}
+          showMarca={false}
+          showDate
+          filters={filters}
+        />
+      </CollapsibleFilters>
 
       <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatTile

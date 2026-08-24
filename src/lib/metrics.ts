@@ -1072,7 +1072,7 @@ export async function getTopClientes(
     ...(vendedor ? { vendedor } : {}),
     ...(canal !== "todos" ? { AND: [canalWhere(canal)] } : {}),
   };
-  const [rows, devolvidoPorCliente] = await Promise.all([
+  const [rows, devolvidoPorCliente, vendedorRows] = await Promise.all([
     prisma.sale.groupBy({
       by: ["clienteNome"],
       where,
@@ -1080,7 +1080,22 @@ export async function getTopClientes(
       _count: { _all: true },
     }),
     liquido && canal !== "b2b" ? getValorDevolvidoPorCliente(filters) : Promise.resolve(new Map<string, number>()),
+    // Vendedor "principal" de cada cliente — quem mais faturou em cima dele no período, já que
+    // um cliente pode ter sido atendido por mais de um vendedor.
+    prisma.sale.groupBy({ by: ["clienteNome", "vendedor"], where, _sum: { valorTotalLiquido: true } }),
   ]);
+
+  const vendedorPrincipalPorCliente = new Map<string, string>();
+  const melhorReceitaPorCliente = new Map<string, number>();
+  for (const r of vendedorRows) {
+    const cliente = r.clienteNome as string;
+    if (!r.vendedor) continue;
+    const rev = r._sum.valorTotalLiquido ?? 0;
+    if (rev > (melhorReceitaPorCliente.get(cliente) ?? -1)) {
+      melhorReceitaPorCliente.set(cliente, rev);
+      vendedorPrincipalPorCliente.set(cliente, r.vendedor);
+    }
+  }
 
   const sorted = rows
     .map((r) => {
@@ -1089,12 +1104,14 @@ export async function getTopClientes(
       const devolvido = devolvidoPorCliente.get(cliente) ?? 0;
       return {
         cliente,
+        vendedor: vendedorPrincipalPorCliente.get(cliente) ?? null,
         pedidos: r._count._all,
         unidades: r._sum.quantidade ?? 0,
-        receita: liquido ? receitaBruta - devolvido : receitaBruta,
+        receitaBruta,
+        receitaLiquida: liquido ? receitaBruta - devolvido : receitaBruta,
       };
     })
-    .sort((a, b) => b.receita - a.receita)
+    .sort((a, b) => (liquido ? b.receitaLiquida - a.receitaLiquida : b.receitaBruta - a.receitaBruta))
     .slice(0, limit);
 
   // Enriquece com telefone/email da tabela Client (join por nome)

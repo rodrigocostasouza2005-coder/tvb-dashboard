@@ -20,6 +20,7 @@ import {
 } from "@/lib/permissions";
 import { parseFilters, parseDimension, type RawSearchParams } from "@/lib/filters";
 import { FilterBar } from "./filter-bar";
+import { CollapsibleFilters } from "./collapsible-filters";
 import { StatTile } from "./stat-tile";
 import { DimensionToggle } from "./dimension-toggle";
 import { SalesTrendChart } from "./sales-trend-chart";
@@ -86,14 +87,16 @@ export default async function OverviewPage({
 
   return (
     <div>
-      <FilterBar
-        action="/dashboard"
-        stores={stores}
-        marcas={marcas}
-        tabelasPreco={tabelasPreco}
-        showTabelaPreco
-        filters={filters}
-      />
+      <CollapsibleFilters>
+        <FilterBar
+          action="/dashboard"
+          stores={stores}
+          marcas={marcas}
+          tabelasPreco={tabelasPreco}
+          showTabelaPreco
+          filters={filters}
+        />
+      </CollapsibleFilters>
 
       <section className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
         <StatTile label="Unidades vendidas (brutas)" value={kpi.unitsSold.toLocaleString("pt-BR")} />

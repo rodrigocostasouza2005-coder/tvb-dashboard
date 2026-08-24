@@ -4,6 +4,7 @@ import { getGrupoRestriction, getStoreRestriction, getTabelaPrecoRestriction } f
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
+import { CollapsibleFilters } from "../collapsible-filters";
 import { StatTile } from "../stat-tile";
 import { PieChart } from "../pie-chart";
 import { EnvelhecimentoTable } from "./envelhecimento-table";
@@ -51,16 +52,18 @@ export default async function EnvelhecimentoPage({
 
   return (
     <div>
-      <FilterBar
-        action="/dashboard/envelhecimento"
-        stores={stores}
-        marcas={marcas}
-        tabelasPreco={tabelasPreco}
-        showTabelaPreco
-        showDate={false}
-        filters={filters}
-        showMarca={false}
-      />
+      <CollapsibleFilters>
+        <FilterBar
+          action="/dashboard/envelhecimento"
+          stores={stores}
+          marcas={marcas}
+          tabelasPreco={tabelasPreco}
+          showTabelaPreco
+          showDate={false}
+          filters={filters}
+          showMarca={false}
+        />
+      </CollapsibleFilters>
       <p className="mb-3 text-xs text-[var(--text-muted)]">
         Idade contada a partir da <strong>primeira venda</strong> daquele produto naquela loja (não
         da última) — pra saber desde quando ele realmente começou a vender. Só mostra itens com

@@ -4,6 +4,7 @@ import { canSeeFinancials, getGrupoRestriction, getStoreRestriction, getMarcaRes
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
+import { CollapsibleFilters } from "../collapsible-filters";
 import { ParetoChart } from "./pareto-chart";
 
 function formatBRL(v: number) {
@@ -171,14 +172,16 @@ export default async function CurvaAbcPage({
 
   return (
     <div>
-      <FilterBar
-        action="/dashboard/curva-abc"
-        stores={stores}
-        marcas={marcas}
-        tabelasPreco={tabelasPreco}
-        showTabelaPreco
-        filters={filters}
-      />
+      <CollapsibleFilters>
+        <FilterBar
+          action="/dashboard/curva-abc"
+          stores={stores}
+          marcas={marcas}
+          tabelasPreco={tabelasPreco}
+          showTabelaPreco
+          filters={filters}
+        />
+      </CollapsibleFilters>
 
       {/* Resumo de contagem */}
       <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-6">

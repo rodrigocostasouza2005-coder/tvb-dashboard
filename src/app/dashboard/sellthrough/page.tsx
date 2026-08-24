@@ -11,6 +11,7 @@ import { getGrupoRestriction, getStoreRestriction, getMarcaRestriction, getTabel
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
+import { CollapsibleFilters } from "../collapsible-filters";
 import { ColecaoSellthroughTable } from "./colecao-sellthrough-table";
 import { ColecaoDetalheChart } from "./colecao-detalhe-chart";
 import { ColecaoDetalheTable } from "./colecao-detalhe-table";
@@ -53,15 +54,17 @@ export default async function SellthroughPage({
 
   return (
     <div>
-      <FilterBar
-        action="/dashboard/sellthrough"
-        stores={stores}
-        marcas={marcas}
-        tabelasPreco={tabelasPreco}
-        showTabelaPreco
-        showDate={false}
-        filters={filters}
-      />
+      <CollapsibleFilters>
+        <FilterBar
+          action="/dashboard/sellthrough"
+          stores={stores}
+          marcas={marcas}
+          tabelasPreco={tabelasPreco}
+          showTabelaPreco
+          showDate={false}
+          filters={filters}
+        />
+      </CollapsibleFilters>
 
       {/* Stat cards */}
       <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">

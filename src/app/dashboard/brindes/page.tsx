@@ -4,6 +4,7 @@ import { canSeeFinancials, getGrupoRestriction, getStoreRestriction, getMarcaRes
 import { parseFilters, parseDimension, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
+import { CollapsibleFilters } from "../collapsible-filters";
 import { DimensionToggle } from "../dimension-toggle";
 import { TopBarChart } from "../top-bar-chart";
 import { ExpandableSalesTable } from "../vendas/expandable-sales-table";
@@ -42,7 +43,9 @@ export default async function BrindesPage({
 
   return (
     <div>
-      <FilterBar action="/dashboard/brindes" stores={stores} marcas={marcas} filters={filters} />
+      <CollapsibleFilters>
+        <FilterBar action="/dashboard/brindes" stores={stores} marcas={marcas} filters={filters} />
+      </CollapsibleFilters>
       <p className="mb-3 text-xs text-[var(--text-muted)]">
         Itens dados como brinde (Tipo=Brinde na API) — não entram na contagem de vendas nem de
         devoluções. Quem retirou é registrado a partir do próximo sync após o deploy de 14/08/2026.

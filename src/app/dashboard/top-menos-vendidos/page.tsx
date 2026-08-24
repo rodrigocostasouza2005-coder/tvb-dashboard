@@ -4,6 +4,7 @@ import { canSeeFinancials, getGrupoRestriction, getStoreRestriction, getMarcaRes
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
+import { CollapsibleFilters } from "../collapsible-filters";
 import { MetricBarChart } from "../metric-bar-chart";
 
 const LIMIT = 10;
@@ -51,14 +52,16 @@ export default async function TopMenosVendidosPage({
 
   return (
     <div>
-      <FilterBar
-        action="/dashboard/top-menos-vendidos"
-        stores={stores}
-        marcas={marcas}
-        tabelasPreco={tabelasPreco}
-        showTabelaPreco
-        filters={filters}
-      />
+      <CollapsibleFilters>
+        <FilterBar
+          action="/dashboard/top-menos-vendidos"
+          stores={stores}
+          marcas={marcas}
+          tabelasPreco={tabelasPreco}
+          showTabelaPreco
+          filters={filters}
+        />
+      </CollapsibleFilters>
 
       <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
         <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">

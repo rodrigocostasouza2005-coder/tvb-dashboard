@@ -5,6 +5,7 @@ import { parseFilters, brasiliaDayStart, brasiliaDayEnd, todayBrasiliaStr, type 
 import { requireTabAccess } from "@/lib/tabs";
 import { StatTile } from "../stat-tile";
 import { TrendChart } from "./trend-chart";
+import { CollapsibleFilters } from "../collapsible-filters";
 
 const DATA_START_MONTH = "2025-09";
 
@@ -202,80 +203,82 @@ export default async function LaminaMensalPage({
         </div>
       </div>
 
-      {/* Controles: comparar com / canal */}
-      <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
-        <form method="get" action="/dashboard/lamina-mensal" className="flex items-end gap-2 text-sm">
-          <input type="hidden" name="month" value={month} />
-          <input type="hidden" name="canal" value={canal} />
-          {rawStoreSelection.map((v) => (
-            <input key={v} type="hidden" name="store" value={v} />
-          ))}
-          <label className="flex flex-col gap-1">
-            <span className="text-xs text-[var(--text-muted)]">Comparar com</span>
-            <select
-              name="compare"
-              defaultValue={compareMonth}
-              className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-[var(--text-primary)]"
-            >
-              {monthOptions.filter((m) => m !== month).map((m) => (
-                <option key={m} value={m}>{formatMonthLabel(m)}</option>
-              ))}
-            </select>
-          </label>
-          <button type="submit" className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-3 py-1.5 text-[var(--text-secondary)] hover:bg-[var(--page-plane)]">
-            Comparar
-          </button>
-        </form>
+      {/* Controles: comparar com / canal / loja */}
+      <CollapsibleFilters>
+        <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
+          <form method="get" action="/dashboard/lamina-mensal" className="flex items-end gap-2 text-sm">
+            <input type="hidden" name="month" value={month} />
+            <input type="hidden" name="canal" value={canal} />
+            {rawStoreSelection.map((v) => (
+              <input key={v} type="hidden" name="store" value={v} />
+            ))}
+            <label className="flex flex-col gap-1">
+              <span className="text-xs text-[var(--text-muted)]">Comparar com</span>
+              <select
+                name="compare"
+                defaultValue={compareMonth}
+                className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-[var(--text-primary)]"
+              >
+                {monthOptions.filter((m) => m !== month).map((m) => (
+                  <option key={m} value={m}>{formatMonthLabel(m)}</option>
+                ))}
+              </select>
+            </label>
+            <button type="submit" className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-3 py-1.5 text-[var(--text-secondary)] hover:bg-[var(--page-plane)]">
+              Comparar
+            </button>
+          </form>
 
-        <div className="flex gap-1">
-          {([
-            { value: "todos", label: "Todos" },
-            { value: "b2b", label: "B2B (atacado)" },
-            { value: "b2c", label: "B2C (varejo)" },
-          ] as const).map((opt) => (
-            <a
-              key={opt.value}
-              href={baseQuery({ canal: opt.value })}
-              className={`rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
-                canal === opt.value
-                  ? "border-[var(--series-1)] bg-[var(--series-1)] text-white"
-                  : "border-[var(--border)] bg-[var(--surface-1)] text-[var(--text-secondary)] hover:bg-[var(--page-plane)]"
-              }`}
-            >
-              {opt.label}
-            </a>
-          ))}
+          <div className="flex gap-1">
+            {([
+              { value: "todos", label: "Todos" },
+              { value: "b2b", label: "B2B (atacado)" },
+              { value: "b2c", label: "B2C (varejo)" },
+            ] as const).map((opt) => (
+              <a
+                key={opt.value}
+                href={baseQuery({ canal: opt.value })}
+                className={`rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
+                  canal === opt.value
+                    ? "border-[var(--series-1)] bg-[var(--series-1)] text-white"
+                    : "border-[var(--border)] bg-[var(--surface-1)] text-[var(--text-secondary)] hover:bg-[var(--page-plane)]"
+                }`}
+              >
+                {opt.label}
+              </a>
+            ))}
+          </div>
         </div>
-      </div>
 
-      {storeOptions.length > 1 && (
-        <div className="mb-6 flex flex-wrap items-center gap-1.5 -mt-3">
-          <span className="mr-1 text-xs text-[var(--text-muted)]">Loja:</span>
-          <a
-            href={allStoresHref}
-            className={`rounded-md border px-2.5 py-1 text-xs font-medium transition-colors ${
-              rawStoreSelection.length === 0
-                ? "border-[var(--series-1)] bg-[var(--series-1)] text-white"
-                : "border-[var(--border)] bg-[var(--surface-1)] text-[var(--text-secondary)] hover:bg-[var(--page-plane)]"
-            }`}
-          >
-            Todas
-          </a>
-          {storeOptions.map((s) => (
+        {storeOptions.length > 1 && (
+          <div className="mb-6 flex flex-wrap items-center gap-1.5 -mt-3">
+            <span className="mr-1 text-xs text-[var(--text-muted)]">Loja:</span>
             <a
-              key={s.id}
-              href={storeToggleHref(s.id)}
+              href={allStoresHref}
               className={`rounded-md border px-2.5 py-1 text-xs font-medium transition-colors ${
-                rawStoreSelection.includes(s.id)
+                rawStoreSelection.length === 0
                   ? "border-[var(--series-1)] bg-[var(--series-1)] text-white"
                   : "border-[var(--border)] bg-[var(--surface-1)] text-[var(--text-secondary)] hover:bg-[var(--page-plane)]"
               }`}
             >
-              {s.name}
+              Todas
             </a>
-          ))}
-        </div>
-      )}
+            {storeOptions.map((s) => (
+              <a
+                key={s.id}
+                href={storeToggleHref(s.id)}
+                className={`rounded-md border px-2.5 py-1 text-xs font-medium transition-colors ${
+                  rawStoreSelection.includes(s.id)
+                    ? "border-[var(--series-1)] bg-[var(--series-1)] text-white"
+                    : "border-[var(--border)] bg-[var(--surface-1)] text-[var(--text-secondary)] hover:bg-[var(--page-plane)]"
+                }`}
+              >
+                {s.name}
+              </a>
+            ))}
+          </div>
+        )}
+      </CollapsibleFilters>
 
       {/* KPIs principais */}
       {showFinancials && (
@@ -363,22 +366,38 @@ export default async function LaminaMensalPage({
 
       {showFinancials && (
         <section className="mt-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-          <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Top 5 clientes do mês (receita líquida)</h2>
+          <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Top 5 clientes do mês (bruta · líquida)</h2>
           {topClientes.length === 0 ? (
             <p className="text-sm text-[var(--text-muted)]">Sem clientes identificados no período.</p>
           ) : (
-            <ul className="flex flex-col gap-2">
-              {topClientes.map((c, i) => (
-                <li key={c.cliente} className="flex items-center justify-between gap-3">
-                  <span className="flex items-center gap-3 truncate">
-                    <span className="w-4 shrink-0 text-xs font-medium text-[var(--text-muted)]">{i + 1}</span>
-                    <span className="truncate text-sm text-[var(--text-primary)]">{c.cliente}</span>
-                  </span>
-                  <span className="shrink-0 text-right text-xs tabular-nums text-[var(--text-secondary)]">
-                    {formatBRL(c.receita)}
-                  </span>
-                </li>
-              ))}
+            <ul className="flex flex-col gap-3">
+              {topClientes.map((c, i) => {
+                const telefone = c.telefone;
+                return (
+                  <li key={c.cliente} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                    <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5">
+                      <span className="w-4 shrink-0 text-xs font-medium text-[var(--text-muted)]">{i + 1}</span>
+                      <span className="truncate text-sm text-[var(--text-primary)]">{c.cliente}</span>
+                      {telefone && (
+                        <a
+                          href={`tel:${telefone}`}
+                          className="shrink-0 text-xs tabular-nums text-[var(--series-1)] hover:underline"
+                        >
+                          {telefone}
+                        </a>
+                      )}
+                      {c.vendedor && (
+                        <span className="shrink-0 text-xs text-[var(--text-muted)]">vendedor: {c.vendedor}</span>
+                      )}
+                    </span>
+                    <span className="shrink-0 text-right text-xs tabular-nums text-[var(--text-secondary)]">
+                      <span title="Receita bruta">{formatBRL(c.receitaBruta)}</span>
+                      {" · "}
+                      <span className="text-[var(--text-primary)]" title="Receita líquida">{formatBRL(c.receitaLiquida)} líq.</span>
+                    </span>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </section>

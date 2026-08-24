@@ -4,6 +4,7 @@ import { getGrupoRestriction, getStoreRestriction, getMarcaRestriction, getTabel
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
+import { CollapsibleFilters } from "../collapsible-filters";
 import { PesquisaTable } from "./pesquisa-table";
 
 export default async function PesquisaPage({
@@ -35,14 +36,16 @@ export default async function PesquisaPage({
 
   return (
     <div>
-      <FilterBar
-        action="/dashboard/pesquisa"
-        stores={stores}
-        marcas={marcas}
-        tabelasPreco={tabelasPreco}
-        showTabelaPreco
-        filters={filters}
-      />
+      <CollapsibleFilters>
+        <FilterBar
+          action="/dashboard/pesquisa"
+          stores={stores}
+          marcas={marcas}
+          tabelasPreco={tabelasPreco}
+          showTabelaPreco
+          filters={filters}
+        />
+      </CollapsibleFilters>
 
       <form action="/dashboard/pesquisa" method="GET" className="mb-4 flex gap-2">
         {(filters.storeIds ?? []).map((id) => (

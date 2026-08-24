@@ -4,6 +4,7 @@ import { getGrupoRestriction, canSeeFinancials, getStoreRestriction } from "@/li
 import { parseFilters, parseDimension, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
+import { CollapsibleFilters } from "../collapsible-filters";
 import { DimensionToggle } from "../dimension-toggle";
 import { PieChart } from "../pie-chart";
 import { MetricBarChart } from "../metric-bar-chart";
@@ -43,7 +44,9 @@ export default async function EstoqueAtualPage({
 
   return (
     <div>
-      <FilterBar action="/dashboard/estoque-atual" stores={stores} marcas={marcas} filters={filters} showMarca={false} />
+      <CollapsibleFilters>
+        <FilterBar action="/dashboard/estoque-atual" stores={stores} marcas={marcas} filters={filters} showMarca={false} />
+      </CollapsibleFilters>
       <DimensionToggle basePath="/dashboard/estoque-atual" searchParams={rawParams} current={dimension} />
 
       <p className="mb-3 text-xs text-[var(--text-muted)]">

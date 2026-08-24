@@ -4,6 +4,7 @@ import { getGrupoRestriction, getStoreRestriction } from "@/lib/permissions";
 import { parseFilters, toDateInputValue, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
+import { CollapsibleFilters } from "../collapsible-filters";
 import { MetricBarChart } from "../metric-bar-chart";
 
 export default async function ReposicaoPage({
@@ -58,7 +59,9 @@ export default async function ReposicaoPage({
 
   return (
     <div>
-      <FilterBar action="/dashboard/reposicao" stores={stores} marcas={marcas} filters={filters} showMarca={false} showDate={false} />
+      <CollapsibleFilters>
+        <FilterBar action="/dashboard/reposicao" stores={stores} marcas={marcas} filters={filters} showMarca={false} showDate={false} />
+      </CollapsibleFilters>
 
       <div className="mb-3 flex flex-wrap items-center gap-1.5">
         <span className="mr-1 text-xs text-[var(--text-muted)]">Coleção:</span>

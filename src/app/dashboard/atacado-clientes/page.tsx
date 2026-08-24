@@ -3,6 +3,7 @@ import { getAtacadoClientes, getClienteRetencaoPorMes } from "@/lib/metrics";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
+import { CollapsibleFilters } from "../collapsible-filters";
 import { StatTile } from "../stat-tile";
 import { ClientesTable } from "./clientes-table";
 import { ClienteRetencaoChart } from "./cliente-retencao-chart";
@@ -27,15 +28,17 @@ export default async function AtacadoClientesPage({
 
   return (
     <div>
-      <FilterBar
-        action="/dashboard/atacado-clientes"
-        stores={[]}
-        marcas={[]}
-        tabelasPreco={[]}
-        showMarca={false}
-        showDate
-        filters={filters}
-      />
+      <CollapsibleFilters>
+        <FilterBar
+          action="/dashboard/atacado-clientes"
+          stores={[]}
+          marcas={[]}
+          tabelasPreco={[]}
+          showMarca={false}
+          showDate
+          filters={filters}
+        />
+      </CollapsibleFilters>
 
       <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-5">
         <StatTile label="Clientes únicos" value={String(data.totalClientes)} />

@@ -4,6 +4,7 @@ import { getGrupoRestriction, getStoreRestriction, getTabelaPrecoRestriction } f
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
+import { CollapsibleFilters } from "../collapsible-filters";
 import { StatTile } from "../stat-tile";
 import { CoberturaTable } from "./cobertura-table";
 
@@ -39,16 +40,18 @@ export default async function CoberturaPage({
 
   return (
     <div>
-      <FilterBar
-        action="/dashboard/cobertura"
-        stores={stores}
-        marcas={marcas}
-        tabelasPreco={tabelasPreco}
-        showTabelaPreco
-        showDate={false}
-        showMarca={false}
-        filters={filters}
-      />
+      <CollapsibleFilters>
+        <FilterBar
+          action="/dashboard/cobertura"
+          stores={stores}
+          marcas={marcas}
+          tabelasPreco={tabelasPreco}
+          showTabelaPreco
+          showDate={false}
+          showMarca={false}
+          filters={filters}
+        />
+      </CollapsibleFilters>
       <p className="mb-3 text-xs text-[var(--text-muted)]">
         Mostra quantos <strong>dias de venda restam</strong> em cada SKU, com base na média de
         vendas dos últimos 30 dias. Crítico &lt; 7 dias · Atenção 7–30 dias · OK 30–60 dias · Excesso &gt; 60 dias.

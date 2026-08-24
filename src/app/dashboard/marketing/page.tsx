@@ -4,6 +4,7 @@ import { getGrupoRestriction, getStoreRestriction, getMarcaRestriction, getTabel
 import { parseFilters, parseDimension, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
+import { CollapsibleFilters } from "../collapsible-filters";
 import { DimensionToggle } from "../dimension-toggle";
 import { statusFor } from "../status-filter";
 import { MetricBarChart } from "../metric-bar-chart";
@@ -42,14 +43,16 @@ export default async function MarketingPage({
 
   return (
     <div>
-      <FilterBar
-        action="/dashboard/marketing"
-        stores={stores}
-        marcas={marcas}
-        tabelasPreco={tabelasPreco}
-        showTabelaPreco
-        filters={filters}
-      />
+      <CollapsibleFilters>
+        <FilterBar
+          action="/dashboard/marketing"
+          stores={stores}
+          marcas={marcas}
+          tabelasPreco={tabelasPreco}
+          showTabelaPreco
+          filters={filters}
+        />
+      </CollapsibleFilters>
       <DimensionToggle basePath="/dashboard/marketing" searchParams={rawParams} current={dimension} />
 
       <h2 className="mb-1 text-sm font-medium text-[var(--text-primary)]">

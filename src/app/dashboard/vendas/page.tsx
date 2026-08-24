@@ -28,6 +28,7 @@ import {
 import { parseFilters, parseDimension, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
+import { CollapsibleFilters } from "../collapsible-filters";
 import { DimensionToggle } from "../dimension-toggle";
 import { SalesTrendChart } from "../sales-trend-chart";
 import { ReturnsTrendChart } from "../returns-trend-chart";
@@ -116,14 +117,16 @@ export default async function VendasPage({
 
   return (
     <div>
-      <FilterBar
-        action="/dashboard/vendas"
-        stores={stores}
-        marcas={marcas}
-        tabelasPreco={tabelasPreco}
-        showTabelaPreco
-        filters={filters}
-      />
+      <CollapsibleFilters>
+        <FilterBar
+          action="/dashboard/vendas"
+          stores={stores}
+          marcas={marcas}
+          tabelasPreco={tabelasPreco}
+          showTabelaPreco
+          filters={filters}
+        />
+      </CollapsibleFilters>
 
       <section className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">

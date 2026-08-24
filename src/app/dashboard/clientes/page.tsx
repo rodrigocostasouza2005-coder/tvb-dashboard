@@ -4,6 +4,7 @@ import { canSeeFinancials, getStoreRestriction, getMarcaRestriction, getTabelaPr
 import { parseFilters, todayBrasiliaStr, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
+import { CollapsibleFilters } from "../collapsible-filters";
 import { MetricBarChart } from "../metric-bar-chart";
 import { StatTile } from "../stat-tile";
 import { ClienteRetencaoChart } from "./cliente-retencao-chart";
@@ -70,14 +71,16 @@ export default async function ClientesPage({
 
   return (
     <div>
-      <FilterBar
-        action="/dashboard/clientes"
-        stores={stores}
-        marcas={marcas}
-        tabelasPreco={tabelasPreco}
-        showTabelaPreco
-        filters={filters}
-      />
+      <CollapsibleFilters>
+        <FilterBar
+          action="/dashboard/clientes"
+          stores={stores}
+          marcas={marcas}
+          tabelasPreco={tabelasPreco}
+          showTabelaPreco
+          filters={filters}
+        />
+      </CollapsibleFilters>
       <form method="get" action="/dashboard/clientes" className="mb-3 flex flex-wrap items-center gap-2">
         {/* Preserva os filtros existentes ao filtrar por vendedor */}
         {filters.storeIds?.map((id) => <input key={id} type="hidden" name="store" value={id} />)}
@@ -114,7 +117,7 @@ export default async function ClientesPage({
           Top clientes {showFinancials ? "por receita bruta" : "por unidades brutas"}
         </h2>
         <MetricBarChart
-          data={rows.slice(0, 10).map((r) => ({ key: r.cliente, value: showFinancials ? r.receita : r.unidades }))}
+          data={rows.slice(0, 10).map((r) => ({ key: r.cliente, value: showFinancials ? r.receitaBruta : r.unidades }))}
           format={showFinancials ? "currency" : "number"}
           color="var(--cat-3)"
         />
@@ -156,7 +159,7 @@ export default async function ClientesPage({
                 </td>
                 <td className="px-4 py-2 tabular-nums">{r.pedidos}</td>
                 <td className="px-4 py-2 tabular-nums">{r.unidades}</td>
-                {showFinancials && <td className="px-4 py-2 tabular-nums">{formatBRL(r.receita)}</td>}
+                {showFinancials && <td className="px-4 py-2 tabular-nums">{formatBRL(r.receitaBruta)}</td>}
               </tr>
             ))}
             {rows.length === 0 && (

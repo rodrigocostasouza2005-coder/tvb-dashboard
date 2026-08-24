@@ -4,6 +4,7 @@ import { getGrupoRestriction, getStoreRestriction, getMarcaRestriction, getTabel
 import { parseFilters, parseDimension, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
+import { CollapsibleFilters } from "../collapsible-filters";
 import { BarCompare } from "../bar-compare";
 import { DimensionToggle } from "../dimension-toggle";
 import { StatTile } from "../stat-tile";
@@ -54,14 +55,16 @@ export default async function EstoquePage({
 
   return (
     <div>
-      <FilterBar
-        action="/dashboard/estoque"
-        stores={stores}
-        marcas={marcas}
-        tabelasPreco={tabelasPreco}
-        showTabelaPreco
-        filters={filters}
-      />
+      <CollapsibleFilters>
+        <FilterBar
+          action="/dashboard/estoque"
+          stores={stores}
+          marcas={marcas}
+          tabelasPreco={tabelasPreco}
+          showTabelaPreco
+          filters={filters}
+        />
+      </CollapsibleFilters>
 
       <section className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-3">
         <StatTile label="Estoque atual (total)" value={totalEstoque.toLocaleString("pt-BR")} />
