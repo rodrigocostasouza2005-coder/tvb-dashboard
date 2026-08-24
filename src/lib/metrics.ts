@@ -1103,11 +1103,13 @@ export async function getTopClientes(
   vendedor?: string | null,
   limit = 30,
   canal: Canal = "todos",
-  liquido = false
+  liquido = false,
+  query?: string
 ) {
+  const q = query?.trim();
   const where: Prisma.SaleWhereInput = {
     ...saleWhere(filters),
-    clienteNome: { not: null },
+    clienteNome: q ? { contains: q, mode: "insensitive" } : { not: null },
     ...(vendedor ? { vendedor } : {}),
     ...(canal !== "todos" ? { AND: [canalWhere(canal)] } : {}),
   };

@@ -1,11 +1,20 @@
 import { getSessionUser } from "@/lib/auth";
-import { searchStockVsSalesComTamanhos, getStores, getMarcas, getTabelasPreco } from "@/lib/metrics";
-import { getGrupoRestriction, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
+import { searchStockVsSalesComTamanhos, getTopClientes, getStores, getMarcas, getTabelasPreco } from "@/lib/metrics";
+import { canSeeFinancials, getGrupoRestriction, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
 import { CollapsibleFilters } from "../collapsible-filters";
 import { PesquisaTable } from "./pesquisa-table";
+
+function formatBRL(value: number) {
+  return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+
+function formatDataNascimento(d: Date | null) {
+  if (!d) return null;
+  return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "UTC" });
+}
 
 export default async function PesquisaPage({
   searchParams,
@@ -27,12 +36,14 @@ export default async function PesquisaPage({
     grupoIn,
   };
 
-  const [{ rows, tamanhos }, stores, marcas, tabelasPreco] = await Promise.all([
+  const [{ rows, tamanhos }, clientes, stores, marcas, tabelasPreco] = await Promise.all([
     searchStockVsSalesComTamanhos(filters, query),
+    query.trim() ? getTopClientes(filters, null, 20, "todos", true, query) : Promise.resolve([]),
     getStores(allowedStores),
     getMarcas(allowedMarcas),
     getTabelasPreco(allowedTabelasPreco),
   ]);
+  const showFinancials = canSeeFinancials(user);
 
   return (
     <div>
@@ -87,6 +98,51 @@ export default async function PesquisaPage({
           Buscar
         </button>
       </form>
+
+      {clientes.length > 0 && (
+        <div className="mb-6 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+          <h2 className="border-b border-[var(--gridline)] px-4 py-2 text-sm font-medium text-[var(--text-secondary)]">
+            Clientes encontrados
+          </h2>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
+                <th className="px-4 py-2 font-medium">Cliente</th>
+                <th className="px-4 py-2 font-medium">Contato</th>
+                <th className="px-4 py-2 font-medium">Nascimento</th>
+                <th className="px-4 py-2 font-medium">Pedidos</th>
+                <th className="px-4 py-2 font-medium">Unidades</th>
+                {showFinancials && <th className="px-4 py-2 font-medium">Receita bruta</th>}
+                {showFinancials && <th className="px-4 py-2 font-medium">Receita líquida</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {clientes.map((c) => (
+                <tr key={c.cliente} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
+                  <td className="px-4 py-2 font-medium">{c.cliente}</td>
+                  <td className="px-4 py-2">
+                    {c.telefone ? (
+                      <a href={`tel:${c.telefone}`} className="text-[var(--series-1)] hover:underline tabular-nums">
+                        {c.telefone}
+                      </a>
+                    ) : (
+                      <span className="text-[var(--text-muted)]">—</span>
+                    )}
+                    {c.email && <div className="mt-0.5 text-xs text-[var(--text-muted)]">{c.email}</div>}
+                  </td>
+                  <td className="px-4 py-2 tabular-nums text-[var(--text-secondary)]">
+                    {formatDataNascimento(c.dataNascimento) ?? <span className="text-[var(--text-muted)]">—</span>}
+                  </td>
+                  <td className="px-4 py-2 tabular-nums">{c.pedidos}</td>
+                  <td className="px-4 py-2 tabular-nums">{c.unidades.toLocaleString("pt-BR")}</td>
+                  {showFinancials && <td className="px-4 py-2 tabular-nums">{formatBRL(c.receitaBruta)}</td>}
+                  {showFinancials && <td className="px-4 py-2 tabular-nums">{formatBRL(c.receitaLiquida)}</td>}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       <PesquisaTable
         rows={rows.slice(0, 100).map((r) => ({
