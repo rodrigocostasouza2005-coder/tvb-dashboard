@@ -19,7 +19,9 @@ export default async function AtacadoPage({
 
   const filters = parseFilters(await searchParams, {});
 
-  const data = await getAtacadoVendas(filters);
+  // Só B2B (Tabela atacado) — sem isso misturava com o varejo do site, que passa pela mesma
+  // loja física "Site+Atacado".
+  const data = await getAtacadoVendas({ ...filters, tabelasPreco: ["Tabela atacado"] });
 
   const { kpis, byDay, topProdutos } = data;
 

@@ -7,7 +7,6 @@ import {
   getSalesByProdutoTamanho,
   getSalesByDay,
   getSalesByDayPerStore,
-  getSalesByDayPerCanal,
   getReturnsByDimension,
   getReturnsByGrupoProduto,
   getReturnsByGrupoProdutoTamanho,
@@ -73,7 +72,7 @@ export default async function VendasPage({
   const emptyTamanhoSalesRows: Awaited<ReturnType<typeof getSalesByGrupoProdutoTamanho>> = [];
   const emptyTamanhoReturnRows: Awaited<ReturnType<typeof getReturnsByGrupoProdutoTamanho>> = [];
 
-  const [rows, salesSubRows, salesTamanhoRows, salesByDay, salesByDayPerStore, salesByDayPerCanal, returnRows, returnSubRows, returnTamanhoRows, returnsByDay, stores, marcas, tabelasPreco, siteCidades] = await Promise.all([
+  const [rows, salesSubRows, salesTamanhoRows, salesByDay, salesByDayPerStore, returnRows, returnSubRows, returnTamanhoRows, returnsByDay, stores, marcas, tabelasPreco, siteCidades] = await Promise.all([
     getSalesByDimension(filters, dimension),
     dimension === "grupo"
       ? getSalesByGrupoProduto(filters)
@@ -87,7 +86,6 @@ export default async function VendasPage({
       : Promise.resolve(emptyTamanhoSalesRows),
     getSalesByDay(filters),
     getSalesByDayPerStore(filters),
-    getSalesByDayPerCanal(filters),
     getReturnsByDimension(filters, dimension),
     dimension === "grupo"
       ? getReturnsByGrupoProduto(filters)
@@ -137,16 +135,6 @@ export default async function VendasPage({
           <StoreCompareChart data={salesByDayPerStore.data} series={salesByDayPerStore.series} />
         </div>
       </section>
-
-      {showFinancials && (
-        <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
-          <h2 className="mb-1 text-sm font-medium text-[var(--text-secondary)]">Vendas por canal — B2B x B2C</h2>
-          <p className="mb-3 text-xs text-[var(--text-muted)]">
-            Receita por dia. B2B = Tabela atacado, B2C = tudo mais (varejo do site, lojas físicas, promoções).
-          </p>
-          <StoreCompareChart data={salesByDayPerCanal.data} series={salesByDayPerCanal.series} />
-        </section>
-      )}
 
       {canSeeSiteMap && siteEstadoRows.length > 0 && (
         <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">

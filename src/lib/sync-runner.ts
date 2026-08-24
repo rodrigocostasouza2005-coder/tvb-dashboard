@@ -250,16 +250,17 @@ async function syncClientes(client: DapicClient) {
   for (let i = 0; i < clientes.length; i += BATCH) {
     const batch = clientes.slice(i, i + BATCH);
     const values = batch.map(
-      (c) => Prisma.sql`(${randomUUID()}, ${c.Id}, ${c.NomeRazaoSocial}, ${c.Telefone ?? null}, ${c.Celular ?? null}, ${c.Email ?? null})`
+      (c) => Prisma.sql`(${randomUUID()}, ${c.Id}, ${c.NomeRazaoSocial}, ${c.Telefone ?? null}, ${c.Celular ?? null}, ${c.Email ?? null}, ${c.DataAniversario ? new Date(c.DataAniversario) : null})`
     );
     await prisma.$executeRaw`
-      INSERT INTO "ClienteCadastro" ("id", "dapicId", "nome", "telefone", "celular", "email")
+      INSERT INTO "ClienteCadastro" ("id", "dapicId", "nome", "telefone", "celular", "email", "dataNascimento")
       VALUES ${Prisma.join(values)}
       ON CONFLICT ("dapicId") DO UPDATE SET
-        "nome"     = EXCLUDED."nome",
-        "telefone" = EXCLUDED."telefone",
-        "celular"  = EXCLUDED."celular",
-        "email"    = EXCLUDED."email"
+        "nome"           = EXCLUDED."nome",
+        "telefone"       = EXCLUDED."telefone",
+        "celular"        = EXCLUDED."celular",
+        "email"          = EXCLUDED."email",
+        "dataNascimento" = EXCLUDED."dataNascimento"
     `;
     count += batch.length;
   }

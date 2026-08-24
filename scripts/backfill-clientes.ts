@@ -27,17 +27,18 @@ async function main() {
     const batch = clientes.slice(i, i + BATCH_SIZE);
     const values = batch.map(
       (c) =>
-        Prisma.sql`(${randomUUID()}, ${c.Id}, ${c.NomeRazaoSocial}, ${c.Telefone ?? null}, ${c.Celular ?? null}, ${c.Email ?? null})`
+        Prisma.sql`(${randomUUID()}, ${c.Id}, ${c.NomeRazaoSocial}, ${c.Telefone ?? null}, ${c.Celular ?? null}, ${c.Email ?? null}, ${c.DataAniversario ? new Date(c.DataAniversario) : null})`
     );
 
     await prisma.$executeRaw`
-      INSERT INTO "ClienteCadastro" ("id", "dapicId", "nome", "telefone", "celular", "email")
+      INSERT INTO "ClienteCadastro" ("id", "dapicId", "nome", "telefone", "celular", "email", "dataNascimento")
       VALUES ${Prisma.join(values)}
       ON CONFLICT ("dapicId") DO UPDATE SET
-        "nome"     = EXCLUDED."nome",
-        "telefone" = EXCLUDED."telefone",
-        "celular"  = EXCLUDED."celular",
-        "email"    = EXCLUDED."email"
+        "nome"           = EXCLUDED."nome",
+        "telefone"       = EXCLUDED."telefone",
+        "celular"        = EXCLUDED."celular",
+        "email"          = EXCLUDED."email",
+        "dataNascimento" = EXCLUDED."dataNascimento"
     `;
     total += batch.length;
     process.stdout.write(`\r  ${total}/${clientes.length} inseridos...`);

@@ -400,6 +400,8 @@ export type DapicCliente = {
   Celular: string | null;
   WhatsApp: string | null;
   Email: string | null;
+  // "YYYY-MM-DD" ou null — nem todo cliente tem, cadastro é opcional no PDV/site.
+  DataAniversario: string | null;
 };
 
 // Campos reais de /faturas, confirmados em 2026-08-10 com o token cd-atacado. Ao contrário de

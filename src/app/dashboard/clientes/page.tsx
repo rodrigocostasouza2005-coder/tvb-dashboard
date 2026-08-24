@@ -12,6 +12,11 @@ function formatBRL(value: number) {
   return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
+function formatDataNascimento(d: Date | null) {
+  if (!d) return null;
+  return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "UTC" });
+}
+
 export default async function ClientesPage({
   searchParams,
 }: {
@@ -100,6 +105,7 @@ export default async function ClientesPage({
             <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
               <th className="px-4 py-2 font-medium">Cliente</th>
               <th className="px-4 py-2 font-medium">Contato</th>
+              <th className="px-4 py-2 font-medium">Nascimento</th>
               <th className="px-4 py-2 font-medium">Pedidos</th>
               <th className="px-4 py-2 font-medium">Unidades</th>
               {showFinancials && <th className="px-4 py-2 font-medium">Receita</th>}
@@ -124,6 +130,9 @@ export default async function ClientesPage({
                     <div className="text-xs text-[var(--text-muted)] mt-0.5">{r.email}</div>
                   )}
                 </td>
+                <td className="px-4 py-2 tabular-nums text-[var(--text-secondary)]">
+                  {formatDataNascimento(r.dataNascimento) ?? <span className="text-[var(--text-muted)]">—</span>}
+                </td>
                 <td className="px-4 py-2 tabular-nums">{r.pedidos}</td>
                 <td className="px-4 py-2 tabular-nums">{r.unidades}</td>
                 {showFinancials && <td className="px-4 py-2 tabular-nums">{formatBRL(r.receita)}</td>}
@@ -131,7 +140,7 @@ export default async function ClientesPage({
             ))}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={showFinancials ? 5 : 4} className="px-4 py-6 text-center text-[var(--text-muted)]">
+                <td colSpan={showFinancials ? 6 : 5} className="px-4 py-6 text-center text-[var(--text-muted)]">
                   Sem vendas no período/filtro selecionado.
                 </td>
               </tr>

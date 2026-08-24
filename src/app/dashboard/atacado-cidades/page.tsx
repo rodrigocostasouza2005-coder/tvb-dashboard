@@ -19,7 +19,9 @@ export default async function AtacadoCidadesPage({
 
   const filters = parseFilters(await searchParams, {});
 
-  const data = await getAtacadoCidades(filters);
+  // Só B2B (Tabela atacado) — sem isso misturava com o varejo do site, que passa pela mesma
+  // loja física "Site+Atacado".
+  const data = await getAtacadoCidades({ ...filters, tabelasPreco: ["Tabela atacado"] });
 
   const totalReceita = data.rows.reduce((sum, r) => sum + r.receita, 0);
 
