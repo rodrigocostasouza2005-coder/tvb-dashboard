@@ -149,7 +149,7 @@ export default async function VendasPage({
       <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
         <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">
           Top {dimension === "grupo" ? "grupo" : dimension === "produto" ? "produto" : "tamanho"}{" "}
-          {showFinancials ? "por receita" : "por vendas"}
+          {showFinancials ? "por receita bruta" : "por vendas brutas"}
         </h2>
         <TopBarChart data={top10} valueKey={showFinancials ? "revenue" : "unitsSold"} showCurrency={showFinancials} />
       </section>

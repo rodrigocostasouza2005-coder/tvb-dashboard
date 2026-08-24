@@ -329,14 +329,14 @@ export default async function LaminaMensalPage({
       {/* Tendência */}
       {showFinancials && trendData.length >= 2 && (
         <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-          <h2 className="mb-1 text-sm font-medium text-[var(--text-secondary)]">Tendência (últimos 6 meses)</h2>
+          <h2 className="mb-1 text-sm font-medium text-[var(--text-secondary)]">Tendência de receita bruta (últimos 6 meses)</h2>
           <TrendChart data={trendData} />
         </section>
       )}
 
       {/* Top produtos */}
       <section className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-        <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Principais produtos faturados</h2>
+        <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Principais produtos faturados (receita bruta)</h2>
         {top5.length === 0 ? (
           <p className="text-sm text-[var(--text-muted)]">Sem vendas no período.</p>
         ) : (

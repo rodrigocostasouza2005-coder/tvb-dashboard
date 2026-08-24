@@ -75,8 +75,8 @@ export default async function TopMenosVendidosPage({
               <th className="px-4 py-2 font-medium">#</th>
               <th className="px-4 py-2 font-medium">Grupo</th>
               <th className="px-4 py-2 font-medium">Produto</th>
-              <th className="px-4 py-2 font-medium text-right">Unidades</th>
-              {showFinancials && <th className="px-4 py-2 font-medium text-right">Receita</th>}
+              <th className="px-4 py-2 font-medium text-right">Unidades brutas</th>
+              {showFinancials && <th className="px-4 py-2 font-medium text-right">Receita bruta</th>}
             </tr>
           </thead>
           <tbody>

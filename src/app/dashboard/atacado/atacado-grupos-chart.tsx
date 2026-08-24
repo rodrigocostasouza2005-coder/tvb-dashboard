@@ -49,7 +49,7 @@ export function AtacadoGruposChart({ rows }: { rows: Row[] }) {
             borderRadius: 8,
             fontSize: 12,
           }}
-          formatter={(value) => [formatBRL(Number(value)), "Receita"]}
+          formatter={(value) => [formatBRL(Number(value)), "Receita bruta"]}
         />
         <Bar dataKey="receita" fill="#2a78d6" radius={[0, 4, 4, 0]} maxBarSize={20} />
       </BarChart>

@@ -67,8 +67,8 @@ export function ClientesTable({ rows }: { rows: ClienteRow[] }) {
               <th className="px-4 py-2 font-medium">Cidade</th>
               <th className="px-4 py-2 font-medium">Estado</th>
               <th className="px-4 py-2 font-medium text-right">Pedidos</th>
-              <th className="px-4 py-2 font-medium text-right">Unidades</th>
-              <th className="px-4 py-2 font-medium text-right">Receita</th>
+              <th className="px-4 py-2 font-medium text-right">Unidades brutas</th>
+              <th className="px-4 py-2 font-medium text-right">Receita bruta</th>
               <th className="px-4 py-2 font-medium">Última compra</th>
               <th className="px-4 py-2 font-medium">Novo?</th>
             </tr>

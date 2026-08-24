@@ -34,7 +34,7 @@ export function ParetoChart({ rows, maxItems = 30 }: { rows: Row[]; maxItems?: n
         <div className="flex items-center gap-4 text-xs text-[var(--text-secondary)]">
           <span className="flex items-center gap-1.5">
             <span className="h-2 w-2 rounded-sm" style={{ backgroundColor: "var(--series-1)" }} />
-            % da receita (individual)
+            % da receita bruta (individual)
           </span>
           <span className="flex items-center gap-1.5">
             <span className="h-2 w-2 rounded-full" style={{ backgroundColor: "var(--series-2)" }} />
@@ -77,7 +77,7 @@ export function ParetoChart({ rows, maxItems = 30 }: { rows: Row[]; maxItems?: n
             labelFormatter={(_, payload) => payload?.[0]?.payload?.fullLabel ?? ""}
             formatter={(value, name) => [
               `${Number(value).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`,
-              name === "individual" ? "% da receita" : "% acumulado",
+              name === "individual" ? "% da receita bruta" : "% acumulado",
             ]}
           />
           <Bar dataKey="individual" fill="var(--series-1)" radius={[3, 3, 0, 0]} maxBarSize={28} />

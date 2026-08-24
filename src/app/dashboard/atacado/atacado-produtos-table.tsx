@@ -43,8 +43,8 @@ export function AtacadoProdutosTable({ rows }: { rows: ProdutoRow[] }) {
         <thead>
           <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
             <th className="px-4 py-2 font-medium">Grupo / Produto</th>
-            <th className="px-4 py-2 font-medium text-right">Unidades</th>
-            <th className="px-4 py-2 font-medium text-right">Receita</th>
+            <th className="px-4 py-2 font-medium text-right">Unidades brutas</th>
+            <th className="px-4 py-2 font-medium text-right">Receita bruta</th>
           </tr>
         </thead>
         <tbody>

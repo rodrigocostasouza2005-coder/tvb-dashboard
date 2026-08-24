@@ -46,7 +46,7 @@ export default async function AtacadoClientesPage({
           trend={data.novosNoPeriodo > 0 ? "up" : undefined}
         />
         <StatTile
-          label="Total Receita"
+          label="Total Receita bruta"
           value={totalReceita.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
         />
         <StatTile label="Compraram 1x" value={String(retencao.compraram1x)} />

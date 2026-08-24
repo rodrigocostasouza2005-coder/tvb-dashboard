@@ -60,9 +60,9 @@ export function CidadesChart({ rows }: { rows: CidadeRow[] }) {
             borderRadius: 8,
             fontSize: 12,
           }}
-          formatter={(value) => [formatBRL(Number(value)), "Receita"]}
+          formatter={(value) => [formatBRL(Number(value)), "Receita bruta"]}
         />
-        <Bar dataKey="receita" fill="#2a78d6" radius={[0, 3, 3, 0]} name="Receita" />
+        <Bar dataKey="receita" fill="#2a78d6" radius={[0, 3, 3, 0]} name="Receita bruta" />
       </BarChart>
     </ResponsiveContainer>
   );

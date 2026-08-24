@@ -96,7 +96,7 @@ export default async function OverviewPage({
       />
 
       <section className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <StatTile label="Unidades vendidas" value={kpi.unitsSold.toLocaleString("pt-BR")} />
+        <StatTile label="Unidades vendidas (brutas)" value={kpi.unitsSold.toLocaleString("pt-BR")} />
         {showFinancials && <StatTile label="Receita bruta" value={formatBRL(kpi.revenue)} />}
         {showFinancials && (
           <StatTile
@@ -149,8 +149,8 @@ export default async function OverviewPage({
               <thead>
                 <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
                   <th className="px-4 py-2 font-medium">{dimensionLabel}</th>
-                  <th className="px-4 py-2 font-medium">Unidades</th>
-                  {showFinancials && <th className="px-4 py-2 font-medium">Receita</th>}
+                  <th className="px-4 py-2 font-medium">Unidades brutas</th>
+                  {showFinancials && <th className="px-4 py-2 font-medium">Receita bruta</th>}
                 </tr>
               </thead>
               <tbody>

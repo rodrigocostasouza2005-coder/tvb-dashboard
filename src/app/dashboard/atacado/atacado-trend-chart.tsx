@@ -49,9 +49,9 @@ export function AtacadoTrendChart({ data }: { data: { day: string; units: number
             fontSize: 12,
           }}
           labelFormatter={(day) => `Dia ${formatDay(String(day))}`}
-          formatter={(value) => [formatBRL(Number(value)), "Receita"]}
+          formatter={(value) => [formatBRL(Number(value)), "Receita bruta"]}
         />
-        <Bar dataKey="revenue" fill="#2a78d6" radius={[3, 3, 0, 0]} name="Receita" />
+        <Bar dataKey="revenue" fill="#2a78d6" radius={[3, 3, 0, 0]} name="Receita bruta" />
       </BarChart>
     </ResponsiveContainer>
   );

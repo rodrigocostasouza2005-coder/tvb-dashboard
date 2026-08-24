@@ -79,8 +79,8 @@ export default async function VendedoresPage({
                     <th className="px-4 py-2 font-medium">#</th>
                     <th className="px-4 py-2 font-medium">Vendedor</th>
                     <th className="px-4 py-2 font-medium">Vendas</th>
-                    <th className="px-4 py-2 font-medium">Unidades</th>
-                    {showFinancials && <th className="px-4 py-2 font-medium">Receita</th>}
+                    <th className="px-4 py-2 font-medium">Unidades brutas</th>
+                    {showFinancials && <th className="px-4 py-2 font-medium">Receita bruta</th>}
                   </tr>
                 </thead>
                 <tbody>

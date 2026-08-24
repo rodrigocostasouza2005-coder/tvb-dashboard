@@ -48,7 +48,7 @@ export default async function AtacadoCidadesPage({
         <StatTile label="Cidades atendidas" value={String(data.totalCidades)} />
         <StatTile label="Estados" value={String(data.totalEstados)} />
         <StatTile
-          label="Total Receita"
+          label="Total Receita bruta"
           value={totalReceita.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
         />
       </div>

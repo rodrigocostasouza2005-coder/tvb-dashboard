@@ -85,10 +85,10 @@ export function CidadesTable({ rows }: { rows: CidadeRow[] }) {
               Pedidos{sortIndicator("pedidos")}
             </th>
             <th className={`${thClass} text-right`} onClick={() => handleSort("unidades")}>
-              Unidades{sortIndicator("unidades")}
+              Unidades brutas{sortIndicator("unidades")}
             </th>
             <th className={`${thClass} text-right`} onClick={() => handleSort("receita")}>
-              Receita{sortIndicator("receita")}
+              Receita bruta{sortIndicator("receita")}
             </th>
           </tr>
           <tr className="border-b border-[var(--gridline)] bg-[var(--surface-1)]">

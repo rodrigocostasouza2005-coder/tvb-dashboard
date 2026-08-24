@@ -104,7 +104,7 @@ export default async function ClientesPage({
 
       <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
         <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">
-          Top clientes {showFinancials ? "por receita" : "por unidades"}
+          Top clientes {showFinancials ? "por receita bruta" : "por unidades brutas"}
         </h2>
         <MetricBarChart
           data={rows.slice(0, 10).map((r) => ({ key: r.cliente, value: showFinancials ? r.receita : r.unidades }))}
@@ -121,8 +121,8 @@ export default async function ClientesPage({
               <th className="px-4 py-2 font-medium">Contato</th>
               <th className="px-4 py-2 font-medium">Nascimento</th>
               <th className="px-4 py-2 font-medium">Pedidos</th>
-              <th className="px-4 py-2 font-medium">Unidades</th>
-              {showFinancials && <th className="px-4 py-2 font-medium">Receita</th>}
+              <th className="px-4 py-2 font-medium">Unidades brutas</th>
+              {showFinancials && <th className="px-4 py-2 font-medium">Receita bruta</th>}
             </tr>
           </thead>
           <tbody>

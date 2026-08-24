@@ -90,8 +90,8 @@ export default async function MensalPage({
       {/* Toggle receita / unidades */}
       <div className="mb-4 flex gap-1">
         {[
-          { label: "Receita", value: "revenue" },
-          { label: "Unidades", value: "units" },
+          { label: "Receita bruta", value: "revenue" },
+          { label: "Unidades brutas", value: "units" },
         ].map((opt) => {
           const active = opt.value === "revenue" ? showRevenue : !showRevenue;
           const href = `/dashboard/mensal?${new URLSearchParams({
@@ -119,7 +119,7 @@ export default async function MensalPage({
       {data.length > 0 ? (
         <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
           <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">
-            {showRevenue ? "Receita" : "Unidades"} por mês e loja
+            {showRevenue ? "Receita bruta" : "Unidades brutas"} por mês e loja
           </h2>
           <MonthlyChart data={data} series={series} showRevenue={showRevenue && showFinancials} />
         </section>

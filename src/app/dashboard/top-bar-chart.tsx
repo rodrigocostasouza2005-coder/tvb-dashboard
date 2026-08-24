@@ -62,7 +62,7 @@ export function TopBarChart({
             const n = Number(value ?? 0);
             return [
               showCurrency ? n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }) : n.toLocaleString("pt-BR"),
-              showCurrency ? "Receita" : "Unidades",
+              showCurrency ? "Receita bruta" : "Unidades brutas",
             ];
           }}
         />

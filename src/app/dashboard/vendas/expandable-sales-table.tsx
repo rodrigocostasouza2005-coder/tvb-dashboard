@@ -68,9 +68,9 @@ export function ExpandableSalesTable({
         <thead>
           <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
             <th className="px-4 py-2 font-medium">{parentLabel}</th>
-            <th className="px-4 py-2 font-medium">Unidades</th>
+            <th className="px-4 py-2 font-medium">Unidades brutas</th>
             <th className="px-4 py-2 font-medium">% do total</th>
-            {showFinancials && <th className="px-4 py-2 font-medium">Receita</th>}
+            {showFinancials && <th className="px-4 py-2 font-medium">Receita bruta</th>}
           </tr>
         </thead>
         <tbody>

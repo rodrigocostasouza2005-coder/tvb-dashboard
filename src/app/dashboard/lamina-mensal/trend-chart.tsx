@@ -39,7 +39,7 @@ export function TrendChart({ data }: { data: { month: string; revenue: number }[
             fontSize: 12,
           }}
           labelFormatter={(m) => formatMonth(String(m))}
-          formatter={(value) => [formatBRL(Number(value ?? 0)), "Receita"]}
+          formatter={(value) => [formatBRL(Number(value ?? 0)), "Receita bruta"]}
         />
         <Area
           type="monotone"

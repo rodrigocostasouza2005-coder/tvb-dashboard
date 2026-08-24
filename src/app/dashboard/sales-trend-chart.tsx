@@ -79,7 +79,7 @@ export function SalesTrendChart({
             const n = Number(value ?? 0);
             return [
               name === "revenue" ? n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }) : n.toLocaleString("pt-BR"),
-              name === "revenue" ? "Receita" : "Unidades",
+              name === "revenue" ? "Receita bruta" : "Unidades brutas",
             ];
           }}
         />

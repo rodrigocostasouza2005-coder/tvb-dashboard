@@ -61,10 +61,10 @@ function AbcTable({
               <th className="px-4 py-2 font-medium">#</th>
               {extraCol && <th className="px-4 py-2 font-medium">{extraCol}</th>}
               <th className="px-4 py-2 font-medium">{nameLabel}</th>
-              <th className="px-4 py-2 font-medium text-right">Unidades</th>
+              <th className="px-4 py-2 font-medium text-right">Unidades brutas</th>
               {showFinancials && (
                 <>
-                  <th className="px-4 py-2 font-medium text-right">Receita</th>
+                  <th className="px-4 py-2 font-medium text-right">Receita bruta</th>
                   <th className="px-4 py-2 font-medium text-right">% individual</th>
                   <th className="px-4 py-2 font-medium text-right">% acumulado</th>
                 </>
