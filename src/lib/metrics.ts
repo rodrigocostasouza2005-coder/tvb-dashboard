@@ -1028,27 +1028,72 @@ export async function getStockAging(
     .sort((a, b) => (b.diasDesdePrimeiraVenda ?? 999999) - (a.diasDesdePrimeiraVenda ?? 999999));
 }
 
-export async function getTopClientes(filters: DashboardFilters, vendedor?: string | null, limit = 30, canal: Canal = "todos") {
+// Devoluções não têm clienteNome no schema, mas dapicVendaId é o mesmo id da venda original
+// — junta de volta com Sale (storeId+dapicVendaId) pra descobrir de quem foi cada devolução.
+// Devolução é sempre B2C (confirmado pelo Rodrigo em 2026-08-21), então não faz sentido
+// chamar isso quando canal="b2b" (líquida = bruta nesse caso, sem devolução nenhuma).
+async function getValorDevolvidoPorCliente(filters: Pick<DashboardFilters, "storeIds" | "grupoIn" | "from" | "to">) {
+  const returns = await prisma.return.findMany({
+    where: { ...returnWhere(filters), dapicVendaId: { not: null } },
+    select: { storeId: true, dapicVendaId: true, valorTotal: true },
+  });
+  if (returns.length === 0) return new Map<string, number>();
+
+  const dapicVendaIds = [...new Set(returns.map((r) => r.dapicVendaId as number))];
+  const storeIds = [...new Set(returns.map((r) => r.storeId))];
+  const sales = await prisma.sale.findMany({
+    where: { storeId: { in: storeIds }, dapicVendaId: { in: dapicVendaIds }, clienteNome: { not: null } },
+    select: { storeId: true, dapicVendaId: true, clienteNome: true },
+  });
+  const clienteByVenda = new Map(sales.map((s) => [`${s.storeId}::${s.dapicVendaId}`, s.clienteNome as string]));
+
+  const devolvidoPorCliente = new Map<string, number>();
+  for (const r of returns) {
+    const cliente = clienteByVenda.get(`${r.storeId}::${r.dapicVendaId}`);
+    if (!cliente) continue;
+    devolvidoPorCliente.set(cliente, (devolvidoPorCliente.get(cliente) ?? 0) + r.valorTotal);
+  }
+  return devolvidoPorCliente;
+}
+
+// liquido=true desconta devolução da receita (usado só na Lâmina Mensal — pedido do Rodrigo
+// em 2026-08-24). Padrão continua bruta pra não mudar o que a aba Clientes já mostra (lá está
+// rotulado "Receita bruta").
+export async function getTopClientes(
+  filters: DashboardFilters,
+  vendedor?: string | null,
+  limit = 30,
+  canal: Canal = "todos",
+  liquido = false
+) {
   const where: Prisma.SaleWhereInput = {
     ...saleWhere(filters),
     clienteNome: { not: null },
     ...(vendedor ? { vendedor } : {}),
     ...(canal !== "todos" ? { AND: [canalWhere(canal)] } : {}),
   };
-  const rows = await prisma.sale.groupBy({
-    by: ["clienteNome"],
-    where,
-    _sum: { quantidade: true, valorTotalLiquido: true },
-    _count: { _all: true },
-  });
+  const [rows, devolvidoPorCliente] = await Promise.all([
+    prisma.sale.groupBy({
+      by: ["clienteNome"],
+      where,
+      _sum: { quantidade: true, valorTotalLiquido: true },
+      _count: { _all: true },
+    }),
+    liquido && canal !== "b2b" ? getValorDevolvidoPorCliente(filters) : Promise.resolve(new Map<string, number>()),
+  ]);
 
   const sorted = rows
-    .map((r) => ({
-      cliente: r.clienteNome as string,
-      pedidos: r._count._all,
-      unidades: r._sum.quantidade ?? 0,
-      receita: r._sum.valorTotalLiquido ?? 0,
-    }))
+    .map((r) => {
+      const cliente = r.clienteNome as string;
+      const receitaBruta = r._sum.valorTotalLiquido ?? 0;
+      const devolvido = devolvidoPorCliente.get(cliente) ?? 0;
+      return {
+        cliente,
+        pedidos: r._count._all,
+        unidades: r._sum.quantidade ?? 0,
+        receita: liquido ? receitaBruta - devolvido : receitaBruta,
+      };
+    })
     .sort((a, b) => b.receita - a.receita)
     .slice(0, limit);
 
@@ -1091,7 +1136,7 @@ export async function getAniversariantesDoMes(filters: DashboardFilters, vendedo
     .sort((a, b) => a.dataNascimento.getUTCDate() - b.dataNascimento.getUTCDate());
 }
 
-export async function getMonthlySalesByStore(filters: DashboardFilters) {
+export async function getMonthlySalesByStore(filters: DashboardFilters, canal: Canal = "todos") {
   const rows = await prisma.$queryRaw<{ month: Date; storeId: string; units: bigint; revenue: number }[]>`
     SELECT
       DATE_TRUNC('month', ("saleDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo') AS month,
@@ -1105,6 +1150,8 @@ export async function getMonthlySalesByStore(filters: DashboardFilters) {
       ${filters.marcas !== undefined ? Prisma.sql`AND "marca" = ANY(${filters.marcas})` : Prisma.empty}
       ${filters.tabelasPreco !== undefined ? Prisma.sql`AND ("tabelaPreco" = ANY(${filters.tabelasPreco}) OR "tabelaPreco" IS NULL)` : Prisma.empty}
       ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
+      ${canal === "b2b" ? Prisma.sql`AND "tabelaPreco" = 'Tabela atacado'` : Prisma.empty}
+      ${canal === "b2c" ? Prisma.sql`AND ("tabelaPreco" IS DISTINCT FROM 'Tabela atacado')` : Prisma.empty}
     GROUP BY month, "storeId"
     ORDER BY month ASC
   `;

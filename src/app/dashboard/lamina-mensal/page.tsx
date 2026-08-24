@@ -119,9 +119,9 @@ export default async function LaminaMensalPage({
   const [curKpi, cmpKpi, trendRaw, topProdutos, topClientes] = await Promise.all([
     getMonthlySnapshotKpi(curFilters, canal),
     getMonthlySnapshotKpi(cmpFilters, canal),
-    getMonthlySalesByStore(trendFilters),
+    getMonthlySalesByStore(trendFilters, canal),
     getSalesByDimension(curFilters, "produto", canal),
-    showFinancials ? getTopClientes(curFilters, null, 5, canal) : Promise.resolve([]),
+    showFinancials ? getTopClientes(curFilters, null, 5, canal, true) : Promise.resolve([]),
   ]);
 
   const trendData = trendRaw.data.map((d) => ({
@@ -363,7 +363,7 @@ export default async function LaminaMensalPage({
 
       {showFinancials && (
         <section className="mt-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-          <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Top 5 clientes do mês (receita bruta)</h2>
+          <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Top 5 clientes do mês (receita líquida)</h2>
           {topClientes.length === 0 ? (
             <p className="text-sm text-[var(--text-muted)]">Sem clientes identificados no período.</p>
           ) : (
