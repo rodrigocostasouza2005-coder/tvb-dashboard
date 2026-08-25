@@ -1,6 +1,8 @@
 {
   "crons": [
+    { "path": "/api/sync-midnight", "schedule": "0 3 * * *" },
     { "path": "/api/sync", "schedule": "0 11 * * *" },
+    { "path": "/api/sync-noon", "schedule": "0 15 * * *" },
     { "path": "/api/sync-evening", "schedule": "0 20 * * *" },
     { "path": "/api/sync-late", "schedule": "30 21 * * *" }
   ]

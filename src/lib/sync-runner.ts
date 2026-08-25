@@ -375,7 +375,10 @@ async function buildResumoMessage(desde: Date, ate: Date) {
   return partes.join("\n");
 }
 
-export async function runSync() {
+// Um "attempt" da sync inteira — devolve o resumo em caso de sucesso, ou lança em caso de erro.
+// Separado de runSync() pra permitir tentar de novo (retryBudgetMs) sem duplicar a lógica de
+// notificação/log, que só acontece uma vez, no fim, em runSync().
+async function doSync() {
   // "Mais vendidos por loja" olha o dia de ontem inteiro (00h-23h59 Brasília) — não mais
   // últimas 24h corridas nem "desde o último sync" (as duas versões anteriores podiam cair
   // majoritariamente numa janela de madrugada sem movimento das lojas físicas e mostrar só o
@@ -388,117 +391,148 @@ export async function runSync() {
   const desde = brasiliaDayStart(ontemStr);
   const ate = brasiliaDayEnd(ontemStr);
 
-  try {
-    // "matriz" não vende nada (só existe pra dar acesso a /ordensproducao/produtos) — incluir ela
-    // no loop de estoque/vendas abaixo duplicaria a busca de estoque das outras lojas (o token da
-    // matriz enxerga tudo) e arriscaria timeout de novo à toa. Sincronizada à parte, em paralelo.
-    const allClients = createDapicClients();
-    const clients = allClients.filter((c) => c.label !== "matriz");
-    const matrizClient = allClients.find((c) => c.label === "matriz");
+  // "matriz" não vende nada (só existe pra dar acesso a /ordensproducao/produtos) — incluir ela
+  // no loop de estoque/vendas abaixo duplicaria a busca de estoque das outras lojas (o token da
+  // matriz enxerga tudo) e arriscaria timeout de novo à toa. Sincronizada à parte, em paralelo.
+  const allClients = createDapicClients();
+  const clients = allClients.filter((c) => c.label !== "matriz");
+  const matrizClient = allClients.find((c) => c.label === "matriz");
 
-    async function syncOneClient(client: DapicClient) {
-      const { storeByDapicId, primaryStoreId } = await syncArmazenadores(client);
-      const [estoque, priceCatalog] = await Promise.all([
-        syncEstoque(client, storeByDapicId),
-        fetchPriceCatalogCached(prisma, client),
-      ]);
-      // Janela de 1 dia (24h) — cobre com folga o intervalo entre os 2 syncs diários (12h) e
-      // reduz o volume processado (menos chamadas de /faturas, que é 1 por fatura pro
-      // Site+Atacado). Se um sync falhar, o self-heal-sync.ts (dispara sozinho se o último
-      // SyncLog tiver mais de 5h) cobre o risco de perder dado mais velho que essa janela.
-      const vendas = await syncVendas(client, primaryStoreId, 1, priceCatalog);
-      const faturas = await syncFaturas(client, primaryStoreId, 1, priceCatalog);
-      return {
-        estoque,
-        vendas: vendas.vendas + faturas.vendas,
-        devolucoes: vendas.devolucoes,
-        brindes: vendas.brindes + faturas.brindes,
-      };
-    }
-
-    // cd-atacado (Site+Atacado, ~14k linhas de estoque, 3x maior que cada loja física) rodava em
-    // paralelo com as outras 3 e travava todo mundo junto — medido em 2026-08-12: isolado leva
-    // ~130s, mas junto com as outras 3 passava de 260s (quase estourando os 300s da Vercel), e as
-    // 3 pequenas juntas SEM ela levam só ~87s (eram 126-200s cada rodando junto com ela). Parece
-    // ser contenção real do lado do DAPIC quando os 4 tokens batem ao mesmo tempo, não só volume
-    // de dado. Separado em duas fases sequenciais (cd-atacado sozinho, depois as 3 pequenas juntas)
-    // — soma ~217s em vez de ~270-280s, com bem mais folga do limite.
-    const cdAtacadoClient = clients.find((c) => c.label === "cd-atacado");
-    const outrasLojas = clients.filter((c) => c.label !== "cd-atacado");
-
-    const [results, totalOrdensProducao, totalClientes] = await Promise.all([
-      (async () => {
-        const outrosResultados = await Promise.all(outrasLojas.map(syncOneClient));
-        const cdResultado = cdAtacadoClient ? [await syncOneClient(cdAtacadoClient)] : [];
-        return [...outrosResultados, ...cdResultado];
-      })(),
-      // Não fatal: se o token da matriz ainda não estiver configurado (ex: só em dev, não em
-      // produção), syncOrdensProducao devolve 0 sem quebrar o resto da sync.
-      syncOrdensProducao(matrizClient).catch((e) => { console.error("[syncOrdensProducao] falhou:", e?.message ?? e); return 0; }),
-      // Clientes — 1 token basta, não é fatal se falhar
-      (cdAtacadoClient ? syncClientes(cdAtacadoClient) : Promise.resolve(0)).catch(() => 0),
-      // Parcelas em aberto (inadimplência) — não é fatal se falhar
-      (cdAtacadoClient ? syncParcelas(cdAtacadoClient) : Promise.resolve(0)).catch((e) => { console.error("[syncParcelas] falhou:", e?.message ?? e); return 0; }),
+  async function syncOneClient(client: DapicClient) {
+    const { storeByDapicId, primaryStoreId } = await syncArmazenadores(client);
+    const [estoque, priceCatalog] = await Promise.all([
+      syncEstoque(client, storeByDapicId),
+      fetchPriceCatalogCached(prisma, client),
     ]);
-
-    const totalEstoque = results.reduce((a, r) => a + r.estoque, 0);
-    const totalVendas = results.reduce((a, r) => a + r.vendas, 0);
-    const totalDevolucoes = results.reduce((a, r) => a + r.devolucoes, 0);
-    const totalBrindes = results.reduce((a, r) => a + r.brindes, 0);
-
-    await prisma.syncLog.create({
-      data: { source: "STOCK", status: "SUCCESS", recordsSynced: totalEstoque, finishedAt: new Date() },
-    });
-    await prisma.syncLog.create({
-      data: { source: "SALES", status: "SUCCESS", recordsSynced: totalVendas, finishedAt: new Date() },
-    });
-    await prisma.syncLog.create({
-      data: { source: "RETURNS", status: "SUCCESS", recordsSynced: totalDevolucoes, finishedAt: new Date() },
-    });
-    await prisma.syncLog.create({
-      data: { source: "PRODUCTION", status: "SUCCESS", recordsSynced: totalOrdensProducao, finishedAt: new Date() },
-    });
-    await prisma.syncLog.create({
-      data: { source: "GIFTS", status: "SUCCESS", recordsSynced: totalBrindes, finishedAt: new Date() },
-    });
-
-    const agora = new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" });
-    const resumo = await buildResumoMessage(desde, ate).catch(() => "");
-    await sendTelegramMessage(`✅ Dashboard TVB atualizado (${agora})\n${resumo}`);
-
-    return NextResponse.json({
-      ok: true,
-      lojas: clients.length,
-      estoque: totalEstoque,
-      vendas: totalVendas,
-      devolucoes: totalDevolucoes,
-      ordensProducao: totalOrdensProducao,
-      brindes: totalBrindes,
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    await prisma.syncLog.create({
-      data: { source: "STOCK", status: "FAILED", message, finishedAt: new Date() },
-    });
-    await sendTelegramMessage(`⚠️ Falha ao atualizar o Dashboard TVB: ${message}`);
-    return NextResponse.json({ ok: false, error: message }, { status: 502 });
+    // Janela de 1 dia (24h) — cobre com folga o intervalo entre os 2 syncs diários (12h) e
+    // reduz o volume processado (menos chamadas de /faturas, que é 1 por fatura pro
+    // Site+Atacado). Se um sync falhar, o self-heal-sync.ts (dispara sozinho se o último
+    // SyncLog tiver mais de 5h) cobre o risco de perder dado mais velho que essa janela.
+    const vendas = await syncVendas(client, primaryStoreId, 1, priceCatalog);
+    const faturas = await syncFaturas(client, primaryStoreId, 1, priceCatalog);
+    return {
+      estoque,
+      vendas: vendas.vendas + faturas.vendas,
+      devolucoes: vendas.devolucoes,
+      brindes: vendas.brindes + faturas.brindes,
+    };
   }
+
+  // cd-atacado (Site+Atacado, ~14k linhas de estoque, 3x maior que cada loja física) rodava em
+  // paralelo com as outras 3 e travava todo mundo junto — medido em 2026-08-12: isolado leva
+  // ~130s, mas junto com as outras 3 passava de 260s (quase estourando os 300s da Vercel), e as
+  // 3 pequenas juntas SEM ela levam só ~87s (eram 126-200s cada rodando junto com ela). Parece
+  // ser contenção real do lado do DAPIC quando os 4 tokens batem ao mesmo tempo, não só volume
+  // de dado. Separado em duas fases sequenciais (cd-atacado sozinho, depois as 3 pequenas juntas)
+  // — soma ~217s em vez de ~270-280s, com bem mais folga do limite.
+  const cdAtacadoClient = clients.find((c) => c.label === "cd-atacado");
+  const outrasLojas = clients.filter((c) => c.label !== "cd-atacado");
+
+  const [results, totalOrdensProducao, totalClientes] = await Promise.all([
+    (async () => {
+      const outrosResultados = await Promise.all(outrasLojas.map(syncOneClient));
+      const cdResultado = cdAtacadoClient ? [await syncOneClient(cdAtacadoClient)] : [];
+      return [...outrosResultados, ...cdResultado];
+    })(),
+    // Não fatal: se o token da matriz ainda não estiver configurado (ex: só em dev, não em
+    // produção), syncOrdensProducao devolve 0 sem quebrar o resto da sync.
+    syncOrdensProducao(matrizClient).catch((e) => { console.error("[syncOrdensProducao] falhou:", e?.message ?? e); return 0; }),
+    // Clientes — 1 token basta, não é fatal se falhar
+    (cdAtacadoClient ? syncClientes(cdAtacadoClient) : Promise.resolve(0)).catch(() => 0),
+    // Parcelas em aberto (inadimplência) — não é fatal se falhar
+    (cdAtacadoClient ? syncParcelas(cdAtacadoClient) : Promise.resolve(0)).catch((e) => { console.error("[syncParcelas] falhou:", e?.message ?? e); return 0; }),
+  ]);
+
+  const totalEstoque = results.reduce((a, r) => a + r.estoque, 0);
+  const totalVendas = results.reduce((a, r) => a + r.vendas, 0);
+  const totalDevolucoes = results.reduce((a, r) => a + r.devolucoes, 0);
+  const totalBrindes = results.reduce((a, r) => a + r.brindes, 0);
+
+  await prisma.syncLog.create({
+    data: { source: "STOCK", status: "SUCCESS", recordsSynced: totalEstoque, finishedAt: new Date() },
+  });
+  await prisma.syncLog.create({
+    data: { source: "SALES", status: "SUCCESS", recordsSynced: totalVendas, finishedAt: new Date() },
+  });
+  await prisma.syncLog.create({
+    data: { source: "RETURNS", status: "SUCCESS", recordsSynced: totalDevolucoes, finishedAt: new Date() },
+  });
+  await prisma.syncLog.create({
+    data: { source: "PRODUCTION", status: "SUCCESS", recordsSynced: totalOrdensProducao, finishedAt: new Date() },
+  });
+  await prisma.syncLog.create({
+    data: { source: "GIFTS", status: "SUCCESS", recordsSynced: totalBrindes, finishedAt: new Date() },
+  });
+
+  return {
+    lojas: clients.length,
+    estoque: totalEstoque,
+    vendas: totalVendas,
+    devolucoes: totalDevolucoes,
+    ordensProducao: totalOrdensProducao,
+    brindes: totalBrindes,
+    desde,
+    ate,
+  };
+}
+
+// silent: não manda "✅ atualizado" no sucesso (usado nas syncs extra de 00h/12h — pedido do
+// Rodrigo em 2026-08-24, essas são só rede de segurança, não precisa avisar todo mundo). Erro
+// sempre avisa, mas só pro admin (TELEGRAM_ADMIN_CHAT_ID) — só o Rodrigo recebe erro, sucesso
+// continua indo pra lista inteira (TELEGRAM_CHAT_ID).
+// retryBudgetMs: se a 1ª tentativa falhar, tenta de novo até esse tempo total passar (uma sync
+// completa já leva ~130-280s sozinha — maxDuration é 300s — então normalmente cabe só mais 1-2
+// tentativas, não um número fixo; por isso o retry é por orçamento de tempo, não por contagem).
+export async function runSync(options: { silent?: boolean; retryBudgetMs?: number } = {}) {
+  const { silent = false, retryBudgetMs = 0 } = options;
+  const start = Date.now();
+  let lastMessage = "";
+  let attempt = 0;
+
+  do {
+    attempt++;
+    try {
+      const result = await doSync();
+      const agora = new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" });
+      if (!silent) {
+        const resumo = await buildResumoMessage(result.desde, result.ate).catch(() => "");
+        await sendTelegramMessage(`✅ Dashboard TVB atualizado (${agora})\n${resumo}`);
+      }
+      return NextResponse.json({ ok: true, ...result, attempt });
+    } catch (error) {
+      lastMessage = error instanceof Error ? error.message : String(error);
+      console.error(`[sync] tentativa ${attempt} falhou:`, lastMessage);
+      await prisma.syncLog.create({
+        data: { source: "STOCK", status: "FAILED", message: lastMessage, finishedAt: new Date() },
+      }).catch(() => {});
+
+      const remaining = retryBudgetMs - (Date.now() - start);
+      if (remaining <= 5_000) break; // não sobra tempo útil pra outra tentativa completa
+      await new Promise((r) => setTimeout(r, Math.min(15_000, remaining)));
+    }
+  } while (Date.now() - start < retryBudgetMs);
+
+  await sendTelegramMessage(
+    `⚠️ Falha ao atualizar o Dashboard TVB (${attempt}x tentativas): ${lastMessage}`,
+    { adminOnly: true }
+  );
+  return NextResponse.json({ ok: false, error: lastMessage, attempts: attempt }, { status: 502 });
 }
 
 // Vercel Cron chama via GET com "Authorization: Bearer <CRON_SECRET>" automático.
-export async function handleSyncGet(request: NextRequest) {
+export async function handleSyncGet(request: NextRequest, options?: { silent?: boolean; retryBudgetMs?: number }) {
   const auth = request.headers.get("authorization");
   if (!process.env.CRON_SECRET || auth !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  return runSync();
+  return runSync(options);
 }
 
 // Disparo manual (ex: pra testar), com o segredo num header próprio.
-export async function handleSyncPost(request: NextRequest) {
+export async function handleSyncPost(request: NextRequest, options?: { silent?: boolean; retryBudgetMs?: number }) {
   const secret = request.headers.get("x-cron-secret");
   if (!process.env.CRON_SECRET || secret !== process.env.CRON_SECRET) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  return runSync();
+  return runSync(options);
 }
