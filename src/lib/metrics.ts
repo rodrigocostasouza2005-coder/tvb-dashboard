@@ -1123,19 +1123,42 @@ export async function getTopClientes(
     liquido && canal !== "b2b" ? getValorDevolvidoPorCliente(filters) : Promise.resolve(new Map<string, number>()),
   ]);
 
-  const sorted = rows
-    .map((r) => {
-      const cliente = r.clienteNome as string;
-      const receitaBruta = r._sum.valorTotalLiquido ?? 0;
-      const devolvido = devolvidoPorCliente.get(cliente) ?? 0;
-      return {
-        cliente,
-        pedidos: r._count._all,
-        unidades: r._sum.quantidade ?? 0,
-        receitaBruta,
-        receitaLiquida: liquido ? receitaBruta - devolvido : receitaBruta,
-      };
-    })
+  // O mesmo cliente às vezes está cadastrado com maiúscula/minúscula diferente no DAPIC (ex:
+  // "Gringo" e "GRINGO") — sem normalizar, o groupBy trata como 2 clientes distintos e fragmenta
+  // a receita dele em duas linhas. Junta pelo nome normalizado, mantendo como nome de exibição
+  // a variante com mais pedidos (a mais "oficial" das duas).
+  type Merged = { cliente: string; pedidos: number; unidades: number; receitaBruta: number; devolvido: number; melhorPedidos: number };
+  const merged = new Map<string, Merged>();
+  for (const r of rows) {
+    const nome = r.clienteNome as string;
+    const norm = nome.trim().toUpperCase();
+    const pedidos = r._count._all;
+    const unidades = r._sum.quantidade ?? 0;
+    const receitaBruta = r._sum.valorTotalLiquido ?? 0;
+    const devolvido = devolvidoPorCliente.get(nome) ?? 0;
+    const cur = merged.get(norm);
+    if (!cur) {
+      merged.set(norm, { cliente: nome, pedidos, unidades, receitaBruta, devolvido, melhorPedidos: pedidos });
+    } else {
+      cur.pedidos += pedidos;
+      cur.unidades += unidades;
+      cur.receitaBruta += receitaBruta;
+      cur.devolvido += devolvido;
+      if (pedidos > cur.melhorPedidos) {
+        cur.cliente = nome;
+        cur.melhorPedidos = pedidos;
+      }
+    }
+  }
+
+  const sorted = [...merged.values()]
+    .map((m) => ({
+      cliente: m.cliente,
+      pedidos: m.pedidos,
+      unidades: m.unidades,
+      receitaBruta: m.receitaBruta,
+      receitaLiquida: liquido ? m.receitaBruta - m.devolvido : m.receitaBruta,
+    }))
     .sort((a, b) => (liquido ? b.receitaLiquida - a.receitaLiquida : b.receitaBruta - a.receitaBruta))
     .slice(0, limit);
 
