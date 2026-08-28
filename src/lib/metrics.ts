@@ -1495,6 +1495,7 @@ export type ClienteFicha = {
   receitaBruta: number;
   receitaLiquida: number;
   pedidos: number;
+  pedidosLiquidos: number;
   pedidosB2B: number;
   pedidosB2C: number;
   ticketMedio: number;
@@ -1700,12 +1701,16 @@ export async function getClienteFicha(
     devolvidoValorTotal += r.valorTotal;
   }
 
-  // Pedido só conta pra uma loja se sobrou saldo líquido positivo ali (pedido 100% devolvido não
-  // é um "pedido comprado" de verdade).
+  // Pedido só conta como "líquido" (aqui e em "onde comprou") se sobrou saldo positivo depois da
+  // devolução — pedido 100% devolvido não é um "pedido comprado" de verdade. KPI "Pedidos" no topo
+  // usa isso como valor principal, com o bruto (pedidos.size) como subtexto — pedido do Rodrigo em
+  // 2026-08-28, achou estranho o KPI bruto não bater com a soma de "onde comprou" (líquida).
   const pedidosPorLoja = new Map<string, number>();
+  let pedidosLiquidos = 0;
   for (const [pedidoKey, bruto] of pedidoUnidadesBruto) {
     const liquido = bruto - (pedidoUnidadesDevolvido.get(pedidoKey) ?? 0);
     if (liquido <= 0) continue;
+    pedidosLiquidos++;
     const loja = pedidoKeyToLoja.get(pedidoKey);
     if (!loja) continue;
     pedidosPorLoja.set(loja, (pedidosPorLoja.get(loja) ?? 0) + 1);
@@ -1728,9 +1733,12 @@ export async function getClienteFicha(
     unidadesBrutas,
     unidadesLiquidas: unidadesBrutas - devolvidoUnidadesTotal,
     pedidos: pedidos.size,
+    pedidosLiquidos,
     pedidosB2B,
     pedidosB2C,
-    ticketMedio: pedidos.size > 0 ? (receitaBruta - devolvidoValorTotal) / pedidos.size : 0,
+    // Líquido/líquido: receita líquida dividida por pedidos líquidos (pedido 100% devolvido não
+    // deveria "puxar pra baixo" o ticket médio de quem ele nem chegou a ficar com nada).
+    ticketMedio: pedidosLiquidos > 0 ? (receitaBruta - devolvidoValorTotal) / pedidosLiquidos : 0,
     primeiraCompra,
     ultimaCompra,
     receitaB2B,

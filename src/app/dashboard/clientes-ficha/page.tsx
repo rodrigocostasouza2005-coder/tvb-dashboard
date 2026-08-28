@@ -120,7 +120,7 @@ export default async function ClientesFichaPage({
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             {showFinancials && <StatTile label="Receita líquida" value={formatBRL(ficha.receitaLiquida)} subValue={`Bruta: ${formatBRL(ficha.receitaBruta)}`} />}
             <StatTile label="Unidades líquidas" value={ficha.unidadesLiquidas.toLocaleString("pt-BR")} subValue={`Brutas: ${ficha.unidadesBrutas.toLocaleString("pt-BR")}`} />
-            <StatTile label="Pedidos" value={ficha.pedidos.toLocaleString("pt-BR")} subValue={`B2B ${ficha.pedidosB2B} · B2C ${ficha.pedidosB2C}`} />
+            <StatTile label="Pedidos (líquidos)" value={ficha.pedidosLiquidos.toLocaleString("pt-BR")} subValue={`Brutos: ${ficha.pedidos} (B2B ${ficha.pedidosB2B} · B2C ${ficha.pedidosB2C})`} />
             {showFinancials && <StatTile label="Ticket médio (líquido)" value={formatBRL(ficha.ticketMedio)} />}
           </div>
 
