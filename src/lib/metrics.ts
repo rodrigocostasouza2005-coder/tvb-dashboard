@@ -903,22 +903,34 @@ export async function getReplenishment(filters: Pick<DashboardFilters, "storeIds
 // "Cliente novo" = a 1ª compra dele de todas (sem limite de data, dentro do resto do filtro
 // aplicado — loja/marca/tabela de preço/grupo) caiu dentro do período escolhido no filtro de
 // data. Pedido do Rodrigo em 2026-08-11 pro card da Visão Geral.
+// Primeira compra HISTÓRICA de cada cliente, sem NENHUM filtro de loja/marca/tabela de preço —
+// "cliente novo" sempre significa novo pra empresa inteira, nunca só dentro do filtro aplicado
+// (decisão do Rodrigo em 2026-08-28, corrigindo um comportamento antigo onde filtrar por 1 loja
+// podia marcar como "novo" um cliente que já comprava havia tempo em outra loja/marca). Mesma
+// normalização de capitalização de getTopClientes (senão "Gringo"/"GRINGO" contam como 2
+// primeiras-compras diferentes). Recebe os nomes JÁ normalizados (trim+upper).
+async function getPrimeiraCompraGlobalPorCliente(nomesNormalizados: string[]): Promise<Map<string, Date>> {
+  if (nomesNormalizados.length === 0) return new Map();
+  const rows = await prisma.$queryRaw<{ norm: string; first: Date }[]>`
+    SELECT UPPER(TRIM("clienteNome")) AS norm, MIN("saleDate") AS first
+    FROM "Sale"
+    WHERE UPPER(TRIM("clienteNome")) = ANY(${nomesNormalizados})
+    GROUP BY norm
+  `;
+  return new Map(rows.map((r) => [r.norm, new Date(r.first)]));
+}
+
 export async function getNewClientsCount(filters: DashboardFilters) {
-  const where: Prisma.SaleWhereInput = {
-    clienteNome: { not: null },
-    ...(filters.storeIds !== undefined ? { storeId: { in: filters.storeIds } } : {}),
-    ...(filters.marcas !== undefined ? { marca: { in: filters.marcas } } : {}),
-    ...(filters.tabelasPreco !== undefined ? { tabelaPreco: { in: filters.tabelasPreco } } : {}),
-    ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
-  };
-  const firstPurchaseByClient = await prisma.sale.groupBy({
-    by: ["clienteNome"],
-    where,
-    _min: { saleDate: true },
-  });
-  return firstPurchaseByClient.filter(
-    (c) => c._min.saleDate && c._min.saleDate >= filters.from && c._min.saleDate <= filters.to
-  ).length;
+  const where: Prisma.SaleWhereInput = { ...saleWhere(filters), clienteNome: { not: null } };
+  const clientesNoPeriodo = await prisma.sale.groupBy({ by: ["clienteNome"], where });
+  const normSet = new Set(clientesNoPeriodo.map((c) => (c.clienteNome as string).trim().toUpperCase()));
+  const primeiraGlobal = await getPrimeiraCompraGlobalPorCliente([...normSet]);
+  let count = 0;
+  for (const norm of normSet) {
+    const first = primeiraGlobal.get(norm);
+    if (first && first >= filters.from && first <= filters.to) count++;
+  }
+  return count;
 }
 
 // Devoluções não têm vendedor no schema, mas dapicVendaId é o mesmo id da venda original —
@@ -1113,48 +1125,53 @@ export async function getTopClientes(
     ...(vendedor ? { vendedor } : {}),
     ...(canal !== "todos" ? { AND: [canalWhere(canal)] } : {}),
   };
-  const [rows, devolvidoPorCliente] = await Promise.all([
+  const [rows, pedidosRows, devolvidoPorCliente] = await Promise.all([
     prisma.sale.groupBy({
       by: ["clienteNome"],
       where,
       _sum: { quantidade: true, valorTotalLiquido: true },
-      _count: { _all: true },
     }),
+    // "Pedidos" precisa ser PEDIDO distinto (storeId+dapicVendaId), não linha de item — 1 pedido
+    // pode ter vários produtos, cada um sua própria linha em Sale. Contar linhas (_count._all)
+    // inflava até 40x em clientes de atacado com pedidos grandes (achado em 2026-08-28).
+    prisma.sale.groupBy({ by: ["clienteNome", "storeId", "dapicVendaId"], where }),
     liquido && canal !== "b2b" ? getValorDevolvidoPorCliente(filters) : Promise.resolve(new Map<string, number>()),
   ]);
 
   // O mesmo cliente às vezes está cadastrado com maiúscula/minúscula diferente no DAPIC (ex:
   // "Gringo" e "GRINGO") — sem normalizar, o groupBy trata como 2 clientes distintos e fragmenta
   // a receita dele em duas linhas. Junta pelo nome normalizado, mantendo como nome de exibição
-  // a variante com mais pedidos (a mais "oficial" das duas).
-  type Merged = { cliente: string; pedidos: number; unidades: number; receitaBruta: number; devolvido: number; melhorPedidos: number };
+  // a variante com mais receita (a mais "oficial" das duas).
+  type Merged = { cliente: string; unidades: number; receitaBruta: number; devolvido: number; melhorReceita: number; pedidos: Set<string> };
   const merged = new Map<string, Merged>();
   for (const r of rows) {
     const nome = r.clienteNome as string;
     const norm = nome.trim().toUpperCase();
-    const pedidos = r._count._all;
     const unidades = r._sum.quantidade ?? 0;
     const receitaBruta = r._sum.valorTotalLiquido ?? 0;
     const devolvido = devolvidoPorCliente.get(nome) ?? 0;
     const cur = merged.get(norm);
     if (!cur) {
-      merged.set(norm, { cliente: nome, pedidos, unidades, receitaBruta, devolvido, melhorPedidos: pedidos });
+      merged.set(norm, { cliente: nome, unidades, receitaBruta, devolvido, melhorReceita: receitaBruta, pedidos: new Set() });
     } else {
-      cur.pedidos += pedidos;
       cur.unidades += unidades;
       cur.receitaBruta += receitaBruta;
       cur.devolvido += devolvido;
-      if (pedidos > cur.melhorPedidos) {
+      if (receitaBruta > cur.melhorReceita) {
         cur.cliente = nome;
-        cur.melhorPedidos = pedidos;
+        cur.melhorReceita = receitaBruta;
       }
     }
+  }
+  for (const p of pedidosRows) {
+    const norm = (p.clienteNome as string).trim().toUpperCase();
+    merged.get(norm)?.pedidos.add(`${p.storeId}::${p.dapicVendaId}`);
   }
 
   const sorted = [...merged.values()]
     .map((m) => ({
       cliente: m.cliente,
-      pedidos: m.pedidos,
+      pedidos: m.pedidos.size,
       unidades: m.unidades,
       receitaBruta: m.receitaBruta,
       receitaLiquida: liquido ? m.receitaBruta - m.devolvido : m.receitaBruta,
@@ -1176,6 +1193,381 @@ export async function getTopClientes(
       dataNascimento: cad?.dataNascimento ?? null,
     };
   });
+}
+
+// ===== CRM de Clientes (2026-08-28) =====
+
+// KPIs da Visão Geral do CRM: ativos, novos (mesma regra de getNewClientsCount — 1ª compra da
+// empresa inteira caiu no período), recorrentes (2+ pedidos, não-novo), ocasionais (1 pedido,
+// não-novo), ticket médio, unidades por pedido, receita média por cliente.
+export type ClientesCrmOverview = {
+  ativos: number;
+  novos: number;
+  recorrentes: number;
+  ocasionais: number;
+  pedidos: number;
+  unidades: number;
+  receitaBruta: number;
+  ticketMedio: number;
+  unidadesPorPedido: number;
+  receitaMediaPorCliente: number;
+};
+
+export async function getClientesCrmOverview(filters: DashboardFilters, canal: Canal = "todos"): Promise<ClientesCrmOverview> {
+  const where: Prisma.SaleWhereInput = {
+    ...saleWhere(filters),
+    clienteNome: { not: null },
+    ...(canal !== "todos" ? { AND: [canalWhere(canal)] } : {}),
+  };
+
+  const porPedido = await prisma.sale.groupBy({
+    by: ["clienteNome", "storeId", "dapicVendaId"],
+    where,
+    _sum: { quantidade: true, valorTotalLiquido: true },
+  });
+
+  const porClienteNorm = new Map<string, { pedidos: Set<string>; unidades: number; receita: number }>();
+  for (const r of porPedido) {
+    const norm = (r.clienteNome as string).trim().toUpperCase();
+    const cur = porClienteNorm.get(norm) ?? { pedidos: new Set<string>(), unidades: 0, receita: 0 };
+    cur.pedidos.add(`${r.storeId}::${r.dapicVendaId}`);
+    cur.unidades += r._sum.quantidade ?? 0;
+    cur.receita += r._sum.valorTotalLiquido ?? 0;
+    porClienteNorm.set(norm, cur);
+  }
+
+  const primeiraGlobal = await getPrimeiraCompraGlobalPorCliente([...porClienteNorm.keys()]);
+
+  let novos = 0, recorrentes = 0, ocasionais = 0;
+  let totalPedidos = 0, totalUnidades = 0, totalReceita = 0;
+  for (const [norm, v] of porClienteNorm) {
+    const first = primeiraGlobal.get(norm);
+    const isNovo = first !== undefined && first >= filters.from && first <= filters.to;
+    if (isNovo) novos++;
+    else if (v.pedidos.size >= 2) recorrentes++;
+    else ocasionais++;
+    totalPedidos += v.pedidos.size;
+    totalUnidades += v.unidades;
+    totalReceita += v.receita;
+  }
+
+  const ativos = porClienteNorm.size;
+  return {
+    ativos,
+    novos,
+    recorrentes,
+    ocasionais,
+    pedidos: totalPedidos,
+    unidades: totalUnidades,
+    receitaBruta: totalReceita,
+    ticketMedio: totalPedidos > 0 ? totalReceita / totalPedidos : 0,
+    unidadesPorPedido: totalPedidos > 0 ? totalUnidades / totalPedidos : 0,
+    receitaMediaPorCliente: ativos > 0 ? totalReceita / ativos : 0,
+  };
+}
+
+export type ClienteSegmento = "novo" | "vip" | "recorrente" | "em_risco" | "ocasional" | "inativo";
+
+export type ClienteSegmentado = {
+  cliente: string;
+  recenciaDias: number;
+  pedidos: number;
+  receitaBruta: number;
+  segmento: ClienteSegmento;
+};
+
+// Segmentação tipo RFM (Recência/Frequência/Valor) sem expor a sigla pro usuário — pedido do
+// Rodrigo em 2026-08-28. Limiares calibrados contra a distribuição real da base (não são "regra
+// de livro"): medi em 2026-08-28 que a mediana de recência é ~172 dias e 65% dos clientes tem
+// só 1 pedido na vida toda — um corte tipo "90 dias = inativo" classificaria a maioria da base
+// inteira como inativa, então os limiares abaixo (90/180 dias) foram escolhidos olhando esses
+// percentis reais, não um valor arbitrário de manual de CRM.
+//
+// Usa o HISTÓRICO COMPLETO (ignora from/to do filtro) pra recência/frequência/valor — só
+// respeita loja/marca/tabela/canal do filtro. Sem isso, filtrar "últimos 30 dias" faria todo
+// mundo parecer "recente" e a segmentação perderia o sentido. "Novo" é a única exceção: usa o
+// período selecionado de verdade, e sempre olha a 1ª compra da empresa inteira (mesmo critério
+// de getNewClientsCount), não só dentro do filtro de loja/marca/tabela.
+export async function getClienteSegmentacao(filters: DashboardFilters, canal: Canal = "todos"): Promise<ClienteSegmentado[]> {
+  const allTime: DashboardFilters = { ...filters, from: new Date(0), to: new Date() };
+  const where: Prisma.SaleWhereInput = {
+    ...saleWhere(allTime),
+    clienteNome: { not: null },
+    ...(canal !== "todos" ? { AND: [canalWhere(canal)] } : {}),
+  };
+  const rows = await prisma.sale.findMany({
+    where,
+    select: { clienteNome: true, saleDate: true, dapicVendaId: true, storeId: true, valorTotalLiquido: true },
+  });
+
+  const byCliente = new Map<string, { nome: string; last: Date; pedidos: Set<string>; receita: number }>();
+  for (const r of rows) {
+    const nome = r.clienteNome as string;
+    const norm = nome.trim().toUpperCase();
+    const cur = byCliente.get(norm) ?? { nome, last: r.saleDate, pedidos: new Set<string>(), receita: 0 };
+    if (r.saleDate > cur.last) cur.last = r.saleDate;
+    cur.pedidos.add(`${r.storeId}::${r.dapicVendaId}`);
+    cur.receita += r.valorTotalLiquido;
+    byCliente.set(norm, cur);
+  }
+  if (byCliente.size === 0) return [];
+
+  const primeiraGlobal = await getPrimeiraCompraGlobalPorCliente([...byCliente.keys()]);
+
+  const now = new Date();
+  const receitaOrdenada = [...byCliente.values()].map((c) => c.receita).sort((a, b) => b - a);
+  const corteVip = receitaOrdenada[Math.max(0, Math.floor(receitaOrdenada.length * 0.1) - 1)] ?? Infinity;
+
+  const RECENCIA_ATIVO_DIAS = 90;
+  const RECENCIA_INATIVO_DIAS = 180;
+
+  return [...byCliente.entries()].map(([norm, c]) => {
+    const recenciaDias = Math.floor((now.getTime() - c.last.getTime()) / 86400000);
+    const pedidos = c.pedidos.size;
+    const primeiraCompra = primeiraGlobal.get(norm);
+    const isNovo = primeiraCompra !== undefined && primeiraCompra >= filters.from && primeiraCompra <= filters.to;
+
+    let segmento: ClienteSegmento;
+    if (isNovo) segmento = "novo";
+    else if (recenciaDias > RECENCIA_INATIVO_DIAS) segmento = "inativo";
+    else if (c.receita >= corteVip) segmento = "vip";
+    else if (pedidos >= 2 && recenciaDias <= RECENCIA_ATIVO_DIAS) segmento = "recorrente";
+    else if (pedidos >= 2) segmento = "em_risco";
+    else segmento = "ocasional";
+
+    return { cliente: c.nome, recenciaDias, pedidos, receitaBruta: c.receita, segmento };
+  });
+}
+
+export type ClientePrecoBehavior = "full_price" | "promo_driven" | "mixed" | "sem_dado";
+
+// Tabelas reais confirmadas em produção em 2026-08-28 (Sale.tabelaPreco): "Tabela varejo",
+// "Tabela atacado", "Promoção", "Black Friday 2025", mais null (tabela não inferida — 43-81%
+// das vendas por mês, taxa alta e constante, não é só resíduo de backfill antigo).
+const TABELAS_PROMOCIONAIS = new Set(["Promoção", "Black Friday 2025"]);
+const TABELAS_CHEIAS = new Set(["Tabela varejo", "Tabela atacado"]);
+// Cliente só recebe rótulo se tiver pelo menos essa quantidade de vendas com tabela
+// identificada — com a taxa de null alta, classificar com 1-2 vendas seria pouco confiável.
+const MIN_VENDAS_COM_TABELA = 3;
+
+function classificarComportamentoPreco(receitaCheio: number, receitaPromo: number, vendasComTabela: number): ClientePrecoBehavior {
+  if (vendasComTabela < MIN_VENDAS_COM_TABELA) return "sem_dado";
+  const total = receitaCheio + receitaPromo;
+  if (total <= 0) return "sem_dado";
+  const pctPromo = receitaPromo / total;
+  if (pctPromo >= 0.8) return "promo_driven";
+  if (pctPromo <= 0.2) return "full_price";
+  return "mixed";
+}
+
+// Full Price / Promo Driven / Mixed por cliente, em massa (usado na Segmentação da CRM). Só
+// classifica quem tem dado suficiente (ver MIN_VENDAS_COM_TABELA) — o resto vira "sem_dado" em
+// vez de arriscar um rótulo errado com pouca informação.
+export async function getClientesPrecoBehavior(
+  filters: DashboardFilters,
+  canal: Canal = "todos"
+): Promise<Map<string, ClientePrecoBehavior>> {
+  const where: Prisma.SaleWhereInput = {
+    ...saleWhere(filters),
+    clienteNome: { not: null },
+    ...(canal !== "todos" ? { AND: [canalWhere(canal)] } : {}),
+  };
+  const rows = await prisma.sale.groupBy({
+    by: ["clienteNome", "tabelaPreco"],
+    where,
+    _sum: { valorTotalLiquido: true },
+    _count: { _all: true },
+  });
+
+  const byCliente = new Map<string, { cheio: number; promo: number; comTabela: number }>();
+  for (const r of rows) {
+    const norm = (r.clienteNome as string).trim().toUpperCase();
+    const cur = byCliente.get(norm) ?? { cheio: 0, promo: 0, comTabela: 0 };
+    if (r.tabelaPreco !== null) {
+      cur.comTabela += r._count._all;
+      const valor = r._sum.valorTotalLiquido ?? 0;
+      if (TABELAS_PROMOCIONAIS.has(r.tabelaPreco)) cur.promo += valor;
+      else if (TABELAS_CHEIAS.has(r.tabelaPreco)) cur.cheio += valor;
+    }
+    byCliente.set(norm, cur);
+  }
+
+  const result = new Map<string, ClientePrecoBehavior>();
+  for (const [norm, v] of byCliente) {
+    result.set(norm, classificarComportamentoPreco(v.cheio, v.promo, v.comTabela));
+  }
+  return result;
+}
+
+// "Quem compra esse produto/grupo?" — mesmo padrão de normalização de getTopClientes, mas
+// agrupado por produto/grupo específico em vez do total do cliente.
+export async function getClientesPorDimensao(
+  filters: DashboardFilters,
+  dimension: "produto" | "grupo",
+  key: string,
+  canal: Canal = "todos",
+  limit = 20
+) {
+  const where: Prisma.SaleWhereInput = {
+    ...saleWhere(filters),
+    clienteNome: { not: null },
+    ...(dimension === "produto" ? { produto: key } : { grupo: key }),
+    ...(canal !== "todos" ? { AND: [canalWhere(canal)] } : {}),
+  };
+  const rows = await prisma.sale.groupBy({
+    by: ["clienteNome"],
+    where,
+    _sum: { quantidade: true, valorTotalLiquido: true },
+  });
+
+  const merged = new Map<string, { cliente: string; unidades: number; receita: number }>();
+  for (const r of rows) {
+    const nome = r.clienteNome as string;
+    const norm = nome.trim().toUpperCase();
+    const unidades = r._sum.quantidade ?? 0;
+    const receita = r._sum.valorTotalLiquido ?? 0;
+    const cur = merged.get(norm);
+    if (!cur) {
+      merged.set(norm, { cliente: nome, unidades, receita });
+    } else {
+      cur.unidades += unidades;
+      cur.receita += receita;
+    }
+  }
+  return [...merged.values()].sort((a, b) => b.receita - a.receita).slice(0, limit);
+}
+
+export type ClienteFicha = {
+  cliente: string;
+  telefone: string | null;
+  email: string | null;
+  dataNascimento: Date | null;
+  receitaBruta: number;
+  receitaLiquida: number;
+  unidades: number;
+  pedidos: number;
+  ticketMedio: number;
+  primeiraCompra: Date;
+  ultimaCompra: Date;
+  receitaB2B: number;
+  receitaB2C: number;
+  comportamentoPreco: ClientePrecoBehavior;
+  topProdutos: { produto: string; unidades: number; receita: number }[];
+  topTamanhos: { tamanho: string; unidades: number }[];
+  historicoMensal: { month: string; receita: number; unidades: number }[];
+};
+
+// Ficha do cliente: histórico COMPLETO (não o período do filtro — uma ficha é um perfil, não um
+// recorte), respeitando só loja/marca/tabela/grupo do filtro atual. Busca todas as variantes de
+// capitalização do nome primeiro (raw SQL, único jeito de casar por nome normalizado no Prisma),
+// depois usa elas num `in` normal — evita reescrever a query inteira em SQL cru.
+export async function getClienteFicha(
+  filters: Pick<DashboardFilters, "storeIds" | "marcas" | "tabelasPreco" | "grupoIn">,
+  nomeCliente: string
+): Promise<ClienteFicha | null> {
+  const norm = nomeCliente.trim().toUpperCase();
+  if (!norm) return null;
+
+  const variantRows = await prisma.$queryRaw<{ nome: string }[]>`
+    SELECT DISTINCT "clienteNome" AS nome FROM "Sale" WHERE UPPER(TRIM("clienteNome")) = ${norm}
+  `;
+  if (variantRows.length === 0) return null;
+  const variantes = variantRows.map((r) => r.nome);
+
+  const allTime: DashboardFilters = {
+    storeIds: filters.storeIds,
+    marcas: filters.marcas,
+    tabelasPreco: filters.tabelasPreco,
+    grupoIn: filters.grupoIn,
+    from: new Date(0),
+    to: new Date(),
+  };
+  const where: Prisma.SaleWhereInput = { ...saleWhere(allTime), clienteNome: { in: variantes } };
+
+  const [sales, devolvidoMap, cadastro] = await Promise.all([
+    prisma.sale.findMany({
+      where,
+      select: {
+        saleDate: true, dapicVendaId: true, storeId: true, valorTotalLiquido: true,
+        quantidade: true, tabelaPreco: true, produto: true, tamanho: true,
+      },
+    }),
+    getValorDevolvidoPorCliente(allTime),
+    prisma.clienteCadastro.findMany({ where: { nome: { in: variantes } } }),
+  ]);
+  if (sales.length === 0) return null;
+
+  const pedidos = new Set<string>();
+  let unidades = 0, receitaBruta = 0, receitaB2B = 0, receitaB2C = 0;
+  let primeiraCompra = sales[0].saleDate, ultimaCompra = sales[0].saleDate;
+  let cheio = 0, promo = 0, comTabela = 0;
+  const porProduto = new Map<string, { unidades: number; receita: number }>();
+  const porTamanho = new Map<string, number>();
+  const porMes = new Map<string, { receita: number; unidades: number }>();
+
+  for (const s of sales) {
+    pedidos.add(`${s.storeId}::${s.dapicVendaId}`);
+    unidades += s.quantidade;
+    receitaBruta += s.valorTotalLiquido;
+    if (s.tabelaPreco === "Tabela atacado") receitaB2B += s.valorTotalLiquido;
+    else receitaB2C += s.valorTotalLiquido;
+    if (s.saleDate < primeiraCompra) primeiraCompra = s.saleDate;
+    if (s.saleDate > ultimaCompra) ultimaCompra = s.saleDate;
+    if (s.tabelaPreco !== null) {
+      comTabela++;
+      if (TABELAS_PROMOCIONAIS.has(s.tabelaPreco)) promo += s.valorTotalLiquido;
+      else if (TABELAS_CHEIAS.has(s.tabelaPreco)) cheio += s.valorTotalLiquido;
+    }
+
+    const p = porProduto.get(s.produto) ?? { unidades: 0, receita: 0 };
+    p.unidades += s.quantidade;
+    p.receita += s.valorTotalLiquido;
+    porProduto.set(s.produto, p);
+
+    const tamanho = s.tamanho && s.tamanho.trim() ? s.tamanho : "—";
+    porTamanho.set(tamanho, (porTamanho.get(tamanho) ?? 0) + s.quantidade);
+
+    const mes = s.saleDate.toISOString().slice(0, 7);
+    const m = porMes.get(mes) ?? { receita: 0, unidades: 0 };
+    m.receita += s.valorTotalLiquido;
+    m.unidades += s.quantidade;
+    porMes.set(mes, m);
+  }
+
+  const devolvido = variantes.reduce((sum, v) => sum + (devolvidoMap.get(v) ?? 0), 0);
+  const cad = cadastro[0];
+  // Nome de exibição: a variante de capitalização mais longa (heurística simples — geralmente é
+  // a mais "completa", ex: prefere "João Tardim" a "JOAO TARDIM" só quando ambas tem o mesmo
+  // tamanho não dá pra saber qual é a "certa" mesmo, mas na prática resolve a maioria dos casos).
+  const nomeExibicao = [...variantes].sort((a, b) => b.length - a.length)[0] ?? nomeCliente;
+
+  return {
+    cliente: nomeExibicao,
+    telefone: cad?.telefone ?? cad?.celular ?? null,
+    email: cad?.email ?? null,
+    dataNascimento: cad?.dataNascimento ?? null,
+    receitaBruta,
+    receitaLiquida: receitaBruta - devolvido,
+    unidades,
+    pedidos: pedidos.size,
+    ticketMedio: pedidos.size > 0 ? receitaBruta / pedidos.size : 0,
+    primeiraCompra,
+    ultimaCompra,
+    receitaB2B,
+    receitaB2C,
+    comportamentoPreco: classificarComportamentoPreco(cheio, promo, comTabela),
+    topProdutos: [...porProduto.entries()]
+      .map(([produto, v]) => ({ produto, ...v }))
+      .sort((a, b) => b.receita - a.receita)
+      .slice(0, 5),
+    topTamanhos: [...porTamanho.entries()]
+      .map(([tamanho, unidades]) => ({ tamanho, unidades }))
+      .sort((a, b) => b.unidades - a.unidades)
+      .slice(0, 8),
+    historicoMensal: [...porMes.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([month, v]) => ({ month, ...v })),
+  };
 }
 
 // Aniversariantes de um mês específico (1-12), independente do ano de nascimento — pra

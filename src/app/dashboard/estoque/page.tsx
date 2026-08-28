@@ -31,12 +31,16 @@ export default async function EstoquePage({
     grupoIn,
   };
 
-  // Grupo escolhido no seletor: em Grupo, funciona como drill-down (troca pra ver os Produtos
-  // daquele grupo); em Produto/Tamanho já pedido do Rodrigo em 2026-08-28: só filtra a visão
-  // atual pro grupo escolhido, sem trocar de dimensão.
-  const grupoDrill = typeof rawParams.grupo === "string" ? rawParams.grupo : "";
-  const effectiveFilters = grupoDrill ? { ...filters, grupoIn: [grupoDrill] } : filters;
-  const effectiveDimension = grupoDrill && dimension === "grupo" ? "produto" : dimension;
+  // Grupo(s) escolhido(s) no seletor (multi-seleção, pedido do Rodrigo em 2026-08-28): em
+  // Grupo, funciona como drill-down (troca pra ver os Produtos daqueles grupos); em Produto/
+  // Tamanho só filtra a visão atual pros grupos escolhidos, sem trocar de dimensão.
+  const gruposSelecionados = Array.isArray(rawParams.grupo)
+    ? rawParams.grupo
+    : rawParams.grupo
+      ? [rawParams.grupo]
+      : [];
+  const effectiveFilters = gruposSelecionados.length > 0 ? { ...filters, grupoIn: gruposSelecionados } : filters;
+  const effectiveDimension = gruposSelecionados.length > 0 && dimension === "grupo" ? "produto" : dimension;
 
   const [rowsBrutas, returns, totalEstoque, grupoRows, stores, marcas, tabelasPreco] = await Promise.all([
     getStockVsSales(effectiveFilters, effectiveDimension),
@@ -76,8 +80,8 @@ export default async function EstoquePage({
       <DimensionToggle basePath="/dashboard/estoque" searchParams={rawParams} current={dimension} />
       <GrupoDrillSelect
         grupos={grupoRows.map((r) => r.key)}
-        current={grupoDrill}
-        label={dimension === "grupo" ? "Ver produtos de um grupo" : "Filtrar por grupo de produto"}
+        current={gruposSelecionados}
+        label={dimension === "grupo" ? "Ver produtos de um ou mais grupos" : "Filtrar por grupo de produto"}
       />
 
       <section className="mb-6">
