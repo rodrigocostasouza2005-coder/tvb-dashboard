@@ -1524,14 +1524,30 @@ export type ClienteFicha = {
 // depois usa elas num `in` normal — evita reescrever a query inteira em SQL cru.
 export async function getClienteFicha(
   filters: Pick<DashboardFilters, "storeIds" | "marcas" | "tabelasPreco" | "grupoIn">,
-  nomeCliente: string
+  busca: string
 ): Promise<ClienteFicha | null> {
-  const norm = nomeCliente.trim().toUpperCase();
+  let norm = busca.trim().toUpperCase();
   if (!norm) return null;
 
-  const variantRows = await prisma.$queryRaw<{ nome: string }[]>`
+  let variantRows = await prisma.$queryRaw<{ nome: string }[]>`
     SELECT DISTINCT "clienteNome" AS nome FROM "Sale" WHERE UPPER(TRIM("clienteNome")) = ${norm}
   `;
+  // Se não achou por nome exato, tenta como CPF/CNPJ — compara só os dígitos (o cadastro guarda
+  // formatado, ex: "098.286.597-00", o Rodrigo pode digitar com ou sem pontuação).
+  if (variantRows.length === 0) {
+    const somenteDigitos = busca.replace(/\D/g, "");
+    if (somenteDigitos.length >= 8) {
+      const cadastroPorCpf = await prisma.$queryRaw<{ nome: string }[]>`
+        SELECT "nome" FROM "ClienteCadastro" WHERE regexp_replace("cpfCnpj", '[^0-9]', '', 'g') = ${somenteDigitos} LIMIT 1
+      `;
+      if (cadastroPorCpf.length > 0) {
+        norm = cadastroPorCpf[0].nome.trim().toUpperCase();
+        variantRows = await prisma.$queryRaw<{ nome: string }[]>`
+          SELECT DISTINCT "clienteNome" AS nome FROM "Sale" WHERE UPPER(TRIM("clienteNome")) = ${norm}
+        `;
+      }
+    }
+  }
   if (variantRows.length === 0) return null;
   const variantes = variantRows.map((r) => r.nome);
 
@@ -1573,6 +1589,7 @@ export async function getClienteFicha(
   const porLoja = new Map<string, number>();
   const porMes = new Map<string, { receita: number; unidades: number }>();
   const pedidoKeys = new Set<string>();
+  const storeIdToLoja = new Map<string, string>();
 
   for (const s of sales) {
     const pedidoKey = `${s.storeId}::${s.dapicVendaId}`;
@@ -1602,6 +1619,7 @@ export async function getClienteFicha(
 
     const loja = s.store.displayGroup ?? s.store.name;
     porLoja.set(loja, (porLoja.get(loja) ?? 0) + s.quantidade);
+    storeIdToLoja.set(s.storeId, loja);
 
     const mes = s.saleDate.toISOString().slice(0, 7);
     const m = porMes.get(mes) ?? { receita: 0, unidades: 0 };
@@ -1626,10 +1644,15 @@ export async function getClienteFicha(
   const returnsCliente = dapicVendaIdsCliente.length > 0
     ? await prisma.return.findMany({
         where: { storeId: { in: storeIdsCliente }, dapicVendaId: { in: dapicVendaIdsCliente } },
-        select: { storeId: true, dapicVendaId: true, produto: true, quantidade: true, valorTotal: true },
+        select: { storeId: true, dapicVendaId: true, produto: true, tamanho: true, quantidade: true, valorTotal: true },
       })
     : [];
   const devolvidoPorProduto = new Map<string, { unidades: number; valor: number }>();
+  // Mesma netagem por produto, agora também por tamanho e por loja — pedido do Rodrigo em
+  // 2026-08-28: "onde comprou" e "tamanhos mais comprados" ficaram brutos enquanto o resto da
+  // ficha já tinha virado líquido, inconsistente na mesma tela.
+  const devolvidoPorTamanho = new Map<string, number>();
+  const devolvidoPorLoja = new Map<string, number>();
   let devolvidoUnidadesTotal = 0, devolvidoValorTotal = 0;
   for (const r of returnsCliente) {
     if (!pedidoKeys.has(`${r.storeId}::${r.dapicVendaId}`)) continue;
@@ -1637,6 +1660,13 @@ export async function getClienteFicha(
     cur.unidades += r.quantidade;
     cur.valor += r.valorTotal;
     devolvidoPorProduto.set(r.produto, cur);
+
+    const tamanho = r.tamanho && r.tamanho.trim() ? r.tamanho : "—";
+    devolvidoPorTamanho.set(tamanho, (devolvidoPorTamanho.get(tamanho) ?? 0) + r.quantidade);
+
+    const loja = storeIdToLoja.get(r.storeId);
+    if (loja) devolvidoPorLoja.set(loja, (devolvidoPorLoja.get(loja) ?? 0) + r.quantidade);
+
     devolvidoUnidadesTotal += r.quantidade;
     devolvidoValorTotal += r.valorTotal;
   }
@@ -1645,7 +1675,7 @@ export async function getClienteFicha(
   // Nome de exibição: a variante de capitalização mais longa (heurística simples — geralmente é
   // a mais "completa", ex: prefere "João Tardim" a "JOAO TARDIM" só quando ambas tem o mesmo
   // tamanho não dá pra saber qual é a "certa" mesmo, mas na prática resolve a maioria dos casos).
-  const nomeExibicao = [...variantes].sort((a, b) => b.length - a.length)[0] ?? nomeCliente;
+  const nomeExibicao = [...variantes].sort((a, b) => b.length - a.length)[0] ?? busca;
 
   return {
     cliente: nomeExibicao,
@@ -1677,14 +1707,13 @@ export async function getClienteFicha(
           receitaLiquida: v.receita - dev.valor,
         };
       })
-      .sort((a, b) => b.receitaLiquida - a.receitaLiquida)
-      .slice(0, 6),
+      .sort((a, b) => b.receitaLiquida - a.receitaLiquida),
     topTamanhos: [...porTamanho.entries()]
-      .map(([tamanho, unidades]) => ({ tamanho, unidades }))
+      .map(([tamanho, unidades]) => ({ tamanho, unidades: Math.max(0, unidades - (devolvidoPorTamanho.get(tamanho) ?? 0)) }))
       .sort((a, b) => b.unidades - a.unidades)
       .slice(0, 8),
     topLojas: [...porLoja.entries()]
-      .map(([loja, unidades]) => ({ loja, unidades }))
+      .map(([loja, unidades]) => ({ loja, unidades: Math.max(0, unidades - (devolvidoPorLoja.get(loja) ?? 0)) }))
       .sort((a, b) => b.unidades - a.unidades),
     historicoMensal: [...porMes.entries()]
       .sort(([a], [b]) => a.localeCompare(b))

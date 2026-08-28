@@ -78,7 +78,7 @@ export default async function ClientesFichaPage({
           type="text"
           name="cliente"
           defaultValue={clienteNome ?? ""}
-          placeholder="Nome exato do cliente..."
+          placeholder="Nome exato do cliente ou CPF/CNPJ..."
           className="w-full max-w-sm rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-3 py-1.5 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--series-1)]"
           style={{ colorScheme: "light dark" }}
         />
@@ -88,10 +88,10 @@ export default async function ClientesFichaPage({
       </form>
 
       {!clienteNome && (
-        <p className="text-sm text-[var(--text-muted)]">Digite o nome de um cliente pra ver a ficha (encontre o nome exato na aba Visão Geral, Segmentação ou Produto → Cliente).</p>
+        <p className="text-sm text-[var(--text-muted)]">Digite o nome exato ou o CPF/CNPJ de um cliente pra ver a ficha (encontre o nome exato na aba Visão Geral, Segmentação ou Produto → Cliente).</p>
       )}
       {clienteNome && !ficha && (
-        <p className="text-sm text-[var(--text-muted)]">Cliente não encontrado (confira o nome exato).</p>
+        <p className="text-sm text-[var(--text-muted)]">Cliente não encontrado (confira o nome exato ou o CPF/CNPJ).</p>
       )}
 
       {ficha && (
@@ -126,8 +126,8 @@ export default async function ClientesFichaPage({
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
-              <h3 className="mb-2 text-xs font-medium text-[var(--text-muted)]">Produtos mais comprados (líquido)</h3>
-              <ul className="flex flex-col gap-1.5 text-sm">
+              <h3 className="mb-2 text-xs font-medium text-[var(--text-muted)]">Todos os produtos comprados (líquido)</h3>
+              <ul className="flex max-h-80 flex-col gap-1.5 overflow-y-auto text-sm">
                 {ficha.topProdutos.map((p) => (
                   <li key={p.produto} className="flex items-center justify-between gap-2">
                     <span className="truncate text-[var(--text-primary)]">{p.produto}</span>
@@ -138,7 +138,7 @@ export default async function ClientesFichaPage({
               </ul>
             </div>
             <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
-              <h3 className="mb-2 text-xs font-medium text-[var(--text-muted)]">Onde comprou</h3>
+              <h3 className="mb-2 text-xs font-medium text-[var(--text-muted)]">Onde comprou (líquido)</h3>
               <ul className="flex flex-wrap gap-1.5">
                 {ficha.topLojas.map((l) => (
                   <li key={l.loja} className="rounded-md border border-[var(--border)] px-2 py-1 text-xs text-[var(--text-secondary)]">
@@ -149,7 +149,7 @@ export default async function ClientesFichaPage({
               </ul>
             </div>
             <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
-              <h3 className="mb-2 text-xs font-medium text-[var(--text-muted)]">Tamanhos mais comprados</h3>
+              <h3 className="mb-2 text-xs font-medium text-[var(--text-muted)]">Tamanhos mais comprados (líquido)</h3>
               <ul className="flex flex-wrap gap-1.5">
                 {ficha.topTamanhos.map((t) => (
                   <li key={t.tamanho} className="rounded-md border border-[var(--border)] px-2 py-1 text-xs text-[var(--text-secondary)]">
