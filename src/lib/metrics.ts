@@ -1707,13 +1707,19 @@ export async function getClienteFicha(
           receitaLiquida: v.receita - dev.valor,
         };
       })
+      // 0 não conta como "comprado". Negativo fica visível de propósito (devolução > compra
+      // naquele produto/loja/tamanho, normalmente troca feita em loja/registro diferente da
+      // compra original) — sem clamp, a soma do card sempre bate com unidadesLiquidas do topo.
+      .filter((p) => p.unidadesLiquidas !== 0)
       .sort((a, b) => b.receitaLiquida - a.receitaLiquida),
     topTamanhos: [...porTamanho.entries()]
-      .map(([tamanho, unidades]) => ({ tamanho, unidades: Math.max(0, unidades - (devolvidoPorTamanho.get(tamanho) ?? 0)) }))
+      .map(([tamanho, unidades]) => ({ tamanho, unidades: unidades - (devolvidoPorTamanho.get(tamanho) ?? 0) }))
+      .filter((t) => t.unidades !== 0)
       .sort((a, b) => b.unidades - a.unidades)
       .slice(0, 8),
     topLojas: [...porLoja.entries()]
-      .map(([loja, unidades]) => ({ loja, unidades: Math.max(0, unidades - (devolvidoPorLoja.get(loja) ?? 0)) }))
+      .map(([loja, unidades]) => ({ loja, unidades: unidades - (devolvidoPorLoja.get(loja) ?? 0) }))
+      .filter((l) => l.unidades !== 0)
       .sort((a, b) => b.unidades - a.unidades),
     historicoMensal: [...porMes.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
