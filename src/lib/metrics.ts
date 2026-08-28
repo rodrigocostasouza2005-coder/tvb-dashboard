@@ -1270,6 +1270,8 @@ export type ClienteSegmento = "novo" | "vip" | "recorrente" | "em_risco" | "ocas
 
 export type ClienteSegmentado = {
   cliente: string;
+  telefone: string | null;
+  grupoPrincipal: string | null;
   recenciaDias: number;
   pedidos: number;
   receitaBruta: number;
@@ -1301,22 +1303,27 @@ export async function getClienteSegmentacao(filters: DashboardFilters, canal: Ca
   };
   const rows = await prisma.sale.findMany({
     where,
-    select: { clienteNome: true, saleDate: true, dapicVendaId: true, storeId: true, valorTotalLiquido: true },
+    select: { clienteNome: true, saleDate: true, dapicVendaId: true, storeId: true, valorTotalLiquido: true, quantidade: true, grupo: true },
   });
 
-  const byCliente = new Map<string, { nome: string; last: Date; pedidos: Set<string>; receita: number }>();
+  const byCliente = new Map<string, { nome: string; last: Date; pedidos: Set<string>; receita: number; porGrupo: Map<string, number> }>();
   for (const r of rows) {
     const nome = r.clienteNome as string;
     const norm = nome.trim().toUpperCase();
-    const cur = byCliente.get(norm) ?? { nome, last: r.saleDate, pedidos: new Set<string>(), receita: 0 };
+    const cur = byCliente.get(norm) ?? { nome, last: r.saleDate, pedidos: new Set<string>(), receita: 0, porGrupo: new Map<string, number>() };
     if (r.saleDate > cur.last) cur.last = r.saleDate;
     cur.pedidos.add(`${r.storeId}::${r.dapicVendaId}`);
     cur.receita += r.valorTotalLiquido;
+    cur.porGrupo.set(r.grupo, (cur.porGrupo.get(r.grupo) ?? 0) + r.quantidade);
     byCliente.set(norm, cur);
   }
   if (byCliente.size === 0) return [];
 
   const primeiraGlobal = await getPrimeiraCompraGlobalPorCliente([...byCliente.keys()]);
+  // Telefone — mesmo enriquecimento de getTopClientes (join por nome com ClienteCadastro).
+  const nomesRaw = [...byCliente.values()].map((c) => c.nome);
+  const cadastros = await prisma.clienteCadastro.findMany({ where: { nome: { in: nomesRaw } } });
+  const cadastroByNome = new Map(cadastros.map((c) => [c.nome, c]));
 
   const now = new Date();
   const receitaOrdenada = [...byCliente.values()].map((c) => c.receita).sort((a, b) => b - a);
@@ -1341,7 +1348,18 @@ export async function getClienteSegmentacao(filters: DashboardFilters, canal: Ca
     else if (pedidos >= 2) segmento = "em_risco";
     else segmento = "ocasional";
 
-    return { cliente: c.nome, recenciaDias, pedidos, receitaBruta: c.receita, segmento };
+    const grupoPrincipal = [...c.porGrupo.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+    const cad = cadastroByNome.get(c.nome);
+
+    return {
+      cliente: c.nome,
+      telefone: cad?.telefone ?? cad?.celular ?? null,
+      grupoPrincipal,
+      recenciaDias,
+      pedidos,
+      receitaBruta: c.receita,
+      segmento,
+    };
   });
 }
 
@@ -1458,8 +1476,13 @@ export type ClienteFicha = {
   receitaB2B: number;
   receitaB2C: number;
   comportamentoPreco: ClientePrecoBehavior;
-  topProdutos: { produto: string; unidades: number; receita: number }[];
-  topTamanhos: { tamanho: string; unidades: number }[];
+  topProdutos: {
+    produto: string;
+    unidades: number;
+    receita: number;
+    porLoja: { loja: string; unidades: number }[];
+    porTamanho: { tamanho: string; unidades: number }[];
+  }[];
   historicoMensal: { month: string; receita: number; unidades: number }[];
 };
 
@@ -1496,6 +1519,7 @@ export async function getClienteFicha(
       select: {
         saleDate: true, dapicVendaId: true, storeId: true, valorTotalLiquido: true,
         quantidade: true, tabelaPreco: true, produto: true, tamanho: true,
+        store: { select: { name: true, displayGroup: true } },
       },
     }),
     getValorDevolvidoPorCliente(allTime),
@@ -1507,8 +1531,10 @@ export async function getClienteFicha(
   let unidades = 0, receitaBruta = 0, receitaB2B = 0, receitaB2C = 0;
   let primeiraCompra = sales[0].saleDate, ultimaCompra = sales[0].saleDate;
   let cheio = 0, promo = 0, comTabela = 0;
-  const porProduto = new Map<string, { unidades: number; receita: number }>();
-  const porTamanho = new Map<string, number>();
+  // Por produto: unidades/receita totais + quebra por loja (onde comprou) e por tamanho —
+  // pedido do Rodrigo em 2026-08-28, antes tamanho era uma lista solta misturando produtos
+  // diferentes, sem dizer qual tamanho era de qual produto nem em qual loja comprou.
+  const porProduto = new Map<string, { unidades: number; receita: number; porLoja: Map<string, number>; porTamanho: Map<string, number> }>();
   const porMes = new Map<string, { receita: number; unidades: number }>();
 
   for (const s of sales) {
@@ -1525,13 +1551,14 @@ export async function getClienteFicha(
       else if (TABELAS_CHEIAS.has(s.tabelaPreco)) cheio += s.valorTotalLiquido;
     }
 
-    const p = porProduto.get(s.produto) ?? { unidades: 0, receita: 0 };
+    const p = porProduto.get(s.produto) ?? { unidades: 0, receita: 0, porLoja: new Map<string, number>(), porTamanho: new Map<string, number>() };
     p.unidades += s.quantidade;
     p.receita += s.valorTotalLiquido;
-    porProduto.set(s.produto, p);
-
+    const loja = s.store.displayGroup ?? s.store.name;
+    p.porLoja.set(loja, (p.porLoja.get(loja) ?? 0) + s.quantidade);
     const tamanho = s.tamanho && s.tamanho.trim() ? s.tamanho : "—";
-    porTamanho.set(tamanho, (porTamanho.get(tamanho) ?? 0) + s.quantidade);
+    p.porTamanho.set(tamanho, (p.porTamanho.get(tamanho) ?? 0) + s.quantidade);
+    porProduto.set(s.produto, p);
 
     const mes = s.saleDate.toISOString().slice(0, 7);
     const m = porMes.get(mes) ?? { receita: 0, unidades: 0 };
@@ -1563,12 +1590,18 @@ export async function getClienteFicha(
     receitaB2C,
     comportamentoPreco: classificarComportamentoPreco(cheio, promo, comTabela),
     topProdutos: [...porProduto.entries()]
-      .map(([produto, v]) => ({ produto, ...v }))
+      .map(([produto, v]) => ({
+        produto,
+        unidades: v.unidades,
+        receita: v.receita,
+        porLoja: [...v.porLoja.entries()]
+          .map(([loja, unidades]) => ({ loja, unidades }))
+          .sort((a, b) => b.unidades - a.unidades),
+        porTamanho: [...v.porTamanho.entries()]
+          .map(([tamanho, unidades]) => ({ tamanho, unidades }))
+          .sort((a, b) => b.unidades - a.unidades),
+      }))
       .sort((a, b) => b.receita - a.receita)
-      .slice(0, 5),
-    topTamanhos: [...porTamanho.entries()]
-      .map(([tamanho, unidades]) => ({ tamanho, unidades }))
-      .sort((a, b) => b.unidades - a.unidades)
       .slice(0, 8),
     historicoMensal: [...porMes.entries()]
       .sort(([a], [b]) => a.localeCompare(b))

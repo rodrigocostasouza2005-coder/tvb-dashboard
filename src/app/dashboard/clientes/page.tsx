@@ -331,6 +331,8 @@ export default async function ClientesPage({
               <thead>
                 <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
                   <th className="px-4 py-2 font-medium">Cliente ({SEGMENTO_LABEL[segmentoSelecionado]})</th>
+                  <th className="px-4 py-2 font-medium">Contato</th>
+                  <th className="px-4 py-2 font-medium">Grupo mais comprado</th>
                   <th className="px-4 py-2 font-medium">Pedidos</th>
                   <th className="px-4 py-2 font-medium">Última compra</th>
                   {showFinancials && <th className="px-4 py-2 font-medium">Receita bruta</th>}
@@ -342,6 +344,14 @@ export default async function ClientesPage({
                     <td className="px-4 py-2 font-medium">
                       <a href={clienteHref(s.cliente)} className="hover:underline">{s.cliente}</a>
                     </td>
+                    <td className="px-4 py-2">
+                      {s.telefone ? (
+                        <a href={`tel:${s.telefone}`} className="text-[var(--series-1)] hover:underline tabular-nums">{s.telefone}</a>
+                      ) : (
+                        <span className="text-[var(--text-muted)]">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-2 text-[var(--text-secondary)]">{s.grupoPrincipal ?? <span className="text-[var(--text-muted)]">—</span>}</td>
                     <td className="px-4 py-2 tabular-nums">{s.pedidos}</td>
                     <td className="px-4 py-2 tabular-nums text-[var(--text-secondary)]">há {s.recenciaDias}d</td>
                     {showFinancials && <td className="px-4 py-2 tabular-nums">{formatBRL(s.receitaBruta)}</td>}
@@ -349,7 +359,7 @@ export default async function ClientesPage({
                 ))}
                 {listaSegmento.length === 0 && (
                   <tr>
-                    <td colSpan={showFinancials ? 4 : 3} className="px-4 py-6 text-center text-[var(--text-muted)]">
+                    <td colSpan={showFinancials ? 6 : 5} className="px-4 py-6 text-center text-[var(--text-muted)]">
                       Nenhum cliente nesse segmento.
                     </td>
                   </tr>
@@ -419,30 +429,39 @@ export default async function ClientesPage({
               )}
             </div>
 
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div>
-                <h4 className="mb-2 text-xs font-medium text-[var(--text-muted)]">Produtos mais comprados</h4>
-                <ul className="flex flex-col gap-1.5 text-sm">
-                  {ficha.topProdutos.map((p) => (
-                    <li key={p.produto} className="flex items-center justify-between gap-2">
-                      <span className="truncate text-[var(--text-primary)]">{p.produto}</span>
+            <div>
+              <h4 className="mb-2 text-xs font-medium text-[var(--text-muted)]">Produtos mais comprados</h4>
+              <ul className="flex flex-col gap-3 text-sm">
+                {ficha.topProdutos.map((p) => (
+                  <li key={p.produto} className="rounded-md border border-[var(--border)] p-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="truncate font-medium text-[var(--text-primary)]">{p.produto}</span>
                       <span className="shrink-0 tabular-nums text-[var(--text-muted)]">{p.unidades} un.</span>
-                    </li>
-                  ))}
-                  {ficha.topProdutos.length === 0 && <li className="text-[var(--text-muted)]">—</li>}
-                </ul>
-              </div>
-              <div>
-                <h4 className="mb-2 text-xs font-medium text-[var(--text-muted)]">Tamanhos mais comprados</h4>
-                <ul className="flex flex-wrap gap-1.5">
-                  {ficha.topTamanhos.map((t) => (
-                    <li key={t.tamanho} className="rounded-md border border-[var(--border)] px-2 py-1 text-xs text-[var(--text-secondary)]">
-                      {t.tamanho} <span className="text-[var(--text-muted)]">({t.unidades})</span>
-                    </li>
-                  ))}
-                  {ficha.topTamanhos.length === 0 && <li className="text-[var(--text-muted)]">—</li>}
-                </ul>
-              </div>
+                    </div>
+                    <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--text-muted)]">
+                      <span>
+                        Onde comprou:{" "}
+                        {p.porLoja.map((l, i) => (
+                          <span key={l.loja}>
+                            {i > 0 && ", "}
+                            {l.loja} ({l.unidades})
+                          </span>
+                        ))}
+                      </span>
+                      <span>
+                        Tamanhos:{" "}
+                        {p.porTamanho.map((t, i) => (
+                          <span key={t.tamanho}>
+                            {i > 0 && ", "}
+                            {t.tamanho} ({t.unidades})
+                          </span>
+                        ))}
+                      </span>
+                    </div>
+                  </li>
+                ))}
+                {ficha.topProdutos.length === 0 && <li className="text-[var(--text-muted)]">—</li>}
+              </ul>
             </div>
           </div>
         )}
