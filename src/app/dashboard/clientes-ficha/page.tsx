@@ -124,7 +124,19 @@ export default async function ClientesFichaPage({
             {showFinancials && <StatTile label="Ticket médio (líquido)" value={formatBRL(ficha.ticketMedio)} />}
           </div>
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
+              <h3 className="mb-2 text-xs font-medium text-[var(--text-muted)]">Grupos comprados (líquido)</h3>
+              <ul className="flex max-h-80 flex-col gap-1.5 overflow-y-auto text-sm">
+                {ficha.topGrupos.map((g) => (
+                  <li key={g.grupo} className="flex items-center justify-between gap-2">
+                    <span className="truncate text-[var(--text-primary)]">{g.grupo}</span>
+                    <span className="shrink-0 tabular-nums text-[var(--text-muted)]">{g.unidadesLiquidas} un.</span>
+                  </li>
+                ))}
+                {ficha.topGrupos.length === 0 && <li className="text-[var(--text-muted)]">—</li>}
+              </ul>
+            </div>
             <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
               <h3 className="mb-2 text-xs font-medium text-[var(--text-muted)]">Todos os produtos comprados (líquido)</h3>
               <ul className="flex max-h-80 flex-col gap-1.5 overflow-y-auto text-sm">
@@ -138,11 +150,11 @@ export default async function ClientesFichaPage({
               </ul>
             </div>
             <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
-              <h3 className="mb-2 text-xs font-medium text-[var(--text-muted)]">Onde comprou (líquido)</h3>
+              <h3 className="mb-2 text-xs font-medium text-[var(--text-muted)]">Onde comprou (pedidos)</h3>
               <ul className="flex flex-wrap gap-1.5">
                 {ficha.topLojas.map((l) => (
                   <li key={l.loja} className="rounded-md border border-[var(--border)] px-2 py-1 text-xs text-[var(--text-secondary)]">
-                    {l.loja} <span className="text-[var(--text-muted)]">({l.unidades})</span>
+                    {l.loja} <span className="text-[var(--text-muted)]">({l.pedidos} {l.pedidos === 1 ? "pedido" : "pedidos"})</span>
                   </li>
                 ))}
                 {ficha.topLojas.length === 0 && <li className="text-[var(--text-muted)]">—</li>}

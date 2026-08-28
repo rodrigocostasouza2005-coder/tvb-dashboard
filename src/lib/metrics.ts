@@ -1505,6 +1505,13 @@ export type ClienteFicha = {
   unidadesBrutas: number;
   unidadesLiquidas: number;
   comportamentoPreco: ClientePrecoBehavior;
+  topGrupos: {
+    grupo: string;
+    unidadesBrutas: number;
+    unidadesLiquidas: number;
+    receitaBruta: number;
+    receitaLiquida: number;
+  }[];
   topProdutos: {
     produto: string;
     unidadesBrutas: number;
@@ -1513,7 +1520,7 @@ export type ClienteFicha = {
     receitaLiquida: number;
   }[];
   topTamanhos: { tamanho: string; unidades: number }[];
-  topLojas: { loja: string; unidades: number }[];
+  topLojas: { loja: string; pedidos: number }[];
   // bruta — devolução não é atribuída a mês aqui (só ao produto, ver comentário na função).
   historicoMensal: { month: string; receita: number; unidades: number }[];
 };
@@ -1566,7 +1573,7 @@ export async function getClienteFicha(
       where,
       select: {
         saleDate: true, dapicVendaId: true, storeId: true, valorTotalLiquido: true,
-        quantidade: true, tabelaPreco: true, produto: true, tamanho: true,
+        quantidade: true, tabelaPreco: true, produto: true, tamanho: true, grupo: true,
         store: { select: { name: true, displayGroup: true } },
       },
     }),
@@ -1582,6 +1589,7 @@ export async function getClienteFicha(
   let primeiraCompra = sales[0].saleDate, ultimaCompra = sales[0].saleDate;
   let cheio = 0, promo = 0, comTabela = 0;
   const porProduto = new Map<string, { unidades: number; receita: number }>();
+  const porGrupo = new Map<string, { unidades: number; receita: number }>();
   const porTamanho = new Map<string, number>();
   // Card resumido de "onde comprou" (agregado, não por produto) — pedido do Rodrigo em
   // 2026-08-28: a quebra por produto tinha sido tirada por ficar detalhada demais, mas ele quis
@@ -1590,11 +1598,16 @@ export async function getClienteFicha(
   const porMes = new Map<string, { receita: number; unidades: number }>();
   const pedidoKeys = new Set<string>();
   const storeIdToLoja = new Map<string, string>();
+  // "Onde comprou" virou contagem de pedidos, não de peças (pedido do Rodrigo em 2026-08-28) —
+  // pedido pertence a 1 loja só (mesmo storeId), então dá pra contar direto por pedidoKey.
+  const pedidoKeyToLoja = new Map<string, string>();
+  const pedidoUnidadesBruto = new Map<string, number>();
 
   for (const s of sales) {
     const pedidoKey = `${s.storeId}::${s.dapicVendaId}`;
     pedidos.add(pedidoKey);
     pedidoKeys.add(pedidoKey);
+    pedidoUnidadesBruto.set(pedidoKey, (pedidoUnidadesBruto.get(pedidoKey) ?? 0) + s.quantidade);
     const isB2BLine = s.tabelaPreco === "Tabela atacado";
     pedidoCanal.set(pedidoKey, isB2BLine || (pedidoCanal.get(pedidoKey) ?? false));
     unidadesBrutas += s.quantidade;
@@ -1614,12 +1627,18 @@ export async function getClienteFicha(
     p.receita += s.valorTotalLiquido;
     porProduto.set(s.produto, p);
 
+    const g = porGrupo.get(s.grupo) ?? { unidades: 0, receita: 0 };
+    g.unidades += s.quantidade;
+    g.receita += s.valorTotalLiquido;
+    porGrupo.set(s.grupo, g);
+
     const tamanho = s.tamanho && s.tamanho.trim() ? s.tamanho : "—";
     porTamanho.set(tamanho, (porTamanho.get(tamanho) ?? 0) + s.quantidade);
 
     const loja = s.store.displayGroup ?? s.store.name;
     porLoja.set(loja, (porLoja.get(loja) ?? 0) + s.quantidade);
     storeIdToLoja.set(s.storeId, loja);
+    pedidoKeyToLoja.set(pedidoKey, loja);
 
     const mes = s.saleDate.toISOString().slice(0, 7);
     const m = porMes.get(mes) ?? { receita: 0, unidades: 0 };
@@ -1644,22 +1663,30 @@ export async function getClienteFicha(
   const returnsCliente = dapicVendaIdsCliente.length > 0
     ? await prisma.return.findMany({
         where: { storeId: { in: storeIdsCliente }, dapicVendaId: { in: dapicVendaIdsCliente } },
-        select: { storeId: true, dapicVendaId: true, produto: true, tamanho: true, quantidade: true, valorTotal: true },
+        select: { storeId: true, dapicVendaId: true, produto: true, tamanho: true, grupo: true, quantidade: true, valorTotal: true },
       })
     : [];
   const devolvidoPorProduto = new Map<string, { unidades: number; valor: number }>();
-  // Mesma netagem por produto, agora também por tamanho e por loja — pedido do Rodrigo em
+  const devolvidoPorGrupo = new Map<string, { unidades: number; valor: number }>();
+  // Mesma netagem por produto, agora também por grupo, tamanho e loja — pedido do Rodrigo em
   // 2026-08-28: "onde comprou" e "tamanhos mais comprados" ficaram brutos enquanto o resto da
   // ficha já tinha virado líquido, inconsistente na mesma tela.
   const devolvidoPorTamanho = new Map<string, number>();
   const devolvidoPorLoja = new Map<string, number>();
+  const pedidoUnidadesDevolvido = new Map<string, number>();
   let devolvidoUnidadesTotal = 0, devolvidoValorTotal = 0;
   for (const r of returnsCliente) {
-    if (!pedidoKeys.has(`${r.storeId}::${r.dapicVendaId}`)) continue;
+    const pedidoKey = `${r.storeId}::${r.dapicVendaId}`;
+    if (!pedidoKeys.has(pedidoKey)) continue;
     const cur = devolvidoPorProduto.get(r.produto) ?? { unidades: 0, valor: 0 };
     cur.unidades += r.quantidade;
     cur.valor += r.valorTotal;
     devolvidoPorProduto.set(r.produto, cur);
+
+    const curGrupo = devolvidoPorGrupo.get(r.grupo) ?? { unidades: 0, valor: 0 };
+    curGrupo.unidades += r.quantidade;
+    curGrupo.valor += r.valorTotal;
+    devolvidoPorGrupo.set(r.grupo, curGrupo);
 
     const tamanho = r.tamanho && r.tamanho.trim() ? r.tamanho : "—";
     devolvidoPorTamanho.set(tamanho, (devolvidoPorTamanho.get(tamanho) ?? 0) + r.quantidade);
@@ -1667,8 +1694,21 @@ export async function getClienteFicha(
     const loja = storeIdToLoja.get(r.storeId);
     if (loja) devolvidoPorLoja.set(loja, (devolvidoPorLoja.get(loja) ?? 0) + r.quantidade);
 
+    pedidoUnidadesDevolvido.set(pedidoKey, (pedidoUnidadesDevolvido.get(pedidoKey) ?? 0) + r.quantidade);
+
     devolvidoUnidadesTotal += r.quantidade;
     devolvidoValorTotal += r.valorTotal;
+  }
+
+  // Pedido só conta pra uma loja se sobrou saldo líquido positivo ali (pedido 100% devolvido não
+  // é um "pedido comprado" de verdade).
+  const pedidosPorLoja = new Map<string, number>();
+  for (const [pedidoKey, bruto] of pedidoUnidadesBruto) {
+    const liquido = bruto - (pedidoUnidadesDevolvido.get(pedidoKey) ?? 0);
+    if (liquido <= 0) continue;
+    const loja = pedidoKeyToLoja.get(pedidoKey);
+    if (!loja) continue;
+    pedidosPorLoja.set(loja, (pedidosPorLoja.get(loja) ?? 0) + 1);
   }
 
   const cad = cadastro[0];
@@ -1696,6 +1736,19 @@ export async function getClienteFicha(
     receitaB2B,
     receitaB2C,
     comportamentoPreco: classificarComportamentoPreco(cheio, promo, comTabela),
+    topGrupos: [...porGrupo.entries()]
+      .map(([grupo, v]) => {
+        const dev = devolvidoPorGrupo.get(grupo) ?? { unidades: 0, valor: 0 };
+        return {
+          grupo,
+          unidadesBrutas: v.unidades,
+          unidadesLiquidas: v.unidades - dev.unidades,
+          receitaBruta: v.receita,
+          receitaLiquida: v.receita - dev.valor,
+        };
+      })
+      .filter((g) => g.unidadesLiquidas !== 0)
+      .sort((a, b) => b.receitaLiquida - a.receitaLiquida),
     topProdutos: [...porProduto.entries()]
       .map(([produto, v]) => {
         const dev = devolvidoPorProduto.get(produto) ?? { unidades: 0, valor: 0 };
@@ -1717,10 +1770,10 @@ export async function getClienteFicha(
       .filter((t) => t.unidades !== 0)
       .sort((a, b) => b.unidades - a.unidades)
       .slice(0, 8),
-    topLojas: [...porLoja.entries()]
-      .map(([loja, unidades]) => ({ loja, unidades: unidades - (devolvidoPorLoja.get(loja) ?? 0) }))
-      .filter((l) => l.unidades !== 0)
-      .sort((a, b) => b.unidades - a.unidades),
+    topLojas: [...porLoja.keys()]
+      .map((loja) => ({ loja, pedidos: pedidosPorLoja.get(loja) ?? 0 }))
+      .filter((l) => l.pedidos !== 0)
+      .sort((a, b) => b.pedidos - a.pedidos),
     historicoMensal: [...porMes.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([month, v]) => ({ month, ...v })),
