@@ -244,23 +244,28 @@ const ORDENS_PRODUCAO_DATA_INICIAL = "2018-01-01";
 async function syncClientes(client: DapicClient) {
   const DATA_INICIAL = "2020-01-01";
   const dataFinal = toDateStr(new Date());
-  const clientes = await client.fetchClientes(DATA_INICIAL, dataFinal);
+  const clientesRaw = await client.fetchClientes(DATA_INICIAL, dataFinal);
+  // A API às vezes repete o mesmo Id na mesma resposta (achado em 2026-08-28, mesmo padrão já
+  // visto em /ordensproducao/produtos) — sem dedupe, "ON CONFLICT DO UPDATE" quebra a sync
+  // inteira porque a mesma linha apareceria 2x pra INSERT dentro do mesmo lote.
+  const clientes = [...new Map(clientesRaw.map((c) => [c.Id, c])).values()];
   const BATCH = 500;
   let count = 0;
   for (let i = 0; i < clientes.length; i += BATCH) {
     const batch = clientes.slice(i, i + BATCH);
     const values = batch.map(
-      (c) => Prisma.sql`(${randomUUID()}, ${c.Id}, ${c.NomeRazaoSocial}, ${c.Telefone ?? null}, ${c.Celular ?? null}, ${c.Email ?? null}, ${c.DataAniversario ? new Date(c.DataAniversario) : null})`
+      (c) => Prisma.sql`(${randomUUID()}, ${c.Id}, ${c.NomeRazaoSocial}, ${c.Telefone ?? null}, ${c.Celular ?? null}, ${c.Email ?? null}, ${c.DataAniversario ? new Date(c.DataAniversario) : null}, ${c.CpfCnpj ?? null})`
     );
     await prisma.$executeRaw`
-      INSERT INTO "ClienteCadastro" ("id", "dapicId", "nome", "telefone", "celular", "email", "dataNascimento")
+      INSERT INTO "ClienteCadastro" ("id", "dapicId", "nome", "telefone", "celular", "email", "dataNascimento", "cpfCnpj")
       VALUES ${Prisma.join(values)}
       ON CONFLICT ("dapicId") DO UPDATE SET
         "nome"           = EXCLUDED."nome",
         "telefone"       = EXCLUDED."telefone",
         "celular"        = EXCLUDED."celular",
         "email"          = EXCLUDED."email",
-        "dataNascimento" = EXCLUDED."dataNascimento"
+        "dataNascimento" = EXCLUDED."dataNascimento",
+        "cpfCnpj"        = EXCLUDED."cpfCnpj"
     `;
     count += batch.length;
   }

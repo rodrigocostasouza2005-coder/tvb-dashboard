@@ -402,6 +402,9 @@ export type DapicCliente = {
   Email: string | null;
   // "YYYY-MM-DD" ou null — nem todo cliente tem, cadastro é opcional no PDV/site.
   DataAniversario: string | null;
+  // CPF (pessoa física) ou CNPJ (pessoa jurídica), já formatado com pontuação. Descoberto em
+  // 2026-08-28 — pedido do Rodrigo pra aparecer na Ficha do Cliente.
+  CpfCnpj: string | null;
 };
 
 // Campos reais de /faturas, confirmados em 2026-08-10 com o token cd-atacado. Ao contrário de

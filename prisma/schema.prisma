@@ -274,6 +274,9 @@ model ClienteCadastro {
   celular        String?
   email          String?
   dataNascimento DateTime?
+  // CPF (pessoa física) ou CNPJ (pessoa jurídica) — mesmo campo bruto do DAPIC (CpfCnpj),
+  // já formatado com pontuação. Pedido do Rodrigo em 2026-08-28.
+  cpfCnpj        String?
 
   @@index([nome])
 }

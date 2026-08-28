@@ -153,8 +153,8 @@ export default async function ClientesPage({
         <StatTile label="Clientes ativos" value={overview.ativos.toLocaleString("pt-BR")} />
         <StatTile label="Novos" value={overview.novos.toLocaleString("pt-BR")} trend={overview.novos > 0 ? "up" : undefined} />
         <StatTile label="Recorrentes (2+ pedidos)" value={overview.recorrentes.toLocaleString("pt-BR")} />
-        {showFinancials && <StatTile label="Ticket médio" value={formatBRL(overview.ticketMedio)} />}
-        {showFinancials && <StatTile label="Receita média/cliente" value={formatBRL(overview.receitaMediaPorCliente)} />}
+        {showFinancials && <StatTile label="Ticket médio (líquido)" value={formatBRL(overview.ticketMedio)} />}
+        {showFinancials && <StatTile label="Receita média/cliente (líquida)" value={formatBRL(overview.receitaMediaPorCliente)} />}
       </div>
 
       {showFinancials && (

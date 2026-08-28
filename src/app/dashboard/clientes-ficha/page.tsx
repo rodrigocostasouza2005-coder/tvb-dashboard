@@ -105,6 +105,7 @@ export default async function ClientesFichaPage({
                 )}
                 {ficha.email && <span>{ficha.email}</span>}
                 {ficha.dataNascimento && <span>Nasc. {formatDataNascimento(ficha.dataNascimento)}</span>}
+                {ficha.cpfCnpj && <span>{ficha.cpfCnpj}</span>}
               </div>
               <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--text-muted)]">
                 <span>1ª compra: {formatData(ficha.primeiraCompra)}</span>
@@ -120,10 +121,10 @@ export default async function ClientesFichaPage({
             {showFinancials && <StatTile label="Receita líquida" value={formatBRL(ficha.receitaLiquida)} subValue={`Bruta: ${formatBRL(ficha.receitaBruta)}`} />}
             <StatTile label="Unidades líquidas" value={ficha.unidadesLiquidas.toLocaleString("pt-BR")} subValue={`Brutas: ${ficha.unidadesBrutas.toLocaleString("pt-BR")}`} />
             <StatTile label="Pedidos" value={ficha.pedidos.toLocaleString("pt-BR")} subValue={`B2B ${ficha.pedidosB2B} · B2C ${ficha.pedidosB2C}`} />
-            {showFinancials && <StatTile label="Ticket médio (bruta/pedido)" value={formatBRL(ficha.ticketMedio)} />}
+            {showFinancials && <StatTile label="Ticket médio (líquido)" value={formatBRL(ficha.ticketMedio)} />}
           </div>
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
               <h3 className="mb-2 text-xs font-medium text-[var(--text-muted)]">Produtos mais comprados (líquido)</h3>
               <ul className="flex flex-col gap-1.5 text-sm">
@@ -134,6 +135,17 @@ export default async function ClientesFichaPage({
                   </li>
                 ))}
                 {ficha.topProdutos.length === 0 && <li className="text-[var(--text-muted)]">—</li>}
+              </ul>
+            </div>
+            <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
+              <h3 className="mb-2 text-xs font-medium text-[var(--text-muted)]">Onde comprou</h3>
+              <ul className="flex flex-wrap gap-1.5">
+                {ficha.topLojas.map((l) => (
+                  <li key={l.loja} className="rounded-md border border-[var(--border)] px-2 py-1 text-xs text-[var(--text-secondary)]">
+                    {l.loja} <span className="text-[var(--text-muted)]">({l.unidades})</span>
+                  </li>
+                ))}
+                {ficha.topLojas.length === 0 && <li className="text-[var(--text-muted)]">—</li>}
               </ul>
             </div>
             <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">

@@ -1208,6 +1208,8 @@ export type ClientesCrmOverview = {
   pedidos: number;
   unidades: number;
   receitaBruta: number;
+  receitaLiquida: number;
+  // ticketMedio e receitaMediaPorCliente usam líquida — pedido do Rodrigo em 2026-08-28.
   ticketMedio: number;
   unidadesPorPedido: number;
   receitaMediaPorCliente: number;
@@ -1220,26 +1222,35 @@ export async function getClientesCrmOverview(filters: DashboardFilters, canal: C
     ...(canal !== "todos" ? { AND: [canalWhere(canal)] } : {}),
   };
 
-  const porPedido = await prisma.sale.groupBy({
-    by: ["clienteNome", "storeId", "dapicVendaId"],
-    where,
-    _sum: { quantidade: true, valorTotalLiquido: true },
-  });
+  const [porPedido, devolvidoPorCliente] = await Promise.all([
+    prisma.sale.groupBy({
+      by: ["clienteNome", "storeId", "dapicVendaId"],
+      where,
+      _sum: { quantidade: true, valorTotalLiquido: true },
+    }),
+    canal !== "b2b" ? getValorDevolvidoPorCliente(filters) : Promise.resolve(new Map<string, number>()),
+  ]);
 
-  const porClienteNorm = new Map<string, { pedidos: Set<string>; unidades: number; receita: number }>();
+  const porClienteNorm = new Map<string, { pedidos: Set<string>; unidades: number; receita: number; devolvido: number }>();
   for (const r of porPedido) {
     const norm = (r.clienteNome as string).trim().toUpperCase();
-    const cur = porClienteNorm.get(norm) ?? { pedidos: new Set<string>(), unidades: 0, receita: 0 };
+    const cur = porClienteNorm.get(norm) ?? { pedidos: new Set<string>(), unidades: 0, receita: 0, devolvido: 0 };
     cur.pedidos.add(`${r.storeId}::${r.dapicVendaId}`);
     cur.unidades += r._sum.quantidade ?? 0;
     cur.receita += r._sum.valorTotalLiquido ?? 0;
     porClienteNorm.set(norm, cur);
   }
+  // getValorDevolvidoPorCliente é por nome BRUTO (pode ter variante de capitalização diferente
+  // da usada como chave normalizada acima) — soma dentro do bucket normalizado certo.
+  for (const [nomeRaw, valor] of devolvidoPorCliente) {
+    const cur = porClienteNorm.get(nomeRaw.trim().toUpperCase());
+    if (cur) cur.devolvido += valor;
+  }
 
   const primeiraGlobal = await getPrimeiraCompraGlobalPorCliente([...porClienteNorm.keys()]);
 
   let novos = 0, recorrentes = 0, ocasionais = 0;
-  let totalPedidos = 0, totalUnidades = 0, totalReceita = 0;
+  let totalPedidos = 0, totalUnidades = 0, totalReceitaBruta = 0, totalDevolvido = 0;
   for (const [norm, v] of porClienteNorm) {
     const first = primeiraGlobal.get(norm);
     const isNovo = first !== undefined && first >= filters.from && first <= filters.to;
@@ -1248,8 +1259,10 @@ export async function getClientesCrmOverview(filters: DashboardFilters, canal: C
     else ocasionais++;
     totalPedidos += v.pedidos.size;
     totalUnidades += v.unidades;
-    totalReceita += v.receita;
+    totalReceitaBruta += v.receita;
+    totalDevolvido += v.devolvido;
   }
+  const totalReceitaLiquida = totalReceitaBruta - totalDevolvido;
 
   const ativos = porClienteNorm.size;
   return {
@@ -1259,10 +1272,11 @@ export async function getClientesCrmOverview(filters: DashboardFilters, canal: C
     ocasionais,
     pedidos: totalPedidos,
     unidades: totalUnidades,
-    receitaBruta: totalReceita,
-    ticketMedio: totalPedidos > 0 ? totalReceita / totalPedidos : 0,
+    receitaBruta: totalReceitaBruta,
+    receitaLiquida: totalReceitaLiquida,
+    ticketMedio: totalPedidos > 0 ? totalReceitaLiquida / totalPedidos : 0,
     unidadesPorPedido: totalPedidos > 0 ? totalUnidades / totalPedidos : 0,
-    receitaMediaPorCliente: ativos > 0 ? totalReceita / ativos : 0,
+    receitaMediaPorCliente: ativos > 0 ? totalReceitaLiquida / ativos : 0,
   };
 }
 
@@ -1475,6 +1489,7 @@ export type ClienteFicha = {
   cliente: string;
   telefone: string | null;
   email: string | null;
+  cpfCnpj: string | null;
   dataNascimento: Date | null;
   receitaBruta: number;
   receitaLiquida: number;
@@ -1497,6 +1512,7 @@ export type ClienteFicha = {
     receitaLiquida: number;
   }[];
   topTamanhos: { tamanho: string; unidades: number }[];
+  topLojas: { loja: string; unidades: number }[];
   // bruta — devolução não é atribuída a mês aqui (só ao produto, ver comentário na função).
   historicoMensal: { month: string; receita: number; unidades: number }[];
 };
@@ -1534,6 +1550,7 @@ export async function getClienteFicha(
       select: {
         saleDate: true, dapicVendaId: true, storeId: true, valorTotalLiquido: true,
         quantidade: true, tabelaPreco: true, produto: true, tamanho: true,
+        store: { select: { name: true, displayGroup: true } },
       },
     }),
     prisma.clienteCadastro.findMany({ where: { nome: { in: variantes } } }),
@@ -1549,6 +1566,10 @@ export async function getClienteFicha(
   let cheio = 0, promo = 0, comTabela = 0;
   const porProduto = new Map<string, { unidades: number; receita: number }>();
   const porTamanho = new Map<string, number>();
+  // Card resumido de "onde comprou" (agregado, não por produto) — pedido do Rodrigo em
+  // 2026-08-28: a quebra por produto tinha sido tirada por ficar detalhada demais, mas ele quis
+  // de volta um resumo geral de lojas.
+  const porLoja = new Map<string, number>();
   const porMes = new Map<string, { receita: number; unidades: number }>();
   const pedidoKeys = new Set<string>();
 
@@ -1577,6 +1598,9 @@ export async function getClienteFicha(
 
     const tamanho = s.tamanho && s.tamanho.trim() ? s.tamanho : "—";
     porTamanho.set(tamanho, (porTamanho.get(tamanho) ?? 0) + s.quantidade);
+
+    const loja = s.store.displayGroup ?? s.store.name;
+    porLoja.set(loja, (porLoja.get(loja) ?? 0) + s.quantidade);
 
     const mes = s.saleDate.toISOString().slice(0, 7);
     const m = porMes.get(mes) ?? { receita: 0, unidades: 0 };
@@ -1626,6 +1650,7 @@ export async function getClienteFicha(
     cliente: nomeExibicao,
     telefone: cad?.telefone ?? cad?.celular ?? null,
     email: cad?.email ?? null,
+    cpfCnpj: cad?.cpfCnpj ?? null,
     dataNascimento: cad?.dataNascimento ?? null,
     receitaBruta,
     receitaLiquida: receitaBruta - devolvidoValorTotal,
@@ -1634,7 +1659,7 @@ export async function getClienteFicha(
     pedidos: pedidos.size,
     pedidosB2B,
     pedidosB2C,
-    ticketMedio: pedidos.size > 0 ? receitaBruta / pedidos.size : 0,
+    ticketMedio: pedidos.size > 0 ? (receitaBruta - devolvidoValorTotal) / pedidos.size : 0,
     primeiraCompra,
     ultimaCompra,
     receitaB2B,
@@ -1657,6 +1682,9 @@ export async function getClienteFicha(
       .map(([tamanho, unidades]) => ({ tamanho, unidades }))
       .sort((a, b) => b.unidades - a.unidades)
       .slice(0, 8),
+    topLojas: [...porLoja.entries()]
+      .map(([loja, unidades]) => ({ loja, unidades }))
+      .sort((a, b) => b.unidades - a.unidades),
     historicoMensal: [...porMes.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([month, v]) => ({ month, ...v })),

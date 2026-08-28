@@ -19,26 +19,31 @@ async function main() {
   const cdClient = clients.find((c) => c.label === "cd-atacado") ?? clients[0];
 
   console.log(`Buscando clientes de ${DATA_INICIAL} até ${DATA_FINAL}...`);
-  const clientes = await cdClient.fetchClientes(DATA_INICIAL, DATA_FINAL);
-  console.log(`Recebidos: ${clientes.length} clientes`);
+  const clientesRaw = await cdClient.fetchClientes(DATA_INICIAL, DATA_FINAL);
+  // A API às vezes repete o mesmo Id na mesma resposta (achado em 2026-08-28, mesmo padrão já
+  // visto em /ordensproducao/produtos) — sem dedupe, "ON CONFLICT DO UPDATE" quebra porque a
+  // mesma linha apareceria 2x pra INSERT dentro do mesmo lote.
+  const clientes = [...new Map(clientesRaw.map((c) => [c.Id, c])).values()];
+  console.log(`Recebidos: ${clientesRaw.length} clientes (${clientes.length} após dedupe por Id)`);
 
   let total = 0;
   for (let i = 0; i < clientes.length; i += BATCH_SIZE) {
     const batch = clientes.slice(i, i + BATCH_SIZE);
     const values = batch.map(
       (c) =>
-        Prisma.sql`(${randomUUID()}, ${c.Id}, ${c.NomeRazaoSocial}, ${c.Telefone ?? null}, ${c.Celular ?? null}, ${c.Email ?? null}, ${c.DataAniversario ? new Date(c.DataAniversario) : null})`
+        Prisma.sql`(${randomUUID()}, ${c.Id}, ${c.NomeRazaoSocial}, ${c.Telefone ?? null}, ${c.Celular ?? null}, ${c.Email ?? null}, ${c.DataAniversario ? new Date(c.DataAniversario) : null}, ${c.CpfCnpj ?? null})`
     );
 
     await prisma.$executeRaw`
-      INSERT INTO "ClienteCadastro" ("id", "dapicId", "nome", "telefone", "celular", "email", "dataNascimento")
+      INSERT INTO "ClienteCadastro" ("id", "dapicId", "nome", "telefone", "celular", "email", "dataNascimento", "cpfCnpj")
       VALUES ${Prisma.join(values)}
       ON CONFLICT ("dapicId") DO UPDATE SET
         "nome"           = EXCLUDED."nome",
         "telefone"       = EXCLUDED."telefone",
         "celular"        = EXCLUDED."celular",
         "email"          = EXCLUDED."email",
-        "dataNascimento" = EXCLUDED."dataNascimento"
+        "dataNascimento" = EXCLUDED."dataNascimento",
+        "cpfCnpj"        = EXCLUDED."cpfCnpj"
     `;
     total += batch.length;
     process.stdout.write(`\r  ${total}/${clientes.length} inseridos...`);
