@@ -2,9 +2,10 @@
 
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 
-// Por padrão mostra o gráfico por Grupo; ao escolher um grupo aqui, troca pra mostrar os
-// produtos daquele grupo (ver uso em page.tsx: dimension vira "produto" + grupoIn = [grupo]).
-export function GrupoDrillSelect({ grupos, current }: { grupos: string[]; current: string }) {
+// Em Grupo, funciona como drill-down (escolher aqui troca pra ver os Produtos daquele grupo —
+// dimension vira "produto" + grupoIn = [grupo] em page.tsx). Em Produto/Tamanho, só filtra a
+// visão atual pro grupo escolhido, sem trocar de dimensão (pedido do Rodrigo em 2026-08-28).
+export function GrupoDrillSelect({ grupos, current, label }: { grupos: string[]; current: string; label?: string }) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -19,7 +20,7 @@ export function GrupoDrillSelect({ grupos, current }: { grupos: string[]; curren
   return (
     <div className="mb-4 flex flex-col gap-1">
       <label className="text-xs text-[var(--text-muted)]" htmlFor="grupo-drill">
-        Ver produtos de um grupo
+        {label ?? "Ver produtos de um grupo"}
       </label>
       <select
         id="grupo-drill"

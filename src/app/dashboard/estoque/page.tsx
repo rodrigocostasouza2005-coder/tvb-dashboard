@@ -31,18 +31,18 @@ export default async function EstoquePage({
     grupoIn,
   };
 
-  // Grupo escolhido no drill-down (só ativo quando a dimensão é grupo — não faz sentido drillar
-  // dentro de um grupo se já estamos vendo por Produto ou Tamanho): força ver por Produto,
-  // restrito a esse grupo só.
-  const grupoDrill = dimension === "grupo" && typeof rawParams.grupo === "string" ? rawParams.grupo : "";
+  // Grupo escolhido no seletor: em Grupo, funciona como drill-down (troca pra ver os Produtos
+  // daquele grupo); em Produto/Tamanho já pedido do Rodrigo em 2026-08-28: só filtra a visão
+  // atual pro grupo escolhido, sem trocar de dimensão.
+  const grupoDrill = typeof rawParams.grupo === "string" ? rawParams.grupo : "";
   const effectiveFilters = grupoDrill ? { ...filters, grupoIn: [grupoDrill] } : filters;
-  const effectiveDimension = grupoDrill ? "produto" : dimension;
+  const effectiveDimension = grupoDrill && dimension === "grupo" ? "produto" : dimension;
 
   const [rowsBrutas, returns, totalEstoque, grupoRows, stores, marcas, tabelasPreco] = await Promise.all([
     getStockVsSales(effectiveFilters, effectiveDimension),
     getReturnsByDimension(effectiveFilters, effectiveDimension),
     getTotalStock({ storeIds: filters.storeIds, grupoIn: filters.grupoIn }),
-    dimension === "grupo" ? getStockVsSales(filters, "grupo") : Promise.resolve([]),
+    getStockVsSales(filters, "grupo"),
     getStores(allowedStores),
     getMarcas(allowedMarcas),
     getTabelasPreco(allowedTabelasPreco),
@@ -74,9 +74,11 @@ export default async function EstoquePage({
       </section>
 
       <DimensionToggle basePath="/dashboard/estoque" searchParams={rawParams} current={dimension} />
-      {dimension === "grupo" && (
-        <GrupoDrillSelect grupos={grupoRows.map((r) => r.key)} current={grupoDrill} />
-      )}
+      <GrupoDrillSelect
+        grupos={grupoRows.map((r) => r.key)}
+        current={grupoDrill}
+        label={dimension === "grupo" ? "Ver produtos de um grupo" : "Filtrar por grupo de produto"}
+      />
 
       <section className="mb-6">
         <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">
