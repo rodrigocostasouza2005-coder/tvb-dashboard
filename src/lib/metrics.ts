@@ -1283,11 +1283,15 @@ export type ClienteSegmentado = {
 // inteira como inativa, então os limiares abaixo (90/180 dias) foram escolhidos olhando esses
 // percentis reais, não um valor arbitrário de manual de CRM.
 //
-// Usa o HISTÓRICO COMPLETO (ignora from/to do filtro) pra recência/frequência/valor — só
-// respeita loja/marca/tabela/canal do filtro. Sem isso, filtrar "últimos 30 dias" faria todo
-// mundo parecer "recente" e a segmentação perderia o sentido. "Novo" é a única exceção: usa o
-// período selecionado de verdade, e sempre olha a 1ª compra da empresa inteira (mesmo critério
-// de getNewClientsCount), não só dentro do filtro de loja/marca/tabela.
+// Usa o HISTÓRICO COMPLETO (ignora from/to do filtro) pra recência/frequência/valor E pra
+// "novo" — só respeita loja/marca/tabela/canal do filtro. Sem isso, filtrar "últimos 30 dias"
+// faria todo mundo parecer "recente", e usar from/to pra "novo" quebrava com o período padrão
+// (que cobre o histórico inteiro desde set/2025) — todo cliente virava "novo" porque a 1ª
+// compra de qualquer um sempre cai dentro de um período tão largo (achado testando em
+// 2026-08-28: Segmentação toda zerada em VIP/Recorrente/etc, tudo empurrado pra "novo"). "Novo"
+// aqui sempre usa uma janela fixa dos últimos NOVO_DIAS a partir de hoje, independente do
+// período selecionado — sempre olhando a 1ª compra da empresa inteira (mesmo critério de
+// getNewClientsCount), não só dentro do filtro de loja/marca/tabela.
 export async function getClienteSegmentacao(filters: DashboardFilters, canal: Canal = "todos"): Promise<ClienteSegmentado[]> {
   const allTime: DashboardFilters = { ...filters, from: new Date(0), to: new Date() };
   const where: Prisma.SaleWhereInput = {
@@ -1320,12 +1324,14 @@ export async function getClienteSegmentacao(filters: DashboardFilters, canal: Ca
 
   const RECENCIA_ATIVO_DIAS = 90;
   const RECENCIA_INATIVO_DIAS = 180;
+  const NOVO_DIAS = 60;
 
   return [...byCliente.entries()].map(([norm, c]) => {
     const recenciaDias = Math.floor((now.getTime() - c.last.getTime()) / 86400000);
     const pedidos = c.pedidos.size;
     const primeiraCompra = primeiraGlobal.get(norm);
-    const isNovo = primeiraCompra !== undefined && primeiraCompra >= filters.from && primeiraCompra <= filters.to;
+    const diasDesdePrimeiraCompra = primeiraCompra ? Math.floor((now.getTime() - primeiraCompra.getTime()) / 86400000) : Infinity;
+    const isNovo = diasDesdePrimeiraCompra <= NOVO_DIAS;
 
     let segmento: ClienteSegmento;
     if (isNovo) segmento = "novo";
