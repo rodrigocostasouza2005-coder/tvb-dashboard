@@ -1458,7 +1458,17 @@ export async function getClientesPorDimensao(
       cur.receita += receita;
     }
   }
-  return [...merged.values()].sort((a, b) => b.receita - a.receita).slice(0, limit);
+  const sorted = [...merged.values()].sort((a, b) => b.receita - a.receita).slice(0, limit);
+
+  // Telefone — mesmo enriquecimento de getTopClientes (pedido do Rodrigo em 2026-08-28: telefone
+  // em toda visão que lista cliente).
+  const nomes = sorted.map((r) => r.cliente);
+  const cadastros = await prisma.clienteCadastro.findMany({ where: { nome: { in: nomes } } });
+  const cadastroByNome = new Map(cadastros.map((c) => [c.nome, c]));
+  return sorted.map((r) => {
+    const cad = cadastroByNome.get(r.cliente);
+    return { ...r, telefone: cad?.telefone ?? cad?.celular ?? null };
+  });
 }
 
 export type ClienteFicha = {
@@ -1468,21 +1478,26 @@ export type ClienteFicha = {
   dataNascimento: Date | null;
   receitaBruta: number;
   receitaLiquida: number;
-  unidades: number;
   pedidos: number;
+  pedidosB2B: number;
+  pedidosB2C: number;
   ticketMedio: number;
   primeiraCompra: Date;
   ultimaCompra: Date;
   receitaB2B: number;
   receitaB2C: number;
+  unidadesBrutas: number;
+  unidadesLiquidas: number;
   comportamentoPreco: ClientePrecoBehavior;
   topProdutos: {
     produto: string;
-    unidades: number;
-    receita: number;
-    porLoja: { loja: string; unidades: number }[];
-    porTamanho: { tamanho: string; unidades: number }[];
+    unidadesBrutas: number;
+    unidadesLiquidas: number;
+    receitaBruta: number;
+    receitaLiquida: number;
   }[];
+  topTamanhos: { tamanho: string; unidades: number }[];
+  // bruta — devolução não é atribuída a mês aqui (só ao produto, ver comentário na função).
   historicoMensal: { month: string; receita: number; unidades: number }[];
 };
 
@@ -1513,35 +1528,39 @@ export async function getClienteFicha(
   };
   const where: Prisma.SaleWhereInput = { ...saleWhere(allTime), clienteNome: { in: variantes } };
 
-  const [sales, devolvidoMap, cadastro] = await Promise.all([
+  const [sales, cadastro] = await Promise.all([
     prisma.sale.findMany({
       where,
       select: {
         saleDate: true, dapicVendaId: true, storeId: true, valorTotalLiquido: true,
         quantidade: true, tabelaPreco: true, produto: true, tamanho: true,
-        store: { select: { name: true, displayGroup: true } },
       },
     }),
-    getValorDevolvidoPorCliente(allTime),
     prisma.clienteCadastro.findMany({ where: { nome: { in: variantes } } }),
   ]);
   if (sales.length === 0) return null;
 
   const pedidos = new Set<string>();
-  let unidades = 0, receitaBruta = 0, receitaB2B = 0, receitaB2C = 0;
+  // true = pelo menos 1 item do pedido é B2B (Tabela atacado) — pedido misto é raro, mas conta
+  // como B2B se tiver qualquer item assim.
+  const pedidoCanal = new Map<string, boolean>();
+  let unidadesBrutas = 0, receitaBruta = 0, receitaB2B = 0, receitaB2C = 0;
   let primeiraCompra = sales[0].saleDate, ultimaCompra = sales[0].saleDate;
   let cheio = 0, promo = 0, comTabela = 0;
-  // Por produto: unidades/receita totais + quebra por loja (onde comprou) e por tamanho —
-  // pedido do Rodrigo em 2026-08-28, antes tamanho era uma lista solta misturando produtos
-  // diferentes, sem dizer qual tamanho era de qual produto nem em qual loja comprou.
-  const porProduto = new Map<string, { unidades: number; receita: number; porLoja: Map<string, number>; porTamanho: Map<string, number> }>();
+  const porProduto = new Map<string, { unidades: number; receita: number }>();
+  const porTamanho = new Map<string, number>();
   const porMes = new Map<string, { receita: number; unidades: number }>();
+  const pedidoKeys = new Set<string>();
 
   for (const s of sales) {
-    pedidos.add(`${s.storeId}::${s.dapicVendaId}`);
-    unidades += s.quantidade;
+    const pedidoKey = `${s.storeId}::${s.dapicVendaId}`;
+    pedidos.add(pedidoKey);
+    pedidoKeys.add(pedidoKey);
+    const isB2BLine = s.tabelaPreco === "Tabela atacado";
+    pedidoCanal.set(pedidoKey, isB2BLine || (pedidoCanal.get(pedidoKey) ?? false));
+    unidadesBrutas += s.quantidade;
     receitaBruta += s.valorTotalLiquido;
-    if (s.tabelaPreco === "Tabela atacado") receitaB2B += s.valorTotalLiquido;
+    if (isB2BLine) receitaB2B += s.valorTotalLiquido;
     else receitaB2C += s.valorTotalLiquido;
     if (s.saleDate < primeiraCompra) primeiraCompra = s.saleDate;
     if (s.saleDate > ultimaCompra) ultimaCompra = s.saleDate;
@@ -1551,14 +1570,13 @@ export async function getClienteFicha(
       else if (TABELAS_CHEIAS.has(s.tabelaPreco)) cheio += s.valorTotalLiquido;
     }
 
-    const p = porProduto.get(s.produto) ?? { unidades: 0, receita: 0, porLoja: new Map<string, number>(), porTamanho: new Map<string, number>() };
+    const p = porProduto.get(s.produto) ?? { unidades: 0, receita: 0 };
     p.unidades += s.quantidade;
     p.receita += s.valorTotalLiquido;
-    const loja = s.store.displayGroup ?? s.store.name;
-    p.porLoja.set(loja, (p.porLoja.get(loja) ?? 0) + s.quantidade);
-    const tamanho = s.tamanho && s.tamanho.trim() ? s.tamanho : "—";
-    p.porTamanho.set(tamanho, (p.porTamanho.get(tamanho) ?? 0) + s.quantidade);
     porProduto.set(s.produto, p);
+
+    const tamanho = s.tamanho && s.tamanho.trim() ? s.tamanho : "—";
+    porTamanho.set(tamanho, (porTamanho.get(tamanho) ?? 0) + s.quantidade);
 
     const mes = s.saleDate.toISOString().slice(0, 7);
     const m = porMes.get(mes) ?? { receita: 0, unidades: 0 };
@@ -1567,7 +1585,37 @@ export async function getClienteFicha(
     porMes.set(mes, m);
   }
 
-  const devolvido = variantes.reduce((sum, v) => sum + (devolvidoMap.get(v) ?? 0), 0);
+  let pedidosB2B = 0, pedidosB2C = 0;
+  for (const isB2B of pedidoCanal.values()) {
+    if (isB2B) pedidosB2B++;
+    else pedidosB2C++;
+  }
+
+  // Devolução, por produto — Return não tem clienteNome, mas junta com os pedidos (storeId +
+  // dapicVendaId) desse cliente que já buscamos acima. Return já tem seu próprio campo
+  // "produto" (não precisa mais nada da Sale pra saber o quê foi devolvido), então dá pra netar
+  // certo por produto, não só o total do cliente — antes "Produtos mais comprados" ficava bruto
+  // mesmo com o resumo do topo mostrando líquida, número inconsistente na mesma tela.
+  const storeIdsCliente = [...new Set(sales.map((s) => s.storeId))];
+  const dapicVendaIdsCliente = [...new Set(sales.map((s) => s.dapicVendaId))];
+  const returnsCliente = dapicVendaIdsCliente.length > 0
+    ? await prisma.return.findMany({
+        where: { storeId: { in: storeIdsCliente }, dapicVendaId: { in: dapicVendaIdsCliente } },
+        select: { storeId: true, dapicVendaId: true, produto: true, quantidade: true, valorTotal: true },
+      })
+    : [];
+  const devolvidoPorProduto = new Map<string, { unidades: number; valor: number }>();
+  let devolvidoUnidadesTotal = 0, devolvidoValorTotal = 0;
+  for (const r of returnsCliente) {
+    if (!pedidoKeys.has(`${r.storeId}::${r.dapicVendaId}`)) continue;
+    const cur = devolvidoPorProduto.get(r.produto) ?? { unidades: 0, valor: 0 };
+    cur.unidades += r.quantidade;
+    cur.valor += r.valorTotal;
+    devolvidoPorProduto.set(r.produto, cur);
+    devolvidoUnidadesTotal += r.quantidade;
+    devolvidoValorTotal += r.valorTotal;
+  }
+
   const cad = cadastro[0];
   // Nome de exibição: a variante de capitalização mais longa (heurística simples — geralmente é
   // a mais "completa", ex: prefere "João Tardim" a "JOAO TARDIM" só quando ambas tem o mesmo
@@ -1580,9 +1628,12 @@ export async function getClienteFicha(
     email: cad?.email ?? null,
     dataNascimento: cad?.dataNascimento ?? null,
     receitaBruta,
-    receitaLiquida: receitaBruta - devolvido,
-    unidades,
+    receitaLiquida: receitaBruta - devolvidoValorTotal,
+    unidadesBrutas,
+    unidadesLiquidas: unidadesBrutas - devolvidoUnidadesTotal,
     pedidos: pedidos.size,
+    pedidosB2B,
+    pedidosB2C,
     ticketMedio: pedidos.size > 0 ? receitaBruta / pedidos.size : 0,
     primeiraCompra,
     ultimaCompra,
@@ -1590,18 +1641,21 @@ export async function getClienteFicha(
     receitaB2C,
     comportamentoPreco: classificarComportamentoPreco(cheio, promo, comTabela),
     topProdutos: [...porProduto.entries()]
-      .map(([produto, v]) => ({
-        produto,
-        unidades: v.unidades,
-        receita: v.receita,
-        porLoja: [...v.porLoja.entries()]
-          .map(([loja, unidades]) => ({ loja, unidades }))
-          .sort((a, b) => b.unidades - a.unidades),
-        porTamanho: [...v.porTamanho.entries()]
-          .map(([tamanho, unidades]) => ({ tamanho, unidades }))
-          .sort((a, b) => b.unidades - a.unidades),
-      }))
-      .sort((a, b) => b.receita - a.receita)
+      .map(([produto, v]) => {
+        const dev = devolvidoPorProduto.get(produto) ?? { unidades: 0, valor: 0 };
+        return {
+          produto,
+          unidadesBrutas: v.unidades,
+          unidadesLiquidas: v.unidades - dev.unidades,
+          receitaBruta: v.receita,
+          receitaLiquida: v.receita - dev.valor,
+        };
+      })
+      .sort((a, b) => b.receitaLiquida - a.receitaLiquida)
+      .slice(0, 6),
+    topTamanhos: [...porTamanho.entries()]
+      .map(([tamanho, unidades]) => ({ tamanho, unidades }))
+      .sort((a, b) => b.unidades - a.unidades)
       .slice(0, 8),
     historicoMensal: [...porMes.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
@@ -2178,8 +2232,14 @@ export async function getAtacadoClientes(filters: DashboardFilters) {
 
   const clientesAntigos = new Set(primeiraVendaGeral.map(r => r.clienteNome));
 
+  // Telefone — pedido do Rodrigo em 2026-08-28: telefone em toda visão que lista cliente.
+  const nomes = [...new Set(rows.map((r) => r.clienteNome).filter((n): n is string => n !== null))];
+  const cadastros = await prisma.clienteCadastro.findMany({ where: { nome: { in: nomes } } });
+  const cadastroByNome = new Map(cadastros.map((c) => [c.nome, c]));
+
   const mapped = rows.map(r => ({
     clienteNome: r.clienteNome ?? "—",
+    telefone: (r.clienteNome && (cadastroByNome.get(r.clienteNome)?.telefone ?? cadastroByNome.get(r.clienteNome)?.celular)) || null,
     cidade: r.cidade ?? "—",
     estado: r.estado ?? "—",
     pedidos: r._count.dapicVendaId,

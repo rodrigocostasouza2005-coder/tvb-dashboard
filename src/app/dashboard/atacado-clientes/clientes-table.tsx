@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 
 type ClienteRow = {
   clienteNome: string;
+  telefone: string | null;
   cidade: string;
   estado: string;
   pedidos: number;
@@ -64,6 +65,7 @@ export function ClientesTable({ rows }: { rows: ClienteRow[] }) {
           <thead>
             <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
               <th className="px-4 py-2 font-medium">Cliente</th>
+              <th className="px-4 py-2 font-medium">Contato</th>
               <th className="px-4 py-2 font-medium">Cidade</th>
               <th className="px-4 py-2 font-medium">Estado</th>
               <th className="px-4 py-2 font-medium text-right">Pedidos</th>
@@ -73,7 +75,7 @@ export function ClientesTable({ rows }: { rows: ClienteRow[] }) {
               <th className="px-4 py-2 font-medium">Novo?</th>
             </tr>
             <tr className="border-b border-[var(--gridline)] bg-[var(--surface-1)]">
-              <th className="px-4 py-1.5" colSpan={2}></th>
+              <th className="px-4 py-1.5" colSpan={3}></th>
               <th className="px-4 py-1.5">
                 <select
                   className={selectClass}
@@ -98,6 +100,13 @@ export function ClientesTable({ rows }: { rows: ClienteRow[] }) {
                 className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]"
               >
                 <td className="px-4 py-2 font-medium text-[var(--text-primary)]">{r.clienteNome}</td>
+                <td className="px-4 py-2">
+                  {r.telefone ? (
+                    <a href={`tel:${r.telefone}`} className="text-[var(--series-1)] hover:underline tabular-nums">{r.telefone}</a>
+                  ) : (
+                    <span className="text-[var(--text-muted)]">—</span>
+                  )}
+                </td>
                 <td className="px-4 py-2 text-[var(--text-secondary)]">{r.cidade}</td>
                 <td className="px-4 py-2 text-[var(--text-secondary)]">{r.estado}</td>
                 <td className="px-4 py-2 tabular-nums text-right text-[var(--text-secondary)]">
@@ -123,7 +132,7 @@ export function ClientesTable({ rows }: { rows: ClienteRow[] }) {
             ))}
             {visible.length === 0 && (
               <tr>
-                <td colSpan={8} className="px-4 py-6 text-center text-[var(--text-muted)]">
+                <td colSpan={9} className="px-4 py-6 text-center text-[var(--text-muted)]">
                   Nenhum cliente encontrado.
                 </td>
               </tr>

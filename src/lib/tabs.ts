@@ -25,9 +25,12 @@ export type TabKey =
   | "top-menos-vendidos"
   | "curva-abc"
   | "lamina-mensal"
-  | "indicadores";
+  | "indicadores"
+  | "clientes-segmentacao"
+  | "clientes-ficha"
+  | "clientes-produto";
 
-export type TabGroup = "visao-geral" | "vendas" | "estoque" | "atacado" | "marketing" | "pesquisa" | "lamina" | "outros";
+export type TabGroup = "visao-geral" | "vendas" | "estoque" | "atacado" | "clientes" | "marketing" | "pesquisa" | "lamina" | "outros";
 
 export type TabEntry =
   | { key: TabKey; label: string; href: string; group: TabGroup; todo?: false }
@@ -64,8 +67,13 @@ export const TABS: TabEntry[] = [
   { key: "atacado-clientes", label: "Por cliente", href: "/dashboard/atacado-clientes", group: "atacado" },
   { key: "inadimplencia", label: "Inadimplência", href: "/dashboard/inadimplencia", group: "atacado" },
 
+  // clientes
+  { key: "clientes", label: "Visão Geral", href: "/dashboard/clientes", group: "clientes" },
+  { key: "clientes-segmentacao", label: "Segmentação", href: "/dashboard/clientes-segmentacao", group: "clientes" },
+  { key: "clientes-ficha", label: "Ficha do Cliente", href: "/dashboard/clientes-ficha", group: "clientes" },
+  { key: "clientes-produto", label: "Produto → Cliente", href: "/dashboard/clientes-produto", group: "clientes" },
+
   // marketing
-  { key: "clientes", label: "Clientes", href: "/dashboard/clientes", group: "marketing" },
   { key: "top-mais-vendidos", label: "Top 10 mais vendidos", href: "/dashboard/top-mais-vendidos", group: "marketing" },
   { key: "top-menos-vendidos", label: "Top 10 menos vendidos", href: "/dashboard/top-menos-vendidos", group: "marketing" },
 
@@ -85,11 +93,14 @@ export const GROUPS: { key: TabGroup; label: string; single?: boolean }[] = [
   { key: "vendas", label: "Vendas" },
   { key: "estoque", label: "Estoque" },
   { key: "atacado", label: "Atacado" },
+  { key: "clientes", label: "Clientes" },
   { key: "marketing", label: "Marketing" },
   { key: "pesquisa", label: "Pesquisa", single: true },
 ];
 
-const BLOCKED_BY_DEFAULT_FOR_VENDEDOR: TabKey[] = ["clientes", "vendedores", "estoque-minimo"];
+const BLOCKED_BY_DEFAULT_FOR_VENDEDOR: TabKey[] = [
+  "clientes", "clientes-segmentacao", "clientes-ficha", "clientes-produto", "vendedores", "estoque-minimo",
+];
 
 export function defaultAllowedTabs(role: Role): TabKey[] {
   const keys = TABS.filter((t): t is Extract<TabEntry, { key: TabKey }> => t.key !== undefined).map((t) => t.key);
