@@ -5,6 +5,7 @@ import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
 import { CollapsibleFilters } from "../collapsible-filters";
+import { PcKeySelect } from "./pc-key-select";
 
 function formatBRL(value: number) {
   return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -31,7 +32,11 @@ export default async function ClientesProdutoPage({
   });
   const canal: Canal = rawParams.canal === "b2b" || rawParams.canal === "b2c" ? rawParams.canal : "todos";
   const pcDim: "produto" | "grupo" = rawParams.pcDim === "produto" ? "produto" : "grupo";
-  const pcKey = typeof rawParams.pcKey === "string" && rawParams.pcKey ? rawParams.pcKey : null;
+  const pcKeys = Array.isArray(rawParams.pcKey)
+    ? rawParams.pcKey
+    : typeof rawParams.pcKey === "string" && rawParams.pcKey
+      ? [rawParams.pcKey]
+      : [];
 
   const [stores, marcas, tabelasPreco, pcOptions] = await Promise.all([
     getStores(allowedStores),
@@ -40,7 +45,7 @@ export default async function ClientesProdutoPage({
     getSalesByDimension(filters, pcDim, canal),
   ]);
   const showFinancials = canSeeFinancials(user);
-  const pcResultado = pcKey ? await getClientesPorDimensao(filters, pcDim, pcKey, canal) : [];
+  const pcResultado = pcKeys.length > 0 ? await getClientesPorDimensao(filters, pcDim, pcKeys, canal) : [];
 
   function baseParams() {
     const p = new URLSearchParams();
@@ -54,7 +59,7 @@ export default async function ClientesProdutoPage({
     const p = baseParams();
     p.set("canal", c);
     p.set("pcDim", pcDim);
-    if (pcKey) p.set("pcKey", pcKey);
+    for (const k of pcKeys) p.append("pcKey", k);
     return `/dashboard/clientes-produto?${p.toString()}`;
   }
   function pcDimHref(dim: "produto" | "grupo") {
@@ -117,29 +122,13 @@ export default async function ClientesProdutoPage({
           Por produto
         </a>
       </div>
-      <form method="get" action="/dashboard/clientes-produto" className="mb-4 flex gap-2">
-        {filters.storeIds?.map((id) => <input key={id} type="hidden" name="store" value={id} />)}
-        {filters.marcas?.map((m) => <input key={m} type="hidden" name="marca" value={m} />)}
-        {filters.tabelasPreco?.map((t) => <input key={t} type="hidden" name="tabelaPreco" value={t} />)}
-        <input type="hidden" name="canal" value={canal} />
-        <input type="hidden" name="pcDim" value={pcDim} />
-        <select
-          name="pcKey"
-          defaultValue={pcKey ?? ""}
-          className="w-full max-w-sm rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-sm text-[var(--text-primary)]"
-          style={{ colorScheme: "light dark" }}
-        >
-          <option value="">Selecione um {pcDim}...</option>
-          {pcOptions.map((o) => (
-            <option key={o.key} value={o.key}>{o.key}</option>
-          ))}
-        </select>
-        <button type="submit" className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-3 py-1.5 text-sm hover:bg-[var(--page-plane)]">
-          Ver
-        </button>
-      </form>
+      <PcKeySelect
+        options={pcOptions.map((o) => o.key)}
+        current={pcKeys}
+        label={`Selecione um ou mais ${pcDim === "grupo" ? "grupos" : "produtos"}`}
+      />
 
-      {pcKey && (
+      {pcKeys.length > 0 && (
         <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
           <table className="w-full text-sm">
             <thead>
@@ -170,7 +159,7 @@ export default async function ClientesProdutoPage({
               {pcResultado.length === 0 && (
                 <tr>
                   <td colSpan={showFinancials ? 4 : 3} className="px-4 py-6 text-center text-[var(--text-muted)]">
-                    Sem clientes identificados pra esse {pcDim} no período/filtro.
+                    Sem clientes identificados pra {pcDim === "grupo" ? "esses grupos" : "esses produtos"} no período/filtro.
                   </td>
                 </tr>
               )}

@@ -1442,14 +1442,15 @@ export async function getClientesPrecoBehavior(
 export async function getClientesPorDimensao(
   filters: DashboardFilters,
   dimension: "produto" | "grupo",
-  key: string,
+  keys: string[],
   canal: Canal = "todos",
   limit = 20
 ) {
+  if (keys.length === 0) return [];
   const where: Prisma.SaleWhereInput = {
     ...saleWhere(filters),
     clienteNome: { not: null },
-    ...(dimension === "produto" ? { produto: key } : { grupo: key }),
+    ...(dimension === "produto" ? { produto: { in: keys } } : { grupo: { in: keys } }),
     ...(canal !== "todos" ? { AND: [canalWhere(canal)] } : {}),
   };
   const rows = await prisma.sale.groupBy({
