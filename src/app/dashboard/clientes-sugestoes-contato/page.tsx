@@ -1,5 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
-import { getStores, getMarcas, getTabelasPreco, getSugestoesDeContato, getFollowUpPosCompra } from "@/lib/metrics";
+import { getStores, getMarcas, getTabelasPreco, getSugestoesDeContato, getFollowUpPosCompra, type SugestaoContato, type FollowUpPosCompra } from "@/lib/metrics";
 import { getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
@@ -16,10 +16,23 @@ const MOTIVO_COR: Record<string, string> = {
   "Aniversário": "var(--status-good)",
 };
 
-function TabelaAtendente({ titulo, sugestoes }: { titulo: string; sugestoes: Awaited<ReturnType<typeof getSugestoesDeContato>> }) {
+const SEM_LOJA = "Sem loja identificada";
+
+function agruparPorLoja<T extends { loja: string | null }>(itens: T[]): [string, T[]][] {
+  const grupos = new Map<string, T[]>();
+  for (const item of itens) {
+    const key = item.loja ?? SEM_LOJA;
+    const arr = grupos.get(key) ?? [];
+    arr.push(item);
+    grupos.set(key, arr);
+  }
+  return [...grupos.entries()].sort(([a], [b]) => (a === SEM_LOJA ? 1 : b === SEM_LOJA ? -1 : a.localeCompare(b)));
+}
+
+function TabelaSugestoes({ loja, sugestoes }: { loja: string; sugestoes: SugestaoContato[] }) {
   return (
     <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-      <h3 className="border-b border-[var(--gridline)] px-4 py-2.5 text-sm font-medium text-[var(--text-primary)]">{titulo}</h3>
+      <h3 className="border-b border-[var(--gridline)] px-4 py-2.5 text-sm font-medium text-[var(--text-primary)]">{loja} <span className="font-normal text-[var(--text-muted)]">({sugestoes.length})</span></h3>
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
@@ -50,13 +63,40 @@ function TabelaAtendente({ titulo, sugestoes }: { titulo: string; sugestoes: Awa
               <td className="px-4 py-2 text-[var(--text-secondary)]">{s.produtoFavorito ?? <span className="text-[var(--text-muted)]">—</span>}</td>
             </tr>
           ))}
-          {sugestoes.length === 0 && (
-            <tr>
-              <td colSpan={4} className="px-4 py-6 text-center text-[var(--text-muted)]">
-                Nenhuma sugestão hoje pro filtro selecionado.
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function TabelaFollowUp({ loja, itens }: { loja: string; itens: FollowUpPosCompra[] }) {
+  return (
+    <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+      <h3 className="border-b border-[var(--gridline)] px-4 py-2.5 text-sm font-medium text-[var(--text-primary)]">{loja} <span className="font-normal text-[var(--text-muted)]">({itens.length})</span></h3>
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
+            <th className="px-4 py-2 font-medium">Cliente</th>
+            <th className="px-4 py-2 font-medium">Contato</th>
+            <th className="px-4 py-2 font-medium">Produto(s) comprado(s)</th>
+            <th className="px-4 py-2 font-medium">Há quantos dias</th>
+          </tr>
+        </thead>
+        <tbody>
+          {itens.map((f) => (
+            <tr key={f.cliente} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
+              <td className="px-4 py-2 font-medium">{f.cliente}</td>
+              <td className="px-4 py-2">
+                {f.telefone ? (
+                  <a href={waHref(f.telefone)} target="_blank" rel="noopener noreferrer" className="text-[var(--series-1)] hover:underline tabular-nums">{f.telefone}</a>
+                ) : (
+                  <span className="text-[var(--text-muted)]">—</span>
+                )}
               </td>
+              <td className="px-4 py-2 text-[var(--text-secondary)]">{f.produtos.join(", ")}</td>
+              <td className="px-4 py-2 tabular-nums">{f.diasAtras}</td>
             </tr>
-          )}
+          ))}
         </tbody>
       </table>
     </div>
@@ -91,8 +131,8 @@ export default async function ClientesSugestoesContatoPage({
     getFollowUpPosCompra(filters),
   ]);
 
-  const pessoa1 = sugestoes.filter((s) => s.atendente === 1);
-  const pessoa2 = sugestoes.filter((s) => s.atendente === 2);
+  const sugestoesPorLoja = agruparPorLoja(sugestoes);
+  const followUpPorLoja = agruparPorLoja(followUp);
 
   return (
     <div>
@@ -109,51 +149,28 @@ export default async function ClientesSugestoesContatoPage({
       </CollapsibleFilters>
 
       <p className="mb-4 text-sm text-[var(--text-secondary)]">
-        Lista muda todo dia — só clientes B2C (varejo), com um pouco de cada grupo (VIP esfriando, Recorrente esfriando, Aniversariante) e dividida entre as 2 pessoas do atendimento.
+        Lista muda todo dia — só clientes B2C (varejo), com um pouco de cada grupo (VIP esfriando, Recorrente esfriando, Em risco, Comprou só 1x, Inativo, Aniversário), separada pela loja principal de cada cliente.
       </p>
 
       <div className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <TabelaAtendente titulo="Atendente 1" sugestoes={pessoa1} />
-        <TabelaAtendente titulo="Atendente 2" sugestoes={pessoa2} />
+        {sugestoesPorLoja.map(([loja, itens]) => (
+          <TabelaSugestoes key={loja} loja={loja} sugestoes={itens} />
+        ))}
+        {sugestoesPorLoja.length === 0 && (
+          <p className="text-sm text-[var(--text-muted)]">Nenhuma sugestão hoje pro filtro selecionado.</p>
+        )}
       </div>
 
       <section>
         <h2 className="mb-1 text-sm font-medium text-[var(--text-secondary)]">Follow-up pós-compra (7-10 dias)</h2>
         <p className="mb-3 text-xs text-[var(--text-muted)]">Clientes B2C que compraram há 7-10 dias — perguntar se gostou e conseguiu aproveitar o produto.</p>
-        <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
-                <th className="px-4 py-2 font-medium">Cliente</th>
-                <th className="px-4 py-2 font-medium">Contato</th>
-                <th className="px-4 py-2 font-medium">Produto(s) comprado(s)</th>
-                <th className="px-4 py-2 font-medium">Há quantos dias</th>
-              </tr>
-            </thead>
-            <tbody>
-              {followUp.map((f) => (
-                <tr key={f.cliente} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
-                  <td className="px-4 py-2 font-medium">{f.cliente}</td>
-                  <td className="px-4 py-2">
-                    {f.telefone ? (
-                      <a href={waHref(f.telefone)} target="_blank" rel="noopener noreferrer" className="text-[var(--series-1)] hover:underline tabular-nums">{f.telefone}</a>
-                    ) : (
-                      <span className="text-[var(--text-muted)]">—</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-2 text-[var(--text-secondary)]">{f.produtos.join(", ")}</td>
-                  <td className="px-4 py-2 tabular-nums">{f.diasAtras}</td>
-                </tr>
-              ))}
-              {followUp.length === 0 && (
-                <tr>
-                  <td colSpan={4} className="px-4 py-6 text-center text-[var(--text-muted)]">
-                    Nenhuma compra B2C nessa janela de 7-10 dias atrás.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          {followUpPorLoja.map(([loja, itens]) => (
+            <TabelaFollowUp key={loja} loja={loja} itens={itens} />
+          ))}
+          {followUpPorLoja.length === 0 && (
+            <p className="text-sm text-[var(--text-muted)]">Nenhuma compra B2C nessa janela de 7-10 dias atrás.</p>
+          )}
         </div>
       </section>
     </div>

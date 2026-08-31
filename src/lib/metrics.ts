@@ -1369,6 +1369,7 @@ export type ClienteSegmentado = {
   cliente: string;
   telefone: string | null;
   grupoPrincipal: string | null;
+  lojaPrincipal: string | null;
   recenciaDias: number;
   pedidos: number;
   receitaBruta: number;
@@ -1413,18 +1414,23 @@ export async function getClienteSegmentacao(
   };
   const rows = await prisma.sale.findMany({
     where,
-    select: { clienteNome: true, saleDate: true, dapicVendaId: true, storeId: true, valorTotalLiquido: true, quantidade: true, grupo: true },
+    select: {
+      clienteNome: true, saleDate: true, dapicVendaId: true, storeId: true, valorTotalLiquido: true, quantidade: true, grupo: true,
+      store: { select: { name: true, displayGroup: true } },
+    },
   });
 
-  const byCliente = new Map<string, { nome: string; last: Date; pedidos: Set<string>; receita: number; porGrupo: Map<string, number> }>();
+  const byCliente = new Map<string, { nome: string; last: Date; pedidos: Set<string>; receita: number; porGrupo: Map<string, number>; porLoja: Map<string, number> }>();
   for (const r of rows) {
     const nome = r.clienteNome as string;
     const norm = nome.trim().toUpperCase();
-    const cur = byCliente.get(norm) ?? { nome, last: r.saleDate, pedidos: new Set<string>(), receita: 0, porGrupo: new Map<string, number>() };
+    const cur = byCliente.get(norm) ?? { nome, last: r.saleDate, pedidos: new Set<string>(), receita: 0, porGrupo: new Map<string, number>(), porLoja: new Map<string, number>() };
     if (r.saleDate > cur.last) cur.last = r.saleDate;
     cur.pedidos.add(`${r.storeId}::${r.dapicVendaId}`);
     cur.receita += r.valorTotalLiquido;
     cur.porGrupo.set(r.grupo, (cur.porGrupo.get(r.grupo) ?? 0) + r.quantidade);
+    const loja = r.store.displayGroup ?? r.store.name;
+    cur.porLoja.set(loja, (cur.porLoja.get(loja) ?? 0) + r.quantidade);
     byCliente.set(norm, cur);
   }
   if (byCliente.size === 0) return [];
@@ -1475,12 +1481,14 @@ export async function getClienteSegmentacao(
     else segmento = "ocasional";
 
     const grupoPrincipal = [...c.porGrupo.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+    const lojaPrincipal = [...c.porLoja.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
     const cad = cadastroByNome.get(c.nome);
 
     return {
       cliente: c.nome,
       telefone: cad?.telefone ?? cad?.celular ?? null,
       grupoPrincipal,
+      lojaPrincipal,
       recenciaDias,
       pedidos,
       receitaBruta: c.receita,
@@ -2310,16 +2318,16 @@ export type SugestaoContato = {
   motivo: string;
   detalhe: string;
   produtoFavorito: string | null;
-  atendente: 1 | 2;
+  loja: string | null;
 };
 
 // "Sugestões de Contato" — reformulado pelo Rodrigo em 2026-08-31 depois da 1ª versão: só B2C
 // (isso aqui é atendimento de varejo, não relação com atacadista), mistura uma parte de CADA
 // grupo (não deixa só VIP tomar a lista toda, como acontecia antes), mostra o produto favorito do
-// cliente, muda todo dia (rotação, não sempre os mesmos), e divide entre as 2 pessoas do
-// atendimento.
+// cliente, muda todo dia (rotação, não sempre os mesmos), e separa por LOJA principal do cliente
+// (não por pessoa — "cada loja tem seu próprio CRM", cada uma cuida dos seus próprios clientes).
 //
-// 3 grupos, cada um contribuindo até POR_GRUPO_POR_DIA:
+// 6 grupos, cada um contribuindo até POR_GRUPO_POR_DIA:
 // 1) VIP esfriando (70-90 dias sem comprar — ainda dá tempo de reter antes de "em risco" de
 //    verdade, limiar já usado em getClienteSegmentacao).
 // 2) Recorrente esfriando (mesmo critério).
@@ -2378,22 +2386,27 @@ export async function getSugestoesDeContato(filters: DashboardFilters): Promise<
     .filter((a) => a.telefone ?? a.celular)
     .sort((a, b) => a.nome.localeCompare(b.nome));
 
+  // Loja principal de qualquer cliente (mesmo os que só apareceram via aniversariante, que vem
+  // do ClienteCadastro sem essa info) — resolve pela Segmentação completa, que já cobre todo
+  // mundo com compra registrada.
+  const lojaPorNorm = new Map(segmentacao.map((s) => [s.cliente.trim().toUpperCase(), s.lojaPrincipal]));
+
   const seed = diaDoAno(new Date());
-  const selecionados: Omit<SugestaoContato, "produtoFavorito" | "atendente">[] = [];
+  const selecionados: Omit<SugestaoContato, "produtoFavorito">[] = [];
   for (const s of fatiaDoDia(vipPool, POR_GRUPO_POR_DIA, seed)) {
-    selecionados.push({ cliente: s.cliente, telefone: s.telefone, motivo: "VIP esfriando", detalhe: `${s.recenciaDias} dias sem comprar` });
+    selecionados.push({ cliente: s.cliente, telefone: s.telefone, motivo: "VIP esfriando", detalhe: `${s.recenciaDias} dias sem comprar`, loja: s.lojaPrincipal });
   }
   for (const s of fatiaDoDia(recorrentePool, POR_GRUPO_POR_DIA, seed)) {
-    selecionados.push({ cliente: s.cliente, telefone: s.telefone, motivo: "Recorrente esfriando", detalhe: `${s.recenciaDias} dias sem comprar` });
+    selecionados.push({ cliente: s.cliente, telefone: s.telefone, motivo: "Recorrente esfriando", detalhe: `${s.recenciaDias} dias sem comprar`, loja: s.lojaPrincipal });
   }
   for (const s of fatiaDoDia(emRiscoPool, POR_GRUPO_POR_DIA, seed)) {
-    selecionados.push({ cliente: s.cliente, telefone: s.telefone, motivo: "Em risco", detalhe: `${s.recenciaDias} dias sem comprar` });
+    selecionados.push({ cliente: s.cliente, telefone: s.telefone, motivo: "Em risco", detalhe: `${s.recenciaDias} dias sem comprar`, loja: s.lojaPrincipal });
   }
   for (const s of fatiaDoDia(ocasionalPool, POR_GRUPO_POR_DIA, seed)) {
-    selecionados.push({ cliente: s.cliente, telefone: s.telefone, motivo: "Comprou só 1 vez", detalhe: `há ${s.recenciaDias} dias` });
+    selecionados.push({ cliente: s.cliente, telefone: s.telefone, motivo: "Comprou só 1 vez", detalhe: `há ${s.recenciaDias} dias`, loja: s.lojaPrincipal });
   }
   for (const s of fatiaDoDia(inativoPool, POR_GRUPO_POR_DIA, seed)) {
-    selecionados.push({ cliente: s.cliente, telefone: s.telefone, motivo: "Inativo", detalhe: `${s.recenciaDias} dias sem comprar` });
+    selecionados.push({ cliente: s.cliente, telefone: s.telefone, motivo: "Inativo", detalhe: `${s.recenciaDias} dias sem comprar`, loja: s.lojaPrincipal });
   }
   for (const a of fatiaDoDia(aniversarioPool, POR_GRUPO_POR_DIA, seed)) {
     selecionados.push({
@@ -2401,18 +2414,16 @@ export async function getSugestoesDeContato(filters: DashboardFilters): Promise<
       telefone: a.telefone ?? a.celular,
       motivo: "Aniversário",
       detalhe: `Dia ${a.dataNascimento.getUTCDate().toString().padStart(2, "0")}`,
+      loja: lojaPorNorm.get(a.nome.trim().toUpperCase()) ?? null,
     });
   }
 
   // Produto favorito — em lote (1 query pros clientes do dia, nunca 1 por linha).
   const produtosPorCliente = await getProdutosLiquidosPorClientes(filters, selecionados.map((s) => s.cliente));
 
-  return selecionados.map((s, i) => ({
+  return selecionados.map((s) => ({
     ...s,
     produtoFavorito: produtosPorCliente.get(s.cliente.trim().toUpperCase())?.[0]?.produto ?? null,
-    // Intercalado (1,2,1,2...) em vez de metade/metade em bloco — cada pessoa pega um pouco de
-    // cada grupo, não "pessoa 1 = só VIP".
-    atendente: (i % 2 === 0 ? 1 : 2) as 1 | 2,
   }));
 }
 
@@ -2421,6 +2432,7 @@ export type FollowUpPosCompra = {
   telefone: string | null;
   produtos: string[];
   diasAtras: number;
+  loja: string | null;
 };
 
 // Follow-up pós-compra — pedido do Rodrigo em 2026-08-31: clientes que compraram há 7-10 dias,
@@ -2441,17 +2453,20 @@ export async function getFollowUpPosCompra(filters: DashboardFilters): Promise<F
   };
   const rows = await prisma.sale.findMany({
     where,
-    select: { clienteNome: true, saleDate: true, produto: true },
+    select: { clienteNome: true, saleDate: true, produto: true, store: { select: { name: true, displayGroup: true } } },
   });
   if (rows.length === 0) return [];
 
-  const porCliente = new Map<string, { nome: string; produtos: Set<string>; data: Date }>();
+  const porCliente = new Map<string, { nome: string; produtos: Set<string>; data: Date; loja: string }>();
   for (const r of rows) {
     const nome = r.clienteNome as string;
     const norm = nome.trim().toUpperCase();
-    const cur = porCliente.get(norm) ?? { nome, produtos: new Set<string>(), data: r.saleDate };
+    const loja = r.store.displayGroup ?? r.store.name;
+    const cur = porCliente.get(norm) ?? { nome, produtos: new Set<string>(), data: r.saleDate, loja };
     cur.produtos.add(r.produto);
-    if (r.saleDate > cur.data) cur.data = r.saleDate;
+    // Loja da compra mais recente dentro da janela — se comprou em 2 lojas na mesma janela
+    // (raro), fica a da compra mais nova.
+    if (r.saleDate > cur.data) { cur.data = r.saleDate; cur.loja = loja; }
     porCliente.set(norm, cur);
   }
 
@@ -2468,6 +2483,7 @@ export async function getFollowUpPosCompra(filters: DashboardFilters): Promise<F
         telefone: cad?.telefone ?? cad?.celular ?? null,
         produtos: [...c.produtos],
         diasAtras: Math.floor((now.getTime() - c.data.getTime()) / 86400000),
+        loja: c.loja,
       };
     })
     // Sem telefone não dá pra chamar no WhatsApp — mesmo critério de getSugestoesDeContato.
