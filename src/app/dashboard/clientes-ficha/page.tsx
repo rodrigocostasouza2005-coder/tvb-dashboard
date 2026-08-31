@@ -3,6 +3,7 @@ import { getStores, getMarcas, getTabelasPreco, getClienteFicha } from "@/lib/me
 import { canSeeFinancials, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
+import { waHref } from "@/lib/whatsapp";
 import { FilterBar } from "../filter-bar";
 import { CollapsibleFilters } from "../collapsible-filters";
 import { StatTile } from "../stat-tile";
@@ -101,7 +102,7 @@ export default async function ClientesFichaPage({
               <h2 className="text-base font-semibold text-[var(--text-primary)]">{ficha.cliente}</h2>
               <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm text-[var(--text-secondary)]">
                 {ficha.telefone && (
-                  <a href={`tel:${ficha.telefone}`} className="text-[var(--series-1)] hover:underline tabular-nums">{ficha.telefone}</a>
+                  <a href={waHref(ficha.telefone)} target="_blank" rel="noopener noreferrer" className="text-[var(--series-1)] hover:underline tabular-nums">{ficha.telefone}</a>
                 )}
                 {ficha.email && <span>{ficha.email}</span>}
                 {ficha.dataNascimento && <span>Nasc. {formatDataNascimento(ficha.dataNascimento)}</span>}

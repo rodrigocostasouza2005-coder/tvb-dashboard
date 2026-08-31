@@ -3,6 +3,7 @@ import { getStores, getMarcas, getTabelasPreco, getSalesByDimension, getClientes
 import { canSeeFinancials, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
+import { waHref } from "@/lib/whatsapp";
 import { FilterBar } from "../filter-bar";
 import { CollapsibleFilters } from "../collapsible-filters";
 import { PcKeySelect } from "./pc-key-select";
@@ -150,7 +151,7 @@ export default async function ClientesProdutoPage({
                   </td>
                   <td className="px-4 py-2">
                     {r.telefone ? (
-                      <a href={`tel:${r.telefone}`} className="text-[var(--series-1)] hover:underline tabular-nums">{r.telefone}</a>
+                      <a href={waHref(r.telefone)} target="_blank" rel="noopener noreferrer" className="text-[var(--series-1)] hover:underline tabular-nums">{r.telefone}</a>
                     ) : (
                       <span className="text-[var(--text-muted)]">—</span>
                     )}

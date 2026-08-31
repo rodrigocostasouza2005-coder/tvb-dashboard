@@ -3,6 +3,7 @@ import { getMonthlySnapshotKpi, getMonthlySalesByStore, getMonthlyReturnsTotal, 
 import { canSeeFinancials, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction, getGrupoRestriction } from "@/lib/permissions";
 import { parseFilters, brasiliaDayStart, brasiliaDayEnd, todayBrasiliaStr, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
+import { waHref } from "@/lib/whatsapp";
 import { StatTile } from "../stat-tile";
 import { TrendChart } from "./trend-chart";
 import { CollapsibleFilters } from "../collapsible-filters";
@@ -388,7 +389,9 @@ export default async function LaminaMensalPage({
                       <span className="truncate text-sm text-[var(--text-primary)]">{c.cliente}</span>
                       {telefone && (
                         <a
-                          href={`tel:${telefone}`}
+                          href={waHref(telefone)}
+                          target="_blank"
+                          rel="noopener noreferrer"
                           className="shrink-0 text-xs tabular-nums text-[var(--series-1)] hover:underline"
                         >
                           {telefone}

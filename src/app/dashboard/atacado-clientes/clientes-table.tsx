@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { waHref } from "@/lib/whatsapp";
 
 type ClienteRow = {
   clienteNome: string;
@@ -102,7 +103,7 @@ export function ClientesTable({ rows }: { rows: ClienteRow[] }) {
                 <td className="px-4 py-2 font-medium text-[var(--text-primary)]">{r.clienteNome}</td>
                 <td className="px-4 py-2">
                   {r.telefone ? (
-                    <a href={`tel:${r.telefone}`} className="text-[var(--series-1)] hover:underline tabular-nums">{r.telefone}</a>
+                    <a href={waHref(r.telefone)} target="_blank" rel="noopener noreferrer" className="text-[var(--series-1)] hover:underline tabular-nums">{r.telefone}</a>
                   ) : (
                     <span className="text-[var(--text-muted)]">—</span>
                   )}

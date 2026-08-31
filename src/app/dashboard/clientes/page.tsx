@@ -6,6 +6,7 @@ import {
 import { canSeeFinancials, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
 import { parseFilters, todayBrasiliaStr, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
+import { waHref } from "@/lib/whatsapp";
 import { FilterBar } from "../filter-bar";
 import { CollapsibleFilters } from "../collapsible-filters";
 import { MetricBarChart } from "../metric-bar-chart";
@@ -188,7 +189,7 @@ export default async function ClientesPage({
                 </td>
                 <td className="px-4 py-2">
                   {r.telefone ? (
-                    <a href={`tel:${r.telefone}`} className="text-[var(--series-1)] hover:underline tabular-nums">
+                    <a href={waHref(r.telefone)} target="_blank" rel="noopener noreferrer" className="text-[var(--series-1)] hover:underline tabular-nums">
                       {r.telefone}
                     </a>
                   ) : (
@@ -273,7 +274,7 @@ export default async function ClientesPage({
                     <td className="px-4 py-2">{c.nome}</td>
                     <td className="px-4 py-2">
                       {c.telefone || c.celular ? (
-                        <a href={`tel:${c.telefone ?? c.celular}`} className="text-[var(--series-1)] hover:underline tabular-nums">
+                        <a href={waHref(c.telefone ?? c.celular ?? "")} target="_blank" rel="noopener noreferrer" className="text-[var(--series-1)] hover:underline tabular-nums">
                           {c.telefone ?? c.celular}
                         </a>
                       ) : (

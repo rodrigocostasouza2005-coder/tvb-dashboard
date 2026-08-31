@@ -3,6 +3,7 @@ import { searchStockVsSalesComTamanhos, getTopClientes, getStores, getMarcas, ge
 import { canSeeFinancials, getGrupoRestriction, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
+import { waHref } from "@/lib/whatsapp";
 import { FilterBar } from "../filter-bar";
 import { CollapsibleFilters } from "../collapsible-filters";
 import { PesquisaTable } from "./pesquisa-table";
@@ -123,7 +124,7 @@ export default async function PesquisaPage({
                   <td className="px-4 py-2 font-medium">{c.cliente}</td>
                   <td className="px-4 py-2">
                     {c.telefone ? (
-                      <a href={`tel:${c.telefone}`} className="text-[var(--series-1)] hover:underline tabular-nums">
+                      <a href={waHref(c.telefone)} target="_blank" rel="noopener noreferrer" className="text-[var(--series-1)] hover:underline tabular-nums">
                         {c.telefone}
                       </a>
                     ) : (
