@@ -29,7 +29,8 @@ export type TabKey =
   | "clientes-segmentacao"
   | "clientes-ficha"
   | "clientes-produto"
-  | "clientes-produtos-entrada";
+  | "clientes-produtos-entrada"
+  | "clientes-sugestoes-contato";
 
 export type TabGroup = "visao-geral" | "vendas" | "estoque" | "atacado" | "clientes" | "marketing" | "pesquisa" | "lamina" | "outros";
 
@@ -74,6 +75,7 @@ export const TABS: TabEntry[] = [
   { key: "clientes-ficha", label: "Ficha do Cliente", href: "/dashboard/clientes-ficha", group: "clientes" },
   { key: "clientes-produto", label: "Produto → Cliente", href: "/dashboard/clientes-produto", group: "clientes" },
   { key: "clientes-produtos-entrada", label: "Produtos de Entrada", href: "/dashboard/clientes-produtos-entrada", group: "clientes" },
+  { key: "clientes-sugestoes-contato", label: "Sugestões de Contato", href: "/dashboard/clientes-sugestoes-contato", group: "clientes" },
 
   // marketing
   { key: "top-mais-vendidos", label: "Top 10 mais vendidos", href: "/dashboard/top-mais-vendidos", group: "marketing" },

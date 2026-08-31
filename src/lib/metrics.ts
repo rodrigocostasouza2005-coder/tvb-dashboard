@@ -2303,6 +2303,59 @@ export async function getAniversariantesDoMes(filters: DashboardFilters, vendedo
     .sort((a, b) => a.dataNascimento.getUTCDate() - b.dataNascimento.getUTCDate());
 }
 
+export type SugestaoContato = {
+  cliente: string;
+  telefone: string | null;
+  motivo: string;
+  detalhe: string;
+};
+
+// "Sugestões de Contato" — pedido do Rodrigo em 2026-08-31: lista curta e diária de quem o
+// atendimento deveria ligar/chamar, com o motivo (não é a base inteira de "em risco", que já dá
+// pra ver na Segmentação — aqui é só um punhado por dia, acionável). Dois critérios:
+// 1) VIP/Recorrente esfriando — entre 70-90 dias sem comprar, ainda dá tempo de reter antes de
+//    virar "em risco" de verdade (limiar já usado em getClienteSegmentacao).
+// 2) Aniversariante do mês — reaproveita getAniversariantesDoMes.
+// Limita a um total pequeno (não estica a lista inteira todo dia) — prioriza VIP esfriando
+// primeiro (maior receita), depois recorrente esfriando, depois aniversariantes.
+const SUGESTAO_CONTATO_LIMITE = 20;
+const ESFRIANDO_DIAS_MIN = 70;
+const ESFRIANDO_DIAS_MAX = 90;
+
+export async function getSugestoesDeContato(filters: DashboardFilters, canal: Canal = "todos"): Promise<SugestaoContato[]> {
+  const mesAtual = new Date().getUTCMonth() + 1;
+  const [segmentacao, aniversariantes] = await Promise.all([
+    getClienteSegmentacao(filters, canal),
+    getAniversariantesDoMes(filters, null, mesAtual),
+  ]);
+
+  const vipEsfriando = segmentacao
+    .filter((s) => s.segmento === "vip" && s.recenciaDias >= ESFRIANDO_DIAS_MIN && s.recenciaDias <= ESFRIANDO_DIAS_MAX)
+    .sort((a, b) => b.receitaBruta - a.receitaBruta);
+  const recorrenteEsfriando = segmentacao
+    .filter((s) => s.segmento === "recorrente" && s.recenciaDias >= ESFRIANDO_DIAS_MIN && s.recenciaDias <= ESFRIANDO_DIAS_MAX)
+    .sort((a, b) => b.receitaBruta - a.receitaBruta);
+
+  const sugestoes: SugestaoContato[] = [];
+  for (const s of vipEsfriando) {
+    sugestoes.push({ cliente: s.cliente, telefone: s.telefone, motivo: "VIP esfriando", detalhe: `${s.recenciaDias} dias sem comprar` });
+  }
+  for (const s of recorrenteEsfriando) {
+    sugestoes.push({ cliente: s.cliente, telefone: s.telefone, motivo: "Recorrente esfriando", detalhe: `${s.recenciaDias} dias sem comprar` });
+  }
+  for (const a of aniversariantes) {
+    if (sugestoes.length >= SUGESTAO_CONTATO_LIMITE) break;
+    sugestoes.push({
+      cliente: a.nome,
+      telefone: a.telefone ?? a.celular,
+      motivo: "Aniversário",
+      detalhe: `Dia ${a.dataNascimento.getUTCDate().toString().padStart(2, "0")}`,
+    });
+  }
+
+  return sugestoes.slice(0, SUGESTAO_CONTATO_LIMITE);
+}
+
 export async function getMonthlySalesByStore(filters: DashboardFilters, canal: Canal = "todos") {
   const rows = await prisma.$queryRaw<{ month: Date; storeId: string; units: bigint; revenue: number }[]>`
     SELECT
