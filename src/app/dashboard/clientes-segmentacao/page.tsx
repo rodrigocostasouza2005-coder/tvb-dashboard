@@ -1,5 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
-import { getStores, getMarcas, getTabelasPreco, getClienteSegmentacao, getPrimeiraVendaData, type Canal, type ClienteSegmento } from "@/lib/metrics";
+import { getStores, getMarcas, getTabelasPreco, getClienteSegmentacao, getPrimeiraVendaData, getProdutosLiquidosPorClientes, type Canal, type ClienteSegmento } from "@/lib/metrics";
 import { canSeeFinancials, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
@@ -110,6 +110,11 @@ export default async function ClientesSegmentacaoPage({
         .sort((a, b) => b.receitaBruta - a.receitaBruta)
         .slice(0, 100)
     : [];
+  // Produtos (líquido) só dos clientes efetivamente visíveis na tabela — em lote, não 1 query
+  // por linha (pedido do Rodrigo em 2026-08-31).
+  const produtosPorCliente = listaSegmento.length > 0
+    ? await getProdutosLiquidosPorClientes(filters, listaSegmento.map((s) => s.cliente))
+    : new Map<string, { produto: string; unidades: number }[]>();
 
   function baseParams() {
     const p = new URLSearchParams();
@@ -231,6 +236,7 @@ export default async function ClientesSegmentacaoPage({
                 <th className="px-4 py-2 font-medium">Cliente ({SEGMENTO_LABEL[segmentoSelecionado]})</th>
                 <th className="px-4 py-2 font-medium">Contato</th>
                 <th className="px-4 py-2 font-medium">Grupo mais comprado</th>
+                <th className="px-4 py-2 font-medium">Produtos (líquido)</th>
                 <th className="px-4 py-2 font-medium">Pedidos</th>
                 <th className="px-4 py-2 font-medium">Última compra</th>
                 {showFinancials && <th className="px-4 py-2 font-medium">Receita bruta</th>}
@@ -250,6 +256,30 @@ export default async function ClientesSegmentacaoPage({
                     )}
                   </td>
                   <td className="px-4 py-2 text-[var(--text-secondary)]">{s.grupoPrincipal ?? <span className="text-[var(--text-muted)]">—</span>}</td>
+                  <td className="px-4 py-2">
+                    {(() => {
+                      const produtos = produtosPorCliente.get(s.cliente.trim().toUpperCase()) ?? [];
+                      if (produtos.length === 0) return <span className="text-[var(--text-muted)]">—</span>;
+                      return (
+                        <details className="group relative">
+                          <summary className="flex w-fit cursor-pointer list-none items-center gap-1 text-xs text-[var(--series-1)] hover:underline [&::-webkit-details-marker]:hidden">
+                            {produtos.length} produto{produtos.length > 1 ? "s" : ""}
+                            <span aria-hidden className="text-[10px] transition-transform group-open:rotate-180">▾</span>
+                          </summary>
+                          <div className="absolute left-0 z-10 mt-1 max-h-60 w-64 overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-2 shadow-lg">
+                            <ul className="flex flex-col gap-1 text-xs">
+                              {produtos.map((p) => (
+                                <li key={p.produto} className="flex items-center justify-between gap-2">
+                                  <span className="truncate text-[var(--text-primary)]">{p.produto}</span>
+                                  <span className="shrink-0 tabular-nums text-[var(--text-muted)]">{p.unidades}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        </details>
+                      );
+                    })()}
+                  </td>
                   <td className="px-4 py-2 tabular-nums">{s.pedidos}</td>
                   <td className="px-4 py-2 tabular-nums text-[var(--text-secondary)]">há {s.recenciaDias}d</td>
                   {showFinancials && <td className="px-4 py-2 tabular-nums">{formatBRL(s.receitaBruta)}</td>}
@@ -257,7 +287,7 @@ export default async function ClientesSegmentacaoPage({
               ))}
               {listaSegmento.length === 0 && (
                 <tr>
-                  <td colSpan={showFinancials ? 6 : 5} className="px-4 py-6 text-center text-[var(--text-muted)]">
+                  <td colSpan={showFinancials ? 7 : 6} className="px-4 py-6 text-center text-[var(--text-muted)]">
                     Nenhum cliente nesse segmento.
                   </td>
                 </tr>

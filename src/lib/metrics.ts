@@ -1397,6 +1397,74 @@ export async function getClienteSegmentacao(
   });
 }
 
+// Produtos comprados (líquido) por um lote de clientes — pedido do Rodrigo em 2026-08-31 pra
+// dropdown na lista de Segmentação. Em lote (1 query pra todos os clientes da tela, nunca 1 por
+// linha) — mesma ideia de getClienteFicha, mas resolvido pra N clientes de uma vez em vez de 1.
+// Sempre histórico completo (mesmo critério de "primeira compra"/segmentação — não é o período do
+// filtro), respeitando loja/marca/tabela do filtro atual.
+export async function getProdutosLiquidosPorClientes(
+  filters: Pick<DashboardFilters, "storeIds" | "marcas" | "tabelasPreco" | "grupoIn">,
+  nomesClientes: string[]
+): Promise<Map<string, { produto: string; unidades: number }[]>> {
+  if (nomesClientes.length === 0) return new Map();
+  const normalizedTargets = [...new Set(nomesClientes.map((n) => n.trim().toUpperCase()))];
+
+  const variantRows = await prisma.$queryRaw<{ nome: string; norm: string }[]>`
+    SELECT DISTINCT "clienteNome" AS nome, UPPER(TRIM("clienteNome")) AS norm
+    FROM "Sale"
+    WHERE UPPER(TRIM("clienteNome")) = ANY(${normalizedTargets})
+  `;
+  if (variantRows.length === 0) return new Map();
+  const variantToNorm = new Map(variantRows.map((r) => [r.nome, r.norm]));
+  const allVariants = variantRows.map((r) => r.nome);
+
+  const allTime: DashboardFilters = { ...filters, from: new Date(0), to: new Date() };
+  const where: Prisma.SaleWhereInput = { ...saleWhere(allTime), clienteNome: { in: allVariants } };
+  const sales = await prisma.sale.findMany({
+    where,
+    select: { clienteNome: true, produto: true, quantidade: true, storeId: true, dapicVendaId: true },
+  });
+  if (sales.length === 0) return new Map();
+
+  const porClienteProduto = new Map<string, Map<string, number>>();
+  const pedidoToCliente = new Map<string, string>();
+  for (const s of sales) {
+    const norm = variantToNorm.get(s.clienteNome as string) ?? (s.clienteNome as string).trim().toUpperCase();
+    const m = porClienteProduto.get(norm) ?? new Map<string, number>();
+    m.set(s.produto, (m.get(s.produto) ?? 0) + s.quantidade);
+    porClienteProduto.set(norm, m);
+    pedidoToCliente.set(`${s.storeId}::${s.dapicVendaId}`, norm);
+  }
+
+  // Devolução — junta por storeId+dapicVendaId (Return não tem clienteNome) usando o mapa de
+  // pedido→cliente que já montamos acima, então dá pra atribuir certo com 1 query só pra todos.
+  const storeIds = [...new Set(sales.map((s) => s.storeId))];
+  const vendaIds = [...new Set(sales.map((s) => s.dapicVendaId))];
+  const returns = await prisma.return.findMany({
+    where: { storeId: { in: storeIds }, dapicVendaId: { in: vendaIds } },
+    select: { storeId: true, dapicVendaId: true, produto: true, quantidade: true },
+  });
+  for (const r of returns) {
+    const norm = pedidoToCliente.get(`${r.storeId}::${r.dapicVendaId}`);
+    if (!norm) continue;
+    const m = porClienteProduto.get(norm);
+    if (!m) continue;
+    m.set(r.produto, (m.get(r.produto) ?? 0) - r.quantidade);
+  }
+
+  const result = new Map<string, { produto: string; unidades: number }[]>();
+  for (const [norm, m] of porClienteProduto) {
+    result.set(
+      norm,
+      [...m.entries()]
+        .map(([produto, unidades]) => ({ produto, unidades }))
+        .filter((p) => p.unidades !== 0)
+        .sort((a, b) => b.unidades - a.unidades)
+    );
+  }
+  return result;
+}
+
 export type ClientePrecoBehavior = "full_price" | "promo_driven" | "mixed" | "sem_dado";
 
 // Tabelas reais confirmadas em produção em 2026-08-28 (Sale.tabelaPreco): "Tabela varejo",
