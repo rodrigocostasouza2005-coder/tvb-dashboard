@@ -965,15 +965,35 @@ export async function getReplenishment(filters: Pick<DashboardFilters, "storeIds
 // podia marcar como "novo" um cliente que já comprava havia tempo em outra loja/marca). Mesma
 // normalização de capitalização de getTopClientes (senão "Gringo"/"GRINGO" contam como 2
 // primeiras-compras diferentes). Recebe os nomes JÁ normalizados (trim+upper).
+//
+// Também considera ClienteCadastro.primeiraCompraExterna (site antigo pré-DAPIC, importado em
+// 2026-08-31 via scripts/backfill-primeira-compra-externa.ts) — sem isso, cliente que só voltou
+// a comprar recentemente aparecia como "novo" mesmo já sendo cliente desde 2021-2023 (achado
+// cruzando por CPF: 226 casos reais). Usa a data mais antiga entre as duas fontes.
 async function getPrimeiraCompraGlobalPorCliente(nomesNormalizados: string[]): Promise<Map<string, Date>> {
   if (nomesNormalizados.length === 0) return new Map();
-  const rows = await prisma.$queryRaw<{ norm: string; first: Date }[]>`
-    SELECT UPPER(TRIM("clienteNome")) AS norm, MIN("saleDate") AS first
-    FROM "Sale"
-    WHERE UPPER(TRIM("clienteNome")) = ANY(${nomesNormalizados})
-    GROUP BY norm
-  `;
-  return new Map(rows.map((r) => [r.norm, new Date(r.first)]));
+  const [saleRows, externaRows] = await Promise.all([
+    prisma.$queryRaw<{ norm: string; first: Date }[]>`
+      SELECT UPPER(TRIM("clienteNome")) AS norm, MIN("saleDate") AS first
+      FROM "Sale"
+      WHERE UPPER(TRIM("clienteNome")) = ANY(${nomesNormalizados})
+      GROUP BY norm
+    `,
+    prisma.$queryRaw<{ norm: string; first: Date }[]>`
+      SELECT UPPER(TRIM("nome")) AS norm, MIN("primeiraCompraExterna") AS first
+      FROM "ClienteCadastro"
+      WHERE "primeiraCompraExterna" IS NOT NULL AND UPPER(TRIM("nome")) = ANY(${nomesNormalizados})
+      GROUP BY norm
+    `,
+  ]);
+  const result = new Map<string, Date>();
+  for (const r of saleRows) result.set(r.norm, new Date(r.first));
+  for (const r of externaRows) {
+    const d = new Date(r.first);
+    const cur = result.get(r.norm);
+    if (!cur || d < cur) result.set(r.norm, d);
+  }
+  return result;
 }
 
 // Data da venda mais antiga da base — só pra montar a lista de meses disponíveis no seletor de
@@ -2138,6 +2158,13 @@ export async function getClienteFicha(
   // a mais "completa", ex: prefere "João Tardim" a "JOAO TARDIM" só quando ambas tem o mesmo
   // tamanho não dá pra saber qual é a "certa" mesmo, mas na prática resolve a maioria dos casos).
   const nomeExibicao = [...variantes].sort((a, b) => b.length - a.length)[0] ?? busca;
+
+  // Considera a 1ª compra pré-DAPIC (site antigo, ver getPrimeiraCompraGlobalPorCliente) também
+  // na ficha — senão o card mostraria uma data mais recente que o real pra quem já era cliente
+  // desde 2021-2023.
+  for (const c of cadastro) {
+    if (c.primeiraCompraExterna && c.primeiraCompraExterna < primeiraCompra) primeiraCompra = c.primeiraCompraExterna;
+  }
 
   return {
     cliente: nomeExibicao,

@@ -278,6 +278,16 @@ model ClienteCadastro {
   // já formatado com pontuação. Pedido do Rodrigo em 2026-08-28.
   cpfCnpj        String?
 
+  // Data da 1ª compra do cliente numa base ANTERIOR ao DAPIC (ex: site antigo na vnda,
+  // 2021-2025) — só a data, sem dado de produto/receita. Usado exclusivamente pra corrigir a
+  // classificação de "cliente novo" (getPrimeiraCompraGlobalPorCliente em metrics.ts), que sem
+  // isso marcava como "novo" quem só tinha voltado a comprar depois de anos como cliente antigo
+  // (achado pelo Rodrigo em 2026-08-31, cruzando por CPF: 226 clientes real do vnda desde
+  // 2021-2023 apareciam como "novo" no dashboard). Preenchido 1x via
+  // scripts/backfill-primeira-compra-externa.ts, nunca pelo sync do DAPIC.
+  primeiraCompraExterna DateTime?
+  fonteExterna          String?
+
   @@index([nome])
 }
 
