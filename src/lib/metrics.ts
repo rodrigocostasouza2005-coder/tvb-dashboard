@@ -2013,7 +2013,7 @@ export type ClienteFicha = {
     receitaLiquida: number;
   }[];
   topTamanhos: { tamanho: string; unidades: number }[];
-  topLojas: { loja: string; pedidos: number }[];
+  topLojas: { loja: string; pedidos: number; datas: Date[] }[];
   // bruta — devolução não é atribuída a mês aqui (só ao produto, ver comentário na função).
   historicoMensal: { month: string; receita: number; unidades: number }[];
 };
@@ -2116,6 +2116,9 @@ export async function getClienteFicha(
   // pedido pertence a 1 loja só (mesmo storeId), então dá pra contar direto por pedidoKey.
   const pedidoKeyToLoja = new Map<string, string>();
   const pedidoUnidadesBruto = new Map<string, number>();
+  // Data de cada pedido (todas as linhas de um mesmo pedido têm a mesma data) — pra listar
+  // quando foi cada visita em "onde comprou". Pedido do Rodrigo em 2026-08-31.
+  const pedidoKeyToData = new Map<string, Date>();
 
   for (const s of sales) {
     const pedidoKey = `${s.storeId}::${s.dapicVendaId}`;
@@ -2153,6 +2156,7 @@ export async function getClienteFicha(
     porLoja.set(loja, (porLoja.get(loja) ?? 0) + s.quantidade);
     storeIdToLoja.set(s.storeId, loja);
     pedidoKeyToLoja.set(pedidoKey, loja);
+    pedidoKeyToData.set(pedidoKey, s.saleDate);
 
     const mes = s.saleDate.toISOString().slice(0, 7);
     const m = porMes.get(mes) ?? { receita: 0, unidades: 0 };
@@ -2219,6 +2223,9 @@ export async function getClienteFicha(
   // usa isso como valor principal, com o bruto (pedidos.size) como subtexto — pedido do Rodrigo em
   // 2026-08-28, achou estranho o KPI bruto não bater com a soma de "onde comprou" (líquida).
   const pedidosPorLoja = new Map<string, number>();
+  // Data de cada visita líquida por loja — pedido do Rodrigo em 2026-08-31, pra ver quando foi
+  // cada vez que ele comprou em cada loja, não só a contagem.
+  const datasPorLoja = new Map<string, Date[]>();
   let pedidosLiquidos = 0;
   for (const [pedidoKey, bruto] of pedidoUnidadesBruto) {
     const liquido = bruto - (pedidoUnidadesDevolvido.get(pedidoKey) ?? 0);
@@ -2227,6 +2234,12 @@ export async function getClienteFicha(
     const loja = pedidoKeyToLoja.get(pedidoKey);
     if (!loja) continue;
     pedidosPorLoja.set(loja, (pedidosPorLoja.get(loja) ?? 0) + 1);
+    const data = pedidoKeyToData.get(pedidoKey);
+    if (data) {
+      const arr = datasPorLoja.get(loja) ?? [];
+      arr.push(data);
+      datasPorLoja.set(loja, arr);
+    }
   }
 
   const cad = cadastro[0];
@@ -2307,7 +2320,11 @@ export async function getClienteFicha(
       .sort((a, b) => b.unidades - a.unidades)
       .slice(0, 8),
     topLojas: [...porLoja.keys()]
-      .map((loja) => ({ loja, pedidos: pedidosPorLoja.get(loja) ?? 0 }))
+      .map((loja) => ({
+        loja,
+        pedidos: pedidosPorLoja.get(loja) ?? 0,
+        datas: (datasPorLoja.get(loja) ?? []).sort((a, b) => b.getTime() - a.getTime()),
+      }))
       .filter((l) => l.pedidos !== 0)
       .sort((a, b) => b.pedidos - a.pedidos),
     historicoMensal: [...porMes.entries()]

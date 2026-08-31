@@ -158,10 +158,18 @@ export default async function ClientesFichaPage({
             </div>
             <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
               <h3 className="mb-2 text-xs font-medium text-[var(--text-muted)]">Onde comprou (pedidos)</h3>
-              <ul className="flex flex-wrap gap-1.5">
+              <ul className="flex max-h-80 flex-col gap-2 overflow-y-auto text-xs">
                 {ficha.topLojas.map((l) => (
-                  <li key={l.loja} className="rounded-md border border-[var(--border)] px-2 py-1 text-xs text-[var(--text-secondary)]">
-                    {l.loja} <span className="text-[var(--text-muted)]">({l.pedidos} {l.pedidos === 1 ? "pedido" : "pedidos"})</span>
+                  <li key={l.loja} className="rounded-md border border-[var(--border)] px-2 py-1.5">
+                    <div className="flex items-center justify-between gap-2 text-[var(--text-secondary)]">
+                      <span className="font-medium text-[var(--text-primary)]">{l.loja}</span>
+                      <span className="text-[var(--text-muted)]">{l.pedidos} {l.pedidos === 1 ? "pedido" : "pedidos"}</span>
+                    </div>
+                    <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-[var(--text-muted)]">
+                      {l.datas.map((d, i) => (
+                        <span key={i} className="tabular-nums">{formatData(d)}</span>
+                      ))}
+                    </div>
                   </li>
                 ))}
                 {ficha.topLojas.length === 0 && <li className="text-[var(--text-muted)]">—</li>}
