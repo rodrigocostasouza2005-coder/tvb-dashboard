@@ -163,35 +163,63 @@ export async function getSalesByDay(filters: DashboardFilters) {
 // Mesma ideia de getSalesByDay, mas quebrado por loja — pro gráfico de comparação de lojas
 // da Visão Geral. Agrupa por displayGroup (ex: ATACADO + Site viram uma série só "TVB Site e
 // Atacado"), igual o filtro de loja já faz, senão a mesma operação apareceria duplicada.
+// Líquido (desconta devolução por dia+loja) — pedido do Rodrigo em 2026-08-31, achou que o
+// "Comparativo entre lojas" da Visão Geral estava bruto (estava mesmo — só somava Sale.quantidade
+// sem descontar Return, diferente do resto do dashboard que já é líquido em todo lugar).
 export async function getSalesByDayPerStore(filters: DashboardFilters) {
-  const rows = await prisma.$queryRaw<{ day: Date; storeId: string; units: bigint }[]>`
-    SELECT
-      (("saleDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo')::date AS day,
-      "storeId",
-      SUM("quantidade") AS units
-    FROM "Sale"
-    WHERE "saleDate" >= ${filters.from}
-      AND "saleDate" <= ${filters.to}
-      ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
-      ${filters.marcas !== undefined ? Prisma.sql`AND "marca" = ANY(${filters.marcas})` : Prisma.empty}
-      ${filters.tabelasPreco !== undefined ? Prisma.sql`AND ("tabelaPreco" = ANY(${filters.tabelasPreco}) OR "tabelaPreco" IS NULL)` : Prisma.empty}
-      ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
-    GROUP BY day, "storeId"
-    ORDER BY day ASC
-  `;
+  const [salesRows, returnRows] = await Promise.all([
+    prisma.$queryRaw<{ day: Date; storeId: string; units: bigint }[]>`
+      SELECT
+        (("saleDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo')::date AS day,
+        "storeId",
+        SUM("quantidade") AS units
+      FROM "Sale"
+      WHERE "saleDate" >= ${filters.from}
+        AND "saleDate" <= ${filters.to}
+        ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
+        ${filters.marcas !== undefined ? Prisma.sql`AND "marca" = ANY(${filters.marcas})` : Prisma.empty}
+        ${filters.tabelasPreco !== undefined ? Prisma.sql`AND ("tabelaPreco" = ANY(${filters.tabelasPreco}) OR "tabelaPreco" IS NULL)` : Prisma.empty}
+        ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
+      GROUP BY day, "storeId"
+      ORDER BY day ASC
+    `,
+    // Return não tem marca/tabelaPreco populado de forma confiável (mesmo motivo/limitação já
+    // documentada em returnWhere() — filtra só por loja/grupo/data, igual o resto do dashboard.
+    prisma.$queryRaw<{ day: Date; storeId: string; units: bigint }[]>`
+      SELECT
+        (("returnDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo')::date AS day,
+        "storeId",
+        SUM("quantidade") AS units
+      FROM "Return"
+      WHERE "returnDate" >= ${filters.from}
+        AND "returnDate" <= ${filters.to}
+        ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
+        ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
+      GROUP BY day, "storeId"
+      ORDER BY day ASC
+    `,
+  ]);
 
   const stores = await prisma.store.findMany({ where: { sellsProducts: true } });
   const seriesNameByStoreId = new Map(stores.map((s) => [s.id, s.displayGroup ?? s.name]));
 
   const byDay = new Map<string, Record<string, number>>();
   const seriesNames = new Set<string>();
-  for (const r of rows) {
+  for (const r of salesRows) {
     const seriesName = seriesNameByStoreId.get(r.storeId);
     if (!seriesName) continue; // loja que não vende (armazém/CD) não deveria ter Sale, ignora por segurança
     const day = new Date(r.day).toISOString().slice(0, 10);
     seriesNames.add(seriesName);
     const dayRow = byDay.get(day) ?? {};
     dayRow[seriesName] = (dayRow[seriesName] ?? 0) + Number(r.units);
+    byDay.set(day, dayRow);
+  }
+  for (const r of returnRows) {
+    const seriesName = seriesNameByStoreId.get(r.storeId);
+    if (!seriesName) continue;
+    const day = new Date(r.day).toISOString().slice(0, 10);
+    const dayRow = byDay.get(day) ?? {};
+    dayRow[seriesName] = (dayRow[seriesName] ?? 0) - Number(r.units);
     byDay.set(day, dayRow);
   }
 

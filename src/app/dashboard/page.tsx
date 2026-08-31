@@ -129,7 +129,7 @@ export default async function OverviewPage({
       </section>
 
       <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
-        <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Comparativo entre lojas</h2>
+        <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Comparativo entre lojas (unidades líquidas)</h2>
         <StoreCompareChart data={salesByDayPerStore.data} series={salesByDayPerStore.series} />
       </section>
 
