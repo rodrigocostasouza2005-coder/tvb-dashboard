@@ -305,6 +305,11 @@ model VendaHistoricaExterna {
   id            String   @id @default(cuid())
   clienteNome   String
   cpfCnpj       String?
+  // Cidade/estado do pedido (endereço de entrega no vnda) — pedido do Rodrigo em 2026-08-31,
+  // "de onde é o cliente" na Ficha. Não é endereço fixo do cliente, é só o que veio naquele
+  // pedido específico (mesma limitação que Sale.cidade/estado já tem).
+  cidade        String?
+  estado        String?
   pedidoExterno String   @unique
   saleDate      DateTime
   valorTotal    Float

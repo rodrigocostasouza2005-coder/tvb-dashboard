@@ -1945,6 +1945,8 @@ export type ClienteFicha = {
   email: string | null;
   cpfCnpj: string | null;
   dataNascimento: Date | null;
+  cidade: string | null;
+  estado: string | null;
   receitaBruta: number;
   receitaLiquida: number;
   pedidos: number;
@@ -2023,18 +2025,39 @@ export async function getClienteFicha(
   };
   const where: Prisma.SaleWhereInput = { ...saleWhere(allTime), clienteNome: { in: variantes } };
 
-  const [sales, cadastro] = await Promise.all([
+  const [sales, cadastro, historicoLocal] = await Promise.all([
     prisma.sale.findMany({
       where,
       select: {
         saleDate: true, dapicVendaId: true, storeId: true, valorTotalLiquido: true,
-        quantidade: true, tabelaPreco: true, produto: true, tamanho: true, grupo: true,
+        quantidade: true, tabelaPreco: true, produto: true, tamanho: true, grupo: true, cidade: true, estado: true,
         store: { select: { name: true, displayGroup: true } },
       },
     }),
     prisma.clienteCadastro.findMany({ where: { nome: { in: variantes } } }),
+    // site antigo não tem "variantes" de nome pré-computadas (não é indexado por Sale) — casa
+    // direto pelo mesmo conjunto de nomes normalizados já resolvido acima.
+    prisma.vendaHistoricaExterna.findMany({
+      where: { clienteNome: { in: variantes } },
+      select: { saleDate: true, cidade: true, estado: true },
+    }),
   ]);
   if (sales.length === 0) return null;
+
+  // "De onde é" — pega o estado/cidade mais recente entre DAPIC e site antigo (não é endereço
+  // fixo, é o que veio no pedido mais recente que tinha esse dado). Pedido do Rodrigo em
+  // 2026-08-31.
+  let estadoInfo: { cidade: string | null; estado: string; data: Date } | null = null;
+  for (const s of sales) {
+    if (s.estado && (!estadoInfo || s.saleDate > estadoInfo.data)) {
+      estadoInfo = { cidade: s.cidade, estado: s.estado, data: s.saleDate };
+    }
+  }
+  for (const h of historicoLocal) {
+    if (h.estado && (!estadoInfo || h.saleDate > estadoInfo.data)) {
+      estadoInfo = { cidade: h.cidade, estado: h.estado, data: h.saleDate };
+    }
+  }
 
   const pedidos = new Set<string>();
   // true = pelo menos 1 item do pedido é B2B (Tabela atacado) — pedido misto é raro, mas conta
@@ -2194,6 +2217,8 @@ export async function getClienteFicha(
     email: cad?.email ?? null,
     cpfCnpj: cad?.cpfCnpj ?? null,
     dataNascimento: cad?.dataNascimento ?? null,
+    cidade: estadoInfo?.cidade ?? null,
+    estado: estadoInfo?.estado ?? null,
     receitaBruta,
     receitaLiquida: receitaBruta - devolvidoValorTotal,
     unidadesBrutas,

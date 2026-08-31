@@ -107,6 +107,7 @@ export default async function ClientesFichaPage({
                 {ficha.email && <span>{ficha.email}</span>}
                 {ficha.dataNascimento && <span>Nasc. {formatDataNascimento(ficha.dataNascimento)}</span>}
                 {ficha.cpfCnpj && <span>{ficha.cpfCnpj}</span>}
+                {ficha.estado && <span>{ficha.cidade ? `${ficha.cidade} / ` : ""}{ficha.estado}</span>}
               </div>
               <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[var(--text-muted)]">
                 <span>1ª compra: {formatData(ficha.primeiraCompra)}</span>

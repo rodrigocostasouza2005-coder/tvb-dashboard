@@ -38,8 +38,13 @@ async function main() {
   const iDoc = header.indexOf("Documento");
   const iData = header.indexOf("Data");
   const iPreco = header.indexOf("Preço venda");
+  const iCidade = header.indexOf("Cidade");
+  const iEstado = header.indexOf("Estado");
 
-  type Pedido = { pedidoExterno: string; clienteNome: string; cpfCnpj: string | null; saleDate: Date; valorTotal: number };
+  type Pedido = {
+    pedidoExterno: string; clienteNome: string; cpfCnpj: string | null; saleDate: Date; valorTotal: number;
+    cidade: string | null; estado: string | null;
+  };
   const pedidos: Pedido[] = [];
   for (const r of rows.slice(1)) {
     if (r[iTipo] !== "Total" || r[iStatus] !== "Confirmado") continue;
@@ -49,7 +54,9 @@ async function main() {
     if (!pedidoExterno || !data || !nome) continue;
     const valorTotal = typeof r[iPreco] === "number" ? r[iPreco] : Number(r[iPreco]) || 0;
     const doc = r[iDoc] ? String(r[iDoc]).trim() : null;
-    pedidos.push({ pedidoExterno, clienteNome: nome, cpfCnpj: doc || null, saleDate: data, valorTotal });
+    const cidade = r[iCidade] ? String(r[iCidade]).trim() : null;
+    const estado = r[iEstado] ? String(r[iEstado]).trim() : null;
+    pedidos.push({ pedidoExterno, clienteNome: nome, cpfCnpj: doc || null, saleDate: data, valorTotal, cidade: cidade || null, estado: estado || null });
   }
   console.log(`Pedidos (Total/Confirmado) a importar: ${pedidos.length}`);
 
@@ -58,14 +65,16 @@ async function main() {
     const batch = pedidos.slice(i, i + BATCH_SIZE);
     const values = batch.map(
       (p) =>
-        Prisma.sql`(${randomUUID()}, ${p.clienteNome}, ${p.cpfCnpj}, ${p.pedidoExterno}, ${p.saleDate}::timestamp, ${p.valorTotal}::float, 'vnda')`
+        Prisma.sql`(${randomUUID()}, ${p.clienteNome}, ${p.cpfCnpj}, ${p.cidade}, ${p.estado}, ${p.pedidoExterno}, ${p.saleDate}::timestamp, ${p.valorTotal}::float, 'vnda')`
     );
     await prisma.$executeRaw`
-      INSERT INTO "VendaHistoricaExterna" ("id", "clienteNome", "cpfCnpj", "pedidoExterno", "saleDate", "valorTotal", "fonte")
+      INSERT INTO "VendaHistoricaExterna" ("id", "clienteNome", "cpfCnpj", "cidade", "estado", "pedidoExterno", "saleDate", "valorTotal", "fonte")
       VALUES ${Prisma.join(values)}
       ON CONFLICT ("pedidoExterno") DO UPDATE SET
         "clienteNome" = EXCLUDED."clienteNome",
         "cpfCnpj"     = EXCLUDED."cpfCnpj",
+        "cidade"      = EXCLUDED."cidade",
+        "estado"      = EXCLUDED."estado",
         "saleDate"    = EXCLUDED."saleDate",
         "valorTotal"  = EXCLUDED."valorTotal"
     `;
