@@ -1,5 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
-import { getStores, getMarcas, getTabelasPreco, getSalesByDimension, getClientesPorDimensao, type Canal } from "@/lib/metrics";
+import { getStores, getMarcas, getTabelasPreco, getSalesByDimension, getClientesPorDimensao, getCrossSellPorDimensao, type Canal } from "@/lib/metrics";
 import { canSeeFinancials, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
@@ -45,7 +45,10 @@ export default async function ClientesProdutoPage({
     getSalesByDimension(filters, pcDim, canal),
   ]);
   const showFinancials = canSeeFinancials(user);
-  const pcResultado = pcKeys.length > 0 ? await getClientesPorDimensao(filters, pcDim, pcKeys, canal) : [];
+  const [pcResultado, crossSell] = await Promise.all([
+    pcKeys.length > 0 ? getClientesPorDimensao(filters, pcDim, pcKeys, canal) : Promise.resolve([]),
+    pcKeys.length > 0 ? getCrossSellPorDimensao(filters, pcDim, pcKeys, canal) : Promise.resolve(null),
+  ]);
 
   function baseParams() {
     const p = new URLSearchParams();
@@ -165,6 +168,72 @@ export default async function ClientesProdutoPage({
               )}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {crossSell && crossSell.resumo.totalClientes > 0 && (
+        <div className="mt-6 flex flex-col gap-4">
+          <div>
+            <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">
+              O que mais esses clientes compram? <span className="font-normal text-[var(--text-muted)]">(cross-sell, líquido)</span>
+            </h2>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3">
+                <div className="text-xs text-[var(--text-muted)]">Clientes que compraram</div>
+                <div className="mt-1 text-xl font-semibold tabular-nums text-[var(--text-primary)]">{crossSell.resumo.totalClientes.toLocaleString("pt-BR")}</div>
+              </div>
+              <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3">
+                <div className="text-xs text-[var(--text-muted)]">Unidades (líquidas)</div>
+                <div className="mt-1 text-xl font-semibold tabular-nums text-[var(--text-primary)]">{crossSell.resumo.unidadesLiquidas.toLocaleString("pt-BR")}</div>
+                <div className="mt-0.5 text-xs tabular-nums text-[var(--text-muted)]">Brutas: {crossSell.resumo.unidadesBrutas.toLocaleString("pt-BR")}</div>
+              </div>
+              {showFinancials && (
+                <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3 sm:col-span-2">
+                  <div className="text-xs text-[var(--text-muted)]">Receita (líquida)</div>
+                  <div className="mt-1 text-xl font-semibold tabular-nums text-[var(--text-primary)]">{formatBRL(crossSell.resumo.receitaLiquida)}</div>
+                  <div className="mt-0.5 text-xs tabular-nums text-[var(--text-muted)]">Bruta: {formatBRL(crossSell.resumo.receitaBruta)}</div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
+              <h3 className="mb-2 text-xs font-medium text-[var(--text-muted)]">
+                Produtos mais comprados por esses clientes (líquido)
+              </h3>
+              <ul className="flex max-h-96 flex-col gap-1.5 overflow-y-auto text-sm">
+                {crossSell.produtosRelacionados.map((p) => (
+                  <li key={p.key} className="flex items-center justify-between gap-2">
+                    <span className="truncate text-[var(--text-primary)]">{p.key}</span>
+                    <span className="shrink-0 tabular-nums text-[var(--text-muted)]">{p.unidadesLiquidas} un.</span>
+                  </li>
+                ))}
+                {crossSell.produtosRelacionados.length === 0 && (
+                  <li className="text-[var(--text-muted)]">
+                    {pcDim === "produto" ? "Só compram o produto selecionado." : "Nenhum outro produto identificado."}
+                  </li>
+                )}
+              </ul>
+            </div>
+            <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
+              <h3 className="mb-2 text-xs font-medium text-[var(--text-muted)]">
+                Grupos de produtos mais comprados por esses clientes (líquido)
+              </h3>
+              <ul className="flex flex-wrap gap-1.5">
+                {crossSell.gruposRelacionados.map((g) => (
+                  <li key={g.key} className="rounded-md border border-[var(--border)] px-2 py-1 text-xs text-[var(--text-secondary)]">
+                    {g.key} <span className="text-[var(--text-muted)]">({g.unidadesLiquidas})</span>
+                  </li>
+                ))}
+                {crossSell.gruposRelacionados.length === 0 && (
+                  <li className="text-[var(--text-muted)]">
+                    {pcDim === "grupo" ? "Só compram do grupo selecionado." : "Nenhum outro grupo identificado."}
+                  </li>
+                )}
+              </ul>
+            </div>
+          </div>
         </div>
       )}
     </div>

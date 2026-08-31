@@ -1,10 +1,44 @@
 import { getSessionUser } from "@/lib/auth";
-import { getStores, getMarcas, getTabelasPreco, getClienteSegmentacao, type Canal, type ClienteSegmento } from "@/lib/metrics";
+import { getStores, getMarcas, getTabelasPreco, getClienteSegmentacao, getPrimeiraVendaData, type Canal, type ClienteSegmento } from "@/lib/metrics";
 import { canSeeFinancials, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
 import { CollapsibleFilters } from "../collapsible-filters";
+
+const MES_LABEL = [
+  "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+  "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
+];
+
+// Lista de meses disponíveis pro seletor, do mês da venda mais antiga até o mês atual (real),
+// mais recente primeiro.
+function listaMeses(primeiraVenda: Date | null): { value: string; label: string }[] {
+  const now = new Date();
+  const fim = { ano: now.getUTCFullYear(), mes: now.getUTCMonth() + 1 };
+  const inicio = primeiraVenda
+    ? { ano: primeiraVenda.getUTCFullYear(), mes: primeiraVenda.getUTCMonth() + 1 }
+    : fim;
+  const meses: { value: string; label: string }[] = [];
+  let ano = fim.ano, mes = fim.mes;
+  while (ano > inicio.ano || (ano === inicio.ano && mes >= inicio.mes)) {
+    meses.push({ value: `${ano}-${String(mes).padStart(2, "0")}`, label: `${MES_LABEL[mes - 1]}/${ano}` });
+    mes--;
+    if (mes === 0) { mes = 12; ano--; }
+  }
+  return meses;
+}
+
+// Fim do dia do último dia do mês "YYYY-MM" (23:59:59.999 UTC) — usado como "referenceDate" da
+// segmentação: uma foto de como os clientes estavam classificados até ali, sem restringir os
+// dados só àquele mês (ver comentário em getClienteSegmentacao).
+function fimDoMes(mesParam: string): Date | null {
+  const match = /^(\d{4})-(\d{2})$/.exec(mesParam);
+  if (!match) return null;
+  const ano = Number(match[1]), mes = Number(match[2]);
+  if (mes < 1 || mes > 12) return null;
+  return new Date(Date.UTC(ano, mes, 0, 23, 59, 59, 999));
+}
 
 const SEGMENTO_ORDER: ClienteSegmento[] = ["vip", "recorrente", "em_risco", "novo", "ocasional", "inativo"];
 const SEGMENTO_LABEL: Record<ClienteSegmento, string> = {
@@ -49,14 +83,18 @@ export default async function ClientesSegmentacaoPage({
   });
   const canal: Canal = rawParams.canal === "b2b" || rawParams.canal === "b2c" ? rawParams.canal : "todos";
   const segmentoSelecionado = typeof rawParams.segmento === "string" ? (rawParams.segmento as ClienteSegmento) : null;
+  const mesParam = typeof rawParams.mes === "string" ? rawParams.mes : null;
+  const referenceDate = mesParam ? fimDoMes(mesParam) : null;
 
-  const [stores, marcas, tabelasPreco, segmentacao] = await Promise.all([
+  const [stores, marcas, tabelasPreco, primeiraVenda, segmentacao] = await Promise.all([
     getStores(allowedStores),
     getMarcas(allowedMarcas),
     getTabelasPreco(allowedTabelasPreco),
-    getClienteSegmentacao(filters, canal),
+    getPrimeiraVendaData(),
+    referenceDate ? getClienteSegmentacao(filters, canal, referenceDate) : getClienteSegmentacao(filters, canal),
   ]);
   const showFinancials = canSeeFinancials(user);
+  const meses = listaMeses(primeiraVenda);
 
   const segmentoCounts = new Map<ClienteSegmento, { count: number; receita: number }>();
   for (const s of segmentacao) {
@@ -78,6 +116,7 @@ export default async function ClientesSegmentacaoPage({
     for (const m of filters.marcas ?? []) p.append("marca", m);
     for (const t of filters.tabelasPreco ?? []) p.append("tabelaPreco", t);
     p.set("canal", canal);
+    if (mesParam) p.set("mes", mesParam);
     return p;
   }
   function segmentoHref(seg: ClienteSegmento) {
@@ -131,8 +170,32 @@ export default async function ClientesSegmentacaoPage({
         ))}
       </div>
 
+      <form method="get" action="/dashboard/clientes-segmentacao" className="mb-3 flex items-center gap-2">
+        {filters.storeIds?.map((id) => <input key={id} type="hidden" name="store" value={id} />)}
+        {filters.marcas?.map((m) => <input key={m} type="hidden" name="marca" value={m} />)}
+        {filters.tabelasPreco?.map((t) => <input key={t} type="hidden" name="tabelaPreco" value={t} />)}
+        <input type="hidden" name="canal" value={canal} />
+        <span className="text-xs text-[var(--text-muted)]">Foto de:</span>
+        <select
+          name="mes"
+          defaultValue={mesParam ?? ""}
+          className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-sm text-[var(--text-primary)]"
+          style={{ colorScheme: "light dark" }}
+        >
+          <option value="">Agora (padrão)</option>
+          {meses.map((m) => (
+            <option key={m.value} value={m.value}>{m.label}</option>
+          ))}
+        </select>
+        <button type="submit" className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-3 py-1.5 text-sm hover:bg-[var(--page-plane)]">
+          Ver
+        </button>
+      </form>
+
       <p className="mb-4 text-xs text-[var(--text-muted)]">
-        Baseado no histórico completo do cliente (não só no período do filtro acima) — loja/marca/tabela/canal continuam aplicados.
+        {referenceDate
+          ? `Reconstrução histórica de como os clientes estavam classificados no fim de ${meses.find((m) => m.value === mesParam)?.label ?? mesParam} — considera todo o histórico até essa data (não só aquele mês). Loja/marca/tabela/canal continuam aplicados.`
+          : "Baseado no histórico completo do cliente (não só no período do filtro acima) — loja/marca/tabela/canal continuam aplicados."}
       </p>
 
       <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">

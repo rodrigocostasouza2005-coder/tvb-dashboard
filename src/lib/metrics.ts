@@ -920,6 +920,13 @@ async function getPrimeiraCompraGlobalPorCliente(nomesNormalizados: string[]): P
   return new Map(rows.map((r) => [r.norm, new Date(r.first)]));
 }
 
+// Data da venda mais antiga da base — só pra montar a lista de meses disponíveis no seletor de
+// período da Segmentação (2026-08-31).
+export async function getPrimeiraVendaData(): Promise<Date | null> {
+  const rows = await prisma.$queryRaw<{ first: Date | null }[]>`SELECT MIN("saleDate") AS first FROM "Sale"`;
+  return rows[0]?.first ? new Date(rows[0].first) : null;
+}
+
 export async function getNewClientsCount(filters: DashboardFilters) {
   const where: Prisma.SaleWhereInput = { ...saleWhere(filters), clienteNome: { not: null } };
   const clientesNoPeriodo = await prisma.sale.groupBy({ by: ["clienteNome"], where });
@@ -1305,11 +1312,24 @@ export type ClienteSegmentado = {
 // (que cobre o histórico inteiro desde set/2025) — todo cliente virava "novo" porque a 1ª
 // compra de qualquer um sempre cai dentro de um período tão largo (achado testando em
 // 2026-08-28: Segmentação toda zerada em VIP/Recorrente/etc, tudo empurrado pra "novo"). "Novo"
-// aqui sempre usa uma janela fixa dos últimos NOVO_DIAS a partir de hoje, independente do
+// aqui sempre usa uma janela fixa dos últimos NOVO_DIAS a partir de "referenceDate", não do
 // período selecionado — sempre olhando a 1ª compra da empresa inteira (mesmo critério de
 // getNewClientsCount), não só dentro do filtro de loja/marca/tabela.
-export async function getClienteSegmentacao(filters: DashboardFilters, canal: Canal = "todos"): Promise<ClienteSegmentado[]> {
-  const allTime: DashboardFilters = { ...filters, from: new Date(0), to: new Date() };
+//
+// referenceDate = "foto tirada em que data" (pedido do Rodrigo em 2026-08-31, seletor de
+// mês/período na Segmentação). Default é agora (comportamento de sempre). Quando é um mês
+// passado, vira uma reconstrução histórica: todo o cálculo (recência, pedidos, receita, corte de
+// VIP e a janela de "novo") passa a olhar só até o fim daquele mês, como se estivéssemos ali —
+// SEM restringir a query a vendas só DAQUELE mês, senão um cliente antigo que não comprou
+// especificamente naquele mês sumiria ou virataria "novo" por engano (exemplo do Rodrigo). O
+// histórico anterior ao mês continua 100% visível pro cálculo, só o futuro (depois do mês) que
+// fica de fora.
+export async function getClienteSegmentacao(
+  filters: DashboardFilters,
+  canal: Canal = "todos",
+  referenceDate: Date = new Date()
+): Promise<ClienteSegmentado[]> {
+  const allTime: DashboardFilters = { ...filters, from: new Date(0), to: referenceDate };
   const where: Prisma.SaleWhereInput = {
     ...saleWhere(allTime),
     clienteNome: { not: null },
@@ -1339,7 +1359,7 @@ export async function getClienteSegmentacao(filters: DashboardFilters, canal: Ca
   const cadastros = await prisma.clienteCadastro.findMany({ where: { nome: { in: nomesRaw } } });
   const cadastroByNome = new Map(cadastros.map((c) => [c.nome, c]));
 
-  const now = new Date();
+  const now = referenceDate;
   const receitaOrdenada = [...byCliente.values()].map((c) => c.receita).sort((a, b) => b - a);
   const corteVip = receitaOrdenada[Math.max(0, Math.floor(receitaOrdenada.length * 0.1) - 1)] ?? Infinity;
 
@@ -1484,6 +1504,181 @@ export async function getClientesPorDimensao(
     const cad = cadastroByNome.get(r.cliente);
     return { ...r, telefone: cad?.telefone ?? cad?.celular ?? null };
   });
+}
+
+export type CrossSellResumo = {
+  totalClientes: number;
+  unidadesBrutas: number;
+  unidadesLiquidas: number;
+  receitaBruta: number;
+  receitaLiquida: number;
+};
+
+export type CrossSellItem = {
+  key: string;
+  unidadesBrutas: number;
+  unidadesLiquidas: number;
+  receitaBruta: number;
+  receitaLiquida: number;
+};
+
+export type CrossSellResult = {
+  resumo: CrossSellResumo;
+  produtosRelacionados: CrossSellItem[];
+  gruposRelacionados: CrossSellItem[];
+};
+
+// Cross-sell: "quem comprou X, o que mais compra?" — pedido do Rodrigo em 2026-08-31. Reutiliza
+// saleWhere/canalWhere (mesma regra B2B/B2C oficial de sempre) e o mesmo padrão de netagem de
+// devolução por produto/grupo já usado em getClienteFicha (junta Return por storeId+dapicVendaId,
+// já que Return não tem clienteNome).
+//
+// Passo a passo: 1) acha quem comprou os produtos/grupos selecionados (dimension+keys) dentro do
+// filtro/canal; 2) busca TODAS as compras desses clientes no mesmo filtro/canal (não só do que
+// selecionou — é isso que vira a base do cross-sell); 3) agrega por produto e por grupo; 4) neta
+// devolução (sempre B2C — pedidos.length 0 em canal="b2b" pula a query inteira, mesma regra usada
+// em getClientesCrmOverview); 5) exclui os próprios produtos/grupos selecionados do ranking da
+// MESMA dimensão (não teria sentido dizer "quem compra Camisa X também compra Camisa X").
+export async function getCrossSellPorDimensao(
+  filters: DashboardFilters,
+  dimension: "produto" | "grupo",
+  keys: string[],
+  canal: Canal = "todos",
+  limit = 20
+): Promise<CrossSellResult> {
+  const vazio: CrossSellResult = {
+    resumo: { totalClientes: 0, unidadesBrutas: 0, unidadesLiquidas: 0, receitaBruta: 0, receitaLiquida: 0 },
+    produtosRelacionados: [],
+    gruposRelacionados: [],
+  };
+  if (keys.length === 0) return vazio;
+
+  const baseWhere: Prisma.SaleWhereInput = {
+    ...saleWhere(filters),
+    clienteNome: { not: null },
+    ...(canal !== "todos" ? { AND: [canalWhere(canal)] } : {}),
+  };
+
+  const compradoresRows = await prisma.sale.groupBy({
+    by: ["clienteNome"],
+    where: { ...baseWhere, ...(dimension === "produto" ? { produto: { in: keys } } : { grupo: { in: keys } }) },
+  });
+  if (compradoresRows.length === 0) return vazio;
+  const normalizedSet = new Set(compradoresRows.map((r) => (r.clienteNome as string).trim().toUpperCase()));
+
+  const variantRows = await prisma.$queryRaw<{ nome: string }[]>`
+    SELECT DISTINCT "clienteNome" AS nome FROM "Sale" WHERE UPPER(TRIM("clienteNome")) = ANY(${[...normalizedSet]})
+  `;
+  const variantes = variantRows.map((r) => r.nome);
+
+  // TUDO que esses clientes compraram no mesmo período/filtro/canal — não só o produto/grupo
+  // selecionado. É a base do "o que mais eles compram".
+  const todasComprasRows = await prisma.sale.findMany({
+    where: { ...baseWhere, clienteNome: { in: variantes } },
+    select: { storeId: true, dapicVendaId: true, produto: true, grupo: true, quantidade: true, valorTotalLiquido: true },
+  });
+
+  const porProduto = new Map<string, { unidades: number; receita: number }>();
+  const porGrupo = new Map<string, { unidades: number; receita: number }>();
+  const pedidoKeys = new Set<string>();
+  const storeIdsCliente = new Set<string>();
+  const dapicVendaIdsCliente = new Set<number>();
+  for (const s of todasComprasRows) {
+    const p = porProduto.get(s.produto) ?? { unidades: 0, receita: 0 };
+    p.unidades += s.quantidade;
+    p.receita += s.valorTotalLiquido;
+    porProduto.set(s.produto, p);
+
+    const g = porGrupo.get(s.grupo) ?? { unidades: 0, receita: 0 };
+    g.unidades += s.quantidade;
+    g.receita += s.valorTotalLiquido;
+    porGrupo.set(s.grupo, g);
+
+    pedidoKeys.add(`${s.storeId}::${s.dapicVendaId}`);
+    storeIdsCliente.add(s.storeId);
+    dapicVendaIdsCliente.add(s.dapicVendaId);
+  }
+
+  // Devolução é sempre B2C (regra confirmada com o Rodrigo) — em canal="b2b" não existe, pula a
+  // query. Junta por storeId+dapicVendaId (Return não tem clienteNome) restrito aos pedidos
+  // desses clientes especificamente.
+  const devolvidoPorProduto = new Map<string, { unidades: number; valor: number }>();
+  const devolvidoPorGrupo = new Map<string, { unidades: number; valor: number }>();
+  if (canal !== "b2b" && pedidoKeys.size > 0) {
+    const returns = await prisma.return.findMany({
+      where: { storeId: { in: [...storeIdsCliente] }, dapicVendaId: { in: [...dapicVendaIdsCliente] } },
+      select: { storeId: true, dapicVendaId: true, produto: true, grupo: true, quantidade: true, valorTotal: true },
+    });
+    for (const r of returns) {
+      if (!pedidoKeys.has(`${r.storeId}::${r.dapicVendaId}`)) continue;
+      const p = devolvidoPorProduto.get(r.produto) ?? { unidades: 0, valor: 0 };
+      p.unidades += r.quantidade;
+      p.valor += r.valorTotal;
+      devolvidoPorProduto.set(r.produto, p);
+
+      const g = devolvidoPorGrupo.get(r.grupo) ?? { unidades: 0, valor: 0 };
+      g.unidades += r.quantidade;
+      g.valor += r.valorTotal;
+      devolvidoPorGrupo.set(r.grupo, g);
+    }
+  }
+
+  // Resumo do produto/grupo selecionado (líquido) — extrai dos mesmos mapas acima, já que
+  // todasComprasRows inclui a compra do produto/grupo selecionado também.
+  let resumoUnidadesBrutas = 0, resumoUnidadesLiquidas = 0, resumoReceitaBruta = 0, resumoReceitaLiquida = 0;
+  for (const key of keys) {
+    const bruto = dimension === "produto" ? porProduto.get(key) : porGrupo.get(key);
+    if (!bruto) continue;
+    const dev = (dimension === "produto" ? devolvidoPorProduto.get(key) : devolvidoPorGrupo.get(key)) ?? { unidades: 0, valor: 0 };
+    resumoUnidadesBrutas += bruto.unidades;
+    resumoUnidadesLiquidas += bruto.unidades - dev.unidades;
+    resumoReceitaBruta += bruto.receita;
+    resumoReceitaLiquida += bruto.receita - dev.valor;
+  }
+
+  const keysSet = new Set(keys);
+  const produtosRelacionados = [...porProduto.entries()]
+    .filter(([produto]) => !(dimension === "produto" && keysSet.has(produto)))
+    .map(([produto, v]) => {
+      const dev = devolvidoPorProduto.get(produto) ?? { unidades: 0, valor: 0 };
+      return {
+        key: produto,
+        unidadesBrutas: v.unidades,
+        unidadesLiquidas: v.unidades - dev.unidades,
+        receitaBruta: v.receita,
+        receitaLiquida: v.receita - dev.valor,
+      };
+    })
+    .filter((p) => p.unidadesLiquidas !== 0)
+    .sort((a, b) => b.receitaLiquida - a.receitaLiquida)
+    .slice(0, limit);
+
+  const gruposRelacionados = [...porGrupo.entries()]
+    .filter(([grupo]) => !(dimension === "grupo" && keysSet.has(grupo)))
+    .map(([grupo, v]) => {
+      const dev = devolvidoPorGrupo.get(grupo) ?? { unidades: 0, valor: 0 };
+      return {
+        key: grupo,
+        unidadesBrutas: v.unidades,
+        unidadesLiquidas: v.unidades - dev.unidades,
+        receitaBruta: v.receita,
+        receitaLiquida: v.receita - dev.valor,
+      };
+    })
+    .filter((g) => g.unidadesLiquidas !== 0)
+    .sort((a, b) => b.receitaLiquida - a.receitaLiquida);
+
+  return {
+    resumo: {
+      totalClientes: normalizedSet.size,
+      unidadesBrutas: resumoUnidadesBrutas,
+      unidadesLiquidas: resumoUnidadesLiquidas,
+      receitaBruta: resumoReceitaBruta,
+      receitaLiquida: resumoReceitaLiquida,
+    },
+    produtosRelacionados,
+    gruposRelacionados,
+  };
 }
 
 export type ClienteFicha = {
