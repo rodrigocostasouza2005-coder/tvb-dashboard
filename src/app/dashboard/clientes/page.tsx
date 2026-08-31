@@ -1,7 +1,7 @@
 import { getSessionUser } from "@/lib/auth";
 import {
   getTopClientes, getStores, getMarcas, getTabelasPreco, getVendedores, getClienteRetencaoVarejo,
-  getAniversariantesDoMes, getClientesCrmOverview, getReceitaHistoricaExterna, type Canal,
+  getAniversariantesDoMes, getClientesCrmOverview, getReceitaHistoricaExterna, getDistribuicaoPedidos, type Canal,
 } from "@/lib/metrics";
 import { canSeeFinancials, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
 import { parseFilters, todayBrasiliaStr, type RawSearchParams } from "@/lib/filters";
@@ -57,7 +57,7 @@ export default async function ClientesPage({
     ? aniversarioMesParsed
     : parseInt(todayBrasiliaStr(new Date()).slice(5, 7), 10);
 
-  const [rows, stores, marcas, tabelasPreco, vendedores, retencao, aniversariantes, overview, historicoExterno] = await Promise.all([
+  const [rows, stores, marcas, tabelasPreco, vendedores, retencao, aniversariantes, overview, historicoExterno, distribuicaoPedidos] = await Promise.all([
     getTopClientes(filters, vendedor, 30, canal, true),
     getStores(allowedStores),
     getMarcas(allowedMarcas),
@@ -67,6 +67,7 @@ export default async function ClientesPage({
     getAniversariantesDoMes(filters, vendedor, aniversarioMes),
     getClientesCrmOverview(filters, canal),
     getReceitaHistoricaExterna(),
+    getDistribuicaoPedidos(filters, canal),
   ]);
   const showFinancials = canSeeFinancials(user);
 
@@ -235,6 +236,36 @@ export default async function ClientesPage({
           </div>
         </section>
       )}
+
+      <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
+        <h2 className="mb-1 text-sm font-medium text-[var(--text-secondary)]">Distribuição de pedidos por cliente</h2>
+        <p className="mb-3 text-xs text-[var(--text-muted)]">Quantos clientes fizeram cada quantidade de pedidos (histórico completo, DAPIC + site antigo somados).</p>
+        <div className="overflow-hidden rounded-lg border border-[var(--border)]">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
+                <th className="px-4 py-2 font-medium">Pedidos</th>
+                <th className="px-4 py-2 font-medium">Clientes</th>
+                <th className="px-4 py-2 font-medium">%</th>
+              </tr>
+            </thead>
+            <tbody>
+              {distribuicaoPedidos.map((d) => (
+                <tr key={d.pedidos} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
+                  <td className="px-4 py-2 font-medium">{d.pedidos}</td>
+                  <td className="px-4 py-2 tabular-nums">{d.clientes.toLocaleString("pt-BR")}</td>
+                  <td className="px-4 py-2 tabular-nums text-[var(--text-secondary)]">{d.pct.toFixed(1)}%</td>
+                </tr>
+              ))}
+              {distribuicaoPedidos.length === 0 && (
+                <tr>
+                  <td colSpan={3} className="px-4 py-6 text-center text-[var(--text-muted)]">Sem dados.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       <section className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">

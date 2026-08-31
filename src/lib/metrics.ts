@@ -3054,6 +3054,59 @@ export async function getReceitaHistoricaExterna(): Promise<{ receita: number; p
   return { receita: result._sum.valorTotal ?? 0, pedidos: result._count };
 }
 
+export type DistribuicaoPedidosItem = { pedidos: string; clientes: number; pct: number };
+
+// Quantos clientes fizeram exatamente N pedidos (todo o histórico, DAPIC + site antigo somados —
+// mesmo critério de getClienteSegmentacao: só entra quem já existe via DAPIC, o vnda só soma em
+// cima). Pedido do Rodrigo em 2026-08-31. Bucket final "11+" pra não esticar a tabela pela cauda
+// longa (tem cliente com 1778 pedidos — revenda/atacadista).
+const DISTRIBUICAO_PEDIDOS_CAP = 10;
+export async function getDistribuicaoPedidos(filters: DashboardFilters, canal: Canal = "todos"): Promise<DistribuicaoPedidosItem[]> {
+  const allTime: DashboardFilters = { ...filters, from: new Date(0), to: new Date() };
+  const where: Prisma.SaleWhereInput = {
+    ...saleWhere(allTime),
+    clienteNome: { not: null },
+    ...(canal !== "todos" ? { AND: [canalWhere(canal)] } : {}),
+  };
+  const rows = await prisma.sale.findMany({ where, select: { clienteNome: true, storeId: true, dapicVendaId: true } });
+
+  const pedidosPorCliente = new Map<string, Set<string>>();
+  for (const r of rows) {
+    const norm = (r.clienteNome as string).trim().toUpperCase();
+    const set = pedidosPorCliente.get(norm) ?? new Set<string>();
+    set.add(`${r.storeId}::${r.dapicVendaId}`);
+    pedidosPorCliente.set(norm, set);
+  }
+
+  // Site antigo era só varejo online — não existe pedido "B2B" lá, mesmo raciocínio de
+  // "devolução sempre B2C" já usado em outro lugar da CRM.
+  if (canal !== "b2b") {
+    const historico = await prisma.vendaHistoricaExterna.findMany({ select: { clienteNome: true, pedidoExterno: true } });
+    for (const h of historico) {
+      const norm = h.clienteNome.trim().toUpperCase();
+      const set = pedidosPorCliente.get(norm);
+      if (!set) continue;
+      set.add(`vnda::${h.pedidoExterno}`);
+    }
+  }
+
+  const buckets = new Map<string, number>();
+  for (const set of pedidosPorCliente.values()) {
+    const key = set.size > DISTRIBUICAO_PEDIDOS_CAP ? `${DISTRIBUICAO_PEDIDOS_CAP + 1}+` : String(set.size);
+    buckets.set(key, (buckets.get(key) ?? 0) + 1);
+  }
+  const totalClientes = pedidosPorCliente.size;
+
+  const ordem = [...Array(DISTRIBUICAO_PEDIDOS_CAP)].map((_, i) => String(i + 1)).concat([`${DISTRIBUICAO_PEDIDOS_CAP + 1}+`]);
+  return ordem
+    .filter((k) => buckets.has(k))
+    .map((k) => ({
+      pedidos: k,
+      clientes: buckets.get(k) ?? 0,
+      pct: totalClientes > 0 ? ((buckets.get(k) ?? 0) / totalClientes) * 100 : 0,
+    }));
+}
+
 // Os produtos mais vendidos em cada loja desde um horário de corte (o momento da sync
 // anterior, tipicamente) — pro aviso do bot mostrar "o que vendeu desde a última atualização".
 export async function getTopVendidosPorLoja(desde: Date, ate: Date, limit = 3) {
