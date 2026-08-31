@@ -2354,13 +2354,29 @@ export async function getSugestoesDeContato(filters: DashboardFilters): Promise<
     getAniversariantesDoMes(filters, null, mesAtual, "b2c"),
   ]);
 
+  // Só quem tem telefone no cadastro — sem isso não dá pra chamar no WhatsApp, não faz sentido
+  // ocupar uma vaga do dia com alguém incontatável. Pedido do Rodrigo em 2026-08-31.
   const vipPool = segmentacao
-    .filter((s) => s.segmento === "vip" && s.recenciaDias >= ESFRIANDO_DIAS_MIN && s.recenciaDias <= ESFRIANDO_DIAS_MAX)
+    .filter((s) => s.segmento === "vip" && s.telefone && s.recenciaDias >= ESFRIANDO_DIAS_MIN && s.recenciaDias <= ESFRIANDO_DIAS_MAX)
     .sort((a, b) => a.cliente.localeCompare(b.cliente));
   const recorrentePool = segmentacao
-    .filter((s) => s.segmento === "recorrente" && s.recenciaDias >= ESFRIANDO_DIAS_MIN && s.recenciaDias <= ESFRIANDO_DIAS_MAX)
+    .filter((s) => s.segmento === "recorrente" && s.telefone && s.recenciaDias >= ESFRIANDO_DIAS_MIN && s.recenciaDias <= ESFRIANDO_DIAS_MAX)
     .sort((a, b) => a.cliente.localeCompare(b.cliente));
-  const aniversarioPool = [...aniversariantes].sort((a, b) => a.nome.localeCompare(b.nome));
+  // 3 grupos a mais, pedido do Rodrigo em 2026-08-31 — esses já são "frios" pela própria definição
+  // do segmento (em_risco/inativo já passaram do limiar de recência, ocasional nunca teve um 2º
+  // pedido), então não precisam da janela extra de "esfriando" que VIP/Recorrente usam.
+  const emRiscoPool = segmentacao
+    .filter((s) => s.segmento === "em_risco" && s.telefone)
+    .sort((a, b) => a.cliente.localeCompare(b.cliente));
+  const ocasionalPool = segmentacao
+    .filter((s) => s.segmento === "ocasional" && s.telefone)
+    .sort((a, b) => a.cliente.localeCompare(b.cliente));
+  const inativoPool = segmentacao
+    .filter((s) => s.segmento === "inativo" && s.telefone)
+    .sort((a, b) => a.cliente.localeCompare(b.cliente));
+  const aniversarioPool = aniversariantes
+    .filter((a) => a.telefone ?? a.celular)
+    .sort((a, b) => a.nome.localeCompare(b.nome));
 
   const seed = diaDoAno(new Date());
   const selecionados: Omit<SugestaoContato, "produtoFavorito" | "atendente">[] = [];
@@ -2369,6 +2385,15 @@ export async function getSugestoesDeContato(filters: DashboardFilters): Promise<
   }
   for (const s of fatiaDoDia(recorrentePool, POR_GRUPO_POR_DIA, seed)) {
     selecionados.push({ cliente: s.cliente, telefone: s.telefone, motivo: "Recorrente esfriando", detalhe: `${s.recenciaDias} dias sem comprar` });
+  }
+  for (const s of fatiaDoDia(emRiscoPool, POR_GRUPO_POR_DIA, seed)) {
+    selecionados.push({ cliente: s.cliente, telefone: s.telefone, motivo: "Em risco", detalhe: `${s.recenciaDias} dias sem comprar` });
+  }
+  for (const s of fatiaDoDia(ocasionalPool, POR_GRUPO_POR_DIA, seed)) {
+    selecionados.push({ cliente: s.cliente, telefone: s.telefone, motivo: "Comprou só 1 vez", detalhe: `há ${s.recenciaDias} dias` });
+  }
+  for (const s of fatiaDoDia(inativoPool, POR_GRUPO_POR_DIA, seed)) {
+    selecionados.push({ cliente: s.cliente, telefone: s.telefone, motivo: "Inativo", detalhe: `${s.recenciaDias} dias sem comprar` });
   }
   for (const a of fatiaDoDia(aniversarioPool, POR_GRUPO_POR_DIA, seed)) {
     selecionados.push({
@@ -2445,6 +2470,8 @@ export async function getFollowUpPosCompra(filters: DashboardFilters): Promise<F
         diasAtras: Math.floor((now.getTime() - c.data.getTime()) / 86400000),
       };
     })
+    // Sem telefone não dá pra chamar no WhatsApp — mesmo critério de getSugestoesDeContato.
+    .filter((f) => f.telefone !== null)
     .sort((a, b) => a.diasAtras - b.diasAtras);
 }
 

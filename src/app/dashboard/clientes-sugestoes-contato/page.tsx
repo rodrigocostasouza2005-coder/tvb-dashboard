@@ -10,6 +10,9 @@ import { CollapsibleFilters } from "../collapsible-filters";
 const MOTIVO_COR: Record<string, string> = {
   "VIP esfriando": "var(--series-1)",
   "Recorrente esfriando": "var(--status-warning)",
+  "Em risco": "var(--status-serious)",
+  "Comprou só 1 vez": "var(--cat-3)",
+  "Inativo": "var(--status-critical)",
   "Aniversário": "var(--status-good)",
 };
 
