@@ -477,6 +477,62 @@ export async function getTotalStock(filters: Pick<DashboardFilters, "storeIds" |
   return result._sum.quantidadeDisponivel ?? 0;
 }
 
+export type StockVsSalesCombinadoRow = {
+  grupo: string;
+  produto: string;
+  tamanho: string;
+  currentStock: number;
+  unitsSold: number;
+};
+
+// Estoque × Vendas em granularidade máxima (grupo+produto+tamanho juntos, não 1 dimensão de
+// cada vez) — pedido do Rodrigo em 2026-08-31 pra deixar a aba "dinâmica", parecida com o
+// cross-filter do Power BI: o cliente busca essa lista UMA vez e filtra grupo→produto→tamanho
+// inteiramente no navegador (sem round-trip), então precisa de todas as combinações de uma vez.
+// Vendido já líquido (desconta devolução, mesmo padrão de netByReturns usado no resto da aba).
+export async function getStockVsSalesCombinado(filters: DashboardFilters): Promise<StockVsSalesCombinadoRow[]> {
+  const [salesRows, returnRows, stockRows] = await Promise.all([
+    getSalesByGrupoProdutoTamanho(filters),
+    getReturnsByGrupoProdutoTamanho(filters),
+    latestStockSnapshots(filters),
+  ]);
+
+  const returnByKey = new Map<string, number>();
+  for (const r of returnRows) {
+    const key = `${r.grupo}::${r.produto}::${r.key}`;
+    returnByKey.set(key, (returnByKey.get(key) ?? 0) + r.unitsReturned);
+  }
+
+  const stockByKey = new Map<string, number>();
+  for (const s of stockRows) {
+    const tamanho = s.tamanho && s.tamanho.trim() ? s.tamanho : "—";
+    const key = `${s.grupo}::${s.produto}::${tamanho}`;
+    stockByKey.set(key, (stockByKey.get(key) ?? 0) + s.quantidadeDisponivel);
+  }
+
+  const meta = new Map<string, { grupo: string; produto: string; tamanho: string }>();
+  const salesByKey = new Map<string, number>();
+  for (const s of salesRows) {
+    const key = `${s.grupo}::${s.produto}::${s.key}`;
+    meta.set(key, { grupo: s.grupo, produto: s.produto, tamanho: s.key });
+    salesByKey.set(key, s.unitsSold);
+  }
+  for (const key of stockByKey.keys()) {
+    if (!meta.has(key)) {
+      const [grupo, produto, tamanho] = key.split("::");
+      meta.set(key, { grupo, produto, tamanho });
+    }
+  }
+
+  return [...meta.entries()].map(([key, m]) => ({
+    grupo: m.grupo,
+    produto: m.produto,
+    tamanho: m.tamanho,
+    currentStock: stockByKey.get(key) ?? 0,
+    unitsSold: (salesByKey.get(key) ?? 0) - (returnByKey.get(key) ?? 0),
+  }));
+}
+
 // StockSnapshot tem 1 linha por storeId+cod (upsert no sync mantém sempre atualizada, ver
 // upsertStockSnapshots) — não tem mais duplicata histórica pra dedupar aqui.
 async function latestStockSnapshots(filters: Pick<DashboardFilters, "storeIds" | "grupoIn">) {
