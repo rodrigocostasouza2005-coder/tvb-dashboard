@@ -24,10 +24,12 @@ export function PesquisaTable({
   rows,
   tamanhos,
   emptyMessage,
+  makeProdutoHref,
 }: {
   rows: Row[];
   tamanhos: string[];
   emptyMessage: string;
+  makeProdutoHref?: (key: string) => string;
 }) {
   const [open, setOpen] = useState<Set<string>>(new Set());
 
@@ -80,6 +82,15 @@ export function PesquisaTable({
                       </span>
                       {r.key}
                     </button>
+                    {makeProdutoHref && (
+                      <a
+                        href={makeProdutoHref(r.key)}
+                        title="Ver tendência mensal desse produto"
+                        className="ml-2 text-xs text-[var(--series-1)] hover:underline"
+                      >
+                        tendência
+                      </a>
+                    )}
                   </td>
                   <td className="px-4 py-2 tabular-nums">{r.unitsSold.toLocaleString("pt-BR")}</td>
                   {tamanhos.map((t) => {

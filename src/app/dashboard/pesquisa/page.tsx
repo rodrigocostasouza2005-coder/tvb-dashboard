@@ -1,12 +1,15 @@
 import { getSessionUser } from "@/lib/auth";
-import { searchStockVsSalesComTamanhos, getTopClientes, getStores, getMarcas, getTabelasPreco } from "@/lib/metrics";
+import { searchStockVsSalesComTamanhos, getTopClientes, getMonthlySalesByProduto, getStores, getMarcas, getTabelasPreco } from "@/lib/metrics";
 import { canSeeFinancials, getGrupoRestriction, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
-import { parseFilters, type RawSearchParams } from "@/lib/filters";
+import { parseFilters, brasiliaDayStart, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { waHref } from "@/lib/whatsapp";
 import { FilterBar } from "../filter-bar";
 import { CollapsibleFilters } from "../collapsible-filters";
+import { IndicatorChart } from "../indicadores/indicator-chart";
 import { PesquisaTable } from "./pesquisa-table";
+
+const DATA_START_MONTH = "2025-09";
 
 function formatBRL(value: number) {
   return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -37,15 +40,50 @@ export default async function PesquisaPage({
     ...parseFilters(rawParams, { allowedStoreIds: allowedStores, allowedMarcas, allowedTabelasPreco }),
     grupoIn,
   };
+  const produtoSelecionado = typeof rawParams.produto === "string" && rawParams.produto ? rawParams.produto : null;
+  const dataInicioRange = brasiliaDayStart(DATA_START_MONTH + "-01");
+  const dataFimRange = new Date();
 
-  const [{ rows, tamanhos }, clientes, stores, marcas, tabelasPreco] = await Promise.all([
+  const [{ rows, tamanhos }, clientes, stores, marcas, tabelasPreco, produtoSerie] = await Promise.all([
     searchStockVsSalesComTamanhos(filters, query),
     query.trim() ? getTopClientes(filters, null, 20, "todos", true, query) : Promise.resolve([]),
     getStores(allowedStores),
     getMarcas(allowedMarcas),
     getTabelasPreco(allowedTabelasPreco),
+    produtoSelecionado
+      ? getMonthlySalesByProduto(
+          { storeIds: filters.storeIds, marcas: filters.marcas, tabelasPreco: filters.tabelasPreco, grupoIn, from: dataInicioRange, to: dataFimRange },
+          produtoSelecionado
+        )
+      : Promise.resolve([]),
   ]);
   const showFinancials = canSeeFinancials(user);
+
+  const produtoChartData = produtoSerie.map((p) => ({
+    month: p.month,
+    unitsBruta: p.unitsBruta,
+    unitsLiquida: p.unitsLiquida,
+    revenueBruta: p.revenueBruta,
+    revenueLiquida: p.revenueLiquida,
+  }));
+
+  const makeProdutoHref = (key: string) => {
+    const params = new URLSearchParams();
+    if (query) params.set("q", query);
+    for (const id of filters.storeIds ?? []) params.append("store", id);
+    for (const m of filters.marcas ?? []) params.append("marca", m);
+    for (const t of filters.tabelasPreco ?? []) params.append("tabelaPreco", t);
+    params.set("produto", key);
+    return `/dashboard/pesquisa?${params.toString()}`;
+  };
+  const clearProdutoHref = (() => {
+    const params = new URLSearchParams();
+    if (query) params.set("q", query);
+    for (const id of filters.storeIds ?? []) params.append("store", id);
+    for (const m of filters.marcas ?? []) params.append("marca", m);
+    for (const t of filters.tabelasPreco ?? []) params.append("tabelaPreco", t);
+    return `/dashboard/pesquisa?${params.toString()}`;
+  })();
 
   return (
     <div>
@@ -146,7 +184,46 @@ export default async function PesquisaPage({
         </div>
       )}
 
+      {produtoSelecionado && (
+        <div className="mb-6 flex flex-col gap-4 rounded-lg border border-[var(--series-1)] bg-[var(--surface-1)] p-4">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-sm font-medium text-[var(--text-primary)]">{produtoSelecionado}</h2>
+            <a href={clearProdutoHref} className="rounded-md border border-[var(--border)] px-3 py-1.5 text-sm text-[var(--text-secondary)] hover:bg-[var(--page-plane)]">
+              Fechar
+            </a>
+          </div>
+          {showFinancials && (
+            <section>
+              <h3 className="mb-3 text-xs font-medium text-[var(--text-muted)]">Receita por mês</h3>
+              <IndicatorChart
+                data={produtoChartData}
+                format="currency"
+                series={[
+                  { key: "revenueBruta", name: "Bruta", color: "var(--series-1)" },
+                  { key: "revenueLiquida", name: "Líquida", color: "var(--series-2)" },
+                ]}
+              />
+            </section>
+          )}
+          <section>
+            <h3 className="mb-3 text-xs font-medium text-[var(--text-muted)]">Unidades vendidas por mês</h3>
+            <IndicatorChart
+              data={produtoChartData}
+              format="number"
+              series={[
+                { key: "unitsBruta", name: "Brutas", color: "var(--series-1)" },
+                { key: "unitsLiquida", name: "Líquidas", color: "var(--series-2)" },
+              ]}
+            />
+          </section>
+          {produtoChartData.length === 0 && (
+            <p className="text-sm text-[var(--text-muted)]">Sem vendas desse produto no período/filtro.</p>
+          )}
+        </div>
+      )}
+
       <PesquisaTable
+        makeProdutoHref={makeProdutoHref}
         rows={rows.slice(0, 100).map((r) => ({
           key: r.key,
           unitsSold: r.unitsSold,

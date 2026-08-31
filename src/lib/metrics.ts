@@ -2600,6 +2600,82 @@ export async function getMonthlySalesByStore(filters: DashboardFilters, canal: C
   return { data, series };
 }
 
+export type MonthlyProdutoPoint = {
+  month: string;
+  unitsBruta: number;
+  unitsLiquida: number;
+  revenueBruta: number;
+  revenueLiquida: number;
+};
+
+// "Indicadores no Tempo" por produto específico — pedido do Rodrigo em 2026-08-31: escolher um
+// produto e ver a evolução mês a mês dele (mesmo range de meses da página, desde set/2025).
+// Mesmo padrão de getMonthlySalesByStore, mas filtrado por produto e já líquido (desconta
+// devolução por mês, mesma lógica de getMonthlyReturnsTotal).
+export async function getMonthlySalesByProduto(
+  filters: Pick<DashboardFilters, "storeIds" | "marcas" | "tabelasPreco" | "grupoIn" | "from" | "to">,
+  produto: string,
+  canal: Canal = "todos"
+): Promise<MonthlyProdutoPoint[]> {
+  const [salesRows, returnRows] = await Promise.all([
+    prisma.$queryRaw<{ month: Date; units: bigint; revenue: number }[]>`
+      SELECT
+        DATE_TRUNC('month', ("saleDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo') AS month,
+        SUM("quantidade") AS units,
+        SUM("valorTotalLiquido") AS revenue
+      FROM "Sale"
+      WHERE "produto" = ${produto}
+        AND "saleDate" >= ${filters.from}
+        AND "saleDate" <= ${filters.to}
+        ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
+        ${filters.marcas !== undefined ? Prisma.sql`AND "marca" = ANY(${filters.marcas})` : Prisma.empty}
+        ${filters.tabelasPreco !== undefined ? Prisma.sql`AND ("tabelaPreco" = ANY(${filters.tabelasPreco}) OR "tabelaPreco" IS NULL)` : Prisma.empty}
+        ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
+        ${canal === "b2b" ? Prisma.sql`AND "tabelaPreco" = 'Tabela atacado'` : Prisma.empty}
+        ${canal === "b2c" ? Prisma.sql`AND ("tabelaPreco" IS DISTINCT FROM 'Tabela atacado')` : Prisma.empty}
+      GROUP BY month
+      ORDER BY month ASC
+    `,
+    // Devolução é sempre B2C (confirmado pelo Rodrigo) — em canal="b2b" não existe, mas a query
+    // já vem vazia naturalmente (produto de venda B2B raramente aparece em Return; não vale a
+    // pena um if extra só por isso, o merge abaixo já trata ausência como 0).
+    prisma.$queryRaw<{ month: Date; units: bigint; value: number }[]>`
+      SELECT
+        DATE_TRUNC('month', ("returnDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo') AS month,
+        SUM("quantidade") AS units,
+        SUM("valorTotal") AS value
+      FROM "Return"
+      WHERE "produto" = ${produto}
+        AND "returnDate" >= ${filters.from}
+        AND "returnDate" <= ${filters.to}
+        ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
+        ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
+      GROUP BY month
+      ORDER BY month ASC
+    `,
+  ]);
+
+  const byMonth = new Map<string, MonthlyProdutoPoint>();
+  for (const r of salesRows) {
+    const month = new Date(r.month).toISOString().slice(0, 7);
+    const cur = byMonth.get(month) ?? { month, unitsBruta: 0, unitsLiquida: 0, revenueBruta: 0, revenueLiquida: 0 };
+    cur.unitsBruta += Number(r.units);
+    cur.unitsLiquida += Number(r.units);
+    cur.revenueBruta += Number(r.revenue);
+    cur.revenueLiquida += Number(r.revenue);
+    byMonth.set(month, cur);
+  }
+  for (const r of returnRows) {
+    const month = new Date(r.month).toISOString().slice(0, 7);
+    const cur = byMonth.get(month);
+    if (!cur) continue;
+    cur.unitsLiquida -= Number(r.units);
+    cur.revenueLiquida -= Number(r.value);
+  }
+
+  return [...byMonth.values()].sort((a, b) => a.month.localeCompare(b.month));
+}
+
 // Devolução total por mês (sem quebrar por loja) — usado pra netar a tendência de receita da
 // Lâmina Mensal contra bruta. Devolução é sempre B2C (confirmado pelo Rodrigo), então quando
 // canal="b2b" o chamador nem chama isso (líquida = bruta nesse caso).

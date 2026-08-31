@@ -1,5 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
-import { getMonthlySnapshotKpi, getStores, getMarcas, getTabelasPreco, type DashboardFilters, type Canal } from "@/lib/metrics";
+import { getMonthlySnapshotKpi, getSalesByDimension, getMonthlySalesByProduto, getStores, getMarcas, getTabelasPreco, type DashboardFilters, type Canal } from "@/lib/metrics";
 import { canSeeFinancials, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction, getGrupoRestriction } from "@/lib/permissions";
 import { parseFilters, brasiliaDayStart, brasiliaDayEnd, todayBrasiliaStr, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
@@ -63,9 +63,13 @@ export default async function IndicadoresPage({
   };
 
   const showFinancials = canSeeFinancials(user);
+  const produtoSelecionado = typeof rawParams.produto === "string" && rawParams.produto ? rawParams.produto : null;
+
+  const dataInicioRange = brasiliaDayStart(DATA_START_MONTH + "-01");
+  const dataFimRange = new Date();
 
   const months = allMonthsSince(DATA_START_MONTH, todayMonth);
-  const [kpisPerMonth, stores, marcas, tabelasPreco] = await Promise.all([
+  const [kpisPerMonth, stores, marcas, tabelasPreco, produtoOptions, produtoSerie] = await Promise.all([
     Promise.all(
       months.map(async (month) => {
         const { from, to } = monthRange(month);
@@ -76,6 +80,10 @@ export default async function IndicadoresPage({
     getStores(allowedStores),
     getMarcas(allowedMarcas),
     getTabelasPreco(allowedTabelasPreco),
+    getSalesByDimension({ ...baseRestriction, from: dataInicioRange, to: dataFimRange }, "produto", canal),
+    produtoSelecionado
+      ? getMonthlySalesByProduto({ ...baseRestriction, from: dataInicioRange, to: dataFimRange }, produtoSelecionado, canal)
+      : Promise.resolve([]),
   ]);
 
   const chartData = kpisPerMonth.map((k) => {
@@ -98,9 +106,18 @@ export default async function IndicadoresPage({
   const rawStoreSelection = Array.isArray(rawParams.store) ? rawParams.store : rawParams.store ? [rawParams.store] : [];
   const baseQuery = (overrides: Record<string, string>) => {
     const params = new URLSearchParams({ canal, ...overrides });
+    if (produtoSelecionado && !("produto" in overrides)) params.set("produto", produtoSelecionado);
     for (const v of rawStoreSelection) params.append("store", v);
     return `/dashboard/indicadores?${params.toString()}`;
   };
+
+  const produtoChartData = produtoSerie.map((p) => ({
+    month: p.month,
+    unitsBruta: p.unitsBruta,
+    unitsLiquida: p.unitsLiquida,
+    revenueBruta: p.revenueBruta,
+    revenueLiquida: p.revenueLiquida,
+  }));
 
   return (
     <div>
@@ -135,6 +152,63 @@ export default async function IndicadoresPage({
           </a>
         ))}
       </div>
+
+      <form method="get" action="/dashboard/indicadores" className="mb-6 flex gap-2">
+        {rawStoreSelection.map((id) => <input key={id} type="hidden" name="store" value={id} />)}
+        <input type="hidden" name="canal" value={canal} />
+        <select
+          name="produto"
+          defaultValue={produtoSelecionado ?? ""}
+          className="w-full max-w-sm rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-sm text-[var(--text-primary)]"
+          style={{ colorScheme: "light dark" }}
+        >
+          <option value="">Ver indicadores de um produto específico...</option>
+          {produtoOptions.map((o) => (
+            <option key={o.key} value={o.key}>{o.key}</option>
+          ))}
+        </select>
+        <button type="submit" className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-3 py-1.5 text-sm hover:bg-[var(--page-plane)]">
+          Ver
+        </button>
+        {produtoSelecionado && (
+          <a href={baseQuery({ produto: "" })} className="rounded-md border border-[var(--border)] px-3 py-1.5 text-sm text-[var(--text-secondary)] hover:bg-[var(--page-plane)]">
+            Limpar
+          </a>
+        )}
+      </form>
+
+      {produtoSelecionado && (
+        <div className="mb-6 flex flex-col gap-4 rounded-lg border border-[var(--series-1)] bg-[var(--surface-1)] p-4">
+          <h2 className="text-sm font-medium text-[var(--text-primary)]">{produtoSelecionado}</h2>
+          {showFinancials && (
+            <section>
+              <h3 className="mb-3 text-xs font-medium text-[var(--text-muted)]">Receita por mês</h3>
+              <IndicatorChart
+                data={produtoChartData}
+                format="currency"
+                series={[
+                  { key: "revenueBruta", name: "Bruta", color: "var(--series-1)" },
+                  { key: "revenueLiquida", name: "Líquida", color: "var(--series-2)" },
+                ]}
+              />
+            </section>
+          )}
+          <section>
+            <h3 className="mb-3 text-xs font-medium text-[var(--text-muted)]">Unidades vendidas por mês</h3>
+            <IndicatorChart
+              data={produtoChartData}
+              format="number"
+              series={[
+                { key: "unitsBruta", name: "Brutas", color: "var(--series-1)" },
+                { key: "unitsLiquida", name: "Líquidas", color: "var(--series-2)" },
+              ]}
+            />
+          </section>
+          {produtoChartData.length === 0 && (
+            <p className="text-sm text-[var(--text-muted)]">Sem vendas desse produto no período/filtro.</p>
+          )}
+        </div>
+      )}
 
       {showFinancials && (
         <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
