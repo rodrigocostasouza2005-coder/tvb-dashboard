@@ -1,5 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
-import { searchStockVsSalesComTamanhos, getTopClientes, getMonthlySalesByProduto, getStores, getMarcas, getTabelasPreco } from "@/lib/metrics";
+import { searchStockVsSalesComTamanhos, getTopClientes, getDailySalesByProduto, getStores, getMarcas, getTabelasPreco } from "@/lib/metrics";
 import { canSeeFinancials, getGrupoRestriction, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
 import { parseFilters, brasiliaDayStart, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
@@ -51,7 +51,7 @@ export default async function PesquisaPage({
     getMarcas(allowedMarcas),
     getTabelasPreco(allowedTabelasPreco),
     produtoSelecionado
-      ? getMonthlySalesByProduto(
+      ? getDailySalesByProduto(
           { storeIds: filters.storeIds, marcas: filters.marcas, tabelasPreco: filters.tabelasPreco, grupoIn, from: dataInicioRange, to: dataFimRange },
           produtoSelecionado
         )
@@ -60,7 +60,7 @@ export default async function PesquisaPage({
   const showFinancials = canSeeFinancials(user);
 
   const produtoChartData = produtoSerie.map((p) => ({
-    month: p.month,
+    day: p.day,
     unitsBruta: p.unitsBruta,
     unitsLiquida: p.unitsLiquida,
     revenueBruta: p.revenueBruta,
@@ -184,10 +184,11 @@ export default async function PesquisaPage({
           </div>
           {showFinancials && (
             <section>
-              <h3 className="mb-3 text-xs font-medium text-[var(--text-muted)]">Receita por mês</h3>
+              <h3 className="mb-3 text-xs font-medium text-[var(--text-muted)]">Receita por dia</h3>
               <IndicatorChart
                 data={produtoChartData}
                 format="currency"
+                granularity="day"
                 series={[
                   { key: "revenueBruta", name: "Bruta", color: "var(--series-1)" },
                   { key: "revenueLiquida", name: "Líquida", color: "var(--series-2)" },
@@ -196,10 +197,11 @@ export default async function PesquisaPage({
             </section>
           )}
           <section>
-            <h3 className="mb-3 text-xs font-medium text-[var(--text-muted)]">Unidades vendidas por mês</h3>
+            <h3 className="mb-3 text-xs font-medium text-[var(--text-muted)]">Unidades vendidas por dia</h3>
             <IndicatorChart
               data={produtoChartData}
               format="number"
+              granularity="day"
               series={[
                 { key: "unitsBruta", name: "Brutas", color: "var(--series-1)" },
                 { key: "unitsLiquida", name: "Líquidas", color: "var(--series-2)" },

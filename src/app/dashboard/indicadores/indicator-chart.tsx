@@ -9,6 +9,11 @@ function formatMonthShort(monthStr: string) {
   return `${MONTH_NAMES[parseInt(m) - 1]}/${year.slice(2)}`;
 }
 
+function formatDayShort(dayStr: string) {
+  const [, m, d] = dayStr.split("-");
+  return `${d}/${m}`;
+}
+
 function formatValue(value: number, format: "currency" | "number" | "percent") {
   if (format === "currency") return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
   if (format === "percent") return `${value.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
@@ -21,15 +26,20 @@ export function IndicatorChart({
   data,
   series,
   format,
+  granularity = "month",
 }: {
   data: Record<string, string | number>[];
   series: Series[];
   format: "currency" | "number" | "percent";
+  granularity?: "month" | "day";
 }) {
+  const xKey = granularity === "day" ? "day" : "month";
+  const tickFormatter = granularity === "day" ? formatDayShort : formatMonthShort;
+
   if (data.length < 2) {
     return (
       <div className="flex h-56 items-center justify-center text-sm text-[var(--text-muted)]">
-        Poucos meses no período pra montar o gráfico.
+        {granularity === "day" ? "Poucos dias no período pra montar o gráfico." : "Poucos meses no período pra montar o gráfico."}
       </div>
     );
   }
@@ -39,8 +49,8 @@ export function IndicatorChart({
       <LineChart data={data} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="var(--gridline)" vertical={false} />
         <XAxis
-          dataKey="month"
-          tickFormatter={formatMonthShort}
+          dataKey={xKey}
+          tickFormatter={tickFormatter}
           tick={{ fill: "var(--text-muted)", fontSize: 11 }}
           axisLine={{ stroke: "var(--gridline)" }}
           tickLine={false}
@@ -60,7 +70,7 @@ export function IndicatorChart({
             borderRadius: 8,
             fontSize: 12,
           }}
-          labelFormatter={(m) => formatMonthShort(String(m))}
+          labelFormatter={(m) => tickFormatter(String(m))}
           formatter={(value, name) => [formatValue(Number(value ?? 0), format), name]}
         />
         {series.length > 1 && <Legend wrapperStyle={{ fontSize: 12 }} />}

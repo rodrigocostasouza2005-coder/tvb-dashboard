@@ -1,5 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
-import { getMonthlySnapshotKpi, getSalesByDimension, getMonthlySalesByProduto, getStores, getMarcas, getTabelasPreco, type DashboardFilters, type Canal } from "@/lib/metrics";
+import { getMonthlySnapshotKpi, getSalesByDimension, getDailySalesByProduto, getStores, getMarcas, getTabelasPreco, type DashboardFilters, type Canal } from "@/lib/metrics";
 import { canSeeFinancials, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction, getGrupoRestriction } from "@/lib/permissions";
 import { parseFilters, brasiliaDayStart, brasiliaDayEnd, todayBrasiliaStr, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
@@ -82,7 +82,7 @@ export default async function IndicadoresPage({
     getTabelasPreco(allowedTabelasPreco),
     getSalesByDimension({ ...baseRestriction, from: dataInicioRange, to: dataFimRange }, "produto", canal),
     produtoSelecionado
-      ? getMonthlySalesByProduto({ ...baseRestriction, from: dataInicioRange, to: dataFimRange }, produtoSelecionado, canal)
+      ? getDailySalesByProduto({ ...baseRestriction, from: dataInicioRange, to: dataFimRange }, produtoSelecionado, canal)
       : Promise.resolve([]),
   ]);
 
@@ -112,7 +112,7 @@ export default async function IndicadoresPage({
   };
 
   const produtoChartData = produtoSerie.map((p) => ({
-    month: p.month,
+    day: p.day,
     unitsBruta: p.unitsBruta,
     unitsLiquida: p.unitsLiquida,
     revenueBruta: p.revenueBruta,
@@ -182,10 +182,11 @@ export default async function IndicadoresPage({
           <h2 className="text-sm font-medium text-[var(--text-primary)]">{produtoSelecionado}</h2>
           {showFinancials && (
             <section>
-              <h3 className="mb-3 text-xs font-medium text-[var(--text-muted)]">Receita por mês</h3>
+              <h3 className="mb-3 text-xs font-medium text-[var(--text-muted)]">Receita por dia</h3>
               <IndicatorChart
                 data={produtoChartData}
                 format="currency"
+                granularity="day"
                 series={[
                   { key: "revenueBruta", name: "Bruta", color: "var(--series-1)" },
                   { key: "revenueLiquida", name: "Líquida", color: "var(--series-2)" },
@@ -194,10 +195,11 @@ export default async function IndicadoresPage({
             </section>
           )}
           <section>
-            <h3 className="mb-3 text-xs font-medium text-[var(--text-muted)]">Unidades vendidas por mês</h3>
+            <h3 className="mb-3 text-xs font-medium text-[var(--text-muted)]">Unidades vendidas por dia</h3>
             <IndicatorChart
               data={produtoChartData}
               format="number"
+              granularity="day"
               series={[
                 { key: "unitsBruta", name: "Brutas", color: "var(--series-1)" },
                 { key: "unitsLiquida", name: "Líquidas", color: "var(--series-2)" },

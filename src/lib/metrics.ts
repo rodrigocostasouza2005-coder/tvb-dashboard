@@ -2600,8 +2600,8 @@ export async function getMonthlySalesByStore(filters: DashboardFilters, canal: C
   return { data, series };
 }
 
-export type MonthlyProdutoPoint = {
-  month: string;
+export type DailyProdutoPoint = {
+  day: string;
   unitsBruta: number;
   unitsLiquida: number;
   revenueBruta: number;
@@ -2609,18 +2609,18 @@ export type MonthlyProdutoPoint = {
 };
 
 // "Indicadores no Tempo" por produto específico — pedido do Rodrigo em 2026-08-31: escolher um
-// produto e ver a evolução mês a mês dele (mesmo range de meses da página, desde set/2025).
-// Mesmo padrão de getMonthlySalesByStore, mas filtrado por produto e já líquido (desconta
-// devolução por mês, mesma lógica de getMonthlyReturnsTotal).
-export async function getMonthlySalesByProduto(
+// produto e ver a evolução dia a dia dele (mesmo range da página, desde set/2025; trocado de
+// mês pra dia a pedido do Rodrigo logo em seguida). Mesmo padrão de getSalesByDayPerStore, mas
+// filtrado por produto e já líquido (desconta devolução por dia).
+export async function getDailySalesByProduto(
   filters: Pick<DashboardFilters, "storeIds" | "marcas" | "tabelasPreco" | "grupoIn" | "from" | "to">,
   produto: string,
   canal: Canal = "todos"
-): Promise<MonthlyProdutoPoint[]> {
+): Promise<DailyProdutoPoint[]> {
   const [salesRows, returnRows] = await Promise.all([
-    prisma.$queryRaw<{ month: Date; units: bigint; revenue: number }[]>`
+    prisma.$queryRaw<{ day: Date; units: bigint; revenue: number }[]>`
       SELECT
-        DATE_TRUNC('month', ("saleDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo') AS month,
+        DATE_TRUNC('day', ("saleDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo') AS day,
         SUM("quantidade") AS units,
         SUM("valorTotalLiquido") AS revenue
       FROM "Sale"
@@ -2633,15 +2633,15 @@ export async function getMonthlySalesByProduto(
         ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
         ${canal === "b2b" ? Prisma.sql`AND "tabelaPreco" = 'Tabela atacado'` : Prisma.empty}
         ${canal === "b2c" ? Prisma.sql`AND ("tabelaPreco" IS DISTINCT FROM 'Tabela atacado')` : Prisma.empty}
-      GROUP BY month
-      ORDER BY month ASC
+      GROUP BY day
+      ORDER BY day ASC
     `,
     // Devolução é sempre B2C (confirmado pelo Rodrigo) — em canal="b2b" não existe, mas a query
     // já vem vazia naturalmente (produto de venda B2B raramente aparece em Return; não vale a
     // pena um if extra só por isso, o merge abaixo já trata ausência como 0).
-    prisma.$queryRaw<{ month: Date; units: bigint; value: number }[]>`
+    prisma.$queryRaw<{ day: Date; units: bigint; value: number }[]>`
       SELECT
-        DATE_TRUNC('month', ("returnDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo') AS month,
+        DATE_TRUNC('day', ("returnDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo') AS day,
         SUM("quantidade") AS units,
         SUM("valorTotal") AS value
       FROM "Return"
@@ -2650,30 +2650,30 @@ export async function getMonthlySalesByProduto(
         AND "returnDate" <= ${filters.to}
         ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
         ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
-      GROUP BY month
-      ORDER BY month ASC
+      GROUP BY day
+      ORDER BY day ASC
     `,
   ]);
 
-  const byMonth = new Map<string, MonthlyProdutoPoint>();
+  const byDay = new Map<string, DailyProdutoPoint>();
   for (const r of salesRows) {
-    const month = new Date(r.month).toISOString().slice(0, 7);
-    const cur = byMonth.get(month) ?? { month, unitsBruta: 0, unitsLiquida: 0, revenueBruta: 0, revenueLiquida: 0 };
+    const day = new Date(r.day).toISOString().slice(0, 10);
+    const cur = byDay.get(day) ?? { day, unitsBruta: 0, unitsLiquida: 0, revenueBruta: 0, revenueLiquida: 0 };
     cur.unitsBruta += Number(r.units);
     cur.unitsLiquida += Number(r.units);
     cur.revenueBruta += Number(r.revenue);
     cur.revenueLiquida += Number(r.revenue);
-    byMonth.set(month, cur);
+    byDay.set(day, cur);
   }
   for (const r of returnRows) {
-    const month = new Date(r.month).toISOString().slice(0, 7);
-    const cur = byMonth.get(month);
+    const day = new Date(r.day).toISOString().slice(0, 10);
+    const cur = byDay.get(day);
     if (!cur) continue;
     cur.unitsLiquida -= Number(r.units);
     cur.revenueLiquida -= Number(r.value);
   }
 
-  return [...byMonth.values()].sort((a, b) => a.month.localeCompare(b.month));
+  return [...byDay.values()].sort((a, b) => a.day.localeCompare(b.day));
 }
 
 // Devolução total por mês (sem quebrar por loja) — usado pra netar a tendência de receita da
