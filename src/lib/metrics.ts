@@ -2285,11 +2285,12 @@ export async function getClienteFicha(
 // preço/vendedor/período) — só entra quem tem venda batendo com o filtro atual, mesma lista
 // de clientes que já aparece em getTopClientes, só que sem o limite de 30 e sem ordenar por
 // receita. Ordenado pelo dia do mês.
-export async function getAniversariantesDoMes(filters: DashboardFilters, vendedor: string | null | undefined, month: number) {
+export async function getAniversariantesDoMes(filters: DashboardFilters, vendedor: string | null | undefined, month: number, canal: Canal = "todos") {
   const where: Prisma.SaleWhereInput = {
     ...saleWhere(filters),
     clienteNome: { not: null },
     ...(vendedor ? { vendedor } : {}),
+    ...(canal !== "todos" ? { AND: [canalWhere(canal)] } : {}),
   };
   const clientesFiltrados = await prisma.sale.groupBy({ by: ["clienteNome"], where });
   const nomes = clientesFiltrados.map((r) => r.clienteNome).filter((n): n is string => n !== null);
@@ -2308,44 +2309,69 @@ export type SugestaoContato = {
   telefone: string | null;
   motivo: string;
   detalhe: string;
+  produtoFavorito: string | null;
+  atendente: 1 | 2;
 };
 
-// "Sugestões de Contato" — pedido do Rodrigo em 2026-08-31: lista curta e diária de quem o
-// atendimento deveria ligar/chamar, com o motivo (não é a base inteira de "em risco", que já dá
-// pra ver na Segmentação — aqui é só um punhado por dia, acionável). Dois critérios:
-// 1) VIP/Recorrente esfriando — entre 70-90 dias sem comprar, ainda dá tempo de reter antes de
-//    virar "em risco" de verdade (limiar já usado em getClienteSegmentacao).
-// 2) Aniversariante do mês — reaproveita getAniversariantesDoMes.
-// Limita a um total pequeno (não estica a lista inteira todo dia) — prioriza VIP esfriando
-// primeiro (maior receita), depois recorrente esfriando, depois aniversariantes.
-const SUGESTAO_CONTATO_LIMITE = 20;
+// "Sugestões de Contato" — reformulado pelo Rodrigo em 2026-08-31 depois da 1ª versão: só B2C
+// (isso aqui é atendimento de varejo, não relação com atacadista), mistura uma parte de CADA
+// grupo (não deixa só VIP tomar a lista toda, como acontecia antes), mostra o produto favorito do
+// cliente, muda todo dia (rotação, não sempre os mesmos), e divide entre as 2 pessoas do
+// atendimento.
+//
+// 3 grupos, cada um contribuindo até POR_GRUPO_POR_DIA:
+// 1) VIP esfriando (70-90 dias sem comprar — ainda dá tempo de reter antes de "em risco" de
+//    verdade, limiar já usado em getClienteSegmentacao).
+// 2) Recorrente esfriando (mesmo critério).
+// 3) Aniversariante do mês.
+//
+// Rotação diária: cada grupo tem um pool (todo mundo elegível), e a cada dia pega uma "fatia"
+// diferente do pool (round-robin pelo dia do ano) — em vez de sempre os mesmos K primeiros, dá
+// pra cobrir o pool inteiro ao longo de vários dias e ainda assim mudar toda vez que alguém abre
+// a tela no mesmo dia.
+const POR_GRUPO_POR_DIA = 6;
+
+function diaDoAno(d: Date): number {
+  const start = Date.UTC(d.getUTCFullYear(), 0, 0);
+  return Math.floor((d.getTime() - start) / 86400000);
+}
+
+function fatiaDoDia<T>(pool: T[], porDia: number, seed: number): T[] {
+  if (pool.length === 0) return [];
+  const start = (seed * porDia) % pool.length;
+  const out: T[] = [];
+  for (let i = 0; i < Math.min(porDia, pool.length); i++) out.push(pool[(start + i) % pool.length]);
+  return out;
+}
+
 const ESFRIANDO_DIAS_MIN = 70;
 const ESFRIANDO_DIAS_MAX = 90;
 
-export async function getSugestoesDeContato(filters: DashboardFilters, canal: Canal = "todos"): Promise<SugestaoContato[]> {
+export async function getSugestoesDeContato(filters: DashboardFilters): Promise<SugestaoContato[]> {
   const mesAtual = new Date().getUTCMonth() + 1;
   const [segmentacao, aniversariantes] = await Promise.all([
-    getClienteSegmentacao(filters, canal),
-    getAniversariantesDoMes(filters, null, mesAtual),
+    getClienteSegmentacao(filters, "b2c"),
+    getAniversariantesDoMes(filters, null, mesAtual, "b2c"),
   ]);
 
-  const vipEsfriando = segmentacao
+  const vipPool = segmentacao
     .filter((s) => s.segmento === "vip" && s.recenciaDias >= ESFRIANDO_DIAS_MIN && s.recenciaDias <= ESFRIANDO_DIAS_MAX)
-    .sort((a, b) => b.receitaBruta - a.receitaBruta);
-  const recorrenteEsfriando = segmentacao
+    .sort((a, b) => a.cliente.localeCompare(b.cliente));
+  const recorrentePool = segmentacao
     .filter((s) => s.segmento === "recorrente" && s.recenciaDias >= ESFRIANDO_DIAS_MIN && s.recenciaDias <= ESFRIANDO_DIAS_MAX)
-    .sort((a, b) => b.receitaBruta - a.receitaBruta);
+    .sort((a, b) => a.cliente.localeCompare(b.cliente));
+  const aniversarioPool = [...aniversariantes].sort((a, b) => a.nome.localeCompare(b.nome));
 
-  const sugestoes: SugestaoContato[] = [];
-  for (const s of vipEsfriando) {
-    sugestoes.push({ cliente: s.cliente, telefone: s.telefone, motivo: "VIP esfriando", detalhe: `${s.recenciaDias} dias sem comprar` });
+  const seed = diaDoAno(new Date());
+  const selecionados: Omit<SugestaoContato, "produtoFavorito" | "atendente">[] = [];
+  for (const s of fatiaDoDia(vipPool, POR_GRUPO_POR_DIA, seed)) {
+    selecionados.push({ cliente: s.cliente, telefone: s.telefone, motivo: "VIP esfriando", detalhe: `${s.recenciaDias} dias sem comprar` });
   }
-  for (const s of recorrenteEsfriando) {
-    sugestoes.push({ cliente: s.cliente, telefone: s.telefone, motivo: "Recorrente esfriando", detalhe: `${s.recenciaDias} dias sem comprar` });
+  for (const s of fatiaDoDia(recorrentePool, POR_GRUPO_POR_DIA, seed)) {
+    selecionados.push({ cliente: s.cliente, telefone: s.telefone, motivo: "Recorrente esfriando", detalhe: `${s.recenciaDias} dias sem comprar` });
   }
-  for (const a of aniversariantes) {
-    if (sugestoes.length >= SUGESTAO_CONTATO_LIMITE) break;
-    sugestoes.push({
+  for (const a of fatiaDoDia(aniversarioPool, POR_GRUPO_POR_DIA, seed)) {
+    selecionados.push({
       cliente: a.nome,
       telefone: a.telefone ?? a.celular,
       motivo: "Aniversário",
@@ -2353,7 +2379,73 @@ export async function getSugestoesDeContato(filters: DashboardFilters, canal: Ca
     });
   }
 
-  return sugestoes.slice(0, SUGESTAO_CONTATO_LIMITE);
+  // Produto favorito — em lote (1 query pros clientes do dia, nunca 1 por linha).
+  const produtosPorCliente = await getProdutosLiquidosPorClientes(filters, selecionados.map((s) => s.cliente));
+
+  return selecionados.map((s, i) => ({
+    ...s,
+    produtoFavorito: produtosPorCliente.get(s.cliente.trim().toUpperCase())?.[0]?.produto ?? null,
+    // Intercalado (1,2,1,2...) em vez de metade/metade em bloco — cada pessoa pega um pouco de
+    // cada grupo, não "pessoa 1 = só VIP".
+    atendente: (i % 2 === 0 ? 1 : 2) as 1 | 2,
+  }));
+}
+
+export type FollowUpPosCompra = {
+  cliente: string;
+  telefone: string | null;
+  produtos: string[];
+  diasAtras: number;
+};
+
+// Follow-up pós-compra — pedido do Rodrigo em 2026-08-31: clientes que compraram há 7-10 dias,
+// pra perguntar se gostou/conseguiu aproveitar o produto. Só B2C (mesma lógica da aba inteira).
+// Não precisa de rotação artificial — a janela de 7-10 dias já muda sozinha todo dia conforme o
+// tempo passa (quem cai nela hoje sai amanhã).
+const FOLLOWUP_DIAS_MIN = 7;
+const FOLLOWUP_DIAS_MAX = 10;
+
+export async function getFollowUpPosCompra(filters: DashboardFilters): Promise<FollowUpPosCompra[]> {
+  const hoje = new Date();
+  const inicio = new Date(hoje.getTime() - FOLLOWUP_DIAS_MAX * 86400000);
+  const fim = new Date(hoje.getTime() - FOLLOWUP_DIAS_MIN * 86400000);
+  const where: Prisma.SaleWhereInput = {
+    ...saleWhere({ ...filters, from: inicio, to: fim }),
+    clienteNome: { not: null },
+    AND: [canalWhere("b2c")],
+  };
+  const rows = await prisma.sale.findMany({
+    where,
+    select: { clienteNome: true, saleDate: true, produto: true },
+  });
+  if (rows.length === 0) return [];
+
+  const porCliente = new Map<string, { nome: string; produtos: Set<string>; data: Date }>();
+  for (const r of rows) {
+    const nome = r.clienteNome as string;
+    const norm = nome.trim().toUpperCase();
+    const cur = porCliente.get(norm) ?? { nome, produtos: new Set<string>(), data: r.saleDate };
+    cur.produtos.add(r.produto);
+    if (r.saleDate > cur.data) cur.data = r.saleDate;
+    porCliente.set(norm, cur);
+  }
+
+  const nomes = [...porCliente.values()].map((c) => c.nome);
+  const cadastros = await prisma.clienteCadastro.findMany({ where: { nome: { in: nomes } } });
+  const cadastroByNome = new Map(cadastros.map((c) => [c.nome, c]));
+
+  const now = new Date();
+  return [...porCliente.values()]
+    .map((c) => {
+      const cad = cadastroByNome.get(c.nome);
+      return {
+        cliente: c.nome,
+        telefone: cad?.telefone ?? cad?.celular ?? null,
+        produtos: [...c.produtos],
+        diasAtras: Math.floor((now.getTime() - c.data.getTime()) / 86400000),
+      };
+    })
+    .sort((a, b) => a.diasAtras - b.diasAtras);
 }
 
 export async function getMonthlySalesByStore(filters: DashboardFilters, canal: Canal = "todos") {
