@@ -8,7 +8,9 @@ type Agg = { key: string; currentStock: number; unitsSold: number };
 const COR_ESTOQUE = "#eb6834";
 const COR_VENDIDO = "#2a78d6";
 
-function aggregate(rows: Row[], pick: (r: Row) => string): Agg[] {
+type SortBy = "vendido" | "estoque";
+
+function aggregate(rows: Row[], pick: (r: Row) => string, sortBy: SortBy): Agg[] {
   const map = new Map<string, Agg>();
   for (const r of rows) {
     const key = pick(r);
@@ -20,7 +22,7 @@ function aggregate(rows: Row[], pick: (r: Row) => string): Agg[] {
   // Sem estoque e sem venda no período não tem o que mostrar — pedido do Rodrigo em 2026-08-31.
   return [...map.values()]
     .filter((i) => i.currentStock !== 0 || i.unitsSold !== 0)
-    .sort((a, b) => b.unitsSold - a.unitsSold);
+    .sort((a, b) => (sortBy === "vendido" ? b.unitsSold - a.unitsSold : b.currentStock - a.currentStock));
 }
 
 function BarRow({ item, max, selected, onClick }: { item: Agg; max: number; selected: boolean; onClick: () => void }) {
@@ -77,7 +79,7 @@ function Panel({
           <span className="text-[11px] text-[var(--text-muted)]">{selected.length} selecionado{selected.length > 1 ? "s" : ""}</span>
         )}
       </div>
-      <div className="flex max-h-[calc(100vh-260px)] min-h-[400px] flex-col gap-1 overflow-y-auto">
+      <div className="flex max-h-[calc(100vh-180px)] min-h-[600px] flex-col gap-1 overflow-y-auto">
         {items.map((item) => (
           <BarRow key={item.key} item={item} max={max} selected={selected.includes(item.key)} onClick={() => onToggle(item.key)} />
         ))}
@@ -95,6 +97,7 @@ export function EstoqueVendasDinamico({
   const [selectedGrupos, setSelectedGrupos] = useState<string[]>([]);
   const [selectedProdutos, setSelectedProdutos] = useState<string[]>([]);
   const [selectedTamanhos, setSelectedTamanhos] = useState<string[]>([]);
+  const [sortBy, setSortBy] = useState<SortBy>("vendido");
 
   // Cross-filter nos 3 juntos, tipo Power BI: cada painel reflete a seleção dos OUTROS dois, mas
   // nunca a própria (senão selecionar algo faria o próprio painel murchar pra só aquele item) —
@@ -109,16 +112,16 @@ export function EstoqueVendasDinamico({
   }
 
   const grupoAgg = useMemo(
-    () => aggregate(applyFilters("grupo"), (r) => r.grupo),
-    [rows, selectedProdutos, selectedTamanhos]
+    () => aggregate(applyFilters("grupo"), (r) => r.grupo, sortBy),
+    [rows, selectedProdutos, selectedTamanhos, sortBy]
   );
   const produtoAgg = useMemo(
-    () => aggregate(applyFilters("produto"), (r) => r.produto),
-    [rows, selectedGrupos, selectedTamanhos]
+    () => aggregate(applyFilters("produto"), (r) => r.produto, sortBy),
+    [rows, selectedGrupos, selectedTamanhos, sortBy]
   );
   const tamanhoAgg = useMemo(
-    () => aggregate(applyFilters("tamanho"), (r) => r.tamanho),
-    [rows, selectedGrupos, selectedProdutos]
+    () => aggregate(applyFilters("tamanho"), (r) => r.tamanho, sortBy),
+    [rows, selectedGrupos, selectedProdutos, sortBy]
   );
 
   function toggleGrupo(key: string) {
@@ -147,7 +150,7 @@ export function EstoqueVendasDinamico({
         </button>
       )}
 
-      <div className="mb-1 flex items-center gap-4 text-xs text-[var(--text-secondary)]">
+      <div className="mb-1 flex flex-wrap items-center gap-4 text-xs text-[var(--text-secondary)]">
         <span className="flex items-center gap-1.5">
           <span className="h-2 w-2 rounded-full" style={{ backgroundColor: COR_ESTOQUE }} />
           Estoque atual
@@ -157,6 +160,27 @@ export function EstoqueVendasDinamico({
           Vendido no período (líquido)
         </span>
         <span className="text-[var(--text-muted)]">Clique numa barra de Grupo, Produto ou Tamanho pra filtrar os outros painéis.</span>
+      </div>
+
+      <div className="mb-1 flex items-center gap-2 text-xs">
+        <span className="text-[var(--text-muted)]">Ordenar por:</span>
+        {([
+          { value: "vendido", label: "Vendido no período" },
+          { value: "estoque", label: "Estoque atual" },
+        ] as const).map((opt) => (
+          <button
+            key={opt.value}
+            type="button"
+            onClick={() => setSortBy(opt.value)}
+            className={`rounded-md border px-2.5 py-1 font-medium transition-colors ${
+              sortBy === opt.value
+                ? "border-[var(--series-1)] bg-[var(--series-1)] text-white"
+                : "border-[var(--border)] bg-[var(--surface-1)] text-[var(--text-secondary)] hover:bg-[var(--page-plane)]"
+            }`}
+          >
+            {opt.label}
+          </button>
+        ))}
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
