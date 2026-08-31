@@ -1429,6 +1429,22 @@ export async function getClienteSegmentacao(
   }
   if (byCliente.size === 0) return [];
 
+  // Pedidos/receita do site antigo (vnda) somam em cima do que o cliente já tem no DAPIC — pedido
+  // do Rodrigo em 2026-08-31, mesmo raciocínio da Retenção: só entra em quem já existe aqui via
+  // DAPIC (não cria cliente "fantasma" só de histórico antigo sem nenhuma compra atual). Sem
+  // loja/marca/tabela/canal — essas dimensões não existem pro vnda.
+  const historico = await prisma.vendaHistoricaExterna.findMany({
+    where: { saleDate: { lte: referenceDate } },
+    select: { clienteNome: true, pedidoExterno: true, valorTotal: true },
+  });
+  for (const h of historico) {
+    const norm = h.clienteNome.trim().toUpperCase();
+    const cur = byCliente.get(norm);
+    if (!cur) continue;
+    cur.pedidos.add(`vnda::${h.pedidoExterno}`);
+    cur.receita += h.valorTotal;
+  }
+
   const primeiraGlobal = await getPrimeiraCompraGlobalPorCliente([...byCliente.keys()]);
   // Telefone — mesmo enriquecimento de getTopClientes (join por nome com ClienteCadastro).
   const nomesRaw = [...byCliente.values()].map((c) => c.nome);
