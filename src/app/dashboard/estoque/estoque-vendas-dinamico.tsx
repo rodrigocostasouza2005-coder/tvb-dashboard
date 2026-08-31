@@ -93,39 +93,54 @@ export function EstoqueVendasDinamico({
 }) {
   const [selectedGrupos, setSelectedGrupos] = useState<string[]>([]);
   const [selectedProdutos, setSelectedProdutos] = useState<string[]>([]);
+  const [selectedTamanhos, setSelectedTamanhos] = useState<string[]>([]);
 
-  const grupoAgg = useMemo(() => aggregate(rows, (r) => r.grupo), [rows]);
+  // Cross-filter nos 3 juntos, tipo Power BI: cada painel reflete a seleção dos OUTROS dois, mas
+  // nunca a própria (senão selecionar algo faria o próprio painel murchar pra só aquele item) —
+  // pedido do Rodrigo em 2026-08-31.
+  function applyFilters(exclude: "grupo" | "produto" | "tamanho") {
+    return rows.filter(
+      (r) =>
+        (exclude === "grupo" || selectedGrupos.length === 0 || selectedGrupos.includes(r.grupo)) &&
+        (exclude === "produto" || selectedProdutos.length === 0 || selectedProdutos.includes(r.produto)) &&
+        (exclude === "tamanho" || selectedTamanhos.length === 0 || selectedTamanhos.includes(r.tamanho))
+    );
+  }
 
-  const rowsPorGrupo = useMemo(
-    () => (selectedGrupos.length > 0 ? rows.filter((r) => selectedGrupos.includes(r.grupo)) : rows),
-    [rows, selectedGrupos]
+  const grupoAgg = useMemo(
+    () => aggregate(applyFilters("grupo"), (r) => r.grupo),
+    [rows, selectedProdutos, selectedTamanhos]
   );
-  const produtoAgg = useMemo(() => aggregate(rowsPorGrupo, (r) => r.produto), [rowsPorGrupo]);
-
-  const rowsPorProduto = useMemo(
-    () => (selectedProdutos.length > 0 ? rowsPorGrupo.filter((r) => selectedProdutos.includes(r.produto)) : rowsPorGrupo),
-    [rowsPorGrupo, selectedProdutos]
+  const produtoAgg = useMemo(
+    () => aggregate(applyFilters("produto"), (r) => r.produto),
+    [rows, selectedGrupos, selectedTamanhos]
   );
-  const tamanhoAgg = useMemo(() => aggregate(rowsPorProduto, (r) => r.tamanho), [rowsPorProduto]);
+  const tamanhoAgg = useMemo(
+    () => aggregate(applyFilters("tamanho"), (r) => r.tamanho),
+    [rows, selectedGrupos, selectedProdutos]
+  );
 
   function toggleGrupo(key: string) {
     setSelectedGrupos((cur) => (cur.includes(key) ? cur.filter((g) => g !== key) : [...cur, key]));
-    setSelectedProdutos([]);
   }
   function toggleProduto(key: string) {
     setSelectedProdutos((cur) => (cur.includes(key) ? cur.filter((p) => p !== key) : [...cur, key]));
+  }
+  function toggleTamanho(key: string) {
+    setSelectedTamanhos((cur) => (cur.includes(key) ? cur.filter((t) => t !== key) : [...cur, key]));
   }
 
   const giroFiltrado = selectedGrupos.length > 0 ? giroPorGrupo.filter((g) => selectedGrupos.includes(g.key)) : giroPorGrupo;
 
   return (
     <div className="flex flex-col gap-3">
-      {(selectedGrupos.length > 0 || selectedProdutos.length > 0) && (
+      {(selectedGrupos.length > 0 || selectedProdutos.length > 0 || selectedTamanhos.length > 0) && (
         <button
           type="button"
           onClick={() => {
             setSelectedGrupos([]);
             setSelectedProdutos([]);
+            setSelectedTamanhos([]);
           }}
           className="w-fit rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-3 py-1 text-xs text-[var(--series-1)] hover:bg-[var(--page-plane)]"
         >
@@ -142,7 +157,7 @@ export function EstoqueVendasDinamico({
           <span className="h-2 w-2 rounded-full" style={{ backgroundColor: COR_VENDIDO }} />
           Vendido no período (líquido)
         </span>
-        <span className="text-[var(--text-muted)]">Clique numa barra pra filtrar os painéis à direita.</span>
+        <span className="text-[var(--text-muted)]">Clique numa barra de Grupo, Produto ou Tamanho pra filtrar os outros painéis.</span>
       </div>
 
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-4">
@@ -153,7 +168,7 @@ export function EstoqueVendasDinamico({
           <Panel title="Produto" items={produtoAgg} selected={selectedProdutos} onToggle={toggleProduto} emptyMessage="Sem dados." />
         </div>
         <div className="lg:col-span-1">
-          <Panel title="Tamanho" items={tamanhoAgg} selected={[]} onToggle={() => {}} emptyMessage="Sem dados." />
+          <Panel title="Tamanho" items={tamanhoAgg} selected={selectedTamanhos} onToggle={toggleTamanho} emptyMessage="Sem dados." />
         </div>
         <div className="lg:col-span-1 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-3">
           <h3 className="mb-2 text-xs font-medium text-[var(--text-secondary)]">Giro por grupo</h3>
