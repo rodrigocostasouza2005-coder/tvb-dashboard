@@ -2410,8 +2410,12 @@ export async function getSugestoesDeContato(filters: DashboardFilters): Promise<
   const inativoPool = segmentacao
     .filter((s) => s.segmento === "inativo" && s.telefone)
     .sort((a, b) => a.cliente.localeCompare(b.cliente));
+  // Só o dia exato do aniversário — pedido do Rodrigo em 2026-08-31 (diferente da Visão Geral,
+  // que mostra o mês inteiro de propósito, pra planejamento; aqui é "ligar hoje", só faz sentido
+  // no dia certo).
+  const hojeDia = new Date().getUTCDate();
   const aniversarioPool = aniversariantes
-    .filter((a) => a.telefone ?? a.celular)
+    .filter((a) => (a.telefone ?? a.celular) && a.dataNascimento.getUTCDate() === hojeDia)
     .sort((a, b) => a.nome.localeCompare(b.nome));
 
   // Loja principal de qualquer cliente (mesmo os que só apareceram via aniversariante, que vem
