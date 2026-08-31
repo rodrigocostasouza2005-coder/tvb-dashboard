@@ -1681,6 +1681,104 @@ export async function getCrossSellPorDimensao(
   };
 }
 
+export type ProdutoEntradaItem = {
+  produto: string;
+  clientes: number;
+  unidades: number;
+  receita: number;
+};
+
+export type ProdutosEntradaResult = {
+  primeiraCompra: ProdutoEntradaItem[];
+  compradorUnico: ProdutoEntradaItem[];
+};
+
+// "Produtos de Entrada" — pedido do Rodrigo em 2026-08-31: não é "o que mais vende" nem
+// cross-sell, é "que produto mais TRAZ cliente novo". Duas visões, pedidas juntas:
+// 1) primeiraCompra: pra cada cliente, o produto da 1ª linha de venda dele (cronologicamente) —
+//    simplificação deliberada: se o 1º pedido tiver vários produtos, conta só o 1º item (por
+//    saleDate, empate resolvido por dapicVendaId) — o caso de "1º pedido com vários produtos
+//    diferentes no mesmo instante" é raro e não vale a complexidade de contar todos.
+// 2) compradorUnico: o mesmo recorte, restrito a clientes com exatamente 1 pedido NA VIDA TODA
+//    (nunca voltaram) — como a primeira compra desses é também a única, reusa a mesma linha, sem
+//    query extra.
+// "Primeira compra" é sempre GLOBAL (sem filtro de loja/marca/tabela/período) — mesmo critério de
+// "cliente novo" já usado no resto do CRM (decisão do Rodrigo em 2026-08-28). Os filtros da
+// página (loja/marca/tabela/canal/período) só decidem se AQUELA linha entra no ranking, nunca
+// qual foi a primeira. Não neta devolução — a pergunta é "esse produto trouxe o cliente pra
+// dentro", uma devolução posterior não desfaz a aquisição.
+export async function getProdutosPortaDeEntrada(
+  filters: DashboardFilters,
+  canal: Canal = "todos",
+  limit = 20
+): Promise<ProdutosEntradaResult> {
+  const [firstRows, pedidoCounts] = await Promise.all([
+    prisma.$queryRaw<
+      { norm: string; produto: string; grupo: string; storeId: string; marca: string | null; tabelaPreco: string | null; saleDate: Date; quantidade: number; valorTotalLiquido: number }[]
+    >`
+      SELECT DISTINCT ON (norm)
+        norm, produto, grupo, "storeId", marca, "tabelaPreco", "saleDate", quantidade, "valorTotalLiquido"
+      FROM (
+        SELECT
+          UPPER(TRIM("clienteNome")) AS norm, "produto", "grupo", "storeId", "marca", "tabelaPreco",
+          "saleDate", "quantidade", "valorTotalLiquido", "dapicVendaId"
+        FROM "Sale"
+        WHERE "clienteNome" IS NOT NULL
+      ) t
+      ORDER BY norm, "saleDate" ASC, "dapicVendaId" ASC
+    `,
+    prisma.$queryRaw<{ norm: string; pedidos: bigint }[]>`
+      SELECT UPPER(TRIM("clienteNome")) AS norm, COUNT(DISTINCT ("storeId", "dapicVendaId")) AS pedidos
+      FROM "Sale"
+      WHERE "clienteNome" IS NOT NULL
+      GROUP BY norm
+    `,
+  ]);
+  const pedidosByNorm = new Map(pedidoCounts.map((r) => [r.norm, Number(r.pedidos)]));
+
+  function passaFiltro(r: (typeof firstRows)[number]): boolean {
+    if (r.saleDate < filters.from || r.saleDate > filters.to) return false;
+    if (filters.storeIds !== undefined && !filters.storeIds.includes(r.storeId)) return false;
+    if (filters.marcas !== undefined && (r.marca === null || !filters.marcas.includes(r.marca))) return false;
+    if (filters.tabelasPreco !== undefined && r.tabelaPreco !== null && !filters.tabelasPreco.includes(r.tabelaPreco)) return false;
+    if (filters.grupoIn && !filters.grupoIn.includes(r.grupo)) return false;
+    if (canal === "b2b" && r.tabelaPreco !== "Tabela atacado") return false;
+    if (canal === "b2c" && r.tabelaPreco === "Tabela atacado") return false;
+    return true;
+  }
+
+  const porProdutoPrimeira = new Map<string, { clientes: Set<string>; unidades: number; receita: number }>();
+  const porProdutoUnico = new Map<string, { clientes: Set<string>; unidades: number; receita: number }>();
+  for (const r of firstRows) {
+    if (!passaFiltro(r)) continue;
+    const cur = porProdutoPrimeira.get(r.produto) ?? { clientes: new Set<string>(), unidades: 0, receita: 0 };
+    cur.clientes.add(r.norm);
+    cur.unidades += r.quantidade;
+    cur.receita += r.valorTotalLiquido;
+    porProdutoPrimeira.set(r.produto, cur);
+
+    if ((pedidosByNorm.get(r.norm) ?? 0) === 1) {
+      const curU = porProdutoUnico.get(r.produto) ?? { clientes: new Set<string>(), unidades: 0, receita: 0 };
+      curU.clientes.add(r.norm);
+      curU.unidades += r.quantidade;
+      curU.receita += r.valorTotalLiquido;
+      porProdutoUnico.set(r.produto, curU);
+    }
+  }
+
+  function toSorted(map: Map<string, { clientes: Set<string>; unidades: number; receita: number }>): ProdutoEntradaItem[] {
+    return [...map.entries()]
+      .map(([produto, v]) => ({ produto, clientes: v.clientes.size, unidades: v.unidades, receita: v.receita }))
+      .sort((a, b) => b.clientes - a.clientes)
+      .slice(0, limit);
+  }
+
+  return {
+    primeiraCompra: toSorted(porProdutoPrimeira),
+    compradorUnico: toSorted(porProdutoUnico),
+  };
+}
+
 export type ClienteFicha = {
   cliente: string;
   telefone: string | null;
