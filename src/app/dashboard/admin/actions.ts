@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { hashPassword, getSessionUser } from "@/lib/auth";
 import { TABS, type TabKey } from "@/lib/tabs";
@@ -117,6 +118,13 @@ export async function deleteUserAction(formData: FormData) {
 
 // Fire-and-forget: dispara a sync via POST /api/sync (que tem maxDuration=300 próprio) e
 // retorna imediatamente — o botão não trava mais a página. O Telegram avisa quando terminar.
+//
+// Achado em 2026-08-31 (Rodrigo reportou "botão não funciona"): o fetch() sem await rodava fora
+// de qualquer garantia de execução da Server Action — a Vercel pode encerrar o ambiente da função
+// assim que a resposta é enviada, matando o fetch em voo antes de ele sequer chegar no /api/sync
+// (mesma classe de problema documentada em self-heal-sync.ts, que já usa after() por causa disso).
+// Sem log de erro nenhum (o .catch() engolia silenciosamente), então parecia "não faz nada" — o
+// botão sempre respondia "Sincronização iniciada!" mesmo quando o fetch nunca completava.
 export async function forceSyncAction(): Promise<{ ok: boolean; message: string }> {
   await requireAdmin();
 
@@ -128,13 +136,16 @@ export async function forceSyncAction(): Promise<{ ok: boolean; message: string 
     ? `https://${process.env.VERCEL_URL}`
     : "http://localhost:3000";
 
-  // Dispara sem await — a requisição roda no seu próprio ciclo de vida no Vercel.
-  fetch(`${host}/api/sync`, {
-    method: "POST",
-    headers: { "x-cron-secret": secret },
-  }).catch(() => {
-    // Erro de rede não deve travar a UI; o Telegram já vai avisar se a sync falhar.
-  });
+  // after() garante que isso roda até completar (ou falhar) mesmo depois da resposta já ter
+  // voltado pro navegador — sem isso o fetch podia ser cortado no meio.
+  after(() =>
+    fetch(`${host}/api/sync`, {
+      method: "POST",
+      headers: { "x-cron-secret": secret },
+    }).catch((e) => {
+      console.error("[forceSyncAction] fetch pro /api/sync falhou:", e);
+    })
+  );
 
   return {
     ok: true,
