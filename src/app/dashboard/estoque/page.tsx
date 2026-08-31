@@ -1,5 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
-import { getStockVsSalesCombinado, getStockVsSales, getTotalStock, getStores, getMarcas, getTabelasPreco } from "@/lib/metrics";
+import { getStockVsSalesCombinado, getTotalStock, getStores, getMarcas, getTabelasPreco } from "@/lib/metrics";
 import { getGrupoRestriction, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
@@ -28,9 +28,8 @@ export default async function EstoquePage({
     grupoIn,
   };
 
-  const [rows, giroRows, totalEstoque, stores, marcas, tabelasPreco] = await Promise.all([
+  const [rows, totalEstoque, stores, marcas, tabelasPreco] = await Promise.all([
     getStockVsSalesCombinado(filters),
-    getStockVsSales(filters, "grupo"),
     getTotalStock({ storeIds: filters.storeIds, grupoIn: filters.grupoIn }),
     getStores(allowedStores),
     getMarcas(allowedMarcas),
@@ -56,10 +55,7 @@ export default async function EstoquePage({
         <StatTile label="Vendido no período (líquido) (total)" value={totalVendido.toLocaleString("pt-BR")} />
       </section>
 
-      <EstoqueVendasDinamico
-        rows={rows}
-        giroPorGrupo={giroRows.map((r) => ({ key: r.key, sellThroughRate: r.sellThroughRate }))}
-      />
+      <EstoqueVendasDinamico rows={rows} />
     </div>
   );
 }

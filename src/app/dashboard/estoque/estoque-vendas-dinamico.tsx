@@ -17,7 +17,10 @@ function aggregate(rows: Row[], pick: (r: Row) => string): Agg[] {
     cur.unitsSold += r.unitsSold;
     map.set(key, cur);
   }
-  return [...map.values()].sort((a, b) => b.unitsSold - a.unitsSold);
+  // Sem estoque e sem venda no período não tem o que mostrar — pedido do Rodrigo em 2026-08-31.
+  return [...map.values()]
+    .filter((i) => i.currentStock !== 0 || i.unitsSold !== 0)
+    .sort((a, b) => b.unitsSold - a.unitsSold);
 }
 
 function BarRow({ item, max, selected, onClick }: { item: Agg; max: number; selected: boolean; onClick: () => void }) {
@@ -27,25 +30,25 @@ function BarRow({ item, max, selected, onClick }: { item: Agg; max: number; sele
     <button
       type="button"
       onClick={onClick}
-      className={`w-full rounded-md px-2 py-1.5 text-left transition-colors ${
+      className={`w-full rounded-md px-3 py-2 text-left transition-colors ${
         selected ? "bg-[var(--page-plane)] ring-1 ring-[var(--series-1)]" : "hover:bg-[var(--page-plane)]"
       }`}
     >
-      <div className="mb-1 flex items-center justify-between gap-2 text-xs">
+      <div className="mb-1.5 flex items-center justify-between gap-2 text-sm">
         <span className="truncate font-medium text-[var(--text-primary)]">{item.key}</span>
       </div>
-      <div className="flex flex-col gap-0.5">
-        <div className="flex items-center gap-1.5">
-          <div className="h-2 flex-1 rounded-full bg-[var(--gridline)]">
-            <div className="h-2 rounded-full" style={{ width: `${pctEstoque}%`, backgroundColor: COR_ESTOQUE }} />
+      <div className="flex flex-col gap-1">
+        <div className="flex items-center gap-2">
+          <div className="h-2.5 flex-1 rounded-full bg-[var(--gridline)]">
+            <div className="h-2.5 rounded-full" style={{ width: `${pctEstoque}%`, backgroundColor: COR_ESTOQUE }} />
           </div>
-          <span className="w-12 shrink-0 text-right text-[11px] tabular-nums text-[var(--text-muted)]">{item.currentStock.toLocaleString("pt-BR")}</span>
+          <span className="w-14 shrink-0 text-right text-xs tabular-nums text-[var(--text-muted)]">{item.currentStock.toLocaleString("pt-BR")}</span>
         </div>
-        <div className="flex items-center gap-1.5">
-          <div className="h-2 flex-1 rounded-full bg-[var(--gridline)]">
-            <div className="h-2 rounded-full" style={{ width: `${pctVendido}%`, backgroundColor: COR_VENDIDO }} />
+        <div className="flex items-center gap-2">
+          <div className="h-2.5 flex-1 rounded-full bg-[var(--gridline)]">
+            <div className="h-2.5 rounded-full" style={{ width: `${pctVendido}%`, backgroundColor: COR_VENDIDO }} />
           </div>
-          <span className="w-12 shrink-0 text-right text-[11px] tabular-nums text-[var(--text-muted)]">{item.unitsSold.toLocaleString("pt-BR")}</span>
+          <span className="w-14 shrink-0 text-right text-xs tabular-nums text-[var(--text-muted)]">{item.unitsSold.toLocaleString("pt-BR")}</span>
         </div>
       </div>
     </button>
@@ -67,14 +70,14 @@ function Panel({
 }) {
   const max = Math.max(1, ...items.map((i) => Math.max(i.currentStock, i.unitsSold)));
   return (
-    <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-3">
-      <div className="mb-2 flex items-center justify-between">
-        <h3 className="text-xs font-medium text-[var(--text-secondary)]">{title}</h3>
+    <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="text-sm font-medium text-[var(--text-secondary)]">{title}</h3>
         {selected.length > 0 && (
-          <span className="text-[10px] text-[var(--text-muted)]">{selected.length} selecionado{selected.length > 1 ? "s" : ""}</span>
+          <span className="text-[11px] text-[var(--text-muted)]">{selected.length} selecionado{selected.length > 1 ? "s" : ""}</span>
         )}
       </div>
-      <div className="flex max-h-[520px] flex-col gap-0.5 overflow-y-auto">
+      <div className="flex max-h-[calc(100vh-260px)] min-h-[400px] flex-col gap-1 overflow-y-auto">
         {items.map((item) => (
           <BarRow key={item.key} item={item} max={max} selected={selected.includes(item.key)} onClick={() => onToggle(item.key)} />
         ))}
@@ -86,10 +89,8 @@ function Panel({
 
 export function EstoqueVendasDinamico({
   rows,
-  giroPorGrupo,
 }: {
   rows: Row[];
-  giroPorGrupo: { key: string; sellThroughRate: number | null }[];
 }) {
   const [selectedGrupos, setSelectedGrupos] = useState<string[]>([]);
   const [selectedProdutos, setSelectedProdutos] = useState<string[]>([]);
@@ -130,8 +131,6 @@ export function EstoqueVendasDinamico({
     setSelectedTamanhos((cur) => (cur.includes(key) ? cur.filter((t) => t !== key) : [...cur, key]));
   }
 
-  const giroFiltrado = selectedGrupos.length > 0 ? giroPorGrupo.filter((g) => selectedGrupos.includes(g.key)) : giroPorGrupo;
-
   return (
     <div className="flex flex-col gap-3">
       {(selectedGrupos.length > 0 || selectedProdutos.length > 0 || selectedTamanhos.length > 0) && (
@@ -160,33 +159,10 @@ export function EstoqueVendasDinamico({
         <span className="text-[var(--text-muted)]">Clique numa barra de Grupo, Produto ou Tamanho pra filtrar os outros painéis.</span>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-4">
-        <div className="lg:col-span-1">
-          <Panel title="Grupo" items={grupoAgg} selected={selectedGrupos} onToggle={toggleGrupo} emptyMessage="Sem dados." />
-        </div>
-        <div className="lg:col-span-1">
-          <Panel title="Produto" items={produtoAgg} selected={selectedProdutos} onToggle={toggleProduto} emptyMessage="Sem dados." />
-        </div>
-        <div className="lg:col-span-1">
-          <Panel title="Tamanho" items={tamanhoAgg} selected={selectedTamanhos} onToggle={toggleTamanho} emptyMessage="Sem dados." />
-        </div>
-        <div className="lg:col-span-1 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-3">
-          <h3 className="mb-2 text-xs font-medium text-[var(--text-secondary)]">Giro por grupo</h3>
-          <p className="mb-2 text-[10px] text-[var(--text-muted)]">Vendido / produzido (ou / estoque quando não há produção registrada) — histórico completo, não muda com filtro de período/loja.</p>
-          <div className="flex max-h-[480px] flex-col gap-1 overflow-y-auto text-xs">
-            {[...giroFiltrado]
-              .sort((a, b) => (b.sellThroughRate ?? 0) - (a.sellThroughRate ?? 0))
-              .map((g) => (
-                <div key={g.key} className="flex items-center justify-between gap-2 border-b border-[var(--gridline)] py-1 last:border-0">
-                  <span className="truncate text-[var(--text-secondary)]">{g.key}</span>
-                  <span className="shrink-0 tabular-nums font-medium text-[var(--text-primary)]">
-                    {g.sellThroughRate === null ? "—" : `${g.sellThroughRate.toFixed(0)}%`}
-                  </span>
-                </div>
-              ))}
-            {giroFiltrado.length === 0 && <p className="text-center text-[var(--text-muted)]">Sem dados.</p>}
-          </div>
-        </div>
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <Panel title="Grupo" items={grupoAgg} selected={selectedGrupos} onToggle={toggleGrupo} emptyMessage="Sem dados." />
+        <Panel title="Produto" items={produtoAgg} selected={selectedProdutos} onToggle={toggleProduto} emptyMessage="Sem dados." />
+        <Panel title="Tamanho" items={tamanhoAgg} selected={selectedTamanhos} onToggle={toggleTamanho} emptyMessage="Sem dados." />
       </div>
     </div>
   );
