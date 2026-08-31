@@ -1937,6 +1937,7 @@ export type ClienteFicha = {
   pedidosB2C: number;
   ticketMedio: number;
   primeiraCompra: Date;
+  primeiraCompraFonte: "dapic" | "site_antigo";
   ultimaCompra: Date;
   receitaB2B: number;
   receitaB2C: number;
@@ -2161,9 +2162,14 @@ export async function getClienteFicha(
 
   // Considera a 1ª compra pré-DAPIC (site antigo, ver getPrimeiraCompraGlobalPorCliente) também
   // na ficha — senão o card mostraria uma data mais recente que o real pra quem já era cliente
-  // desde 2021-2023.
+  // desde 2021-2023. Guarda a fonte pra mostrar um selo na tela (pedido do Rodrigo em 2026-08-31,
+  // pra deixar visível que aquele dado veio do site antigo, já que a correção em si é invisível).
+  let primeiraCompraFonte: "dapic" | "site_antigo" = "dapic";
   for (const c of cadastro) {
-    if (c.primeiraCompraExterna && c.primeiraCompraExterna < primeiraCompra) primeiraCompra = c.primeiraCompraExterna;
+    if (c.primeiraCompraExterna && c.primeiraCompraExterna < primeiraCompra) {
+      primeiraCompra = c.primeiraCompraExterna;
+      primeiraCompraFonte = "site_antigo";
+    }
   }
 
   return {
@@ -2184,6 +2190,7 @@ export async function getClienteFicha(
     // deveria "puxar pra baixo" o ticket médio de quem ele nem chegou a ficar com nada).
     ticketMedio: pedidosLiquidos > 0 ? (receitaBruta - devolvidoValorTotal) / pedidosLiquidos : 0,
     primeiraCompra,
+    primeiraCompraFonte,
     ultimaCompra,
     receitaB2B,
     receitaB2C,
@@ -2894,10 +2901,19 @@ export async function getClienteRetencaoPorMes(filters: DashboardFilters) {
 }
 
 // Versão varejo: mesma lógica mas usando saleWhere(filters) — respeita loja/marca/tabelaPreco
+//
+// Também inclui os pedidos do site antigo (VendaHistoricaExterna, vnda 2021-2025) — pedido do
+// Rodrigo em 2026-08-31: depois de só corrigir a data de 1ª compra "por baixo dos panos" ele
+// quis que aparecesse de verdade aqui. Só entra em cliente/pedido/data/valor — sem grupo/produto
+// (não existe pra essas linhas), então nunca polui Vendas por Grupo/Produto/Tamanho nem
+// Estoque×Vendas, que continuam só com dado do DAPIC. Chaves normalizadas (trim+upper) em tudo
+// agora — precisa pra casar nome do vnda com nome do DAPIC (que também tem variação de
+// capitalização entre si).
 export async function getClienteRetencaoVarejo(filters: DashboardFilters) {
   const baseWhere = saleWhere(filters);
+  const norm = (n: string) => n.trim().toUpperCase();
 
-  const [salesInPeriod, allTimeFirst] = await Promise.all([
+  const [salesInPeriod, allTimeFirstSale, historicoInPeriod, historicoAllTimeFirst] = await Promise.all([
     prisma.sale.findMany({
       where: { ...baseWhere, clienteNome: { not: null } },
       select: { clienteNome: true, saleDate: true, dapicVendaId: true },
@@ -2914,21 +2930,41 @@ export async function getClienteRetencaoVarejo(filters: DashboardFilters) {
       },
       _min: { saleDate: true },
     }),
+    // Site antigo não tem loja/marca/tabela/grupo — entra sempre, sem esses filtros.
+    prisma.vendaHistoricaExterna.findMany({
+      where: { saleDate: { gte: filters.from, lte: filters.to } },
+      select: { clienteNome: true, saleDate: true, pedidoExterno: true },
+    }),
+    prisma.vendaHistoricaExterna.groupBy({
+      by: ["clienteNome"],
+      where: { saleDate: { lte: filters.to } },
+      _min: { saleDate: true },
+    }),
   ]);
 
   const firstPurchaseMonth = new Map<string, string>();
-  for (const r of allTimeFirst) {
-    if (r.clienteNome && r._min.saleDate) {
-      firstPurchaseMonth.set(r.clienteNome, r._min.saleDate.toISOString().slice(0, 7));
-    }
+  function trackFirst(clienteNome: string, d: Date) {
+    const k = norm(clienteNome);
+    const m = d.toISOString().slice(0, 7);
+    const cur = firstPurchaseMonth.get(k);
+    if (!cur || m < cur) firstPurchaseMonth.set(k, m);
   }
+  for (const r of allTimeFirstSale) if (r.clienteNome && r._min.saleDate) trackFirst(r.clienteNome, r._min.saleDate);
+  for (const r of historicoAllTimeFirst) if (r._min.saleDate) trackFirst(r.clienteNome, r._min.saleDate);
 
-  const pedidosPorCliente = new Map<string, Set<number>>();
+  const pedidosPorCliente = new Map<string, Set<string>>();
   for (const s of salesInPeriod) {
     if (!s.clienteNome) continue;
-    const set = pedidosPorCliente.get(s.clienteNome) ?? new Set();
-    set.add(s.dapicVendaId);
-    pedidosPorCliente.set(s.clienteNome, set);
+    const k = norm(s.clienteNome);
+    const set = pedidosPorCliente.get(k) ?? new Set<string>();
+    set.add(String(s.dapicVendaId));
+    pedidosPorCliente.set(k, set);
+  }
+  for (const h of historicoInPeriod) {
+    const k = norm(h.clienteNome);
+    const set = pedidosPorCliente.get(k) ?? new Set<string>();
+    set.add(`vnda:${h.pedidoExterno}`);
+    pedidosPorCliente.set(k, set);
   }
   let compraram1x = 0;
   let compraramMaisde1x = 0;
@@ -2941,8 +2977,14 @@ export async function getClienteRetencaoVarejo(filters: DashboardFilters) {
   for (const s of salesInPeriod) {
     if (!s.clienteNome) continue;
     const monthKey = s.saleDate.toISOString().slice(0, 7);
-    const set = monthClientMap.get(monthKey) ?? new Set();
-    set.add(s.clienteNome);
+    const set = monthClientMap.get(monthKey) ?? new Set<string>();
+    set.add(norm(s.clienteNome));
+    monthClientMap.set(monthKey, set);
+  }
+  for (const h of historicoInPeriod) {
+    const monthKey = h.saleDate.toISOString().slice(0, 7);
+    const set = monthClientMap.get(monthKey) ?? new Set<string>();
+    set.add(norm(h.clienteNome));
     monthClientMap.set(monthKey, set);
   }
 
@@ -2958,6 +3000,17 @@ export async function getClienteRetencaoVarejo(filters: DashboardFilters) {
   });
 
   return { months, compraram1x, compraramMaisde1x };
+}
+
+// Receita histórica do site antigo (vnda, 2021-2025) — sempre total, sem filtro de período (a
+// ideia é mostrar o "tamanho" do histórico pré-DAPIC de uma vez, não recortar por data). Pedido
+// do Rodrigo em 2026-08-31 pro card na Visão Geral de Clientes.
+export async function getReceitaHistoricaExterna(): Promise<{ receita: number; pedidos: number }> {
+  const result = await prisma.vendaHistoricaExterna.aggregate({
+    _sum: { valorTotal: true },
+    _count: true,
+  });
+  return { receita: result._sum.valorTotal ?? 0, pedidos: result._count };
 }
 
 // Os produtos mais vendidos em cada loja desde um horário de corte (o momento da sync

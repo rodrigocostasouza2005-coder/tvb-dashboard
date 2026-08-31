@@ -291,6 +291,29 @@ model ClienteCadastro {
   @@index([nome])
 }
 
+// Pedidos do site antigo (plataforma vnda, 2021-2025), 1 linha por pedido (Tipo="Total" no
+// export original — já é o valor final do pedido, sem precisar somar frete/produto/desconto
+// separado). Pedido do Rodrigo em 2026-08-31: depois de só importar a data de 1ª compra achar
+// "invisível" demais, ele quis que aparecesse de verdade em Retenção/Segmentação/receita da
+// Visão Geral de Clientes — MAS sem entrar em nenhum gráfico por Grupo/Produto/Tamanho (o vnda
+// usa nomenclatura de produto genérica demais pra combinar com o DAPIC, ex: "Classic" vs
+// "Classic Lisa"/"Classic Blend"/"Classic Dry" reais). Por isso não tem grupo/produto/tamanho
+// aqui — só o necessário pro lado CRM: quem comprou, quando, quanto. Tabela separada da Sale de
+// propósito, pra zero risco de vazar pra Vendas/Estoque×Vendas sem querer. Preenchida 1x via
+// scripts/backfill-vendas-historicas-externas.ts, nunca pelo sync do DAPIC.
+model VendaHistoricaExterna {
+  id            String   @id @default(cuid())
+  clienteNome   String
+  cpfCnpj       String?
+  pedidoExterno String   @unique
+  saleDate      DateTime
+  valorTotal    Float
+  fonte         String   @default("vnda")
+
+  @@index([clienteNome])
+  @@index([saleDate])
+}
+
 // Grupos de produto marcados como prioritários para vendedores (administrável, sem UI ainda).
 model PriorityGroup {
   id    String @id @default(cuid())

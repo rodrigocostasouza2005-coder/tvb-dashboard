@@ -1,7 +1,7 @@
 import { getSessionUser } from "@/lib/auth";
 import {
   getTopClientes, getStores, getMarcas, getTabelasPreco, getVendedores, getClienteRetencaoVarejo,
-  getAniversariantesDoMes, getClientesCrmOverview, type Canal,
+  getAniversariantesDoMes, getClientesCrmOverview, getReceitaHistoricaExterna, type Canal,
 } from "@/lib/metrics";
 import { canSeeFinancials, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
 import { parseFilters, todayBrasiliaStr, type RawSearchParams } from "@/lib/filters";
@@ -57,7 +57,7 @@ export default async function ClientesPage({
     ? aniversarioMesParsed
     : parseInt(todayBrasiliaStr(new Date()).slice(5, 7), 10);
 
-  const [rows, stores, marcas, tabelasPreco, vendedores, retencao, aniversariantes, overview] = await Promise.all([
+  const [rows, stores, marcas, tabelasPreco, vendedores, retencao, aniversariantes, overview, historicoExterno] = await Promise.all([
     getTopClientes(filters, vendedor, 30, canal, true),
     getStores(allowedStores),
     getMarcas(allowedMarcas),
@@ -66,6 +66,7 @@ export default async function ClientesPage({
     getClienteRetencaoVarejo(filters),
     getAniversariantesDoMes(filters, vendedor, aniversarioMes),
     getClientesCrmOverview(filters, canal),
+    getReceitaHistoricaExterna(),
   ]);
   const showFinancials = canSeeFinancials(user);
 
@@ -218,8 +219,20 @@ export default async function ClientesPage({
 
       {retencao.months.length > 1 && (
         <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
-          <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Retenção — novos vs recorrentes por mês</h2>
+          <h2 className="mb-1 text-sm font-medium text-[var(--text-secondary)]">Retenção — novos vs recorrentes por mês</h2>
+          <p className="mb-3 text-xs text-[var(--text-muted)]">"Novo" já considera a 1ª compra real do cliente, incluindo o site antigo (2021-2025) quando existir — não só o que ele comprou dentro do período filtrado.</p>
           <ClienteRetencaoChart data={retencao.months} />
+        </section>
+      )}
+
+      {historicoExterno.pedidos > 0 && (
+        <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
+          <h2 className="mb-1 text-sm font-medium text-[var(--text-secondary)]">Site antigo (histórico, 2021-2025)</h2>
+          <p className="mb-3 text-xs text-[var(--text-muted)]">Pedidos do site antigo (plataforma vnda), fora do DAPIC — total acumulado, sem filtro de período/loja. Não entra em nenhum gráfico por grupo/produto/tamanho.</p>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <StatTile label="Pedidos" value={historicoExterno.pedidos.toLocaleString("pt-BR")} />
+            {showFinancials && <StatTile label="Receita" value={formatBRL(historicoExterno.receita)} />}
+          </div>
         </section>
       )}
 
