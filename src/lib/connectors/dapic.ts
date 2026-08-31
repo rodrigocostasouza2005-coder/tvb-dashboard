@@ -75,7 +75,14 @@ export class DapicClient {
 
   constructor(private tokenIntegracao: string, public label: string = "default") {}
 
-  private async login(): Promise<string> {
+  // Login tem rate limit próprio no DAPIC (5 requisições/60s no endpoint de autenticação,
+  // achado em 2026-08-31 — os 4 tokens (leblon/rio-sul/barra/matriz) logando quase juntos numa
+  // sync normal já chegam perto do limite). Diferente de .fetch() (que sempre tinha retry em
+  // 429), login() falhava na hora — e como o retry de runSync() espera só 15s (bem menos que o
+  // cooldown de 60s do DAPIC), uma 1ª falha de rate limit virava uma cadeia de falhas repetidas
+  // em vez de se recuperar sozinha. Agora respeita o "DataLiberacao" que o DAPIC devolve no corpo
+  // do erro 429 (quando vem) — espera até lá em vez de um backoff fixo.
+  private async login(attempt = 1): Promise<string> {
     if (!EMPRESA) {
       throw new Error("DAPIC_EMPRESA não configurado no .env.local.");
     }
@@ -87,6 +94,19 @@ export class DapicClient {
       cache: "no-store",
       signal: AbortSignal.timeout(30_000),
     });
+
+    if (response.status === 429 && attempt <= 4) {
+      const body = await response.text().catch(() => "");
+      const dataLiberacao = body.match(/"DataLiberacao":\s*"([^"]+)"/)?.[1];
+      const retryAfterHeader = Number(response.headers.get("Retry-After"));
+      const waitMs = dataLiberacao
+        ? Math.max(1000, new Date(dataLiberacao).getTime() - Date.now() + 500)
+        : Number.isFinite(retryAfterHeader) && retryAfterHeader > 0
+          ? retryAfterHeader * 1000
+          : 15_000 * attempt;
+      await sleep(Math.min(waitMs, 90_000));
+      return this.login(attempt + 1);
+    }
 
     if (!response.ok) {
       const body = await response.text().catch(() => "");
