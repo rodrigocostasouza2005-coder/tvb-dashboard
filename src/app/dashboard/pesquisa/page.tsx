@@ -67,23 +67,13 @@ export default async function PesquisaPage({
     revenueLiquida: p.revenueLiquida,
   }));
 
-  const makeProdutoHref = (key: string) => {
-    const params = new URLSearchParams();
-    if (query) params.set("q", query);
-    for (const id of filters.storeIds ?? []) params.append("store", id);
-    for (const m of filters.marcas ?? []) params.append("marca", m);
-    for (const t of filters.tabelasPreco ?? []) params.append("tabelaPreco", t);
-    params.set("produto", key);
-    return `/dashboard/pesquisa?${params.toString()}`;
-  };
-  const clearProdutoHref = (() => {
-    const params = new URLSearchParams();
-    if (query) params.set("q", query);
-    for (const id of filters.storeIds ?? []) params.append("store", id);
-    for (const m of filters.marcas ?? []) params.append("marca", m);
-    for (const t of filters.tabelasPreco ?? []) params.append("tabelaPreco", t);
-    return `/dashboard/pesquisa?${params.toString()}`;
-  })();
+  const baseParams = new URLSearchParams();
+  if (query) baseParams.set("q", query);
+  for (const id of filters.storeIds ?? []) baseParams.append("store", id);
+  for (const m of filters.marcas ?? []) baseParams.append("marca", m);
+  for (const t of filters.tabelasPreco ?? []) baseParams.append("tabelaPreco", t);
+  const produtoHrefBase = `/dashboard/pesquisa?${baseParams.toString()}`;
+  const clearProdutoHref = produtoHrefBase;
 
   return (
     <div>
@@ -223,7 +213,7 @@ export default async function PesquisaPage({
       )}
 
       <PesquisaTable
-        makeProdutoHref={makeProdutoHref}
+        produtoHrefBase={produtoHrefBase}
         rows={rows.slice(0, 100).map((r) => ({
           key: r.key,
           unitsSold: r.unitsSold,

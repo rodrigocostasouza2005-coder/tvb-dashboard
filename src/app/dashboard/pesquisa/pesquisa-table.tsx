@@ -24,12 +24,12 @@ export function PesquisaTable({
   rows,
   tamanhos,
   emptyMessage,
-  makeProdutoHref,
+  produtoHrefBase,
 }: {
   rows: Row[];
   tamanhos: string[];
   emptyMessage: string;
-  makeProdutoHref?: (key: string) => string;
+  produtoHrefBase?: string;
 }) {
   const [open, setOpen] = useState<Set<string>>(new Set());
 
@@ -82,9 +82,9 @@ export function PesquisaTable({
                       </span>
                       {r.key}
                     </button>
-                    {makeProdutoHref && (
+                    {produtoHrefBase && (
                       <a
-                        href={makeProdutoHref(r.key)}
+                        href={`${produtoHrefBase}${produtoHrefBase.includes("?") ? "&" : "?"}produto=${encodeURIComponent(r.key)}`}
                         title="Ver tendência mensal desse produto"
                         className="ml-2 text-xs text-[var(--series-1)] hover:underline"
                       >
