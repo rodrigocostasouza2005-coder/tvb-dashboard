@@ -1031,17 +1031,23 @@ export async function getPrimeiraVendaData(): Promise<Date | null> {
   return rows[0]?.first ? new Date(rows[0].first) : null;
 }
 
-export async function getNewClientsCount(filters: DashboardFilters) {
+// Novo = 1ª compra global (considerando também o histórico do site antigo, via
+// primeiraCompraExterna) caiu dentro do período filtrado. Recorrente = comprou no período mas já
+// tinha comprado antes — pedido do Rodrigo em 2026-09-01 pra ver os dois lado a lado na Visão Geral.
+export async function getNovosERecorrentesClientes(filters: DashboardFilters) {
   const where: Prisma.SaleWhereInput = { ...saleWhere(filters), clienteNome: { not: null } };
   const clientesNoPeriodo = await prisma.sale.groupBy({ by: ["clienteNome"], where });
   const normSet = new Set(clientesNoPeriodo.map((c) => (c.clienteNome as string).trim().toUpperCase()));
   const primeiraGlobal = await getPrimeiraCompraGlobalPorCliente([...normSet]);
-  let count = 0;
+  let novos = 0;
+  let recorrentes = 0;
   for (const norm of normSet) {
     const first = primeiraGlobal.get(norm);
-    if (first && first >= filters.from && first <= filters.to) count++;
+    if (!first) continue;
+    if (first >= filters.from && first <= filters.to) novos++;
+    else if (first < filters.from) recorrentes++;
   }
-  return count;
+  return { novos, recorrentes };
 }
 
 // Devoluções não têm vendedor no schema, mas dapicVendaId é o mesmo id da venda original —

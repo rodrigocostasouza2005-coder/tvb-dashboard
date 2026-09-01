@@ -9,7 +9,7 @@ import {
   getMarcas,
   getTabelasPreco,
   getLastSyncs,
-  getNewClientsCount,
+  getNovosERecorrentesClientes,
 } from "@/lib/metrics";
 import {
   canSeeFinancials,
@@ -69,7 +69,7 @@ export default async function OverviewPage({
     grupoIn,
   };
   const dimension = parseDimension(rawParams);
-  const [kpi, salesByDimension, salesByDay, salesByDayPerStore, stores, marcas, tabelasPreco, syncs, newClients] =
+  const [kpi, salesByDimension, salesByDay, salesByDayPerStore, stores, marcas, tabelasPreco, syncs, clientesNovosRecorrentes] =
     await Promise.all([
       getKpiSummary(filters),
       getSalesByDimension(filters, dimension),
@@ -79,7 +79,7 @@ export default async function OverviewPage({
       getMarcas(allowedMarcas),
       getTabelasPreco(allowedTabelasPreco),
       getLastSyncs(),
-      getNewClientsCount(filters),
+      getNovosERecorrentesClientes(filters),
     ]);
 
   const showFinancials = canSeeFinancials(user);
@@ -118,8 +118,13 @@ export default async function OverviewPage({
         />
         <StatTile
           label="Clientes novos"
-          value={newClients.toLocaleString("pt-BR")}
-          trend={newClients > 0 ? "up" : undefined}
+          value={clientesNovosRecorrentes.novos.toLocaleString("pt-BR")}
+          trend={clientesNovosRecorrentes.novos > 0 ? "up" : undefined}
+        />
+        <StatTile
+          label="Clientes recorrentes"
+          value={clientesNovosRecorrentes.recorrentes.toLocaleString("pt-BR")}
+          trend={clientesNovosRecorrentes.recorrentes > 0 ? "up" : undefined}
         />
       </section>
 
