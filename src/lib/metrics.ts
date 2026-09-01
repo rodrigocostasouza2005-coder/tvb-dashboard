@@ -96,13 +96,49 @@ export async function getKpiSummary(filters: DashboardFilters) {
 
 export type Canal = "todos" | "b2b" | "b2c";
 
-// B2B = Tabela atacado (só isso, sem fallback de null). B2C = tudo mais (varejo, Black
-// Friday, Promoção, e vendas sem tabela inferida) — decisão do Rodrigo em 2026-08-21: não
-// existe um campo "canal" de verdade, tabela de preço é o proxy mais próximo disponível.
-function canalWhere(canal: Canal): Prisma.SaleWhereInput {
-  if (canal === "b2b") return { tabelaPreco: "Tabela atacado" };
-  if (canal === "b2c") return { OR: [{ tabelaPreco: { not: "Tabela atacado" } }, { tabelaPreco: null }] };
-  return {};
+// B2B = Tabela atacado. Não existe um campo "canal" de verdade no DAPIC — tabelaPreco (inferida
+// batendo o preço pago contra o catálogo, ver connectors/tabela-preco.ts) é o proxy mais próximo
+// disponível, e por venda individual isso ainda vale (decisão do Rodrigo em 2026-08-21).
+//
+// MAS por CLIENTE a regra é outra desde 2026-09-01: cliente atacado de verdade costuma negociar
+// preço próprio, então boa parte (às vezes toda) da venda dele nem bate com a tabela cadastrada e
+// cai em tabelaPreco=null — que por padrão contaria como B2C, fazendo um cliente 100% atacado
+// (achado real: GUARDERIA SURF CLUB LTDA) aparecer sempre como varejo. Por isso, pra filtrar por
+// CLIENTE (Segmentação, Ficha, Sugestões de Contato etc — qualquer coisa agrupada por
+// clienteNome), um cliente que já teve QUALQUER venda batendo exato com "Tabela atacado" alguma
+// vez conta como B2B pra todo o histórico dele, inclusive as vendas com tabelaPreco null. Venda
+// sem clienteNome (balcão/anônima) não tem como saber o cliente, então continua pela regra antiga
+// (só a própria tabelaPreco da linha).
+let b2bClientesCache: { set: Set<string>; expiresAt: number } | null = null;
+const B2B_CLIENTES_CACHE_MS = 5 * 60 * 1000;
+
+async function getB2BClienteNomes(): Promise<Set<string>> {
+  if (b2bClientesCache && b2bClientesCache.expiresAt > Date.now()) return b2bClientesCache.set;
+  const rows = await prisma.sale.findMany({
+    where: { tabelaPreco: "Tabela atacado", clienteNome: { not: null } },
+    select: { clienteNome: true },
+    distinct: ["clienteNome"],
+  });
+  const set = new Set(rows.map((r) => r.clienteNome as string));
+  b2bClientesCache = { set, expiresAt: Date.now() + B2B_CLIENTES_CACHE_MS };
+  return set;
+}
+
+async function canalWhere(canal: Canal): Promise<Prisma.SaleWhereInput> {
+  if (canal === "todos") return {};
+  const b2bClientes = [...(await getB2BClienteNomes())];
+  if (canal === "b2b") {
+    return { OR: [{ tabelaPreco: "Tabela atacado" }, { clienteNome: { in: b2bClientes } }] };
+  }
+  // "not: X" no Prisma exclui null (vira "<>" puro no SQL) — precisa do OR explícito com null,
+  // senão toda venda sem tabelaPreco inferida (boa parte da base) sumia do B2C. Achado testando
+  // contra dado real: sem isso, b2b + b2c não batia com "todos" (2731 vs 1667 unidades).
+  return {
+    AND: [
+      { OR: [{ tabelaPreco: { not: "Tabela atacado" } }, { tabelaPreco: null }] },
+      { OR: [{ clienteNome: null }, { clienteNome: { notIn: b2bClientes } }] },
+    ],
+  };
 }
 
 // KPIs pra Lâmina Mensal: além de unidades/receita, conta pedidos distintos (pra ticket
@@ -111,7 +147,7 @@ function canalWhere(canal: Canal): Prisma.SaleWhereInput {
 // tabelaPreco) — então em "todos" e "b2c" o valor devolvido do período inteiro é aplicado
 // normalmente; em "b2b" não há devolução nenhuma (líquida = bruta).
 export async function getMonthlySnapshotKpi(filters: DashboardFilters, canal: Canal = "todos") {
-  const where: Prisma.SaleWhereInput = { AND: [saleWhere(filters), canalWhere(canal)] };
+  const where: Prisma.SaleWhereInput = { AND: [saleWhere(filters), await canalWhere(canal)] };
   const [salesAgg, orderRows, returnsAgg] = await Promise.all([
     prisma.sale.aggregate({ where, _sum: { quantidade: true, valorTotalLiquido: true } }),
     prisma.sale.groupBy({ by: ["storeId", "dapicVendaId"], where }),
@@ -250,7 +286,7 @@ function dimensionKey(dimension: Dimension, row: { grupo?: string; produto?: str
 }
 
 export async function getSalesByDimension(filters: DashboardFilters, dimension: Dimension = "grupo", canal: Canal = "todos") {
-  const where: Prisma.SaleWhereInput = canal === "todos" ? saleWhere(filters) : { AND: [saleWhere(filters), canalWhere(canal)] };
+  const where: Prisma.SaleWhereInput = canal === "todos" ? saleWhere(filters) : { AND: [saleWhere(filters), await canalWhere(canal)] };
   const rows = await groupSalesByDimension(dimension, where);
   return rows
     .map((r) => ({
@@ -1240,7 +1276,7 @@ export async function getTopClientes(
     ...saleWhere(filters),
     clienteNome: q ? { contains: q, mode: "insensitive" } : { not: null },
     ...(vendedor ? { vendedor } : {}),
-    ...(canal !== "todos" ? { AND: [canalWhere(canal)] } : {}),
+    ...(canal !== "todos" ? { AND: [await canalWhere(canal)] } : {}),
   };
   const [rows, pedidosRows, devolvidoPorCliente] = await Promise.all([
     prisma.sale.groupBy({
@@ -1336,7 +1372,7 @@ export async function getClientesCrmOverview(filters: DashboardFilters, canal: C
   const where: Prisma.SaleWhereInput = {
     ...saleWhere(filters),
     clienteNome: { not: null },
-    ...(canal !== "todos" ? { AND: [canalWhere(canal)] } : {}),
+    ...(canal !== "todos" ? { AND: [await canalWhere(canal)] } : {}),
   };
 
   const [porPedido, devolvidoPorCliente] = await Promise.all([
@@ -1444,7 +1480,7 @@ export async function getClienteSegmentacao(
   const where: Prisma.SaleWhereInput = {
     ...saleWhere(allTime),
     clienteNome: { not: null },
-    ...(canal !== "todos" ? { AND: [canalWhere(canal)] } : {}),
+    ...(canal !== "todos" ? { AND: [await canalWhere(canal)] } : {}),
   };
   const rows = await prisma.sale.findMany({
     where,
@@ -1630,7 +1666,7 @@ export async function getClientesPrecoBehavior(
   const where: Prisma.SaleWhereInput = {
     ...saleWhere(filters),
     clienteNome: { not: null },
-    ...(canal !== "todos" ? { AND: [canalWhere(canal)] } : {}),
+    ...(canal !== "todos" ? { AND: [await canalWhere(canal)] } : {}),
   };
   const rows = await prisma.sale.groupBy({
     by: ["clienteNome", "tabelaPreco"],
@@ -1673,7 +1709,7 @@ export async function getClientesPorDimensao(
     ...saleWhere(filters),
     clienteNome: { not: null },
     ...(dimension === "produto" ? { produto: { in: keys } } : { grupo: { in: keys } }),
-    ...(canal !== "todos" ? { AND: [canalWhere(canal)] } : {}),
+    ...(canal !== "todos" ? { AND: [await canalWhere(canal)] } : {}),
   };
   const rows = await prisma.sale.groupBy({
     by: ["clienteNome"],
@@ -1758,7 +1794,7 @@ export async function getCrossSellPorDimensao(
   const baseWhere: Prisma.SaleWhereInput = {
     ...saleWhere(filters),
     clienteNome: { not: null },
-    ...(canal !== "todos" ? { AND: [canalWhere(canal)] } : {}),
+    ...(canal !== "todos" ? { AND: [await canalWhere(canal)] } : {}),
   };
 
   const compradoresRows = await prisma.sale.groupBy({
@@ -1938,14 +1974,21 @@ export async function getProdutosPortaDeEntrada(
   ]);
   const pedidosByNorm = new Map(pedidoCounts.map((r) => [r.norm, Number(r.pedidos)]));
 
+  // Cliente atacado "de verdade" (mesma regra de canalWhere) — pega os que já negociaram preço
+  // próprio e por isso não batem com "Tabela atacado" só olhando a linha (ver comentário em
+  // canalWhere). "norm" já vem normalizado da query acima.
+  const b2bNormSet =
+    canal !== "todos" ? new Set([...(await getB2BClienteNomes())].map((n) => n.trim().toUpperCase())) : null;
+
   function passaFiltro(r: (typeof firstRows)[number]): boolean {
     if (r.saleDate < filters.from || r.saleDate > filters.to) return false;
     if (filters.storeIds !== undefined && !filters.storeIds.includes(r.storeId)) return false;
     if (filters.marcas !== undefined && (r.marca === null || !filters.marcas.includes(r.marca))) return false;
     if (filters.tabelasPreco !== undefined && r.tabelaPreco !== null && !filters.tabelasPreco.includes(r.tabelaPreco)) return false;
     if (filters.grupoIn && !filters.grupoIn.includes(r.grupo)) return false;
-    if (canal === "b2b" && r.tabelaPreco !== "Tabela atacado") return false;
-    if (canal === "b2c" && r.tabelaPreco === "Tabela atacado") return false;
+    const isB2B = r.tabelaPreco === "Tabela atacado" || (b2bNormSet?.has(r.norm) ?? false);
+    if (canal === "b2b" && !isB2B) return false;
+    if (canal === "b2c" && isB2B) return false;
     return true;
   }
 
@@ -2101,6 +2144,12 @@ export async function getClienteFicha(
     }
   }
 
+  // Cliente é B2B se JÁ teve QUALQUER venda (não só nesse período/filtro, no histórico todo já
+  // carregado em `sales`) batendo com "Tabela atacado" — mesma regra de canalWhere. Preço
+  // negociado (comum em atacado) não bate com a tabela e vira tabelaPreco=null, que por linha
+  // isolada pareceria B2C; aqui o cliente inteiro conta como B2B se algum dia bateu.
+  const clienteEhB2B = sales.some((s) => s.tabelaPreco === "Tabela atacado");
+
   const pedidos = new Set<string>();
   // true = pelo menos 1 item do pedido é B2B (Tabela atacado) — pedido misto é raro, mas conta
   // como B2B se tiver qualquer item assim.
@@ -2131,7 +2180,7 @@ export async function getClienteFicha(
     pedidos.add(pedidoKey);
     pedidoKeys.add(pedidoKey);
     pedidoUnidadesBruto.set(pedidoKey, (pedidoUnidadesBruto.get(pedidoKey) ?? 0) + s.quantidade);
-    const isB2BLine = s.tabelaPreco === "Tabela atacado";
+    const isB2BLine = clienteEhB2B;
     pedidoCanal.set(pedidoKey, isB2BLine || (pedidoCanal.get(pedidoKey) ?? false));
     unidadesBrutas += s.quantidade;
     receitaBruta += s.valorTotalLiquido;
@@ -2349,7 +2398,7 @@ export async function getAniversariantesDoMes(filters: DashboardFilters, vendedo
     ...saleWhere(filters),
     clienteNome: { not: null },
     ...(vendedor ? { vendedor } : {}),
-    ...(canal !== "todos" ? { AND: [canalWhere(canal)] } : {}),
+    ...(canal !== "todos" ? { AND: [await canalWhere(canal)] } : {}),
   };
   const clientesFiltrados = await prisma.sale.groupBy({ by: ["clienteNome"], where });
   const nomes = clientesFiltrados.map((r) => r.clienteNome).filter((n): n is string => n !== null);
@@ -2504,7 +2553,7 @@ export async function getFollowUpPosCompra(filters: DashboardFilters): Promise<F
   const where: Prisma.SaleWhereInput = {
     ...saleWhere({ ...filters, from: inicio, to: fim }),
     clienteNome: { not: null },
-    AND: [canalWhere("b2c")],
+    AND: [await canalWhere("b2c")],
   };
   const rows = await prisma.sale.findMany({
     where,
@@ -2547,6 +2596,10 @@ export async function getFollowUpPosCompra(filters: DashboardFilters): Promise<F
 }
 
 export async function getMonthlySalesByStore(filters: DashboardFilters, canal: Canal = "todos") {
+  // Cliente já classificado como atacado (mesma regra de canalWhere) conta em "b2b" mesmo em
+  // linhas com tabelaPreco null (preço negociado) — sem isso, cliente atacado que negocia preço
+  // ficava subcontado aqui.
+  const b2bClientes = canal !== "todos" ? [...(await getB2BClienteNomes())] : [];
   const rows = await prisma.$queryRaw<{ month: Date; storeId: string; units: bigint; revenue: number }[]>`
     SELECT
       DATE_TRUNC('month', ("saleDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo') AS month,
@@ -2560,8 +2613,8 @@ export async function getMonthlySalesByStore(filters: DashboardFilters, canal: C
       ${filters.marcas !== undefined ? Prisma.sql`AND "marca" = ANY(${filters.marcas})` : Prisma.empty}
       ${filters.tabelasPreco !== undefined ? Prisma.sql`AND ("tabelaPreco" = ANY(${filters.tabelasPreco}) OR "tabelaPreco" IS NULL)` : Prisma.empty}
       ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
-      ${canal === "b2b" ? Prisma.sql`AND "tabelaPreco" = 'Tabela atacado'` : Prisma.empty}
-      ${canal === "b2c" ? Prisma.sql`AND ("tabelaPreco" IS DISTINCT FROM 'Tabela atacado')` : Prisma.empty}
+      ${canal === "b2b" ? Prisma.sql`AND ("tabelaPreco" = 'Tabela atacado' OR "clienteNome" = ANY(${b2bClientes}))` : Prisma.empty}
+      ${canal === "b2c" ? Prisma.sql`AND "tabelaPreco" IS DISTINCT FROM 'Tabela atacado' AND ("clienteNome" IS NULL OR "clienteNome" <> ALL(${b2bClientes}))` : Prisma.empty}
     GROUP BY month, "storeId"
     ORDER BY month ASC
   `;
@@ -2623,6 +2676,9 @@ export async function getDailySalesByProduto(
   produto: string,
   canal: Canal = "todos"
 ): Promise<DailyProdutoPoint[]> {
+  // Cliente já classificado como atacado (mesma regra de canalWhere) conta em "b2b" mesmo em
+  // linhas com tabelaPreco null (preço negociado).
+  const b2bClientes = canal !== "todos" ? [...(await getB2BClienteNomes())] : [];
   const [salesRows, returnRows] = await Promise.all([
     prisma.$queryRaw<{ day: Date; units: bigint; revenue: number }[]>`
       SELECT
@@ -2637,8 +2693,8 @@ export async function getDailySalesByProduto(
         ${filters.marcas !== undefined ? Prisma.sql`AND "marca" = ANY(${filters.marcas})` : Prisma.empty}
         ${filters.tabelasPreco !== undefined ? Prisma.sql`AND ("tabelaPreco" = ANY(${filters.tabelasPreco}) OR "tabelaPreco" IS NULL)` : Prisma.empty}
         ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
-        ${canal === "b2b" ? Prisma.sql`AND "tabelaPreco" = 'Tabela atacado'` : Prisma.empty}
-        ${canal === "b2c" ? Prisma.sql`AND ("tabelaPreco" IS DISTINCT FROM 'Tabela atacado')` : Prisma.empty}
+        ${canal === "b2b" ? Prisma.sql`AND ("tabelaPreco" = 'Tabela atacado' OR "clienteNome" = ANY(${b2bClientes}))` : Prisma.empty}
+        ${canal === "b2c" ? Prisma.sql`AND "tabelaPreco" IS DISTINCT FROM 'Tabela atacado' AND ("clienteNome" IS NULL OR "clienteNome" <> ALL(${b2bClientes}))` : Prisma.empty}
       GROUP BY day
       ORDER BY day ASC
     `,
@@ -3141,10 +3197,14 @@ export async function getAtacadoClientes(filters: DashboardFilters) {
   if (!cdStore) return { rows: [], totalClientes: 0, novosNoPeriodo: 0 };
 
   // Essa aba é especificamente sobre clientes de ATACADO (B2B) — sem esse filtro, misturava
-  // com clientes de varejo do site (mesma loja física "Site+Atacado", canal diferente).
+  // com clientes de varejo do site (mesma loja física "Site+Atacado", canal diferente). Usa
+  // canalWhere("b2b") (cliente já classificado como atacado, não só a linha) em vez de
+  // tabelaPreco="Tabela atacado" direto — senão o cliente que negocia preço próprio (tabelaPreco
+  // null nessas linhas) ficava com pedidos/receita subcontados aqui.
+  const b2bWhere = await canalWhere("b2b");
   const where: Prisma.SaleWhereInput = {
     storeId: cdStore.id,
-    tabelaPreco: "Tabela atacado",
+    AND: [b2bWhere],
     saleDate: { gte: filters.from, lte: filters.to },
     clienteNome: { not: null },
   };
@@ -3161,7 +3221,7 @@ export async function getAtacadoClientes(filters: DashboardFilters) {
     }),
     prisma.sale.groupBy({
       by: ["clienteNome"],
-      where: { storeId: cdStore.id, tabelaPreco: "Tabela atacado", saleDate: { lt: filters.from }, clienteNome: { not: null } },
+      where: { storeId: cdStore.id, AND: [b2bWhere], saleDate: { lt: filters.from }, clienteNome: { not: null } },
       _count: { id: true },
     }),
   ]);
@@ -3195,13 +3255,15 @@ export async function getClienteRetencaoPorMes(filters: DashboardFilters) {
   const cdStore = await prisma.store.findFirst({ where: { code: "CD" } });
   if (!cdStore) return { months: [], compraram1x: 0, compraramMaisde1x: 0 };
 
-  // Mesmo filtro de getAtacadoClientes — só B2B (Tabela atacado), não mistura com o varejo do
-  // site que passa pela mesma loja física.
+  // Mesmo filtro de getAtacadoClientes — cliente já classificado como atacado (canalWhere("b2b")),
+  // não só a linha bater com "Tabela atacado" — não mistura com o varejo do site que passa pela
+  // mesma loja física.
+  const b2bWhere = await canalWhere("b2b");
   const [salesInPeriod, allTimeFirst] = await Promise.all([
     prisma.sale.findMany({
       where: {
         storeId: cdStore.id,
-        tabelaPreco: "Tabela atacado",
+        AND: [b2bWhere],
         saleDate: { gte: filters.from, lte: filters.to },
         clienteNome: { not: null },
       },
@@ -3209,7 +3271,7 @@ export async function getClienteRetencaoPorMes(filters: DashboardFilters) {
     }),
     prisma.sale.groupBy({
       by: ["clienteNome"],
-      where: { storeId: cdStore.id, tabelaPreco: "Tabela atacado", clienteNome: { not: null }, saleDate: { lte: filters.to } },
+      where: { storeId: cdStore.id, AND: [b2bWhere], clienteNome: { not: null }, saleDate: { lte: filters.to } },
       _min: { saleDate: true },
     }),
   ]);
@@ -3385,7 +3447,7 @@ export async function getDistribuicaoPedidos(filters: DashboardFilters, canal: C
   const where: Prisma.SaleWhereInput = {
     ...saleWhere(allTime),
     clienteNome: { not: null },
-    ...(canal !== "todos" ? { AND: [canalWhere(canal)] } : {}),
+    ...(canal !== "todos" ? { AND: [await canalWhere(canal)] } : {}),
   };
   const rows = await prisma.sale.findMany({ where, select: { clienteNome: true, storeId: true, dapicVendaId: true } });
 
