@@ -31,6 +31,12 @@ export type DashboardFilters = {
   // Restringe a grupos específicos — usado pra aplicar a regra de permissão do VENDEDOR
   // (só vê grupos prioritários) em qualquer dimensão, não só quando agrupando por grupo.
   grupoIn?: string[];
+  // Restringe a tamanhos específicos — filtro de Tamanho na aba Estoque x Vendas (pedido do
+  // Rodrigo em 2026-09-01, mesma UX do filtro de Grupo).
+  tamanhoIn?: string[];
+  // Restringe a coleções específicas — filtro de Coleção na aba Estoque x Vendas (mesmo pedido).
+  // Return não tem campo colecao no schema, então só entra em saleWhere/stockWhere.
+  colecaoIn?: string[];
 };
 
 function returnWhere(filters: DashboardFilters): Prisma.ReturnWhereInput {
@@ -41,6 +47,7 @@ function returnWhere(filters: DashboardFilters): Prisma.ReturnWhereInput {
     returnDate: { gte: filters.from, lte: filters.to },
     ...(filters.storeIds !== undefined ? { storeId: { in: filters.storeIds } } : {}),
     ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
+    ...(filters.tamanhoIn ? { tamanho: { in: filters.tamanhoIn } } : {}),
   };
 }
 
@@ -55,10 +62,14 @@ function saleWhere(filters: DashboardFilters): Prisma.SaleWhereInput {
       ? { OR: [{ tabelaPreco: { in: filters.tabelasPreco } }, { tabelaPreco: null }] }
       : {}),
     ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
+    ...(filters.tamanhoIn ? { tamanho: { in: filters.tamanhoIn } } : {}),
+    ...(filters.colecaoIn ? { colecao: { in: filters.colecaoIn } } : {}),
   };
 }
 
-function stockWhere(filters: Pick<DashboardFilters, "storeIds" | "grupoIn">): Prisma.StockSnapshotWhereInput {
+function stockWhere(
+  filters: Pick<DashboardFilters, "storeIds" | "grupoIn" | "tamanhoIn" | "colecaoIn">
+): Prisma.StockSnapshotWhereInput {
   return {
     // "(sem grupo)" é o que o sync grava quando o DAPIC não manda Grupo pra aquela linha —
     // na prática é sempre matéria-prima/insumo (etiqueta, zíper, tecido em rolo), nunca produto
@@ -66,6 +77,8 @@ function stockWhere(filters: Pick<DashboardFilters, "storeIds" | "grupoIn">): Pr
     grupo: { not: "(sem grupo)" },
     ...(filters.storeIds !== undefined ? { storeId: { in: filters.storeIds } } : {}),
     ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
+    ...(filters.tamanhoIn ? { tamanho: { in: filters.tamanhoIn } } : {}),
+    ...(filters.colecaoIn ? { colecao: { in: filters.colecaoIn } } : {}),
   };
 }
 
@@ -533,7 +546,7 @@ export async function getReturnsByDay(filters: DashboardFilters) {
 // vários syncs no histórico).
 // Total de estoque atual sem filtro de data — usado para o card "Estoque atual" na aba
 // Estoque × Vendas, onde a data filtra vendas mas não deve mudar o snapshot de estoque.
-export async function getTotalStock(filters: Pick<DashboardFilters, "storeIds" | "grupoIn">) {
+export async function getTotalStock(filters: Pick<DashboardFilters, "storeIds" | "grupoIn" | "tamanhoIn" | "colecaoIn">) {
   const result = await prisma.stockSnapshot.aggregate({
     where: stockWhere(filters),
     _sum: { quantidadeDisponivel: true },
@@ -599,7 +612,7 @@ export async function getStockVsSalesCombinado(filters: DashboardFilters): Promi
 
 // StockSnapshot tem 1 linha por storeId+cod (upsert no sync mantém sempre atualizada, ver
 // upsertStockSnapshots) — não tem mais duplicata histórica pra dedupar aqui.
-async function latestStockSnapshots(filters: Pick<DashboardFilters, "storeIds" | "grupoIn">) {
+async function latestStockSnapshots(filters: Pick<DashboardFilters, "storeIds" | "grupoIn" | "tamanhoIn" | "colecaoIn">) {
   return prisma.stockSnapshot.findMany({
     where: stockWhere(filters),
     select: {
@@ -2937,6 +2950,16 @@ export async function getDistinctColecoes() {
     where: { colecao: { not: null } },
   });
   return rows.map((r) => r.colecao as string).sort();
+}
+
+// Filtro de Tamanho na aba Estoque x Vendas — pedido do Rodrigo em 2026-09-01.
+export async function getDistinctTamanhos() {
+  const rows = await prisma.stockSnapshot.findMany({
+    distinct: ["tamanho"],
+    select: { tamanho: true },
+    where: { tamanho: { not: null } },
+  });
+  return sortTamanhos(rows.map((r) => r.tamanho as string));
 }
 
 export async function getDistinctGrupos() {
