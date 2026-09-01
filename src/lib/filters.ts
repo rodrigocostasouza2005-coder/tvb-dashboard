@@ -59,13 +59,16 @@ export function parseFilters(params: RawSearchParams, restrictions: FilterRestri
   // 10/08 com a Visão Geral. Constrói a data já com o offset de Brasília explícito no ISO string
   // em vez de deixar o JS assumir UTC. Brasil não observa horário de verão desde 2019, então o
   // offset fixo -03:00 é seguro (sem precisar de lib de timezone).
-  // Padrão: início do histórico disponível no DAPIC (primeiros dados são de set/2025).
-  const DEFAULT_FROM = "2025-09-01";
+  // Padrão: últimos 30 dias (não mais o histórico inteiro desde set/2025) — pedido do Rodrigo em
+  // 2026-09-01, abrir cada aba já direto no período recente em vez de sempre carregar tudo. Dá
+  // pra ampliar manualmente pelo filtro de data quando quiser ver mais.
+  const DEFAULT_DIAS_ATRAS = 30;
+  const defaultFromStr = todayBrasiliaStr(new Date(now.getTime() - DEFAULT_DIAS_ATRAS * 86400000));
 
   const from =
     typeof params.from === "string" && params.from
       ? brasiliaDayStart(params.from)
-      : brasiliaDayStart(DEFAULT_FROM);
+      : brasiliaDayStart(defaultFromStr);
   // "to" default (sem parâmetro) já é o instante atual — não precisa esticar até o fim do dia
   // porque não existe dado no futuro pra esconder. Só quando vem explícito do filtro é que
   // precisa virar "fim do dia em Brasília" pra incluir o dia inteiro escolhido.
