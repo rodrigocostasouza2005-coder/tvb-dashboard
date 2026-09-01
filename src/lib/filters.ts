@@ -9,7 +9,7 @@ export const brasiliaDayStart = (dateStr: string) => new Date(`${dateStr}T00:00:
 export const brasiliaDayEnd = (dateStr: string) => new Date(`${dateStr}T23:59:59.999-03:00`);
 export const todayBrasiliaStr = (d: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(d);
 
-function toArray(v: string | string[] | undefined): string[] {
+export function toArray(v: string | string[] | undefined): string[] {
   if (!v) return [];
   return Array.isArray(v) ? v : [v];
 }
