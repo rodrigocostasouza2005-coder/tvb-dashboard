@@ -3,7 +3,7 @@ import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import { randomUUID } from "crypto";
-import { createDapicClients, stripReferenciaPrefix, parseDapicDateTime, type DapicClient } from "@/lib/connectors/dapic";
+import { createDapicClients, stripReferenciaPrefix, parseDapicDateTime, waitMsFromDapicError, type DapicClient } from "@/lib/connectors/dapic";
 // (import type { Prisma } removido abaixo — já importado acima como valor+tipo)
 import { displayGroupFor, sellsProducts } from "@/lib/connectors/armazenadores";
 import { upsertStockSnapshots, type StockSnapshotRow } from "@/lib/connectors/upsert-stock";
@@ -513,7 +513,16 @@ export async function runSync(options: { silent?: boolean; retryBudgetMs?: numbe
 
       const remaining = retryBudgetMs - (Date.now() - start);
       if (remaining <= 5_000) break; // não sobra tempo útil pra outra tentativa completa
-      await new Promise((r) => setTimeout(r, Math.min(15_000, remaining)));
+
+      // Se o erro veio com "DataLiberacao" (rate limit do login do DAPIC), espera até lá em vez
+      // de um fixo de 15s — achado em 2026-08-31: 15s é bem menor que o cooldown real do DAPIC
+      // (até 60s), então a 1ª falha de rate limit virava uma cadeia de falhas repetidas em vez de
+      // se recuperar sozinha (ver mesmo comentário em connectors/dapic.ts). Se o tempo que falta
+      // no orçamento nem cobre a espera exigida, desiste agora — tentar de novo cedo demais só
+      // repete a mesma falha e queima o resto do orçamento à toa.
+      const dapicWaitMs = waitMsFromDapicError(lastMessage);
+      if (dapicWaitMs !== null && dapicWaitMs > remaining - 2_000) break;
+      await new Promise((r) => setTimeout(r, Math.min(dapicWaitMs ?? 15_000, remaining)));
     }
   } while (Date.now() - start < retryBudgetMs);
 

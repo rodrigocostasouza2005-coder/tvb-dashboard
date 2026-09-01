@@ -63,6 +63,16 @@ function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+// Extrai o "DataLiberacao" (quando o DAPIC devolve no corpo do erro 429) e calcula quanto falta
+// pra esperar até lá — usado tanto pelo retry interno do login() quanto pelo retry externo do
+// runSync() (sync-runner.ts), pra não ficar tentando de novo antes da hora que o próprio DAPIC
+// disse que ia liberar. Null quando a mensagem não tem esse dado (erro de outro tipo).
+export function waitMsFromDapicError(message: string): number | null {
+  const dataLiberacao = message.match(/"DataLiberacao":\s*"([^"]+)"/)?.[1];
+  if (!dataLiberacao) return null;
+  return Math.min(90_000, Math.max(1000, new Date(dataLiberacao).getTime() - Date.now() + 500));
+}
+
 type PaginatedResponse<T> = {
   Dados: T[];
   Pagina: number;
@@ -97,13 +107,10 @@ export class DapicClient {
 
     if (response.status === 429 && attempt <= 4) {
       const body = await response.text().catch(() => "");
-      const dataLiberacao = body.match(/"DataLiberacao":\s*"([^"]+)"/)?.[1];
       const retryAfterHeader = Number(response.headers.get("Retry-After"));
-      const waitMs = dataLiberacao
-        ? Math.max(1000, new Date(dataLiberacao).getTime() - Date.now() + 500)
-        : Number.isFinite(retryAfterHeader) && retryAfterHeader > 0
-          ? retryAfterHeader * 1000
-          : 15_000 * attempt;
+      const waitMs =
+        waitMsFromDapicError(body) ??
+        (Number.isFinite(retryAfterHeader) && retryAfterHeader > 0 ? retryAfterHeader * 1000 : 15_000 * attempt);
       await sleep(Math.min(waitMs, 90_000));
       return this.login(attempt + 1);
     }
