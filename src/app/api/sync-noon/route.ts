@@ -4,7 +4,7 @@ import { handleSyncGet, handleSyncPost } from "@/lib/sync-runner";
 // Chamado pelo Vercel Cron às 12h (horário de Brasília) — sync extra de segurança, silenciosa
 // (não manda "✅ atualizado" no bot) e tenta de novo se falhar, dentro do tempo que sobrar da
 // execução — pedido do Rodrigo em 2026-08-24. Erro (se esgotar as tentativas) avisa só ele.
-export const maxDuration = 800;
+export const maxDuration = 300;
 
 const SYNC_OPTIONS = { silent: true, retryBudgetMs: 240_000 };
 
