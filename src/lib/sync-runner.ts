@@ -81,7 +81,7 @@ async function syncEstoque(client: DapicClient, storeByDapicId: Map<number, stri
 // vem de /faturas (confirmado com Rodrigo em 2026-08-10). As linhas "Venda" que aparecem aqui
 // pra esse token são só o lado de troca (pareada com uma devolução), não a venda real — ignora.
 async function syncVendas(client: DapicClient, storeId: string | null, dias: number, priceCatalog: PriceCatalog) {
-  if (!storeId) return { vendas: 0, devolucoes: 0, brindes: 0 };
+  if (!storeId) return { vendas: 0, devolucoes: 0, brindes: 0, vendedorCorrigido: [] as VendedorCorrigido[] };
   const contaVendaDoPdv = client.label !== "cd-atacado";
   const hoje = new Date();
   const inicio = new Date(hoje);
@@ -158,12 +158,79 @@ async function syncVendas(client: DapicClient, storeId: string | null, dias: num
     });
   }
 
-  // skipDuplicates: idempotente em cima de (storeId, dapicVendaId, itemIndex) — o cron roda 2x/dia
-  // olhando sempre "últimos N dias", então as janelas se sobrepõem e sem isso duplicava tudo.
-  if (saleData.length) await prisma.sale.createMany({ data: saleData, skipDuplicates: true });
+  // Idempotente em cima de (storeId, dapicVendaId, itemIndex) — o cron roda 2x/dia olhando sempre
+  // "últimos N dias", então as janelas se sobrepõem. Devolução/Brinde continuam com createMany +
+  // skipDuplicates (não fazem sentido serem corrigidos depois). Venda usa upsert em massa que
+  // ATUALIZA o "vendedor" no conflito, em vez de só pular — achado em 2026-09-01 (Rodrigo): a loja
+  // às vezes bate a venda com um vendedor e corrige quem atendeu de verdade DEPOIS no DAPIC (ex:
+  // Ingrid registrou uma venda que era da Thye Mattos, cliente do Alexander); sem atualizar,
+  // ficávamos travados no vendedor errado pra sempre depois da 1ª sync daquela venda. Só o campo
+  // "vendedor" é reescrito — os outros ficam como vieram na 1ª sincronização (mesmo padrão de
+  // snapshot imutável do resto da Sale).
+  const vendedorCorrigido = await upsertSalesComVendedorAtualizavel(saleData);
   if (returnData.length) await prisma.return.createMany({ data: returnData, skipDuplicates: true });
   if (giftData.length) await prisma.gift.createMany({ data: giftData, skipDuplicates: true });
-  return { vendas: saleData.length, devolucoes: returnData.length, brindes: giftData.length };
+  return { vendas: saleData.length, devolucoes: returnData.length, brindes: giftData.length, vendedorCorrigido };
+}
+
+type VendedorCorrigido = {
+  clienteNome: string | null;
+  produto: string;
+  saleDate: Date;
+  vendedorAntigo: string | null;
+  vendedorNovo: string | null;
+};
+
+// Upsert em massa: insere venda nova normalmente, e no conflito (venda já sincronizada antes) só
+// atualiza o campo "vendedor" — ver comentário acima em syncVendas. Detecta e devolve os casos
+// onde o vendedor realmente mudou (não toda venda já existente, só as que tiveram correção de
+// verdade), pra entrar no resumo do Telegram.
+async function upsertSalesComVendedorAtualizavel(saleData: Prisma.SaleCreateManyInput[]): Promise<VendedorCorrigido[]> {
+  if (saleData.length === 0) return [];
+  const storeId = saleData[0].storeId as string;
+  const dapicVendaIds = [...new Set(saleData.map((s) => s.dapicVendaId as number))];
+
+  const existentes = await prisma.sale.findMany({
+    where: { storeId, dapicVendaId: { in: dapicVendaIds } },
+    select: { dapicVendaId: true, itemIndex: true, vendedor: true },
+  });
+  const vendedorAntigoPorChave = new Map(existentes.map((e) => [`${e.dapicVendaId}::${e.itemIndex}`, e.vendedor]));
+
+  const values = saleData.map(
+    (s) => Prisma.sql`(
+      ${randomUUID()}, ${s.storeId}, ${s.cod}, ${s.produto}, ${s.grupo}, ${s.cor ?? null}, ${s.tamanho ?? null},
+      ${s.colecao ?? null}, ${s.marca ?? null}, ${s.clienteNome ?? null}, ${s.vendedor ?? null}, ${s.tabelaPreco ?? null},
+      ${s.cidade ?? null}, ${s.estado ?? null}, ${s.quantidade}, ${s.valorTotalLiquido}, ${s.saleDate},
+      ${s.dapicVendaId}, ${s.itemIndex}
+    )`
+  );
+
+  await prisma.$executeRaw`
+    INSERT INTO "Sale" (
+      "id", "storeId", "cod", "produto", "grupo", "cor", "tamanho",
+      "colecao", "marca", "clienteNome", "vendedor", "tabelaPreco",
+      "cidade", "estado", "quantidade", "valorTotalLiquido", "saleDate",
+      "dapicVendaId", "itemIndex"
+    )
+    VALUES ${Prisma.join(values)}
+    ON CONFLICT ("storeId", "dapicVendaId", "itemIndex") DO UPDATE SET
+      "vendedor" = EXCLUDED."vendedor"
+  `;
+
+  const corrigidos: VendedorCorrigido[] = [];
+  for (const s of saleData) {
+    const antigo = vendedorAntigoPorChave.get(`${s.dapicVendaId}::${s.itemIndex}`);
+    if (antigo !== undefined && antigo !== null && antigo !== s.vendedor) {
+      corrigidos.push({
+        clienteNome: s.clienteNome as string | null,
+        produto: s.produto as string,
+        saleDate: s.saleDate as Date,
+        vendedorAntigo: antigo,
+        vendedorNovo: s.vendedor as string | null,
+      });
+    }
+  }
+  return corrigidos;
 }
 
 // Venda de verdade do canal Site+Atacado (só cd-atacado tem acesso a /faturas). Mesma chave de
@@ -254,18 +321,19 @@ async function syncClientes(client: DapicClient) {
   for (let i = 0; i < clientes.length; i += BATCH) {
     const batch = clientes.slice(i, i + BATCH);
     const values = batch.map(
-      (c) => Prisma.sql`(${randomUUID()}, ${c.Id}, ${c.NomeRazaoSocial}, ${c.Telefone ?? null}, ${c.Celular ?? null}, ${c.Email ?? null}, ${c.DataAniversario ? new Date(c.DataAniversario) : null}, ${c.CpfCnpj ?? null})`
+      (c) => Prisma.sql`(${randomUUID()}, ${c.Id}, ${c.NomeRazaoSocial}, ${c.Telefone ?? null}, ${c.Celular ?? null}, ${c.Email ?? null}, ${c.DataAniversario ? new Date(c.DataAniversario) : null}, ${c.CpfCnpj ?? null}, ${c.Funcionario ?? null})`
     );
     await prisma.$executeRaw`
-      INSERT INTO "ClienteCadastro" ("id", "dapicId", "nome", "telefone", "celular", "email", "dataNascimento", "cpfCnpj")
+      INSERT INTO "ClienteCadastro" ("id", "dapicId", "nome", "telefone", "celular", "email", "dataNascimento", "cpfCnpj", "vendedorResponsavel")
       VALUES ${Prisma.join(values)}
       ON CONFLICT ("dapicId") DO UPDATE SET
-        "nome"           = EXCLUDED."nome",
-        "telefone"       = EXCLUDED."telefone",
-        "celular"        = EXCLUDED."celular",
-        "email"          = EXCLUDED."email",
-        "dataNascimento" = EXCLUDED."dataNascimento",
-        "cpfCnpj"        = EXCLUDED."cpfCnpj"
+        "nome"                = EXCLUDED."nome",
+        "telefone"            = EXCLUDED."telefone",
+        "celular"             = EXCLUDED."celular",
+        "email"               = EXCLUDED."email",
+        "dataNascimento"      = EXCLUDED."dataNascimento",
+        "cpfCnpj"             = EXCLUDED."cpfCnpj",
+        "vendedorResponsavel" = EXCLUDED."vendedorResponsavel"
     `;
     count += batch.length;
   }
@@ -420,6 +488,7 @@ async function doSync() {
       vendas: vendas.vendas + faturas.vendas,
       devolucoes: vendas.devolucoes,
       brindes: vendas.brindes + faturas.brindes,
+      vendedorCorrigido: vendas.vendedorCorrigido,
     };
   }
 
@@ -469,6 +538,7 @@ async function doSync() {
   const totalVendas = results.reduce((a, r) => a + r.vendas, 0);
   const totalDevolucoes = results.reduce((a, r) => a + r.devolucoes, 0);
   const totalBrindes = results.reduce((a, r) => a + r.brindes, 0);
+  const vendedorCorrigido = results.flatMap((r) => r.vendedorCorrigido);
 
   await prisma.syncLog.create({
     data: { source: "STOCK", status: "SUCCESS", recordsSynced: totalEstoque, finishedAt: new Date() },
@@ -493,6 +563,7 @@ async function doSync() {
     devolucoes: totalDevolucoes,
     ordensProducao: totalOrdensProducao,
     brindes: totalBrindes,
+    vendedorCorrigido,
     desde,
     ate,
   };
@@ -519,6 +590,23 @@ export async function runSync(options: { silent?: boolean; retryBudgetMs?: numbe
       if (!silent) {
         const resumo = await buildResumoMessage(result.desde, result.ate).catch(() => "");
         await sendTelegramMessage(`✅ Dashboard TVB atualizado (${agora})\n${resumo}`);
+      }
+      // Auditoria de vendedor corrigido — pedido do Rodrigo em 2026-09-01: "o ideal é sempre fazer
+      // uma auditoria nos dados". Manda MESMO em sync silenciosa (meio-dia/meia-noite), só pro
+      // admin — não é o resumo de rotina, é um alerta de dado que mudou (a loja corrigiu o
+      // vendedor de uma venda já sincronizada) e merece atenção mesmo fora do horário de sync
+      // "com aviso".
+      if (result.vendedorCorrigido.length > 0) {
+        const linhas = result.vendedorCorrigido
+          .map((c) => {
+            const data = c.saleDate.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" });
+            return `• ${c.clienteNome ?? "—"} — ${c.produto} (${data}): ${c.vendedorAntigo ?? "—"} → ${c.vendedorNovo ?? "—"}`;
+          })
+          .join("\n");
+        await sendTelegramMessage(
+          `🔄 Vendedor corrigido em ${result.vendedorCorrigido.length} venda(s) já sincronizada(s):\n${linhas}`,
+          { adminOnly: true }
+        );
       }
       return NextResponse.json({ ok: true, ...result, attempt });
     } catch (error) {

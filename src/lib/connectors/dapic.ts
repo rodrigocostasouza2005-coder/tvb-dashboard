@@ -463,6 +463,10 @@ export type DapicCliente = {
   // CPF (pessoa física) ou CNPJ (pessoa jurídica), já formatado com pontuação. Descoberto em
   // 2026-08-28 — pedido do Rodrigo pra aparecer na Ficha do Cliente.
   CpfCnpj: string | null;
+  // Vendedor/funcionário responsável pelo cliente no cadastro — descoberto em 2026-09-01,
+  // separado do campo Vendedor de cada venda (vendaspdv). Usado pra detectar quando a loja
+  // corrige o responsável DEPOIS que uma venda já foi sincronizada com outro vendedor.
+  Funcionario: string | null;
 };
 
 // Campos reais de /faturas, confirmados em 2026-08-10 com o token cd-atacado. Ao contrário de

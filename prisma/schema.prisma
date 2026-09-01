@@ -300,6 +300,14 @@ model ClienteCadastro {
   primeiraCompraExterna DateTime?
   fonteExterna          String?
 
+  // Funcionário/vendedor "dono" do cliente no cadastro do DAPIC (campo Funcionario em /clientes)
+  // — diferente do vendedor gravado em cada Sale (quem bateu aquela venda específica). Pedido do
+  // Rodrigo em 2026-09-01: quando a loja corrige o vendedor responsável de um cliente DEPOIS de
+  // uma venda já ter sido sincronizada com outro vendedor (ex: quem atendeu de fato o cliente foi
+  // outra pessoa), a Sale antiga não é reescrita — comparar contra esse campo (sempre atualizado a
+  // cada sync) é como a divergência é detectada em getVendedorDivergente().
+  vendedorResponsavel String?
+
   @@index([nome])
 }
 
