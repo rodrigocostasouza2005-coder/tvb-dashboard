@@ -18,6 +18,8 @@
 // Pendência: ainda não decidido se pedidosvendas ou vendaspdv é a fonte certa de vendas de loja
 // física (pedidosvendas trouxe volume muito baixo no teste inicial).
 
+import { prisma } from "@/lib/prisma";
+
 const BASE_URL = process.env.DAPIC_BASE_URL ?? "https://api.dapic.app/v1";
 const AUTH_URL = process.env.DAPIC_AUTH_URL ?? "https://api.dapic.app/autenticacao/v1/login";
 const EMPRESA = process.env.DAPIC_EMPRESA;
@@ -59,7 +61,7 @@ type LoginResponse = {
   token_type: string;
 };
 
-function sleep(ms: number) {
+export function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
@@ -82,6 +84,10 @@ type PaginatedResponse<T> = {
 
 export class DapicClient {
   private cachedToken: { accessToken: string; expiresAt: number } | null = null;
+  // Dedup de chamadas concorrentes: dentro do mesmo doSync(), syncClientes e syncParcelas usam o
+  // mesmo client (cd-atacado) em paralelo — sem isso, as duas viam cache vazio ao mesmo tempo e
+  // disparavam 2 logins reais pro mesmo token à toa, gastando budget do rate limit sem necessidade.
+  private loginPromise: Promise<string> | null = null;
 
   constructor(private tokenIntegracao: string, public label: string = "default") {}
 
@@ -126,6 +132,17 @@ export class DapicClient {
       accessToken: data.access_token,
       expiresAt: Date.now() + expiresInMs - 60_000,
     };
+    // Persiste no banco — cada sync roda numa função serverless nova, então o cache em memória
+    // (this.cachedToken) não sobrevive de uma invocação pra outra. Sem isso, toda sincronização
+    // (5x/dia + Force Sync manual + auto-heal) logava de novo pros ~5 tokens, batendo perto do
+    // rate limit do DAPIC toda vez. Não fatal se falhar salvar — só perde o cache dessa vez.
+    await prisma.dapicTokenCache
+      .upsert({
+        where: { label: this.label },
+        create: { label: this.label, accessToken: this.cachedToken.accessToken, expiresAt: new Date(this.cachedToken.expiresAt) },
+        update: { accessToken: this.cachedToken.accessToken, expiresAt: new Date(this.cachedToken.expiresAt) },
+      })
+      .catch((e) => console.error(`[dapic] falhou ao salvar cache do token (${this.label}):`, e?.message ?? e));
     return this.cachedToken.accessToken;
   }
 
@@ -133,7 +150,21 @@ export class DapicClient {
     if (this.cachedToken && this.cachedToken.expiresAt > Date.now()) {
       return this.cachedToken.accessToken;
     }
-    return this.login();
+    if (this.loginPromise) return this.loginPromise;
+
+    this.loginPromise = (async () => {
+      const dbCached = await prisma.dapicTokenCache.findUnique({ where: { label: this.label } }).catch(() => null);
+      if (dbCached && dbCached.expiresAt.getTime() > Date.now()) {
+        this.cachedToken = { accessToken: dbCached.accessToken, expiresAt: dbCached.expiresAt.getTime() };
+        return dbCached.accessToken;
+      }
+      return this.login();
+    })();
+    try {
+      return await this.loginPromise;
+    } finally {
+      this.loginPromise = null;
+    }
   }
 
   private async fetch<T>(

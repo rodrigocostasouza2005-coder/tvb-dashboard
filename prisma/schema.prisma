@@ -266,6 +266,18 @@ model PriceCatalogCache {
   updatedAt   DateTime @updatedAt
 }
 
+// Cache do access_token do login do DAPIC (válido 24h), persistido entre invocações — cada
+// sync roda como uma função serverless nova (Vercel), então o cache em memória do DapicClient
+// não sobrevive de uma chamada pra outra. Sem isso, toda sincronização (5x/dia: 3 principais +
+// 2 de segurança, fora Force Sync manual e o auto-heal) fazia login de novo pros ~5 tokens,
+// batendo perto do rate limit do DAPIC (5 requisições/60s) toda vez. Com o cache, login de
+// verdade só acontece 1x a cada ~24h por token.
+model DapicTokenCache {
+  label       String   @id
+  accessToken String
+  expiresAt   DateTime
+}
+
 model ClienteCadastro {
   id             String    @id @default(cuid())
   dapicId        Int       @unique

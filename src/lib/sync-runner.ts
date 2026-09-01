@@ -3,7 +3,7 @@ import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import { randomUUID } from "crypto";
-import { createDapicClients, stripReferenciaPrefix, parseDapicDateTime, waitMsFromDapicError, type DapicClient } from "@/lib/connectors/dapic";
+import { createDapicClients, stripReferenciaPrefix, parseDapicDateTime, waitMsFromDapicError, sleep, type DapicClient } from "@/lib/connectors/dapic";
 // (import type { Prisma } removido abaixo — já importado acima como valor+tipo)
 import { displayGroupFor, sellsProducts } from "@/lib/connectors/armazenadores";
 import { upsertStockSnapshots, type StockSnapshotRow } from "@/lib/connectors/upsert-stock";
@@ -433,19 +433,36 @@ async function doSync() {
   const cdAtacadoClient = clients.find((c) => c.label === "cd-atacado");
   const outrasLojas = clients.filter((c) => c.label !== "cd-atacado");
 
+  // Escalona o 1º request de cada token (2s de intervalo) — só pesa quando o cache de token
+  // (DapicTokenCache) está frio pros 5 de uma vez (1ª sync depois do deploy, ou depois de ~24h
+  // quando todos os tokens expiram meio juntos), mas garante que os até 5 logins nunca disparem
+  // no mesmo segundo, sobrando folga de verdade dentro do rate limit de 5/60s do DAPIC mesmo se
+  // outra coisa (self-heal, Force Sync manual) acontecer no mesmo instante.
+  const STAGGER_MS = 2_000;
+
   const [results, totalOrdensProducao, totalClientes] = await Promise.all([
     (async () => {
-      const outrosResultados = await Promise.all(outrasLojas.map(syncOneClient));
+      const outrosResultados = await Promise.all(
+        outrasLojas.map((client, i) => sleep(i * STAGGER_MS).then(() => syncOneClient(client)))
+      );
       const cdResultado = cdAtacadoClient ? [await syncOneClient(cdAtacadoClient)] : [];
       return [...outrosResultados, ...cdResultado];
     })(),
     // Não fatal: se o token da matriz ainda não estiver configurado (ex: só em dev, não em
     // produção), syncOrdensProducao devolve 0 sem quebrar o resto da sync.
-    syncOrdensProducao(matrizClient).catch((e) => { console.error("[syncOrdensProducao] falhou:", e?.message ?? e); return 0; }),
+    sleep(outrasLojas.length * STAGGER_MS)
+      .then(() => syncOrdensProducao(matrizClient))
+      .catch((e) => { console.error("[syncOrdensProducao] falhou:", e?.message ?? e); return 0; }),
     // Clientes — 1 token basta, não é fatal se falhar
-    (cdAtacadoClient ? syncClientes(cdAtacadoClient) : Promise.resolve(0)).catch(() => 0),
-    // Parcelas em aberto (inadimplência) — não é fatal se falhar
-    (cdAtacadoClient ? syncParcelas(cdAtacadoClient) : Promise.resolve(0)).catch((e) => { console.error("[syncParcelas] falhou:", e?.message ?? e); return 0; }),
+    sleep((outrasLojas.length + 1) * STAGGER_MS)
+      .then(() => (cdAtacadoClient ? syncClientes(cdAtacadoClient) : Promise.resolve(0)))
+      .catch(() => 0),
+    // Parcelas em aberto (inadimplência) — não é fatal se falhar. Mesmo client que syncClientes
+    // (cd-atacado), então não soma outro slot no escalonamento — o dedup de login concorrente
+    // (loginPromise em DapicClient) já evita 2 logins pro mesmo token aqui.
+    sleep((outrasLojas.length + 1) * STAGGER_MS)
+      .then(() => (cdAtacadoClient ? syncParcelas(cdAtacadoClient) : Promise.resolve(0)))
+      .catch((e) => { console.error("[syncParcelas] falhou:", e?.message ?? e); return 0; }),
   ]);
 
   const totalEstoque = results.reduce((a, r) => a + r.estoque, 0);
