@@ -214,9 +214,13 @@ export default async function PesquisaPage({
         </div>
       )}
 
+      {/* Sem busca (catálogo inteiro) limita a 100 pra não travar a tela à toa — com busca
+          (nome ou tamanho) mostra TODOS os resultados, mesmo que passe de 100 (achado em
+          2026-09-02: buscar um tamanho comum tipo "30" bate em 100+ produtos, e cortar
+          escondia parte do resultado real). */}
       <PesquisaTable
         produtoHrefBase={produtoHrefBase}
-        rows={rows.slice(0, 100).map((r) => ({
+        rows={(query.trim() ? rows : rows.slice(0, 100)).map((r) => ({
           key: r.key,
           unitsSold: r.unitsSold,
           currentStock: r.currentStock,
