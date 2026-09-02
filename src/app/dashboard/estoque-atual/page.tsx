@@ -131,7 +131,10 @@ export default async function EstoqueAtualPage({
               </tr>
             </thead>
             <tbody>
-              {rows.slice(0, 100).map((r) => (
+              {/* Sem busca (323 produtos no total) corta em 100 pra não travar a tela à toa, mas
+                  avisa quantos ficaram de fora — achado em 2026-09-02, mesmo bug que escondia
+                  resultado sem avisar na Pesquisa. Com busca ativa (q), mostra tudo que bateu. */}
+              {(q ? rows : rows.slice(0, 100)).map((r) => (
                 <tr key={r.key} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
                   <td className="px-4 py-2 font-medium">{r.key}</td>
                   <td className="px-4 py-2 tabular-nums">{r.quantidade.toLocaleString("pt-BR")}</td>
@@ -147,6 +150,11 @@ export default async function EstoqueAtualPage({
               )}
             </tbody>
           </table>
+          {!q && rows.length > 100 && (
+            <p className="border-t border-[var(--gridline)] px-4 py-2 text-xs text-[var(--text-muted)]">
+              Mostrando 100 de {rows.length.toLocaleString("pt-BR")} — use a busca acima pra ver um produto específico.
+            </p>
+          )}
         </div>
       )}
     </div>
