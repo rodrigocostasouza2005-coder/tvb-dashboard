@@ -86,6 +86,17 @@ model StockMinimumRule {
   @@unique([storeId, grupo, tamanho, colecao])
 }
 
+// Mapa de Compras — meta de cobertura (quantos meses de venda projetada você quer sempre ter em
+// estoque) por grupo de produto. Configurável na própria tela, não por loja (compra é decisão da
+// empresa toda, não por ponto de venda) — pedido do Rodrigo em 2026-09-02, baseado numa planilha
+// de planejamento de compra que ele já usa.
+model CoberturaMeta {
+  id              String   @id @default(cuid())
+  grupo           String   @unique
+  mesesCobertura  Float
+  updatedAt       DateTime @updatedAt
+}
+
 // Registros ficam denormalizados (grupo/cor/tamanho/coleção direto na linha) porque é assim
 // que o DAPIC/Power BI já exportam — evita um modelo de produto separado que a fonte não tem.
 model Sale {

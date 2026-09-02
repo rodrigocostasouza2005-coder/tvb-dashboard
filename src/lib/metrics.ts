@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
+import { todayBrasiliaStr, brasiliaDayStart } from "@/lib/filters";
 
 export type Dimension = "grupo" | "produto" | "tamanho" | "colecao";
 
@@ -2998,11 +2999,12 @@ export type SugestaoRetirada = {
   tamanhosComEstoque: { tamanho: string; quantidade: number }[];
 };
 
-// Limiar de "grade quebrada" — pedido do Rodrigo em 2026-09-02: 60% ou mais dos tamanhos de um
-// produto zerados NUMA LOJA sugere retirar o que sobrou de lá (grade incompleta vende mal e
-// ocupa espaço). Deliberadamente só olha a grade da PRÓPRIA loja, sem comparar com outras lojas
-// nem com o CD ("não tem que comparar loja com loja ou loja com CD" — instrução direta dele).
-const LIMIAR_GRADE_QUEBRADA = 0.6;
+// Limiar de "grade quebrada" — pedido do Rodrigo em 2026-09-02: inicialmente 60%, baixado pra
+// 40% (mesmo dia) pra pegar mais cedo. 40% ou mais dos tamanhos de um produto zerados NUMA LOJA
+// sugere retirar o que sobrou de lá (grade incompleta vende mal e ocupa espaço). Deliberadamente
+// só olha a grade da PRÓPRIA loja, sem comparar com outras lojas nem com o CD ("não tem que
+// comparar loja com loja ou loja com CD" — instrução direta dele).
+const LIMIAR_GRADE_QUEBRADA = 0.4;
 
 export async function getSugestoesRetiradaEstoque(
   filters: Pick<DashboardFilters, "storeIds" | "grupoIn">
@@ -3067,6 +3069,120 @@ export async function getSugestoesRetiradaEstoque(
   }
 
   return sugestoes.sort((a, b) => b.pctQuebrada - a.pctQuebrada || a.estoqueRestante - b.estoqueRestante);
+}
+
+export type MapaCompraItem = {
+  grupo: string;
+  mediaMensal: number;
+  tendenciaPct: number;
+  projecaoMensal: number;
+  estoqueAtual: number;
+  coberturaMeses: number;
+  estoqueIdeal: number;
+  faltaComprar: number;
+};
+
+// Cobertura padrão quando o grupo ainda não tem meta configurada (CoberturaMeta) — 2 meses é um
+// ponto de partida neutro, ajustável na própria tela.
+const COBERTURA_PADRAO_MESES = 2;
+
+// Mapa de Compras — pedido do Rodrigo em 2026-09-02, baseado numa planilha de planejamento de
+// compra que ele já usa (Cobertura × Venda projetada = Estoque Ideal, gap = Falta comprar).
+// Projeção automática (não manual, ele escolheu): média líquida dos últimos 3 meses COMPLETOS
+// (exclui o mês corrente, que está parcial), ajustada por uma tendência simples (quanto o último
+// mês desviou da média dos 3) — capada entre -50%/+100% pra não deixar 1 mês atípico distorcer
+// a projeção. Cobertura é configurável por grupo (CoberturaMeta); sem meta configurada, usa 2
+// meses como padrão.
+export async function getMapaDeCompras(filters: Pick<DashboardFilters, "grupoIn">): Promise<MapaCompraItem[]> {
+  const hojeBrasiliaStr = todayBrasiliaStr(new Date());
+  const inicioMesAtual = brasiliaDayStart(`${hojeBrasiliaStr.slice(0, 7)}-01`);
+  const inicioJanela = new Date(inicioMesAtual);
+  inicioJanela.setUTCMonth(inicioJanela.getUTCMonth() - 3);
+
+  const [vendasRows, devolucaoRows, estoqueRows, metasRows] = await Promise.all([
+    prisma.$queryRaw<{ grupo: string; mes: Date; unidades: bigint }[]>`
+      SELECT "grupo", DATE_TRUNC('month', ("saleDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo') AS mes, SUM("quantidade") AS unidades
+      FROM "Sale"
+      WHERE "saleDate" >= ${inicioJanela} AND "saleDate" < ${inicioMesAtual} AND "grupo" != '(sem grupo)'
+        ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
+      GROUP BY "grupo", mes
+    `,
+    prisma.$queryRaw<{ grupo: string; mes: Date; unidades: bigint }[]>`
+      SELECT "grupo", DATE_TRUNC('month', ("returnDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo') AS mes, SUM("quantidade") AS unidades
+      FROM "Return"
+      WHERE "returnDate" >= ${inicioJanela} AND "returnDate" < ${inicioMesAtual} AND "grupo" != '(sem grupo)'
+        ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
+      GROUP BY "grupo", mes
+    `,
+    prisma.stockSnapshot.groupBy({
+      by: ["grupo"],
+      where: { grupo: { not: "(sem grupo)" }, ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}) },
+      _sum: { quantidadeDisponivel: true },
+    }),
+    prisma.coberturaMeta.findMany(),
+  ]);
+
+  const porGrupoMes = new Map<string, Map<string, number>>();
+  for (const r of vendasRows) {
+    const mesStr = new Date(r.mes).toISOString().slice(0, 7);
+    const g = porGrupoMes.get(r.grupo) ?? new Map<string, number>();
+    g.set(mesStr, (g.get(mesStr) ?? 0) + Number(r.unidades));
+    porGrupoMes.set(r.grupo, g);
+  }
+  for (const r of devolucaoRows) {
+    const mesStr = new Date(r.mes).toISOString().slice(0, 7);
+    const g = porGrupoMes.get(r.grupo);
+    if (!g) continue;
+    g.set(mesStr, (g.get(mesStr) ?? 0) - Number(r.unidades));
+  }
+
+  // Os 3 últimos meses completos, em ordem cronológica — mesmos pra todo grupo.
+  const meses: string[] = [];
+  const cursor = new Date(inicioMesAtual);
+  for (let i = 0; i < 3; i++) {
+    cursor.setUTCMonth(cursor.getUTCMonth() - 1);
+    meses.unshift(cursor.toISOString().slice(0, 7));
+  }
+
+  const estoqueByGrupo = new Map(estoqueRows.map((r) => [r.grupo, r._sum.quantidadeDisponivel ?? 0]));
+  const metaByGrupo = new Map(metasRows.map((m) => [m.grupo, m.mesesCobertura]));
+  const grupos = new Set([...porGrupoMes.keys(), ...estoqueByGrupo.keys()]);
+
+  const itens: MapaCompraItem[] = [];
+  for (const grupo of grupos) {
+    const mesesMap = porGrupoMes.get(grupo) ?? new Map<string, number>();
+    const valores = meses.map((m) => Math.max(0, mesesMap.get(m) ?? 0));
+    const mediaMensal = valores.reduce((s, v) => s + v, 0) / valores.length;
+    const ultimoMes = valores[valores.length - 1];
+    const tendenciaPct = mediaMensal > 0 ? Math.max(-0.5, Math.min(1, (ultimoMes - mediaMensal) / mediaMensal)) : 0;
+    const projecaoMensal = Math.max(0, mediaMensal * (1 + tendenciaPct));
+
+    const estoqueAtual = estoqueByGrupo.get(grupo) ?? 0;
+    const coberturaMeses = metaByGrupo.get(grupo) ?? COBERTURA_PADRAO_MESES;
+    const estoqueIdeal = projecaoMensal * coberturaMeses;
+    const faltaComprar = Math.max(0, Math.round(estoqueIdeal - estoqueAtual));
+
+    itens.push({
+      grupo,
+      mediaMensal: Math.round(mediaMensal),
+      tendenciaPct: tendenciaPct * 100,
+      projecaoMensal: Math.round(projecaoMensal),
+      estoqueAtual,
+      coberturaMeses,
+      estoqueIdeal: Math.round(estoqueIdeal),
+      faltaComprar,
+    });
+  }
+
+  return itens.sort((a, b) => b.faltaComprar - a.faltaComprar);
+}
+
+export async function setCoberturaMeta(grupo: string, mesesCobertura: number) {
+  await prisma.coberturaMeta.upsert({
+    where: { grupo },
+    create: { grupo, mesesCobertura },
+    update: { mesesCobertura },
+  });
 }
 
 export async function getDistinctGrupos() {

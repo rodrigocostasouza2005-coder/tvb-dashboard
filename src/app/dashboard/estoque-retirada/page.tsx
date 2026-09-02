@@ -113,7 +113,7 @@ export default async function EstoqueRetiradaPage({
       </CollapsibleFilters>
 
       <p className="mb-4 text-sm text-[var(--text-secondary)]">
-        Produtos com 60% ou mais dos tamanhos zerados na loja (grade quebrada) — sobrou pouca
+        Produtos com 40% ou mais dos tamanhos zerados na loja (grade quebrada) — sobrou pouca
         coisa espalhada, dificulta vender e ocupa espaço. Sugestão de retirar o que sobrou dessa
         loja. Compara só o estoque da própria loja, não com outras lojas nem com o CD.
         {sugestoes.length > 0 && (
