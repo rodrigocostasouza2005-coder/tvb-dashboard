@@ -17,11 +17,20 @@ function agruparPorLoja(itens: SugestaoRetirada[]): [string, SugestaoRetirada[]]
 }
 
 function TabelaRetirada({ loja, itens }: { loja: string; itens: SugestaoRetirada[] }) {
+  const storeId = itens[0].storeId;
   return (
     <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-      <h3 className="border-b border-[var(--gridline)] px-4 py-2.5 text-sm font-medium text-[var(--text-primary)]">
-        {loja} <span className="font-normal text-[var(--text-muted)]">({itens.length})</span>
-      </h3>
+      <div className="flex items-center justify-between gap-2 border-b border-[var(--gridline)] px-4 py-2.5">
+        <h3 className="text-sm font-medium text-[var(--text-primary)]">
+          {loja} <span className="font-normal text-[var(--text-muted)]">({itens.length})</span>
+        </h3>
+        <a
+          href={`/api/export/estoque-retirada?store=${storeId}`}
+          className="rounded-md border border-[var(--border)] px-2.5 py-1 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--page-plane)]"
+        >
+          Exportar Excel
+        </a>
+      </div>
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
@@ -79,13 +88,16 @@ export default async function EstoqueRetiradaPage({
     grupoIn,
   };
 
-  const [stores, sugestoes] = await Promise.all([
+  const [storesTodas, sugestoes] = await Promise.all([
     getStores(allowedStores),
     getSugestoesRetiradaEstoque({ storeIds: filters.storeIds, grupoIn: filters.grupoIn }),
   ]);
 
   const porLoja = agruparPorLoja(sugestoes);
   const totalUnidades = sugestoes.reduce((s, r) => s + r.estoqueRestante, 0);
+  // "Retirar da loja" é sobre espaço físico de prateleira — não faz sentido pro CD/Site e
+  // Atacado, então nem oferece ele no filtro de loja dessa aba (2026-09-02).
+  const stores = storesTodas.filter((s) => s.name !== "TVB Site e Atacado");
 
   return (
     <div>
@@ -101,7 +113,7 @@ export default async function EstoqueRetiradaPage({
       </CollapsibleFilters>
 
       <p className="mb-4 text-sm text-[var(--text-secondary)]">
-        Produtos com mais de 60% dos tamanhos zerados na loja (grade quebrada) — sobrou pouca
+        Produtos com 60% ou mais dos tamanhos zerados na loja (grade quebrada) — sobrou pouca
         coisa espalhada, dificulta vender e ocupa espaço. Sugestão de retirar o que sobrou dessa
         loja. Compara só o estoque da própria loja, não com outras lojas nem com o CD.
         {sugestoes.length > 0 && (

@@ -2974,7 +2974,7 @@ export type SugestaoRetirada = {
   tamanhosComEstoque: { tamanho: string; quantidade: number }[];
 };
 
-// Limiar de "grade quebrada" — pedido do Rodrigo em 2026-09-02: mais de 60% dos tamanhos de um
+// Limiar de "grade quebrada" — pedido do Rodrigo em 2026-09-02: 60% ou mais dos tamanhos de um
 // produto zerados NUMA LOJA sugere retirar o que sobrou de lá (grade incompleta vende mal e
 // ocupa espaço). Deliberadamente só olha a grade da PRÓPRIA loja, sem comparar com outras lojas
 // nem com o CD ("não tem que comparar loja com loja ou loja com CD" — instrução direta dele).
@@ -2983,8 +2983,14 @@ const LIMIAR_GRADE_QUEBRADA = 0.6;
 export async function getSugestoesRetiradaEstoque(
   filters: Pick<DashboardFilters, "storeIds" | "grupoIn">
 ): Promise<SugestaoRetirada[]> {
+  // Fora o CD/Site e Atacado — pedido do Rodrigo em 2026-09-02: "retirar da loja" é sobre
+  // espaço físico de prateleira, não faz sentido pro estoque do site/depósito central.
   const sellingStores = await prisma.store.findMany({
-    where: { sellsProducts: true, ...(filters.storeIds !== undefined ? { id: { in: filters.storeIds } } : {}) },
+    where: {
+      sellsProducts: true,
+      code: { not: "CD" },
+      ...(filters.storeIds !== undefined ? { id: { in: filters.storeIds } } : {}),
+    },
   });
   const storeIds = sellingStores.map((s) => s.id);
   const storeNameById = new Map(sellingStores.map((s) => [s.id, s.displayGroup ?? s.name]));
@@ -3015,7 +3021,8 @@ export async function getSugestoesRetiradaEstoque(
     if (tamanhos.length < 2) continue;
     const zerados = tamanhos.filter((t) => t.quantidade === 0).length;
     const pct = zerados / tamanhos.length;
-    if (pct <= LIMIAR_GRADE_QUEBRADA) continue;
+    // 60% ou mais zerado já entra (inclusive, não só acima de 60% — confirmado com o Rodrigo).
+    if (pct < LIMIAR_GRADE_QUEBRADA) continue;
     const tamanhosComEstoque = tamanhos.filter((t) => t.quantidade > 0);
     const estoqueRestante = tamanhosComEstoque.reduce((s, t) => s + t.quantidade, 0);
     // Sem estoque nenhum sobrando não tem o que retirar — já é "sem estoque", outro problema.
