@@ -3071,110 +3071,294 @@ export async function getSugestoesRetiradaEstoque(
   return sugestoes.sort((a, b) => b.pctQuebrada - a.pctQuebrada || a.estoqueRestante - b.estoqueRestante);
 }
 
-export type MapaCompraItem = {
-  grupo: string;
-  mediaMensal: number;
-  tendenciaPct: number;
-  projecaoMensal: number;
-  estoqueAtual: number;
-  coberturaMeses: number;
+export type MesMapaCompras = {
+  mes: string; // "2025-09"
+  tipo: "realizado" | "projetado";
+  estoqueInicial: number;
+  recebimento: number;
+  vendas: number;
+  bonificacoes: number;
+  estoqueFinal: number;
   estoqueIdeal: number;
   faltaComprar: number;
+};
+
+export type MapaComprasProduto = {
+  produto: string;
+  meses: MesMapaCompras[];
+};
+
+export type MapaComprasGrupo = {
+  grupo: string;
+  coberturaMeses: number;
+  meses: MesMapaCompras[];
+  produtos: MapaComprasProduto[];
 };
 
 // Cobertura padrão quando o grupo ainda não tem meta configurada (CoberturaMeta) — 2 meses é um
 // ponto de partida neutro, ajustável na própria tela.
 const COBERTURA_PADRAO_MESES = 2;
 
-// Mapa de Compras — pedido do Rodrigo em 2026-09-02, baseado numa planilha de planejamento de
-// compra que ele já usa (Cobertura × Venda projetada = Estoque Ideal, gap = Falta comprar).
-// Projeção automática (não manual, ele escolheu): média líquida dos últimos 3 meses COMPLETOS
-// (exclui o mês corrente, que está parcial), ajustada por uma tendência simples (quanto o último
-// mês desviou da média dos 3) — capada entre -50%/+100% pra não deixar 1 mês atípico distorcer
-// a projeção. Cobertura é configurável por grupo (CoberturaMeta); sem meta configurada, usa 2
-// meses como padrão.
-export async function getMapaDeCompras(filters: Pick<DashboardFilters, "grupoIn">): Promise<MapaCompraItem[]> {
-  const hojeBrasiliaStr = todayBrasiliaStr(new Date());
-  const inicioMesAtual = brasiliaDayStart(`${hojeBrasiliaStr.slice(0, 7)}-01`);
-  const inicioJanela = new Date(inicioMesAtual);
-  inicioJanela.setUTCMonth(inicioJanela.getUTCMonth() - 3);
+// Primeiro mês com histórico granular por grupo/produto no Radar (dados do DAPIC começam em
+// set/2025 — antes disso só existe o site antigo, sem esse detalhe, ver primeiraCompraExterna).
+const MAPA_COMPRAS_INICIO = "2025-09";
+const MAPA_COMPRAS_MESES_FUTUROS = 12;
 
-  const [vendasRows, devolucaoRows, estoqueRows, metasRows] = await Promise.all([
-    prisma.$queryRaw<{ grupo: string; mes: Date; unidades: bigint }[]>`
-      SELECT "grupo", DATE_TRUNC('month', ("saleDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo') AS mes, SUM("quantidade") AS unidades
-      FROM "Sale"
-      WHERE "saleDate" >= ${inicioJanela} AND "saleDate" < ${inicioMesAtual} AND "grupo" != '(sem grupo)'
-        ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
-      GROUP BY "grupo", mes
-    `,
-    prisma.$queryRaw<{ grupo: string; mes: Date; unidades: bigint }[]>`
-      SELECT "grupo", DATE_TRUNC('month', ("returnDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo') AS mes, SUM("quantidade") AS unidades
-      FROM "Return"
-      WHERE "returnDate" >= ${inicioJanela} AND "returnDate" < ${inicioMesAtual} AND "grupo" != '(sem grupo)'
-        ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
-      GROUP BY "grupo", mes
-    `,
-    prisma.stockSnapshot.groupBy({
-      by: ["grupo"],
-      where: { grupo: { not: "(sem grupo)" }, ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}) },
-      _sum: { quantidadeDisponivel: true },
-    }),
-    prisma.coberturaMeta.findMany(),
-  ]);
-
-  const porGrupoMes = new Map<string, Map<string, number>>();
-  for (const r of vendasRows) {
-    const mesStr = new Date(r.mes).toISOString().slice(0, 7);
-    const g = porGrupoMes.get(r.grupo) ?? new Map<string, number>();
-    g.set(mesStr, (g.get(mesStr) ?? 0) + Number(r.unidades));
-    porGrupoMes.set(r.grupo, g);
-  }
-  for (const r of devolucaoRows) {
-    const mesStr = new Date(r.mes).toISOString().slice(0, 7);
-    const g = porGrupoMes.get(r.grupo);
-    if (!g) continue;
-    g.set(mesStr, (g.get(mesStr) ?? 0) - Number(r.unidades));
-  }
-
-  // Os 3 últimos meses completos, em ordem cronológica — mesmos pra todo grupo.
+function gerarListaMeses(inicio: string, fim: string): string[] {
   const meses: string[] = [];
-  const cursor = new Date(inicioMesAtual);
-  for (let i = 0; i < 3; i++) {
-    cursor.setUTCMonth(cursor.getUTCMonth() - 1);
-    meses.unshift(cursor.toISOString().slice(0, 7));
+  let [y, m] = inicio.split("-").map(Number);
+  const [yFim, mFim] = fim.split("-").map(Number);
+  while (y < yFim || (y === yFim && m <= mFim)) {
+    meses.push(`${y}-${String(m).padStart(2, "0")}`);
+    m++;
+    if (m > 12) {
+      m = 1;
+      y++;
+    }
+  }
+  return meses;
+}
+
+function somaChave<T extends { grupo: string; produto: string; mes: Date; unidades: bigint }>(
+  rows: T[]
+): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const r of rows) {
+    const mesStr = new Date(r.mes).toISOString().slice(0, 7);
+    const key = `${r.grupo}::${r.produto}::${mesStr}`;
+    map.set(key, (map.get(key) ?? 0) + Number(r.unidades));
+  }
+  return map;
+}
+
+// Mapa de Compras — pedido do Rodrigo em 2026-09-02, baseado numa planilha de planejamento de
+// compra que ele já usa. Reconstrói o RAZÃO DE ESTOQUE mês a mês (igual a um livro-caixa, mas de
+// peças): Estoque Inicial + Recebimento (produção finalizada) − Vendas líquidas − Bonificações =
+// Estoque Final, e o Estoque Final de um mês vira o Inicial do próximo. Como só existe o estoque
+// ATUAL gravado (StockSnapshot é sobrescrito a cada sync, não histórico — mesma limitação já
+// documentada no rascunho de "estoque histórico"), os meses passados são reconstruídos ANDANDO
+// PRA TRÁS a partir do estoque de agora: desfaz mês a mês o que entrou/saiu até chegar no início
+// do histórico (set/2025). Não é um fato gravado — é matemática de conservação (o que saiu tem
+// que ter estado lá antes), então bate exato desde que a gente não tenha perdido nenhuma
+// venda/produção no meio do caminho.
+//
+// Meses futuros (projetado): vendas planejadas = média líquida dos últimos 3 meses completos,
+// ajustada pela tendência do mês mais recente vs a média (capada -50%/+100%), repetida flat pros
+// 12 meses seguintes — não modela sazonalidade ainda (só ~1 ano de histórico real, cedo pra isolar
+// padrão sazonal de tendência de verdade). Recebimento futuro = 0 (não simula pedido que ainda não
+// foi feito — "Falta comprar" É a recomendação, não um fato). Estoque Ideal = Vendas Planejadas ×
+// Cobertura (meses configurável por grupo). Falta comprar = Estoque Ideal − Estoque Inicial daquele
+// mês, só nos meses projetados (comprar pro passado não existe).
+export async function getMapaDeComprasDetalhado(
+  filters: Pick<DashboardFilters, "grupoIn">
+): Promise<MapaComprasGrupo[]> {
+  const hojeBrasiliaStr = todayBrasiliaStr(new Date());
+  const mesAtual = hojeBrasiliaStr.slice(0, 7);
+  const inicioMesAtual = brasiliaDayStart(`${mesAtual}-01`);
+  const inicioHistorico = brasiliaDayStart(`${MAPA_COMPRAS_INICIO}-01`);
+  const agora = new Date();
+
+  const [yAtual, mAtualNum] = mesAtual.split("-").map(Number);
+  let yFim = yAtual;
+  let mFim = mAtualNum + MAPA_COMPRAS_MESES_FUTUROS;
+  while (mFim > 12) {
+    mFim -= 12;
+    yFim++;
+  }
+  const mesFim = `${yFim}-${String(mFim).padStart(2, "0")}`;
+  const todosMeses = gerarListaMeses(MAPA_COMPRAS_INICIO, mesFim);
+  const mesesPassados = todosMeses.filter((m) => m < mesAtual);
+
+  const grupoFiltro = filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty;
+
+  const [vendasRows, devolucaoRows, recebimentoRows, bonifRows, vendasParcialRows, recebimentoParcialRows, bonifParcialRows, estoqueAtualRows, metasRows] =
+    await Promise.all([
+      prisma.$queryRaw<{ grupo: string; produto: string; mes: Date; unidades: bigint }[]>`
+      SELECT "grupo", "produto", DATE_TRUNC('month', ("saleDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo') AS mes, SUM("quantidade") AS unidades
+      FROM "Sale"
+      WHERE "saleDate" >= ${inicioHistorico} AND "saleDate" < ${inicioMesAtual} AND "grupo" != '(sem grupo)' ${grupoFiltro}
+      GROUP BY "grupo", "produto", mes
+    `,
+      prisma.$queryRaw<{ grupo: string; produto: string; mes: Date; unidades: bigint }[]>`
+      SELECT "grupo", "produto", DATE_TRUNC('month', ("returnDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo') AS mes, SUM("quantidade") AS unidades
+      FROM "Return"
+      WHERE "returnDate" >= ${inicioHistorico} AND "returnDate" < ${inicioMesAtual} AND "grupo" != '(sem grupo)' ${grupoFiltro}
+      GROUP BY "grupo", "produto", mes
+    `,
+      prisma.$queryRaw<{ grupo: string; produto: string; mes: Date; unidades: bigint }[]>`
+      SELECT "grupo", "produto", DATE_TRUNC('month', ("dataFinalizacaoProducao" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo') AS mes, SUM("quantidade") AS unidades
+      FROM "ProductionOrder"
+      WHERE "dataFinalizacaoProducao" >= ${inicioHistorico} AND "dataFinalizacaoProducao" < ${inicioMesAtual} AND "grupo" != '(sem grupo)' ${grupoFiltro}
+      GROUP BY "grupo", "produto", mes
+    `,
+      prisma.$queryRaw<{ grupo: string; produto: string; mes: Date; unidades: bigint }[]>`
+      SELECT "grupo", "produto", DATE_TRUNC('month', ("giftDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo') AS mes, SUM("quantidade") AS unidades
+      FROM "Gift"
+      WHERE "giftDate" >= ${inicioHistorico} AND "giftDate" < ${inicioMesAtual} AND "grupo" != '(sem grupo)' ${grupoFiltro}
+      GROUP BY "grupo", "produto", mes
+    `,
+      // Fatia do mês corrente até agora (parcial) — ponte entre o estoque ATUAL (live) e o
+      // estoque no início do mês corrente, de onde a reconstrução andando pra trás começa.
+      prisma.$queryRaw<{ grupo: string; produto: string; unidades: bigint }[]>`
+      SELECT "grupo", "produto", SUM("quantidade") AS unidades FROM "Sale"
+      WHERE "saleDate" >= ${inicioMesAtual} AND "saleDate" <= ${agora} AND "grupo" != '(sem grupo)' ${grupoFiltro}
+      GROUP BY "grupo", "produto"
+    `,
+      prisma.$queryRaw<{ grupo: string; produto: string; unidades: bigint }[]>`
+      SELECT "grupo", "produto", SUM("quantidade") AS unidades FROM "ProductionOrder"
+      WHERE "dataFinalizacaoProducao" >= ${inicioMesAtual} AND "dataFinalizacaoProducao" <= ${agora} AND "grupo" != '(sem grupo)' ${grupoFiltro}
+      GROUP BY "grupo", "produto"
+    `,
+      prisma.$queryRaw<{ grupo: string; produto: string; unidades: bigint }[]>`
+      SELECT "grupo", "produto", SUM("quantidade") AS unidades FROM "Gift"
+      WHERE "giftDate" >= ${inicioMesAtual} AND "giftDate" <= ${agora} AND "grupo" != '(sem grupo)' ${grupoFiltro}
+      GROUP BY "grupo", "produto"
+    `,
+      prisma.stockSnapshot.groupBy({
+        by: ["grupo", "produto"],
+        where: { grupo: { not: "(sem grupo)" }, ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}) },
+        _sum: { quantidadeDisponivel: true },
+      }),
+      prisma.coberturaMeta.findMany(),
+    ]);
+
+  const vendasByKey = somaChave(vendasRows);
+  const devolucaoByKey = somaChave(devolucaoRows);
+  const recebimentoByKey = somaChave(recebimentoRows);
+  const bonifByKey = somaChave(bonifRows);
+
+  function somaParcial(rows: { grupo: string; produto: string; unidades: bigint }[]) {
+    const map = new Map<string, number>();
+    for (const r of rows) map.set(`${r.grupo}::${r.produto}`, Number(r.unidades));
+    return map;
+  }
+  const vendasParcialByKey = somaParcial(vendasParcialRows);
+  const recebimentoParcialByKey = somaParcial(recebimentoParcialRows);
+  const bonifParcialByKey = somaParcial(bonifParcialRows);
+
+  const estoqueAtualByKey = new Map(
+    estoqueAtualRows.map((r) => [`${r.grupo}::${r.produto}`, r._sum.quantidadeDisponivel ?? 0])
+  );
+  const metaByGrupo = new Map(metasRows.map((m) => [m.grupo, m.mesesCobertura]));
+
+  const produtosPorGrupo = new Map<string, Set<string>>();
+  for (const key of estoqueAtualByKey.keys()) {
+    const [grupo, produto] = key.split("::");
+    const set = produtosPorGrupo.get(grupo) ?? new Set<string>();
+    set.add(produto);
+    produtosPorGrupo.set(grupo, set);
+  }
+  for (const [key] of [...vendasByKey, ...recebimentoByKey]) {
+    const [grupo, produto] = key.split("::");
+    const set = produtosPorGrupo.get(grupo) ?? new Set<string>();
+    set.add(produto);
+    produtosPorGrupo.set(grupo, set);
   }
 
-  const estoqueByGrupo = new Map(estoqueRows.map((r) => [r.grupo, r._sum.quantidadeDisponivel ?? 0]));
-  const metaByGrupo = new Map(metasRows.map((m) => [m.grupo, m.mesesCobertura]));
-  const grupos = new Set([...porGrupoMes.keys(), ...estoqueByGrupo.keys()]);
+  // Calcula a série de meses de UM produto (chave grupo::produto), reconstruindo pra trás a
+  // partir do estoque atual e projetando pra frente com a tendência.
+  function calcularSerie(grupo: string, produto: string, coberturaMeses: number): MesMapaCompras[] {
+    const key = `${grupo}::${produto}`;
+    const estoqueAtual = estoqueAtualByKey.get(key) ?? 0;
 
-  const itens: MapaCompraItem[] = [];
-  for (const grupo of grupos) {
-    const mesesMap = porGrupoMes.get(grupo) ?? new Map<string, number>();
-    const valores = meses.map((m) => Math.max(0, mesesMap.get(m) ?? 0));
-    const mediaMensal = valores.reduce((s, v) => s + v, 0) / valores.length;
-    const ultimoMes = valores[valores.length - 1];
-    const tendenciaPct = mediaMensal > 0 ? Math.max(-0.5, Math.min(1, (ultimoMes - mediaMensal) / mediaMensal)) : 0;
-    const projecaoMensal = Math.max(0, mediaMensal * (1 + tendenciaPct));
+    const fluxoParcialAtual =
+      (recebimentoParcialByKey.get(key) ?? 0) - (vendasParcialByKey.get(key) ?? 0) - (bonifParcialByKey.get(key) ?? 0);
+    const estoqueInicioMesAtual = estoqueAtual - fluxoParcialAtual;
 
-    const estoqueAtual = estoqueByGrupo.get(grupo) ?? 0;
-    const coberturaMeses = metaByGrupo.get(grupo) ?? COBERTURA_PADRAO_MESES;
-    const estoqueIdeal = projecaoMensal * coberturaMeses;
-    const faltaComprar = Math.max(0, Math.round(estoqueIdeal - estoqueAtual));
+    // Reconstrói pra trás: estoqueInicial(M) = estoqueFinal(M) - fluxoLiquido(M), onde
+    // estoqueFinal(M) = estoqueInicial(M+1) por continuidade.
+    const porMes = new Map<string, MesMapaCompras>();
+    let estoqueFinalCursor = estoqueInicioMesAtual;
+    for (let i = mesesPassados.length - 1; i >= 0; i--) {
+      const mes = mesesPassados[i];
+      const mesKey = `${key}::${mes}`;
+      const vendas = Math.max(0, (vendasByKey.get(mesKey) ?? 0) - (devolucaoByKey.get(mesKey) ?? 0));
+      const recebimento = recebimentoByKey.get(mesKey) ?? 0;
+      const bonificacoes = bonifByKey.get(mesKey) ?? 0;
+      const estoqueFinal = estoqueFinalCursor;
+      const estoqueInicial = estoqueFinal - recebimento + vendas + bonificacoes;
+      porMes.set(mes, {
+        mes,
+        tipo: "realizado",
+        estoqueInicial: Math.round(estoqueInicial),
+        recebimento,
+        vendas,
+        bonificacoes,
+        estoqueFinal: Math.round(estoqueFinal),
+        estoqueIdeal: Math.round(vendas * coberturaMeses),
+        faltaComprar: 0, // comprar pro passado não existe, só informativo
+      });
+      estoqueFinalCursor = estoqueInicial;
+    }
 
-    itens.push({
-      grupo,
-      mediaMensal: Math.round(mediaMensal),
-      tendenciaPct: tendenciaPct * 100,
-      projecaoMensal: Math.round(projecaoMensal),
-      estoqueAtual,
-      coberturaMeses,
-      estoqueIdeal: Math.round(estoqueIdeal),
-      faltaComprar,
+    // Projeção pra frente: média líquida dos últimos 3 meses completos + tendência do mês mais
+    // recente, capada -50%/+100%.
+    const ultimos3 = mesesPassados.slice(-3).map((m) => porMes.get(m)?.vendas ?? 0);
+    const mediaMensal = ultimos3.length > 0 ? ultimos3.reduce((s, v) => s + v, 0) / ultimos3.length : 0;
+    const ultimoValor = ultimos3.length > 0 ? ultimos3[ultimos3.length - 1] : 0;
+    const tendenciaPct = mediaMensal > 0 ? Math.max(-0.5, Math.min(1, (ultimoValor - mediaMensal) / mediaMensal)) : 0;
+    const vendasProjetadas = Math.max(0, Math.round(mediaMensal * (1 + tendenciaPct)));
+
+    let estoqueInicialCursor = estoqueInicioMesAtual;
+    const mesesFuturos = todosMeses.filter((m) => m >= mesAtual);
+    for (const mes of mesesFuturos) {
+      const estoqueInicial = estoqueInicialCursor;
+      const estoqueFinal = estoqueInicial - vendasProjetadas;
+      const estoqueIdeal = vendasProjetadas * coberturaMeses;
+      const faltaComprar = Math.max(0, Math.round(estoqueIdeal - estoqueInicial));
+      porMes.set(mes, {
+        mes,
+        tipo: "projetado",
+        estoqueInicial: Math.round(estoqueInicial),
+        recebimento: 0,
+        vendas: vendasProjetadas,
+        bonificacoes: 0,
+        estoqueFinal: Math.round(estoqueFinal),
+        estoqueIdeal: Math.round(estoqueIdeal),
+        faltaComprar,
+      });
+      estoqueInicialCursor = estoqueFinal;
+    }
+
+    return todosMeses.map((m) => porMes.get(m)!);
+  }
+
+  function somarSeries(series: MesMapaCompras[][]): MesMapaCompras[] {
+    return todosMeses.map((mes, i) => {
+      const linhas = series.map((s) => s[i]);
+      return {
+        mes,
+        tipo: linhas[0]?.tipo ?? "realizado",
+        estoqueInicial: linhas.reduce((s, l) => s + l.estoqueInicial, 0),
+        recebimento: linhas.reduce((s, l) => s + l.recebimento, 0),
+        vendas: linhas.reduce((s, l) => s + l.vendas, 0),
+        bonificacoes: linhas.reduce((s, l) => s + l.bonificacoes, 0),
+        estoqueFinal: linhas.reduce((s, l) => s + l.estoqueFinal, 0),
+        estoqueIdeal: linhas.reduce((s, l) => s + l.estoqueIdeal, 0),
+        faltaComprar: linhas.reduce((s, l) => s + l.faltaComprar, 0),
+      };
     });
   }
 
-  return itens.sort((a, b) => b.faltaComprar - a.faltaComprar);
+  const grupos: MapaComprasGrupo[] = [];
+  for (const [grupo, produtosSet] of produtosPorGrupo) {
+    const coberturaMeses = metaByGrupo.get(grupo) ?? COBERTURA_PADRAO_MESES;
+    const produtos = [...produtosSet]
+      .map((produto) => ({ produto, meses: calcularSerie(grupo, produto, coberturaMeses) }))
+      .sort((a, b) => b.meses[mesesPassados.length]?.faltaComprar - a.meses[mesesPassados.length]?.faltaComprar);
+    grupos.push({
+      grupo,
+      coberturaMeses,
+      meses: somarSeries(produtos.map((p) => p.meses)),
+      produtos,
+    });
+  }
+
+  return grupos.sort((a, b) => {
+    const faltaA = a.meses[mesesPassados.length]?.faltaComprar ?? 0;
+    const faltaB = b.meses[mesesPassados.length]?.faltaComprar ?? 0;
+    return faltaB - faltaA;
+  });
 }
 
 export async function setCoberturaMeta(grupo: string, mesesCobertura: number) {
