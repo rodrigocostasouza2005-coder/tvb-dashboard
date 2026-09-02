@@ -30,7 +30,8 @@ export type TabKey =
   | "clientes-ficha"
   | "clientes-produto"
   | "clientes-produtos-entrada"
-  | "clientes-sugestoes-contato";
+  | "clientes-sugestoes-contato"
+  | "estoque-retirada";
 
 export type TabGroup = "visao-geral" | "vendas" | "estoque" | "atacado" | "clientes" | "marketing" | "pesquisa" | "lamina" | "outros";
 
@@ -61,6 +62,7 @@ export const TABS: TabEntry[] = [
   { key: "envelhecimento", label: "Envelhecimento", href: "/dashboard/envelhecimento", group: "estoque" },
   { key: "reposicao", label: "Reposição de lojas", href: "/dashboard/reposicao", group: "estoque" },
   { key: "estoque-minimo", label: "Estoque Mínimo", href: "/dashboard/estoque-minimo", group: "estoque" },
+  { key: "estoque-retirada", label: "Sugestão de Retirada", href: "/dashboard/estoque-retirada", group: "estoque" },
   { label: "Mapa de compras best sellers", group: "estoque", todo: true },
 
   // atacado

@@ -2962,6 +2962,82 @@ export async function getDistinctTamanhos() {
   return sortTamanhos(rows.map((r) => r.tamanho as string));
 }
 
+export type SugestaoRetirada = {
+  storeId: string;
+  loja: string;
+  grupo: string;
+  produto: string;
+  tamanhosTotal: number;
+  tamanhosZerados: number;
+  pctQuebrada: number; // 0-100
+  estoqueRestante: number;
+  tamanhosComEstoque: { tamanho: string; quantidade: number }[];
+};
+
+// Limiar de "grade quebrada" — pedido do Rodrigo em 2026-09-02: mais de 60% dos tamanhos de um
+// produto zerados NUMA LOJA sugere retirar o que sobrou de lá (grade incompleta vende mal e
+// ocupa espaço). Deliberadamente só olha a grade da PRÓPRIA loja, sem comparar com outras lojas
+// nem com o CD ("não tem que comparar loja com loja ou loja com CD" — instrução direta dele).
+const LIMIAR_GRADE_QUEBRADA = 0.6;
+
+export async function getSugestoesRetiradaEstoque(
+  filters: Pick<DashboardFilters, "storeIds" | "grupoIn">
+): Promise<SugestaoRetirada[]> {
+  const sellingStores = await prisma.store.findMany({
+    where: { sellsProducts: true, ...(filters.storeIds !== undefined ? { id: { in: filters.storeIds } } : {}) },
+  });
+  const storeIds = sellingStores.map((s) => s.id);
+  const storeNameById = new Map(sellingStores.map((s) => [s.id, s.displayGroup ?? s.name]));
+
+  const rows = await prisma.stockSnapshot.findMany({
+    where: {
+      storeId: { in: storeIds },
+      grupo: { not: "(sem grupo)" },
+      ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
+    },
+    select: { storeId: true, grupo: true, produto: true, tamanho: true, quantidadeDisponivel: true },
+  });
+
+  const porChave = new Map<
+    string,
+    { storeId: string; grupo: string; produto: string; tamanhos: { tamanho: string; quantidade: number }[] }
+  >();
+  for (const r of rows) {
+    const key = `${r.storeId}::${r.produto}`;
+    const cur = porChave.get(key) ?? { storeId: r.storeId, grupo: r.grupo, produto: r.produto, tamanhos: [] };
+    cur.tamanhos.push({ tamanho: r.tamanho ?? "—", quantidade: r.quantidadeDisponivel });
+    porChave.set(key, cur);
+  }
+
+  const sugestoes: SugestaoRetirada[] = [];
+  for (const { storeId, grupo, produto, tamanhos } of porChave.values()) {
+    // Grade de 1 tamanho só não tem o que "quebrar" — não é o caso que o Rodrigo descreveu.
+    if (tamanhos.length < 2) continue;
+    const zerados = tamanhos.filter((t) => t.quantidade === 0).length;
+    const pct = zerados / tamanhos.length;
+    if (pct <= LIMIAR_GRADE_QUEBRADA) continue;
+    const tamanhosComEstoque = tamanhos.filter((t) => t.quantidade > 0);
+    const estoqueRestante = tamanhosComEstoque.reduce((s, t) => s + t.quantidade, 0);
+    // Sem estoque nenhum sobrando não tem o que retirar — já é "sem estoque", outro problema.
+    if (estoqueRestante === 0) continue;
+    sugestoes.push({
+      storeId,
+      loja: storeNameById.get(storeId) ?? storeId,
+      grupo,
+      produto,
+      tamanhosTotal: tamanhos.length,
+      tamanhosZerados: zerados,
+      pctQuebrada: pct * 100,
+      estoqueRestante,
+      tamanhosComEstoque: sortTamanhos(tamanhosComEstoque.map((t) => t.tamanho)).map(
+        (tamanho) => tamanhosComEstoque.find((t) => t.tamanho === tamanho)!
+      ),
+    });
+  }
+
+  return sugestoes.sort((a, b) => b.pctQuebrada - a.pctQuebrada || a.estoqueRestante - b.estoqueRestante);
+}
+
 export async function getDistinctGrupos() {
   const rows = await prisma.stockSnapshot.findMany({
     distinct: ["grupo"],
