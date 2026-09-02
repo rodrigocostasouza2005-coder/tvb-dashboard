@@ -921,8 +921,11 @@ export async function searchStockVsSalesComTamanhos(filters: DashboardFilters, q
 
     // Se o texto digitado bate com um tamanho de verdade (ex: "42", "GG"), também traz produtos
     // que TÊM esse tamanho, mesmo que o nome não bata — pedido do Rodrigo em 2026-09-02.
+    // quantidadeDisponivel > 0 — sem isso trazia produto com esse tamanho zerado (a linha
+    // existe no StockSnapshot mesmo sem estoque, ver Sugestão de Retirada). Rodrigo quer só o
+    // que TEM de verdade nesse tamanho.
     const comEsseTamanho = await prisma.stockSnapshot.findMany({
-      where: { ...stockWhere(filters), tamanho: { equals: queryTrim, mode: "insensitive" } },
+      where: { ...stockWhere(filters), tamanho: { equals: queryTrim, mode: "insensitive" }, quantidadeDisponivel: { gt: 0 } },
       select: { produto: true },
       distinct: ["produto"],
     });
