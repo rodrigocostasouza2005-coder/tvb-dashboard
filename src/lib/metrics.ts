@@ -908,7 +908,26 @@ function sortTamanhos(tamanhos: string[]) {
 // o produto com os tamanhos lado a lado, não trocar de visão). "Total" da quebra por tamanho é a
 // mesma soma que currentStock já mostrava — não é outro número, só decomposto.
 export async function searchStockVsSalesComTamanhos(filters: DashboardFilters, query: string) {
-  const rows = await searchStockVsSales(filters, "produto", query);
+  const queryTrim = query.trim();
+  const porNome = await searchStockVsSales(filters, "produto", query);
+
+  // Se o texto digitado bate com um tamanho de verdade (ex: "42", "GG"), também traz produtos
+  // que TÊM esse tamanho, mesmo que o nome não bata — pedido do Rodrigo em 2026-09-02.
+  let rows = porNome;
+  if (queryTrim) {
+    const comEsseTamanho = await prisma.stockSnapshot.findMany({
+      where: { ...stockWhere(filters), tamanho: { equals: queryTrim, mode: "insensitive" } },
+      select: { produto: true },
+      distinct: ["produto"],
+    });
+    const chaves = new Set(porNome.map((r) => r.key));
+    const faltantes = comEsseTamanho.map((r) => r.produto).filter((p) => !chaves.has(p));
+    if (faltantes.length > 0) {
+      const todos = await searchStockVsSales(filters, "produto", "");
+      const porTamanhoFiltrado = todos.filter((r) => faltantes.includes(r.key));
+      rows = [...porNome, ...porTamanhoFiltrado];
+    }
+  }
   if (rows.length === 0) return { rows: [], tamanhos: [] as string[] };
 
   const produtoNames = rows.map((r) => r.key);
