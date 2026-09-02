@@ -30,7 +30,7 @@ const selectClass =
 
 const LIMIT = 150;
 
-export function ClientesTable({ rows }: { rows: ClienteRow[] }) {
+export function ClientesTable({ rows, showReceita = true }: { rows: ClienteRow[]; showReceita?: boolean }) {
   const [search, setSearch] = useState("");
   const [estadoFiltro, setEstadoFiltro] = useState("");
 
@@ -71,7 +71,7 @@ export function ClientesTable({ rows }: { rows: ClienteRow[] }) {
               <th className="px-4 py-2 font-medium">Estado</th>
               <th className="px-4 py-2 font-medium text-right">Pedidos</th>
               <th className="px-4 py-2 font-medium text-right">Unidades brutas</th>
-              <th className="px-4 py-2 font-medium text-right">Receita bruta</th>
+              {showReceita && <th className="px-4 py-2 font-medium text-right">Receita bruta</th>}
               <th className="px-4 py-2 font-medium">Última compra</th>
               <th className="px-4 py-2 font-medium">Novo?</th>
             </tr>
@@ -116,9 +116,11 @@ export function ClientesTable({ rows }: { rows: ClienteRow[] }) {
                 <td className="px-4 py-2 tabular-nums text-right text-[var(--text-secondary)]">
                   {r.unidades.toLocaleString("pt-BR")}
                 </td>
-                <td className="px-4 py-2 tabular-nums text-right font-medium text-[var(--text-primary)]">
-                  {formatBRL(r.receita)}
-                </td>
+                {showReceita && (
+                  <td className="px-4 py-2 tabular-nums text-right font-medium text-[var(--text-primary)]">
+                    {formatBRL(r.receita)}
+                  </td>
+                )}
                 <td className="px-4 py-2 text-[var(--text-secondary)]">{formatDate(r.ultimaCompra)}</td>
                 <td className="px-4 py-2">
                   {r.isNovo ? (
@@ -133,7 +135,7 @@ export function ClientesTable({ rows }: { rows: ClienteRow[] }) {
             ))}
             {visible.length === 0 && (
               <tr>
-                <td colSpan={9} className="px-4 py-6 text-center text-[var(--text-muted)]">
+                <td colSpan={showReceita ? 9 : 8} className="px-4 py-6 text-center text-[var(--text-muted)]">
                   Nenhum cliente encontrado.
                 </td>
               </tr>

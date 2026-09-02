@@ -1,5 +1,6 @@
 import { getSessionUser } from "@/lib/auth";
 import { getAtacadoClientes, getClienteRetencaoPorMes } from "@/lib/metrics";
+import { canSeeFinancials, getGrupoRestriction } from "@/lib/permissions";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
@@ -18,7 +19,9 @@ export default async function AtacadoClientesPage({
   requireTabAccess(user, user.role, "atacado-clientes");
   const filtrosOpen = (await searchParams).filtros === "1";
 
-  const filters = parseFilters(await searchParams, {});
+  const grupoIn = await getGrupoRestriction(user.role);
+  const filters = { ...parseFilters(await searchParams, {}), grupoIn };
+  const showFinancials = canSeeFinancials(user);
 
   const [data, retencao] = await Promise.all([
     getAtacadoClientes(filters),
@@ -49,10 +52,12 @@ export default async function AtacadoClientesPage({
           status={data.novosNoPeriodo > 0 ? "good" : undefined}
           trend={data.novosNoPeriodo > 0 ? "up" : undefined}
         />
-        <StatTile
-          label="Total Receita bruta"
-          value={totalReceita.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
-        />
+        {showFinancials && (
+          <StatTile
+            label="Total Receita bruta"
+            value={totalReceita.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+          />
+        )}
         <StatTile label="Compraram 1x" value={String(retencao.compraram1x)} />
         <StatTile
           label="Compraram +1x"
@@ -68,7 +73,7 @@ export default async function AtacadoClientesPage({
         </section>
       )}
 
-      <ClientesTable rows={data.rows} />
+      <ClientesTable rows={data.rows} showReceita={showFinancials} />
     </div>
   );
 }

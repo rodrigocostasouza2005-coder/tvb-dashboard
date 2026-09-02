@@ -13,7 +13,7 @@ function formatBRL(value: number) {
   return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
-export function AtacadoProdutosTable({ rows }: { rows: ProdutoRow[] }) {
+export function AtacadoProdutosTable({ rows, showReceita = true }: { rows: ProdutoRow[]; showReceita?: boolean }) {
   const [open, setOpen] = useState<Set<string>>(new Set());
 
   function toggle(grupo: string) {
@@ -44,7 +44,7 @@ export function AtacadoProdutosTable({ rows }: { rows: ProdutoRow[] }) {
           <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
             <th className="px-4 py-2 font-medium">Grupo / Produto</th>
             <th className="px-4 py-2 font-medium text-right">Unidades brutas</th>
-            <th className="px-4 py-2 font-medium text-right">Receita bruta</th>
+            {showReceita && <th className="px-4 py-2 font-medium text-right">Receita bruta</th>}
           </tr>
         </thead>
         <tbody>
@@ -72,9 +72,11 @@ export function AtacadoProdutosTable({ rows }: { rows: ProdutoRow[] }) {
                   <td className="px-4 py-2 tabular-nums text-right text-[var(--text-primary)]">
                     {g.unidades.toLocaleString("pt-BR")}
                   </td>
-                  <td className="px-4 py-2 tabular-nums text-right font-medium text-[var(--text-primary)]">
-                    {formatBRL(g.receita)}
-                  </td>
+                  {showReceita && (
+                    <td className="px-4 py-2 tabular-nums text-right font-medium text-[var(--text-primary)]">
+                      {formatBRL(g.receita)}
+                    </td>
+                  )}
                 </tr>
                 {isOpen &&
                   produtos.map((p) => (
@@ -86,9 +88,11 @@ export function AtacadoProdutosTable({ rows }: { rows: ProdutoRow[] }) {
                       <td className="px-4 py-1.5 tabular-nums text-right text-[var(--text-secondary)]">
                         {p.unidades.toLocaleString("pt-BR")}
                       </td>
-                      <td className="px-4 py-1.5 tabular-nums text-right text-[var(--text-secondary)]">
-                        {formatBRL(p.receita)}
-                      </td>
+                      {showReceita && (
+                        <td className="px-4 py-1.5 tabular-nums text-right text-[var(--text-secondary)]">
+                          {formatBRL(p.receita)}
+                        </td>
+                      )}
                     </tr>
                   ))}
               </Fragment>
@@ -96,7 +100,7 @@ export function AtacadoProdutosTable({ rows }: { rows: ProdutoRow[] }) {
           })}
           {rows.length === 0 && (
             <tr>
-              <td colSpan={3} className="px-4 py-6 text-center text-[var(--text-muted)]">
+              <td colSpan={showReceita ? 3 : 2} className="px-4 py-6 text-center text-[var(--text-muted)]">
                 Nenhum dado encontrado.
               </td>
             </tr>

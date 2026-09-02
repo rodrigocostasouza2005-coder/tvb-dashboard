@@ -20,7 +20,7 @@ function formatBRL(value: number) {
 const selectClass =
   "w-full rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1 text-xs text-[var(--text-primary)]";
 
-export function CidadesTable({ rows }: { rows: CidadeRow[] }) {
+export function CidadesTable({ rows, showReceita = true }: { rows: CidadeRow[]; showReceita?: boolean }) {
   const [sortCol, setSortCol] = useState<SortCol>("receita");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [estadoFiltro, setEstadoFiltro] = useState("");
@@ -87,9 +87,11 @@ export function CidadesTable({ rows }: { rows: CidadeRow[] }) {
             <th className={`${thClass} text-right`} onClick={() => handleSort("unidades")}>
               Unidades brutas{sortIndicator("unidades")}
             </th>
-            <th className={`${thClass} text-right`} onClick={() => handleSort("receita")}>
-              Receita bruta{sortIndicator("receita")}
-            </th>
+            {showReceita && (
+              <th className={`${thClass} text-right`} onClick={() => handleSort("receita")}>
+                Receita bruta{sortIndicator("receita")}
+              </th>
+            )}
           </tr>
           <tr className="border-b border-[var(--gridline)] bg-[var(--surface-1)]">
             <th className="px-4 py-1.5">
@@ -133,14 +135,16 @@ export function CidadesTable({ rows }: { rows: CidadeRow[] }) {
               <td className="px-4 py-2 tabular-nums text-right text-[var(--text-secondary)]">
                 {r.unidades.toLocaleString("pt-BR")}
               </td>
-              <td className="px-4 py-2 tabular-nums text-right font-medium text-[var(--text-primary)]">
-                {formatBRL(r.receita)}
-              </td>
+              {showReceita && (
+                <td className="px-4 py-2 tabular-nums text-right font-medium text-[var(--text-primary)]">
+                  {formatBRL(r.receita)}
+                </td>
+              )}
             </tr>
           ))}
           {sorted.length === 0 && (
             <tr>
-              <td colSpan={5} className="px-4 py-6 text-center text-[var(--text-muted)]">
+              <td colSpan={showReceita ? 5 : 4} className="px-4 py-6 text-center text-[var(--text-muted)]">
                 Nenhuma cidade encontrada.
               </td>
             </tr>

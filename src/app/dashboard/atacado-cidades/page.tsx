@@ -1,5 +1,6 @@
 import { getSessionUser } from "@/lib/auth";
 import { getAtacadoCidades } from "@/lib/metrics";
+import { canSeeFinancials, getGrupoRestriction } from "@/lib/permissions";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
@@ -19,11 +20,12 @@ export default async function AtacadoCidadesPage({
   requireTabAccess(user, user.role, "atacado-cidades");
   const filtrosOpen = (await searchParams).filtros === "1";
 
-  const filters = parseFilters(await searchParams, {});
+  const grupoIn = await getGrupoRestriction(user.role);
+  const filters = { ...parseFilters(await searchParams, {}), grupoIn };
+  const showFinancials = canSeeFinancials(user);
 
-  // Só B2B (Tabela atacado) — sem isso misturava com o varejo do site, que passa pela mesma
-  // loja física "Site+Atacado".
-  const data = await getAtacadoCidades({ ...filters, tabelasPreco: ["Tabela atacado"] });
+  // getAtacadoCidades já filtra só B2B por dentro (canalWhere("b2b"), cliente-level).
+  const data = await getAtacadoCidades(filters);
 
   const totalReceita = data.rows.reduce((sum, r) => sum + r.receita, 0);
 
@@ -51,27 +53,29 @@ export default async function AtacadoCidadesPage({
       <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
         <StatTile label="Cidades atendidas" value={String(data.totalCidades)} />
         <StatTile label="Estados" value={String(data.totalEstados)} />
-        <StatTile
-          label="Total Receita bruta"
-          value={totalReceita.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
-        />
+        {showFinancials && (
+          <StatTile
+            label="Total Receita bruta"
+            value={totalReceita.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+          />
+        )}
       </div>
 
-      {data.rows.length > 0 && (
+      {showFinancials && data.rows.length > 0 && (
         <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
           <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Mapa por estado</h2>
           <BrazilMap rows={porEstado} />
         </section>
       )}
 
-      {data.rows.length > 0 && (
+      {showFinancials && data.rows.length > 0 && (
         <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
           <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Top 15 cidades por receita</h2>
           <CidadesChart rows={data.rows} />
         </section>
       )}
 
-      <CidadesTable rows={data.rows} />
+      <CidadesTable rows={data.rows} showReceita={showFinancials} />
     </div>
   );
 }

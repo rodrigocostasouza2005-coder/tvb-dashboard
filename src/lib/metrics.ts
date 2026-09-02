@@ -3223,10 +3223,16 @@ export async function getAtacadoVendas(filters: DashboardFilters) {
   const cdStore = await prisma.store.findFirst({ where: { code: "CD" } });
   if (!cdStore) return { kpis: { receita: 0, pedidos: 0, unidades: 0, ticketMedio: 0 }, byDay: [], topProdutos: [] };
 
+  // Cliente já classificado como atacado (canalWhere("b2b")), não tabelaPreco direto — achado na
+  // auditoria de 2026-09-02: essa aba tinha o mesmo bug da Guarderia (cliente que negocia preço
+  // e cai em tabelaPreco=null ficava subcontado aqui, justamente na aba que É sobre atacado).
+  const b2bWhere = await canalWhere("b2b");
+  const b2bClientes = [...(await getB2BClienteNomes())];
   const where: Prisma.SaleWhereInput = {
     storeId: cdStore.id,
     saleDate: { gte: filters.from, lte: filters.to },
-    ...(filters.tabelasPreco !== undefined ? { tabelaPreco: { in: filters.tabelasPreco } } : {}),
+    AND: [b2bWhere],
+    ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
   };
 
   const [agg, byDayRaw, topGrupos] = await Promise.all([
@@ -3240,7 +3246,8 @@ export async function getAtacadoVendas(filters: DashboardFilters) {
       WHERE "storeId" = ${cdStore.id}
         AND "saleDate" >= ${filters.from}
         AND "saleDate" <= ${filters.to}
-        ${filters.tabelasPreco !== undefined ? Prisma.sql`AND ("tabelaPreco" = ANY(${filters.tabelasPreco}) OR "tabelaPreco" IS NULL)` : Prisma.empty}
+        AND ("tabelaPreco" = 'Tabela atacado' OR "clienteNome" = ANY(${b2bClientes}))
+        ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
       GROUP BY day ORDER BY day ASC
     `,
     prisma.sale.groupBy({
@@ -3268,11 +3275,13 @@ export async function getAtacadoCidades(filters: DashboardFilters) {
   const cdStore = await prisma.store.findFirst({ where: { code: "CD" } });
   if (!cdStore) return { rows: [], totalCidades: 0, totalEstados: 0 };
 
+  // Mesmo fix de getAtacadoVendas — cliente já classificado como atacado, não tabelaPreco direto.
   const where: Prisma.SaleWhereInput = {
     storeId: cdStore.id,
     saleDate: { gte: filters.from, lte: filters.to },
     cidade: { not: null },
-    ...(filters.tabelasPreco !== undefined ? { tabelaPreco: { in: filters.tabelasPreco } } : {}),
+    AND: [await canalWhere("b2b")],
+    ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
   };
 
   const rows = await prisma.sale.groupBy({
@@ -3313,6 +3322,7 @@ export async function getAtacadoClientes(filters: DashboardFilters) {
     AND: [b2bWhere],
     saleDate: { gte: filters.from, lte: filters.to },
     clienteNome: { not: null },
+    ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
   };
 
   const [rows, primeiraVendaGeral] = await Promise.all([

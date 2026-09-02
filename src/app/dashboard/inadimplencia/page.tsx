@@ -1,5 +1,7 @@
+import { redirect } from "next/navigation";
 import { getSessionUser } from "@/lib/auth";
 import { requireTabAccess } from "@/lib/tabs";
+import { canSeeFinancials } from "@/lib/permissions";
 import { getInadimplencia } from "@/lib/inadimplencia";
 import { StatTile } from "../stat-tile";
 import { InadimplenciaTable } from "./inadimplencia-table";
@@ -8,6 +10,11 @@ export default async function InadimplenciaPage() {
   const user = await getSessionUser();
   if (!user) return null;
   requireTabAccess(user, user.role, "inadimplencia");
+  // Achado na auditoria de 2026-09-02: a aba inteira é sobre dinheiro (valor em aberto, boletos
+  // vencidos) — diferente das outras abas, não tem conteúdo não-financeiro pra mostrar, então
+  // bloqueia a página inteira pra quem não tem "Ver valores financeiros" em vez de esconder card
+  // por card.
+  if (!canSeeFinancials(user)) redirect("/dashboard");
 
   const { parcelas } = await getInadimplencia();
 
