@@ -909,24 +909,26 @@ function sortTamanhos(tamanhos: string[]) {
 // mesma soma que currentStock já mostrava — não é outro número, só decomposto.
 export async function searchStockVsSalesComTamanhos(filters: DashboardFilters, query: string) {
   const queryTrim = query.trim();
-  const porNome = await searchStockVsSales(filters, "produto", query);
+  // getStockVsSales calculado 1x só (era 2x — uma vez pro nome, outra pro tamanho — dobrando o
+  // tempo de resposta à toa; achado pelo Rodrigo reclamando que a busca ficou lenta em
+  // 2026-09-02). Filtra o resultado já calculado em memória, tanto por nome quanto por tamanho.
+  const all = await getStockVsSales(filters, "produto");
 
-  // Se o texto digitado bate com um tamanho de verdade (ex: "42", "GG"), também traz produtos
-  // que TÊM esse tamanho, mesmo que o nome não bata — pedido do Rodrigo em 2026-09-02.
-  let rows = porNome;
+  let rows = all;
   if (queryTrim) {
+    const q = queryTrim.toLowerCase();
+    const porChave = new Set(all.filter((r) => r.key.toLowerCase().includes(q)).map((r) => r.key));
+
+    // Se o texto digitado bate com um tamanho de verdade (ex: "42", "GG"), também traz produtos
+    // que TÊM esse tamanho, mesmo que o nome não bata — pedido do Rodrigo em 2026-09-02.
     const comEsseTamanho = await prisma.stockSnapshot.findMany({
       where: { ...stockWhere(filters), tamanho: { equals: queryTrim, mode: "insensitive" } },
       select: { produto: true },
       distinct: ["produto"],
     });
-    const chaves = new Set(porNome.map((r) => r.key));
-    const faltantes = comEsseTamanho.map((r) => r.produto).filter((p) => !chaves.has(p));
-    if (faltantes.length > 0) {
-      const todos = await searchStockVsSales(filters, "produto", "");
-      const porTamanhoFiltrado = todos.filter((r) => faltantes.includes(r.key));
-      rows = [...porNome, ...porTamanhoFiltrado];
-    }
+    for (const r of comEsseTamanho) porChave.add(r.produto);
+
+    rows = all.filter((r) => porChave.has(r.key));
   }
   if (rows.length === 0) return { rows: [], tamanhos: [] as string[] };
 
