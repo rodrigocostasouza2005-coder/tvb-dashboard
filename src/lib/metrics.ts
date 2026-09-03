@@ -3265,15 +3265,14 @@ export async function getMapaDeComprasDetalhado(
 
     const fluxoParcialAtual =
       (recebimentoParcialByKey.get(key) ?? 0) - (vendasParcialByKey.get(key) ?? 0) - (bonifParcialByKey.get(key) ?? 0);
-    // Estoque físico nunca é negativo (achado do Rodrigo em 2026-09-03) — trava em 0 sempre que a
-    // reconstrução daria negativo. Isso normalmente revela um "recebimento" que a gente não
-    // enxerga (produto comprado pronto de fornecedor, não via ordem de produção — ver aviso na
-    // tela), não que o estoque realmente ficou negativo.
-    const estoqueInicioMesAtual = Math.max(0, estoqueAtual - fluxoParcialAtual);
+    const estoqueInicioMesAtual = estoqueAtual - fluxoParcialAtual;
 
     // Reconstrói pra trás: estoqueInicial(M) = estoqueFinal(M) - fluxoLiquido(M), onde
-    // estoqueFinal(M) = estoqueInicial(M+1) por continuidade. Travado em 0 a cada passo, e o
-    // valor JÁ TRAVADO é que encadeia pro mês anterior (senão o negativo "vaza" pra trás inteiro).
+    // estoqueFinal(M) = estoqueInicial(M+1) por continuidade. NÃO trava em 0 — matemática honesta
+    // (decisão do Rodrigo em 2026-09-03: travar escondia o problema em vez de mostrar a causa
+    // real). Quando dá negativo aqui, é sinal de que "Recebimento" não capturou tudo que entrou
+    // em estoque naquele mês (produto comprado pronto de fornecedor, não via ordem de produção —
+    // ver aviso na tela) — não que o estoque físico realmente ficou negativo.
     const porMes = new Map<string, MesMapaCompras>();
     let estoqueFinalCursor = estoqueInicioMesAtual;
     for (let i = mesesPassados.length - 1; i >= 0; i--) {
@@ -3283,7 +3282,7 @@ export async function getMapaDeComprasDetalhado(
       const recebimento = recebimentoByKey.get(mesKey) ?? 0;
       const bonificacoes = bonifByKey.get(mesKey) ?? 0;
       const estoqueFinal = estoqueFinalCursor;
-      const estoqueInicial = Math.max(0, estoqueFinal - recebimento + vendas + bonificacoes);
+      const estoqueInicial = estoqueFinal - recebimento + vendas + bonificacoes;
       porMes.set(mes, {
         mes,
         tipo: "realizado",
@@ -3343,7 +3342,7 @@ export async function getMapaDeComprasDetalhado(
     for (const mes of mesesFuturos) {
       const vendasProjetadas = Math.max(0, Math.round(nivelTendencia * indiceSazonal(mes.slice(5, 7))));
       const estoqueInicial = estoqueInicialCursor;
-      const estoqueFinal = Math.max(0, estoqueInicial - vendasProjetadas);
+      const estoqueFinal = estoqueInicial - vendasProjetadas;
       const estoqueIdeal = vendasProjetadas * coberturaMeses;
       const faltaComprar = Math.max(0, Math.round(estoqueIdeal - estoqueInicial));
       porMes.set(mes, {

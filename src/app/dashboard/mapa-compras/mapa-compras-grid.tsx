@@ -37,14 +37,25 @@ const METRICAS: { key: keyof MesLinha; label: string; destaque?: boolean }[] = [
 function Celula({ valor, mes, metrica }: { valor: number; mes: MesLinha; metrica: (typeof METRICAS)[number] }) {
   const isFalta = metrica.key === "faltaComprar";
   const vazio = valor === 0 && (isFalta || mes.tipo === "realizado" ? metrica.key !== "estoqueFinal" && metrica.key !== "estoqueInicial" : false);
+  // Negativo em estoque não é escondido (decisão do Rodrigo em 2026-09-03) — destacado em
+  // vermelho porque é sinal real de "recebimento que não estamos enxergando", não erro de conta.
+  const negativo = valor < 0 && (metrica.key === "estoqueInicial" || metrica.key === "estoqueFinal");
   return (
     <td
       className="min-w-[76px] border-b border-[var(--gridline)] px-2 py-1.5 text-right text-xs tabular-nums"
       style={{
         backgroundColor: mes.tipo === "projetado" ? "color-mix(in srgb, var(--series-1) 4%, transparent)" : undefined,
-        color: isFalta && valor > 0 ? "var(--status-critical)" : metrica.destaque ? "var(--text-primary)" : "var(--text-secondary)",
-        fontWeight: metrica.destaque ? 600 : 400,
+        color:
+          negativo
+            ? "var(--status-critical)"
+            : isFalta && valor > 0
+              ? "var(--status-critical)"
+              : metrica.destaque
+                ? "var(--text-primary)"
+                : "var(--text-secondary)",
+        fontWeight: metrica.destaque || negativo ? 600 : 400,
       }}
+      title={negativo ? "Negativo — sinal de recebimento não capturado (ver aviso no topo da página)" : undefined}
     >
       {vazio ? <span className="text-[var(--text-muted)]">—</span> : valor.toLocaleString("pt-BR")}
     </td>
