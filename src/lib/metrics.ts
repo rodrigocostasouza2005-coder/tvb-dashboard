@@ -3248,7 +3248,9 @@ export async function getMapaDeComprasDetalhado(
     set.add(produto);
     produtosPorGrupo.set(grupo, set);
   }
-  for (const [key] of [...vendasByKey, ...recebimentoByKey]) {
+  // Inclui bonifByKey também — achado na auditoria de 2026-09-02: produto que só existe via
+  // Brinde (nunca vendido, nunca com estoque, nunca produzido) sumia silenciosamente da grade.
+  for (const [key] of [...vendasByKey, ...recebimentoByKey, ...bonifByKey]) {
     const [grupo, produto] = key.split("::");
     const set = produtosPorGrupo.get(grupo) ?? new Set<string>();
     set.add(produto);

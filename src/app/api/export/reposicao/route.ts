@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { getSessionUser } from "@/lib/auth";
 import { getReplenishment } from "@/lib/metrics";
-import { getGrupoRestriction } from "@/lib/permissions";
+import { getGrupoRestriction, getStoreRestriction } from "@/lib/permissions";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import ExcelJS from "exceljs";
 
@@ -33,9 +33,10 @@ export async function GET(request: NextRequest) {
   }
 
   const grupoIn = await getGrupoRestriction(user.role);
+  const allowedStores = getStoreRestriction(user);
   const colecaoParam = rawParams.colecao;
   const colecaoIn = Array.isArray(colecaoParam) ? colecaoParam : typeof colecaoParam === "string" && colecaoParam ? [colecaoParam] : undefined;
-  const filters = { ...parseFilters(rawParams), grupoIn, colecaoIn };
+  const filters = { ...parseFilters(rawParams, { allowedStoreIds: allowedStores }), grupoIn, colecaoIn };
   const rows = (await getReplenishment(filters)).slice().sort((a, b) =>
     a.storeName.localeCompare(b.storeName, "pt-BR") ||
     a.grupo.localeCompare(b.grupo, "pt-BR") ||

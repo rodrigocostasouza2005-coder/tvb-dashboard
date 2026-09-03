@@ -32,6 +32,13 @@ export default async function MapaComprasPage() {
         negativo lá no passado — os meses mais recentes (perto de hoje) são os mais confiáveis, já
         que partem direto do estoque real atual.
       </p>
+      <p className="mb-4 text-xs text-[var(--text-muted)]">
+        Atenção 2: a projeção NÃO considera época do ano — usa só a tendência dos últimos meses. Num
+        grupo sazonal, se o mês recente foi de baixa (ex: inverno), a projeção assume que vai
+        continuar baixa, mesmo que historicamente suba na próxima estação. Só ~1 ano de histórico
+        real ainda, cedo pra isolar padrão sazonal de tendência de verdade — use com cautela em
+        grupos que você sabe que têm pico de temporada.
+      </p>
 
       <MapaComprasGrid grupos={grupos} />
     </div>
