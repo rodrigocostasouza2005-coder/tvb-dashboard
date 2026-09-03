@@ -3171,16 +3171,16 @@ export async function getMapaDeComprasDetalhado(
 
   const grupoFiltro = filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty;
 
-  const [vendasRows, devolucaoRows, recebimentoRows, bonifRows, vendasParcialRows, recebimentoParcialRows, bonifParcialRows, estoqueAtualRows, metasRows] =
+  const [vendasRows, devolucaoRows, recebimentoRows, bonifRows, vendasParcialRows, recebimentoParcialRows, bonifParcialRows, estoqueAtualRows, metasRows, configRow] =
     await Promise.all([
-      prisma.$queryRaw<{ grupo: string; produto: string; mes: Date; unidades: bigint }[]>`
-      SELECT "grupo", "produto", DATE_TRUNC('month', ("saleDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo') AS mes, SUM("quantidade") AS unidades
+      prisma.$queryRaw<{ grupo: string; produto: string; mes: Date; unidades: bigint; receita: number }[]>`
+      SELECT "grupo", "produto", DATE_TRUNC('month', ("saleDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo') AS mes, SUM("quantidade") AS unidades, SUM("valorTotalLiquido") AS receita
       FROM "Sale"
       WHERE "saleDate" >= ${inicioHistorico} AND "saleDate" < ${inicioMesAtual} AND "grupo" != '(sem grupo)' ${grupoFiltro}
       GROUP BY "grupo", "produto", mes
     `,
-      prisma.$queryRaw<{ grupo: string; produto: string; mes: Date; unidades: bigint }[]>`
-      SELECT "grupo", "produto", DATE_TRUNC('month', ("returnDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo') AS mes, SUM("quantidade") AS unidades
+      prisma.$queryRaw<{ grupo: string; produto: string; mes: Date; unidades: bigint; receita: number }[]>`
+      SELECT "grupo", "produto", DATE_TRUNC('month', ("returnDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo') AS mes, SUM("quantidade") AS unidades, SUM("valorTotal") AS receita
       FROM "Return"
       WHERE "returnDate" >= ${inicioHistorico} AND "returnDate" < ${inicioMesAtual} AND "grupo" != '(sem grupo)' ${grupoFiltro}
       GROUP BY "grupo", "produto", mes
@@ -3220,10 +3220,32 @@ export async function getMapaDeComprasDetalhado(
         _sum: { quantidadeDisponivel: true },
       }),
       prisma.coberturaMeta.findMany(),
+      prisma.mapaComprasConfig.findUnique({ where: { id: "global" } }),
     ]);
+
+  const crescimentoPct = configRow?.crescimentoPct ?? 0;
 
   const vendasByKey = somaChave(vendasRows);
   const devolucaoByKey = somaChave(devolucaoRows);
+  // Receita líquida por grupo::produto::mes (vendas - devolução, mesma chave/formato de
+  // vendasByKey) — usada só pra projetar o futuro (ano anterior × crescimento), não aparece
+  // como coluna na grade.
+  const receitaVendasByKey = new Map<string, number>();
+  for (const r of vendasRows) {
+    const mesStr = new Date(r.mes).toISOString().slice(0, 7);
+    const key = `${r.grupo}::${r.produto}::${mesStr}`;
+    receitaVendasByKey.set(key, (receitaVendasByKey.get(key) ?? 0) + Number(r.receita));
+  }
+  const receitaDevolucaoByKey = new Map<string, number>();
+  for (const r of devolucaoRows) {
+    const mesStr = new Date(r.mes).toISOString().slice(0, 7);
+    const key = `${r.grupo}::${r.produto}::${mesStr}`;
+    receitaDevolucaoByKey.set(key, (receitaDevolucaoByKey.get(key) ?? 0) + Number(r.receita));
+  }
+  function receitaLiquida(grupo: string, produto: string, mes: string): number {
+    const mesKey = `${grupo}::${produto}::${mes}`;
+    return (receitaVendasByKey.get(mesKey) ?? 0) - (receitaDevolucaoByKey.get(mesKey) ?? 0);
+  }
   const recebimentoByKey = somaChave(recebimentoRows);
   const bonifByKey = somaChave(bonifRows);
 
@@ -3257,8 +3279,55 @@ export async function getMapaDeComprasDetalhado(
     produtosPorGrupo.set(grupo, set);
   }
 
+  // Receita por GRUPO (soma de todos os produtos) em cada mês passado — base pra "ano anterior"
+  // e pra participação (%) de cada produto dentro da receita do grupo.
+  const receitaGrupoPorMes = new Map<string, Map<string, number>>();
+  for (const [grupo, produtosSet] of produtosPorGrupo) {
+    const porMesGrupo = new Map<string, number>();
+    for (const mes of mesesPassados) {
+      let soma = 0;
+      for (const produto of produtosSet) soma += receitaLiquida(grupo, produto, mes);
+      porMesGrupo.set(mes, soma);
+    }
+    receitaGrupoPorMes.set(grupo, porMesGrupo);
+  }
+
+  // Participação de cada produto na receita do grupo — pedido do Rodrigo em 2026-09-03: "usar o
+  // % da receita de cada produto do mês anterior". Mês de referência = último mês completo
+  // realizado. Sem receita nenhuma do grupo nesse mês, divide igual entre os produtos (em vez de
+  // zerar todo mundo à toa).
+  const mesReferenciaShare = mesesPassados[mesesPassados.length - 1];
+  function shareProduto(grupo: string, produto: string): number {
+    const receitaGrupoRef = receitaGrupoPorMes.get(grupo)?.get(mesReferenciaShare) ?? 0;
+    if (receitaGrupoRef <= 0) {
+      const qtdProdutos = produtosPorGrupo.get(grupo)?.size ?? 1;
+      return 1 / qtdProdutos;
+    }
+    return receitaLiquida(grupo, produto, mesReferenciaShare) / receitaGrupoRef;
+  }
+
+  // Projeção de receita do GRUPO por mês futuro = receita do MESMO MÊS DO ANO ANTERIOR ×
+  // (1 + crescimento que o Rodrigo escolhe) — mesma lógica de "Crescimento do Ticket" da
+  // planilha dele, mas em cima da receita (mês contra mês, ano contra ano), não de uma média/
+  // tendência calculada. Calculado em ordem cronológica pra que o mês futuro mais distante possa
+  // referenciar um mês futuro anterior já calculado (o histórico real só cobre ~12 meses).
+  const mesesFuturosGlobal = todosMeses.filter((m) => m >= mesAtual);
+  const receitaProjetadaGrupoPorMes = new Map<string, Map<string, number>>();
+  for (const [grupo] of produtosPorGrupo) {
+    const porMesGrupo = receitaGrupoPorMes.get(grupo)!;
+    const projetado = new Map<string, number>();
+    for (const mes of mesesFuturosGlobal) {
+      const [y, m] = mes.split("-").map(Number);
+      const mesAnoAnterior = `${y - 1}-${String(m).padStart(2, "0")}`;
+      const receitaAnoAnterior = porMesGrupo.get(mesAnoAnterior) ?? projetado.get(mesAnoAnterior) ?? 0;
+      projetado.set(mes, Math.max(0, receitaAnoAnterior * (1 + crescimentoPct / 100)));
+    }
+    receitaProjetadaGrupoPorMes.set(grupo, projetado);
+  }
+
   // Calcula a série de meses de UM produto (chave grupo::produto), reconstruindo pra trás a
-  // partir do estoque atual e projetando pra frente com a tendência.
+  // partir do estoque atual e projetando pra frente com receita (ano anterior × crescimento,
+  // distribuída pela participação do produto, convertida de volta pra unidade pelo preço médio).
   function calcularSerie(grupo: string, produto: string, coberturaMeses: number): MesMapaCompras[] {
     const key = `${grupo}::${produto}`;
     const estoqueAtual = estoqueAtualByKey.get(key) ?? 0;
@@ -3297,50 +3366,31 @@ export async function getMapaDeComprasDetalhado(
       estoqueFinalCursor = estoqueInicial;
     }
 
-    // Projeção pra frente COM sazonalidade — pedido do Rodrigo em 2026-09-03: a versão anterior
-    // (média + tendência plana repetida) não olhava a época do ano, errado pra um negócio de
-    // surfwear. Modelo de decomposição sazonal simples (multiplicativo), do jeito que dá pra
-    // fazer com só ~1 ano de histórico:
-    //  1) índice sazonal por mês do calendário = venda daquele mês (o único ano que temos) /
-    //     nível base (média de todo o histórico realizado) — capado 0.3x-3x pra 1 mês atípico
-    //     não distorcer demais. Mês do calendário sem histórico nenhum (produto/grupo não
-    //     existia ainda) usa índice neutro (1.0).
-    //  2) nível de tendência atual = média dos últimos 3 meses realizados, cada um DESSAZONALIZADO
-    //     (dividido pelo índice do mês dele) antes de tirar a média — isola "o negócio cresceu/
-    //     caiu de verdade" de "é só a época do ano", pra não confundir queda sazonal (ex: inverno)
-    //     com queda de tendência real.
-    //  3) projeção de cada mês futuro = nível de tendência × índice sazonal DO MÊS DELE — assim
-    //     um grupo que sempre vende mais no verão volta a projetar mais quando o mês futuro cair
-    //     no verão, em vez de ficar preso no patamar do último mês realizado.
-    const historico = mesesPassados.map((m) => ({ mesCalendario: m.slice(5, 7), vendas: porMes.get(m)?.vendas ?? 0 }));
-    const nivelBase = historico.length > 0 ? historico.reduce((s, h) => s + h.vendas, 0) / historico.length : 0;
-
-    const indiceSazonalPorMesCalendario = new Map<string, number>();
-    if (nivelBase > 0) {
-      const somaPorMesCal = new Map<string, { soma: number; qtd: number }>();
-      for (const h of historico) {
-        const cur = somaPorMesCal.get(h.mesCalendario) ?? { soma: 0, qtd: 0 };
-        cur.soma += h.vendas;
-        cur.qtd += 1;
-        somaPorMesCal.set(h.mesCalendario, cur);
-      }
-      for (const [mesCal, { soma, qtd }] of somaPorMesCal) {
-        const indice = soma / qtd / nivelBase;
-        indiceSazonalPorMesCalendario.set(mesCal, Math.max(0.3, Math.min(3, indice)));
-      }
-    }
-    function indiceSazonal(mesCalendario: string): number {
-      return indiceSazonalPorMesCalendario.get(mesCalendario) ?? 1;
-    }
-
-    const ultimos3 = mesesPassados.slice(-3).map((m) => ({ mesCalendario: m.slice(5, 7), vendas: porMes.get(m)?.vendas ?? 0 }));
-    const dessazonalizados = ultimos3.map((u) => u.vendas / indiceSazonal(u.mesCalendario));
-    const nivelTendencia = dessazonalizados.length > 0 ? dessazonalizados.reduce((s, v) => s + v, 0) / dessazonalizados.length : 0;
+    // Projeção pra frente por RECEITA — pedido direto do Rodrigo em 2026-09-03, comparando com a
+    // fórmula real da planilha dele ("Crescimento do Ticket" aplicado sobre a receita, mês
+    // contra mês do ano anterior): receita do grupo no mesmo mês do ano anterior × (1 +
+    // crescimento escolhido por ele), distribuída pra esse produto pela % de participação dele
+    // na receita do grupo (mês de referência = último mês completo), convertida de volta pra
+    // unidade pelo preço médio de venda do produto nos últimos 3 meses (fallback: histórico
+    // inteiro; sem nenhuma venda ainda, projeta 0).
+    const receitaUltimos3 = mesesPassados.slice(-3).reduce((s, m) => s + receitaLiquida(grupo, produto, m), 0);
+    const unidadesUltimos3 = mesesPassados.slice(-3).reduce((s, m) => s + (porMes.get(m)?.vendas ?? 0), 0);
+    const receitaTodoHistorico = mesesPassados.reduce((s, m) => s + receitaLiquida(grupo, produto, m), 0);
+    const unidadesTodoHistorico = mesesPassados.reduce((s, m) => s + (porMes.get(m)?.vendas ?? 0), 0);
+    const precoMedio =
+      unidadesUltimos3 > 0
+        ? receitaUltimos3 / unidadesUltimos3
+        : unidadesTodoHistorico > 0
+          ? receitaTodoHistorico / unidadesTodoHistorico
+          : 0;
+    const share = shareProduto(grupo, produto);
+    const receitaProjetadaGrupo = receitaProjetadaGrupoPorMes.get(grupo)!;
 
     let estoqueInicialCursor = estoqueInicioMesAtual;
-    const mesesFuturos = todosMeses.filter((m) => m >= mesAtual);
+    const mesesFuturos = mesesFuturosGlobal;
     for (const mes of mesesFuturos) {
-      const vendasProjetadas = Math.max(0, Math.round(nivelTendencia * indiceSazonal(mes.slice(5, 7))));
+      const receitaProjetadaProduto = (receitaProjetadaGrupo.get(mes) ?? 0) * share;
+      const vendasProjetadas = precoMedio > 0 ? Math.max(0, Math.round(receitaProjetadaProduto / precoMedio)) : 0;
       const estoqueInicial = estoqueInicialCursor;
       const estoqueFinal = estoqueInicial - vendasProjetadas;
       const estoqueIdeal = vendasProjetadas * coberturaMeses;
@@ -3405,6 +3455,19 @@ export async function setCoberturaMeta(grupo: string, mesesCobertura: number) {
     where: { grupo },
     create: { grupo, mesesCobertura },
     update: { mesesCobertura },
+  });
+}
+
+export async function getCrescimentoEsperado(): Promise<number> {
+  const row = await prisma.mapaComprasConfig.findUnique({ where: { id: "global" } });
+  return row?.crescimentoPct ?? 0;
+}
+
+export async function setCrescimentoEsperado(crescimentoPct: number) {
+  await prisma.mapaComprasConfig.upsert({
+    where: { id: "global" },
+    create: { id: "global", crescimentoPct },
+    update: { crescimentoPct },
   });
 }
 

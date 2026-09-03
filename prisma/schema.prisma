@@ -97,6 +97,15 @@ model CoberturaMeta {
   updatedAt       DateTime @updatedAt
 }
 
+// Mapa de Compras — % de crescimento de receita esperado que o Rodrigo escolhe (ele mesmo, não
+// calculado), aplicado sobre a receita do mesmo mês do ano anterior pra projetar cada mês futuro
+// — mesma lógica da linha "Crescimento do Ticket" da planilha dele. Uma linha só (id fixo
+// "global"), configuração da empresa toda, não por grupo — pedido do Rodrigo em 2026-09-03.
+model MapaComprasConfig {
+  id             String @id
+  crescimentoPct Float
+}
+
 // Registros ficam denormalizados (grupo/cor/tamanho/coleção direto na linha) porque é assim
 // que o DAPIC/Power BI já exportam — evita um modelo de produto separado que a fonte não tem.
 model Sale {

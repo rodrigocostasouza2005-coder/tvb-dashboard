@@ -1,8 +1,9 @@
 import { getSessionUser } from "@/lib/auth";
-import { getMapaDeComprasDetalhado } from "@/lib/metrics";
+import { getMapaDeComprasDetalhado, getCrescimentoEsperado } from "@/lib/metrics";
 import { getGrupoRestriction } from "@/lib/permissions";
 import { requireTabAccess } from "@/lib/tabs";
 import { MapaComprasGrid } from "./mapa-compras-grid";
+import { updateCrescimentoAction } from "./actions";
 
 export default async function MapaComprasPage() {
   const user = await getSessionUser();
@@ -10,7 +11,10 @@ export default async function MapaComprasPage() {
   requireTabAccess(user, user.role, "mapa-compras");
 
   const grupoIn = await getGrupoRestriction(user.role);
-  const grupos = await getMapaDeComprasDetalhado({ grupoIn });
+  const [grupos, crescimentoPct] = await Promise.all([
+    getMapaDeComprasDetalhado({ grupoIn }),
+    getCrescimentoEsperado(),
+  ]);
 
   return (
     <div>
@@ -24,16 +28,32 @@ export default async function MapaComprasPage() {
         (meses, editável por grupo). Falta comprar nos meses futuros considera que NADA é comprado
         (recebimento futuro = 0) — de propósito, pra mostrar o tamanho real do buraco se não agir.
       </p>
-      <p className="mb-4 text-xs text-[var(--text-muted)]">
-        Projeção com sazonalidade: pra cada mês futuro, calcula um índice sazonal por mês do
-        calendário (ex: "Julho vende historicamente 40% acima da média desse grupo") a partir do
-        único ano de histórico disponível, e aplica esse índice sobre o nível de tendência atual
-        (últimos 3 meses, já descontada a própria sazonalidade deles). Um grupo que sempre vende
-        mais no verão volta a projetar mais quando o mês futuro cair no verão, em vez de ficar preso
-        no patamar do mês mais recente. Como só tem ~1 ano de histórico, o índice de cada mês vem de
-        uma amostra só (não é uma média de vários anos) — mais confiável conforme o histórico
-        crescer com o tempo.
-      </p>
+
+      <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-[var(--series-1)] bg-[var(--surface-1)] p-3">
+        <form action={updateCrescimentoAction} className="flex items-center gap-2">
+          <label className="text-sm text-[var(--text-secondary)]">Crescimento de receita esperado (ano vs. ano):</label>
+          <input
+            type="number"
+            name="crescimentoPct"
+            defaultValue={crescimentoPct}
+            step={1}
+            className="w-20 rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1 text-right text-sm tabular-nums text-[var(--text-primary)]"
+          />
+          <span className="text-sm text-[var(--text-secondary)]">%</span>
+          <button type="submit" className="rounded-md border border-[var(--border)] px-2.5 py-1 text-sm text-[var(--text-secondary)] hover:bg-[var(--page-plane)]">
+            Salvar
+          </button>
+        </form>
+        <p className="text-xs text-[var(--text-muted)]">
+          Projeção por receita: receita de cada grupo no mesmo mês do ano anterior × (1 +
+          crescimento acima), distribuída pra cada produto pela % de participação dele na receita
+          do grupo no último mês completo, convertida pra unidades pelo preço médio de venda de
+          cada produto (últimos 3 meses). Mesma lógica da sua planilha ("Crescimento do Ticket"
+          aplicado sobre receita, ano contra ano) — você escolhe o número, não é calculado
+          sozinho.
+        </p>
+      </div>
+
       <p className="mb-4 text-xs text-[var(--text-muted)]">
         Atenção: "Recebimento" só enxerga produção interna (ordem de produção) — o DAPIC não tem
         (ou eu ainda não achei) um endpoint de "compra de fornecedor" separado disso. Grupo que
