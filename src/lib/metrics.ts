@@ -3265,10 +3265,15 @@ export async function getMapaDeComprasDetalhado(
 
     const fluxoParcialAtual =
       (recebimentoParcialByKey.get(key) ?? 0) - (vendasParcialByKey.get(key) ?? 0) - (bonifParcialByKey.get(key) ?? 0);
-    const estoqueInicioMesAtual = estoqueAtual - fluxoParcialAtual;
+    // Estoque físico nunca é negativo (achado do Rodrigo em 2026-09-03) — trava em 0 sempre que a
+    // reconstrução daria negativo. Isso normalmente revela um "recebimento" que a gente não
+    // enxerga (produto comprado pronto de fornecedor, não via ordem de produção — ver aviso na
+    // tela), não que o estoque realmente ficou negativo.
+    const estoqueInicioMesAtual = Math.max(0, estoqueAtual - fluxoParcialAtual);
 
     // Reconstrói pra trás: estoqueInicial(M) = estoqueFinal(M) - fluxoLiquido(M), onde
-    // estoqueFinal(M) = estoqueInicial(M+1) por continuidade.
+    // estoqueFinal(M) = estoqueInicial(M+1) por continuidade. Travado em 0 a cada passo, e o
+    // valor JÁ TRAVADO é que encadeia pro mês anterior (senão o negativo "vaza" pra trás inteiro).
     const porMes = new Map<string, MesMapaCompras>();
     let estoqueFinalCursor = estoqueInicioMesAtual;
     for (let i = mesesPassados.length - 1; i >= 0; i--) {
@@ -3278,7 +3283,7 @@ export async function getMapaDeComprasDetalhado(
       const recebimento = recebimentoByKey.get(mesKey) ?? 0;
       const bonificacoes = bonifByKey.get(mesKey) ?? 0;
       const estoqueFinal = estoqueFinalCursor;
-      const estoqueInicial = estoqueFinal - recebimento + vendas + bonificacoes;
+      const estoqueInicial = Math.max(0, estoqueFinal - recebimento + vendas + bonificacoes);
       porMes.set(mes, {
         mes,
         tipo: "realizado",
@@ -3293,19 +3298,52 @@ export async function getMapaDeComprasDetalhado(
       estoqueFinalCursor = estoqueInicial;
     }
 
-    // Projeção pra frente: média líquida dos últimos 3 meses completos + tendência do mês mais
-    // recente, capada -50%/+100%.
-    const ultimos3 = mesesPassados.slice(-3).map((m) => porMes.get(m)?.vendas ?? 0);
-    const mediaMensal = ultimos3.length > 0 ? ultimos3.reduce((s, v) => s + v, 0) / ultimos3.length : 0;
-    const ultimoValor = ultimos3.length > 0 ? ultimos3[ultimos3.length - 1] : 0;
-    const tendenciaPct = mediaMensal > 0 ? Math.max(-0.5, Math.min(1, (ultimoValor - mediaMensal) / mediaMensal)) : 0;
-    const vendasProjetadas = Math.max(0, Math.round(mediaMensal * (1 + tendenciaPct)));
+    // Projeção pra frente COM sazonalidade — pedido do Rodrigo em 2026-09-03: a versão anterior
+    // (média + tendência plana repetida) não olhava a época do ano, errado pra um negócio de
+    // surfwear. Modelo de decomposição sazonal simples (multiplicativo), do jeito que dá pra
+    // fazer com só ~1 ano de histórico:
+    //  1) índice sazonal por mês do calendário = venda daquele mês (o único ano que temos) /
+    //     nível base (média de todo o histórico realizado) — capado 0.3x-3x pra 1 mês atípico
+    //     não distorcer demais. Mês do calendário sem histórico nenhum (produto/grupo não
+    //     existia ainda) usa índice neutro (1.0).
+    //  2) nível de tendência atual = média dos últimos 3 meses realizados, cada um DESSAZONALIZADO
+    //     (dividido pelo índice do mês dele) antes de tirar a média — isola "o negócio cresceu/
+    //     caiu de verdade" de "é só a época do ano", pra não confundir queda sazonal (ex: inverno)
+    //     com queda de tendência real.
+    //  3) projeção de cada mês futuro = nível de tendência × índice sazonal DO MÊS DELE — assim
+    //     um grupo que sempre vende mais no verão volta a projetar mais quando o mês futuro cair
+    //     no verão, em vez de ficar preso no patamar do último mês realizado.
+    const historico = mesesPassados.map((m) => ({ mesCalendario: m.slice(5, 7), vendas: porMes.get(m)?.vendas ?? 0 }));
+    const nivelBase = historico.length > 0 ? historico.reduce((s, h) => s + h.vendas, 0) / historico.length : 0;
+
+    const indiceSazonalPorMesCalendario = new Map<string, number>();
+    if (nivelBase > 0) {
+      const somaPorMesCal = new Map<string, { soma: number; qtd: number }>();
+      for (const h of historico) {
+        const cur = somaPorMesCal.get(h.mesCalendario) ?? { soma: 0, qtd: 0 };
+        cur.soma += h.vendas;
+        cur.qtd += 1;
+        somaPorMesCal.set(h.mesCalendario, cur);
+      }
+      for (const [mesCal, { soma, qtd }] of somaPorMesCal) {
+        const indice = soma / qtd / nivelBase;
+        indiceSazonalPorMesCalendario.set(mesCal, Math.max(0.3, Math.min(3, indice)));
+      }
+    }
+    function indiceSazonal(mesCalendario: string): number {
+      return indiceSazonalPorMesCalendario.get(mesCalendario) ?? 1;
+    }
+
+    const ultimos3 = mesesPassados.slice(-3).map((m) => ({ mesCalendario: m.slice(5, 7), vendas: porMes.get(m)?.vendas ?? 0 }));
+    const dessazonalizados = ultimos3.map((u) => u.vendas / indiceSazonal(u.mesCalendario));
+    const nivelTendencia = dessazonalizados.length > 0 ? dessazonalizados.reduce((s, v) => s + v, 0) / dessazonalizados.length : 0;
 
     let estoqueInicialCursor = estoqueInicioMesAtual;
     const mesesFuturos = todosMeses.filter((m) => m >= mesAtual);
     for (const mes of mesesFuturos) {
+      const vendasProjetadas = Math.max(0, Math.round(nivelTendencia * indiceSazonal(mes.slice(5, 7))));
       const estoqueInicial = estoqueInicialCursor;
-      const estoqueFinal = estoqueInicial - vendasProjetadas;
+      const estoqueFinal = Math.max(0, estoqueInicial - vendasProjetadas);
       const estoqueIdeal = vendasProjetadas * coberturaMeses;
       const faltaComprar = Math.max(0, Math.round(estoqueIdeal - estoqueInicial));
       porMes.set(mes, {

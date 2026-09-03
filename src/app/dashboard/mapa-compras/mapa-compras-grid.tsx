@@ -131,7 +131,11 @@ export function MapaComprasGrid({ grupos }: { grupos: GrupoLinha[] }) {
   const mesesHeader = grupos[0]?.meses.map((m) => m.mes) ?? [];
 
   return (
-    <div className="overflow-x-auto overflow-y-visible rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+    // max-h + overflow-auto nos dois eixos — achado do Rodrigo em 2026-09-03: "sticky top-0" só
+    // trava de verdade em relação ao ANCESTRAL QUE ROLA. Sem altura limitada aqui, o container só
+    // crescia (nunca rolava sozinho) e quem rolava era a página inteira — a linha de data não
+    // ficava fixa porque não tinha nada, dentro deste elemento, rolando de verdade.
+    <div className="max-h-[75vh] overflow-auto rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
       <table className="w-full border-collapse text-sm">
         <thead>
           <tr>

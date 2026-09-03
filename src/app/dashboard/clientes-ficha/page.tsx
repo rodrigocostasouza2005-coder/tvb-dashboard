@@ -1,6 +1,6 @@
 import { getSessionUser } from "@/lib/auth";
 import { getStores, getMarcas, getTabelasPreco, getClienteFicha } from "@/lib/metrics";
-import { canSeeFinancials, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
+import { canSeeFinancials, getMarcaRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { waHref } from "@/lib/whatsapp";
@@ -37,7 +37,9 @@ export default async function ClientesFichaPage({
   if (!user) return null;
   requireTabAccess(user, user.role, "clientes-ficha");
 
-  const allowedStores = getStoreRestriction(user);
+  // Ficha do Cliente sempre libera todas as lojas, independente da restrição do usuário —
+  // pedido do Rodrigo em 2026-09-03 (precisa ver o histórico do cliente na base toda).
+  const allowedStores = undefined;
   const allowedMarcas = getMarcaRestriction(user);
   const allowedTabelasPreco = getTabelaPrecoRestriction(user);
   const rawParams = await searchParams;

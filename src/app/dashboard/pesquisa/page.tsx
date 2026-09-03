@@ -1,6 +1,6 @@
 import { getSessionUser } from "@/lib/auth";
 import { searchStockVsSalesComTamanhos, getTopClientes, getDailySalesByProduto, getStores, getMarcas, getTabelasPreco } from "@/lib/metrics";
-import { canSeeFinancials, getGrupoRestriction, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
+import { canSeeFinancials, getGrupoRestriction, getMarcaRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
 import { parseFilters, brasiliaDayStart, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { waHref } from "@/lib/whatsapp";
@@ -33,7 +33,9 @@ export default async function PesquisaPage({
   const filtrosOpen = rawParams.filtros === "1";
   const query = typeof rawParams.q === "string" ? rawParams.q : "";
   const grupoIn = await getGrupoRestriction(user.role);
-  const allowedStores = getStoreRestriction(user);
+  // Pesquisa sempre libera todas as lojas, independente da restrição do usuário — pedido do
+  // Rodrigo em 2026-09-03 (busca de produto/cliente precisa ver a base toda).
+  const allowedStores = undefined;
   const allowedMarcas = getMarcaRestriction(user);
   const allowedTabelasPreco = getTabelaPrecoRestriction(user);
   const filters = {
