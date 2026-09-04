@@ -8,10 +8,12 @@ type MesLinha = {
   tipo: "realizado" | "projetado";
   estoqueInicial: number;
   recebimento: number;
+  entradaNaoCapturada: number;
   vendas: number;
   bonificacoes: number;
   estoqueFinal: number;
   estoqueIdeal: number;
+  coberturaAtual: number | null;
   faltaComprar: number;
 };
 
@@ -24,40 +26,52 @@ function formatMes(mes: string) {
   return `${MES_NOMES[parseInt(m) - 1]}/${y.slice(2)}`;
 }
 
-const METRICAS: { key: keyof MesLinha; label: string; destaque?: boolean }[] = [
+const METRICAS: { key: keyof MesLinha; label: string; destaque?: boolean; decimal?: boolean }[] = [
   { key: "estoqueInicial", label: "Estoque inicial" },
-  { key: "recebimento", label: "Recebimento (produção)" },
+  { key: "recebimento", label: "Recebimento (produção + falta comprar)" },
+  { key: "entradaNaoCapturada", label: "Entrada não capturada" },
   { key: "vendas", label: "Vendas (líquido)" },
   { key: "bonificacoes", label: "Bonificações" },
   { key: "estoqueFinal", label: "Estoque final", destaque: true },
   { key: "estoqueIdeal", label: "Estoque ideal (cobertura)" },
+  { key: "coberturaAtual", label: "Cobertura (meses)", decimal: true },
   { key: "faltaComprar", label: "Falta comprar", destaque: true },
 ];
 
-function Celula({ valor, mes, metrica }: { valor: number; mes: MesLinha; metrica: (typeof METRICAS)[number] }) {
+function Celula({ valor, mes, metrica }: { valor: number | null; mes: MesLinha; metrica: (typeof METRICAS)[number] }) {
   const isFalta = metrica.key === "faltaComprar";
-  const vazio = valor === 0 && (isFalta || mes.tipo === "realizado" ? metrica.key !== "estoqueFinal" && metrica.key !== "estoqueInicial" : false);
-  // Negativo em estoque não é escondido (decisão do Rodrigo em 2026-09-03) — destacado em
-  // vermelho porque é sinal real de "recebimento que não estamos enxergando", não erro de conta.
-  const negativo = valor < 0 && (metrica.key === "estoqueInicial" || metrica.key === "estoqueFinal");
+  const isEntradaNaoCapturada = metrica.key === "entradaNaoCapturada";
+  const vazio =
+    valor === null ||
+    (valor === 0 && (isFalta || isEntradaNaoCapturada || (mes.tipo === "realizado" ? metrica.key !== "estoqueFinal" && metrica.key !== "estoqueInicial" : false)));
+  // Estoque físico nunca é negativo (correção do Rodrigo em 2026-09-03) — o que antes aparecia
+  // como negativo agora vira "Entrada não capturada" (linha própria), destacada em laranja porque
+  // ainda é sinal real de "recebimento que não estamos enxergando", só que sem fingir que o
+  // estoque em si ficou negativo.
+  const alerta = isEntradaNaoCapturada && (valor ?? 0) > 0;
   return (
     <td
       className="min-w-[76px] border-b border-[var(--gridline)] px-2 py-1.5 text-right text-xs tabular-nums"
       style={{
         backgroundColor: mes.tipo === "projetado" ? "color-mix(in srgb, var(--series-1) 4%, transparent)" : undefined,
-        color:
-          negativo
+        color: alerta
+          ? "var(--status-warning, #b45309)"
+          : isFalta && (valor ?? 0) > 0
             ? "var(--status-critical)"
-            : isFalta && valor > 0
-              ? "var(--status-critical)"
-              : metrica.destaque
-                ? "var(--text-primary)"
-                : "var(--text-secondary)",
-        fontWeight: metrica.destaque || negativo ? 600 : 400,
+            : metrica.destaque
+              ? "var(--text-primary)"
+              : "var(--text-secondary)",
+        fontWeight: metrica.destaque || alerta ? 600 : 400,
       }}
-      title={negativo ? "Negativo — sinal de recebimento não capturado (ver aviso no topo da página)" : undefined}
+      title={alerta ? "Recebimento não capturado pelo DAPIC nesse mês (ver aviso no topo da página)" : undefined}
     >
-      {vazio ? <span className="text-[var(--text-muted)]">—</span> : valor.toLocaleString("pt-BR")}
+      {vazio ? (
+        <span className="text-[var(--text-muted)]">—</span>
+      ) : metrica.decimal ? (
+        valor!.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })
+      ) : (
+        valor!.toLocaleString("pt-BR")
+      )}
     </td>
   );
 }
@@ -73,7 +87,7 @@ function BlocoLinhas({ meses, indent = false }: { meses: MesLinha[]; indent?: bo
             {metrica.label}
           </td>
           {meses.map((mes) => (
-            <Celula key={mes.mes} valor={mes[metrica.key] as number} mes={mes} metrica={metrica} />
+            <Celula key={mes.mes} valor={mes[metrica.key] as number | null} mes={mes} metrica={metrica} />
           ))}
         </tr>
       ))}

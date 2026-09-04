@@ -3076,10 +3076,17 @@ export type MesMapaCompras = {
   tipo: "realizado" | "projetado";
   estoqueInicial: number;
   recebimento: number;
+  // Estoque físico nunca é negativo (correção do Rodrigo em 2026-09-03: "nunca teve estoque
+  // negativo"). Quando a reconstrução pra trás dá negativo, é sinal de que "Recebimento" não
+  // capturou tudo que entrou naquele mês — em vez de mostrar o número impossível, trava em 0 e
+  // guarda o tamanho do buraco aqui, pra não esconder o problema real.
+  entradaNaoCapturada: number;
   vendas: number;
   bonificacoes: number;
   estoqueFinal: number;
   estoqueIdeal: number;
+  // Meses de cobertura no fim do mês (estoqueFinal ÷ vendas) — derivado, não é projeção própria.
+  coberturaAtual: number | null;
   faltaComprar: number;
 };
 
@@ -3142,13 +3149,13 @@ function somaChave<T extends { grupo: string; produto: string; mes: Date; unidad
 // que ter estado lá antes), então bate exato desde que a gente não tenha perdido nenhuma
 // venda/produção no meio do caminho.
 //
-// Meses futuros (projetado): vendas planejadas = média líquida dos últimos 3 meses completos,
-// ajustada pela tendência do mês mais recente vs a média (capada -50%/+100%), repetida flat pros
-// 12 meses seguintes — não modela sazonalidade ainda (só ~1 ano de histórico real, cedo pra isolar
-// padrão sazonal de tendência de verdade). Recebimento futuro = 0 (não simula pedido que ainda não
-// foi feito — "Falta comprar" É a recomendação, não um fato). Estoque Ideal = Vendas Planejadas ×
-// Cobertura (meses configurável por grupo). Falta comprar = Estoque Ideal − Estoque Inicial daquele
-// mês, só nos meses projetados (comprar pro passado não existe).
+// Meses futuros (projetado): vendas planejadas por receita (ano anterior × crescimento, ver
+// abaixo). Recebimento futuro = "Falta comprar" do PRÓPRIO mês — pedido do Rodrigo em 2026-09-03:
+// a projeção assume que a compra recomendada é feita na hora, então o estoque nunca fica devendo o
+// que já foi sinalizado como necessário (estoque físico nunca é negativo, nem no passado
+// reconstruído nem na projeção). Estoque Ideal = Vendas Planejadas × Cobertura (meses configurável
+// por grupo). Falta comprar = Estoque Ideal − Estoque Inicial daquele mês (antes da compra), só nos
+// meses projetados (comprar pro passado não existe).
 export async function getMapaDeComprasDetalhado(
   filters: Pick<DashboardFilters, "grupoIn">
 ): Promise<MapaComprasGrupo[]> {
@@ -3334,14 +3341,17 @@ export async function getMapaDeComprasDetalhado(
 
     const fluxoParcialAtual =
       (recebimentoParcialByKey.get(key) ?? 0) - (vendasParcialByKey.get(key) ?? 0) - (bonifParcialByKey.get(key) ?? 0);
-    const estoqueInicioMesAtual = estoqueAtual - fluxoParcialAtual;
+    // Estoque físico nunca é negativo (correção do Rodrigo em 2026-09-03) — trava em 0 mesmo nessa
+    // fronteira do mês corrente.
+    const estoqueInicioMesAtual = Math.max(0, estoqueAtual - fluxoParcialAtual);
 
     // Reconstrói pra trás: estoqueInicial(M) = estoqueFinal(M) - fluxoLiquido(M), onde
-    // estoqueFinal(M) = estoqueInicial(M+1) por continuidade. NÃO trava em 0 — matemática honesta
-    // (decisão do Rodrigo em 2026-09-03: travar escondia o problema em vez de mostrar a causa
-    // real). Quando dá negativo aqui, é sinal de que "Recebimento" não capturou tudo que entrou
-    // em estoque naquele mês (produto comprado pronto de fornecedor, não via ordem de produção —
-    // ver aviso na tela) — não que o estoque físico realmente ficou negativo.
+    // estoqueFinal(M) = estoqueInicial(M+1) por continuidade. Nunca deixa dar negativo (estoque
+    // físico não pode ser negativo — nunca foi, correção direta do Rodrigo em 2026-09-03). Quando o
+    // cálculo daria negativo, é sinal de que "Recebimento" não capturou tudo que entrou em estoque
+    // naquele mês (produto comprado pronto de fornecedor, não via ordem de produção — ver aviso na
+    // tela): trava em 0 e guarda o tamanho do buraco em "entradaNaoCapturada", pra não esconder o
+    // problema (só escondendo o número impossível, não o problema).
     const porMes = new Map<string, MesMapaCompras>();
     let estoqueFinalCursor = estoqueInicioMesAtual;
     for (let i = mesesPassados.length - 1; i >= 0; i--) {
@@ -3351,16 +3361,21 @@ export async function getMapaDeComprasDetalhado(
       const recebimento = recebimentoByKey.get(mesKey) ?? 0;
       const bonificacoes = bonifByKey.get(mesKey) ?? 0;
       const estoqueFinal = estoqueFinalCursor;
-      const estoqueInicial = estoqueFinal - recebimento + vendas + bonificacoes;
+      const estoqueInicialBruto = estoqueFinal - recebimento + vendas + bonificacoes;
+      const entradaNaoCapturada = Math.max(0, Math.round(-estoqueInicialBruto));
+      const estoqueInicial = Math.max(0, Math.round(estoqueInicialBruto));
+      const estoqueFinalArred = Math.round(estoqueFinal);
       porMes.set(mes, {
         mes,
         tipo: "realizado",
-        estoqueInicial: Math.round(estoqueInicial),
+        estoqueInicial,
         recebimento,
+        entradaNaoCapturada,
         vendas,
         bonificacoes,
-        estoqueFinal: Math.round(estoqueFinal),
+        estoqueFinal: estoqueFinalArred,
         estoqueIdeal: Math.round(vendas * coberturaMeses),
+        coberturaAtual: vendas > 0 ? Math.round((estoqueFinalArred / vendas) * 10) / 10 : null,
         faltaComprar: 0, // comprar pro passado não existe, só informativo
       });
       estoqueFinalCursor = estoqueInicial;
@@ -3392,18 +3407,24 @@ export async function getMapaDeComprasDetalhado(
       const receitaProjetadaProduto = (receitaProjetadaGrupo.get(mes) ?? 0) * share;
       const vendasProjetadas = precoMedio > 0 ? Math.max(0, Math.round(receitaProjetadaProduto / precoMedio)) : 0;
       const estoqueInicial = estoqueInicialCursor;
-      const estoqueFinal = estoqueInicial - vendasProjetadas;
       const estoqueIdeal = vendasProjetadas * coberturaMeses;
+      // "Falta comprar" já entra como recebimento no PRÓPRIO mês (pedido do Rodrigo em
+      // 2026-09-03: a projeção assume que a compra recomendada é feita na hora) — o estoque
+      // projetado nunca fica devendo o que a própria tela está recomendando comprar.
       const faltaComprar = Math.max(0, Math.round(estoqueIdeal - estoqueInicial));
+      const recebimento = faltaComprar;
+      const estoqueFinal = Math.max(0, estoqueInicial + recebimento - vendasProjetadas);
       porMes.set(mes, {
         mes,
         tipo: "projetado",
         estoqueInicial: Math.round(estoqueInicial),
-        recebimento: 0,
+        recebimento,
+        entradaNaoCapturada: 0,
         vendas: vendasProjetadas,
         bonificacoes: 0,
         estoqueFinal: Math.round(estoqueFinal),
         estoqueIdeal: Math.round(estoqueIdeal),
+        coberturaAtual: vendasProjetadas > 0 ? Math.round((estoqueFinal / vendasProjetadas) * 10) / 10 : null,
         faltaComprar,
       });
       estoqueInicialCursor = estoqueFinal;
@@ -3415,15 +3436,21 @@ export async function getMapaDeComprasDetalhado(
   function somarSeries(series: MesMapaCompras[][]): MesMapaCompras[] {
     return todosMeses.map((mes, i) => {
       const linhas = series.map((s) => s[i]);
+      const vendas = linhas.reduce((s, l) => s + l.vendas, 0);
+      const estoqueFinal = linhas.reduce((s, l) => s + l.estoqueFinal, 0);
       return {
         mes,
         tipo: linhas[0]?.tipo ?? "realizado",
         estoqueInicial: linhas.reduce((s, l) => s + l.estoqueInicial, 0),
         recebimento: linhas.reduce((s, l) => s + l.recebimento, 0),
-        vendas: linhas.reduce((s, l) => s + l.vendas, 0),
+        entradaNaoCapturada: linhas.reduce((s, l) => s + l.entradaNaoCapturada, 0),
+        vendas,
         bonificacoes: linhas.reduce((s, l) => s + l.bonificacoes, 0),
-        estoqueFinal: linhas.reduce((s, l) => s + l.estoqueFinal, 0),
+        estoqueFinal,
         estoqueIdeal: linhas.reduce((s, l) => s + l.estoqueIdeal, 0),
+        // Cobertura do grupo não é a média das coberturas por produto — recalcula do total
+        // (senão um produto zerado com "cobertura null" distorceria a média).
+        coberturaAtual: vendas > 0 ? Math.round((estoqueFinal / vendas) * 10) / 10 : null,
         faltaComprar: linhas.reduce((s, l) => s + l.faltaComprar, 0),
       };
     });
