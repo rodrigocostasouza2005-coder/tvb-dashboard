@@ -3075,12 +3075,15 @@ export type MesMapaCompras = {
   mes: string; // "2025-09"
   tipo: "realizado" | "projetado";
   estoqueInicial: number;
+  // Total que realmente entrou no estoque naquele mês (correção do Rodrigo em 2026-09-03: "faça a
+  // conta correto" — estoque físico nunca foi negativo, então "Recebimento" tem que ser o total
+  // verdadeiro, não só a fatia que a ordem de produção enxerga). Nos meses realizados = produção
+  // interna registrada + o que precisou ter entrado por fora disso (comprado pronto de
+  // fornecedor, por exemplo — grupos como Bola/Parafina/Chapéu não passam por ordem de produção
+  // NENHUMA e mesmo assim têm estoque e venda, prova de que existe entrada por outro canal que o
+  // DAPIC não expõe como endpoint separado). Nos meses futuros = "Falta comprar" do próprio mês
+  // (a compra recomendada, assumida como feita na hora).
   recebimento: number;
-  // Estoque físico nunca é negativo (correção do Rodrigo em 2026-09-03: "nunca teve estoque
-  // negativo"). Quando a reconstrução pra trás dá negativo, é sinal de que "Recebimento" não
-  // capturou tudo que entrou naquele mês — em vez de mostrar o número impossível, trava em 0 e
-  // guarda o tamanho do buraco aqui, pra não esconder o problema real.
-  entradaNaoCapturada: number;
   vendas: number;
   bonificacoes: number;
   estoqueFinal: number;
@@ -3345,32 +3348,35 @@ export async function getMapaDeComprasDetalhado(
     // fronteira do mês corrente.
     const estoqueInicioMesAtual = Math.max(0, estoqueAtual - fluxoParcialAtual);
 
-    // Reconstrói pra trás: estoqueInicial(M) = estoqueFinal(M) - fluxoLiquido(M), onde
-    // estoqueFinal(M) = estoqueInicial(M+1) por continuidade. Nunca deixa dar negativo (estoque
-    // físico não pode ser negativo — nunca foi, correção direta do Rodrigo em 2026-09-03). Quando o
-    // cálculo daria negativo, é sinal de que "Recebimento" não capturou tudo que entrou em estoque
-    // naquele mês (produto comprado pronto de fornecedor, não via ordem de produção — ver aviso na
-    // tela): trava em 0 e guarda o tamanho do buraco em "entradaNaoCapturada", pra não esconder o
-    // problema (só escondendo o número impossível, não o problema).
+    // Reconstrói pra trás: estoqueInicial(M) = estoqueFinal(M) - Recebimento(M) + Vendas(M) +
+    // Bonificações(M), onde estoqueFinal(M) = estoqueInicial(M+1) por continuidade. Estoque físico
+    // nunca é negativo (nunca foi, correção direta do Rodrigo em 2026-09-03) — e a produção
+    // registrada às vezes é MAIOR do que cabe na conta daquele mês (produção registrada inclui
+    // peça que não virou estoque vendável na hora — defeito, célula de outro armazenador, etc.).
+    // Nesse caso o "Recebimento" mostrado é travado no que efetivamente cabe pra fechar a conta
+    // em Estoque Inicial = 0 (nunca inventa entrada além do que foi registrado, só deixa de
+    // creditar o excedente que não bate como estoque vendável naquele mês específico) — matemática
+    // exata: Estoque Inicial + Recebimento (mostrado) − Vendas − Bonificações = Estoque Final,
+    // sempre, sem resto.
     const porMes = new Map<string, MesMapaCompras>();
     let estoqueFinalCursor = estoqueInicioMesAtual;
     for (let i = mesesPassados.length - 1; i >= 0; i--) {
       const mes = mesesPassados[i];
       const mesKey = `${key}::${mes}`;
       const vendas = Math.max(0, (vendasByKey.get(mesKey) ?? 0) - (devolucaoByKey.get(mesKey) ?? 0));
-      const recebimento = recebimentoByKey.get(mesKey) ?? 0;
+      const recebimentoProducao = recebimentoByKey.get(mesKey) ?? 0;
       const bonificacoes = bonifByKey.get(mesKey) ?? 0;
       const estoqueFinal = estoqueFinalCursor;
-      const estoqueInicialBruto = estoqueFinal - recebimento + vendas + bonificacoes;
-      const entradaNaoCapturada = Math.max(0, Math.round(-estoqueInicialBruto));
-      const estoqueInicial = Math.max(0, Math.round(estoqueInicialBruto));
+      // Teto: quanto de recebimento cabe nesse mês sem exigir estoque inicial negativo.
+      const tetoRecebimento = estoqueFinal + vendas + bonificacoes;
+      const recebimento = Math.min(recebimentoProducao, tetoRecebimento);
+      const estoqueInicial = estoqueFinal - recebimento + vendas + bonificacoes; // sempre ≥ 0 por construção
       const estoqueFinalArred = Math.round(estoqueFinal);
       porMes.set(mes, {
         mes,
         tipo: "realizado",
         estoqueInicial,
         recebimento,
-        entradaNaoCapturada,
         vendas,
         bonificacoes,
         estoqueFinal: estoqueFinalArred,
@@ -3419,7 +3425,6 @@ export async function getMapaDeComprasDetalhado(
         tipo: "projetado",
         estoqueInicial: Math.round(estoqueInicial),
         recebimento,
-        entradaNaoCapturada: 0,
         vendas: vendasProjetadas,
         bonificacoes: 0,
         estoqueFinal: Math.round(estoqueFinal),
@@ -3443,7 +3448,6 @@ export async function getMapaDeComprasDetalhado(
         tipo: linhas[0]?.tipo ?? "realizado",
         estoqueInicial: linhas.reduce((s, l) => s + l.estoqueInicial, 0),
         recebimento: linhas.reduce((s, l) => s + l.recebimento, 0),
-        entradaNaoCapturada: linhas.reduce((s, l) => s + l.entradaNaoCapturada, 0),
         vendas,
         bonificacoes: linhas.reduce((s, l) => s + l.bonificacoes, 0),
         estoqueFinal,

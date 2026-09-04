@@ -20,20 +20,19 @@ export default async function MapaComprasPage() {
     <div>
       <p className="mb-4 text-sm text-[var(--text-secondary)]">
         Razão de estoque mês a mês por grupo (clique pra abrir os produtos): Estoque inicial +
-        Recebimento − Vendas − Bonificações = Estoque final, que vira o inicial do mês seguinte.
-        Colunas com fundo azulado são <strong>projetadas</strong>; o resto é{" "}
-        <strong>realizado</strong>, reconstruído a partir do estoque atual andando pra trás até
-        set/2025 (não é dado gravado historicamente — é a matemática de conservação de estoque, já
-        que o snapshot só guarda o valor de agora). Estoque nunca aparece negativo: quando a conta
-        pra trás daria negativo, trava em 0 e o buraco vira "Entrada não capturada" (linha própria)
-        — sinal de recebimento que o DAPIC não enxergou, não estoque físico negativo (isso nunca
-        aconteceu de verdade). Estoque ideal = vendas projetadas × cobertura (meses, editável por
-        grupo). "Cobertura (meses)" mostra quanto o estoque final do mês cobre de vendas — é
-        derivado, não é uma previsão à parte. Nos meses futuros, "Recebimento" já inclui o "Falta
-        comprar" do próprio mês — a projeção assume que você compra o recomendado na hora, então o
-        estoque projetado nunca desaba: "Falta comprar" é a recomendação acumulada de quanto
-        comprar em cada mês pra manter a cobertura, não um estoque que vai faltar de verdade se você
-        seguir a recomendação.
+        Recebimento − Vendas − Bonificações = Estoque final, que vira o inicial do mês seguinte —
+        essa conta fecha exata em toda coluna, sem resto. Colunas com fundo azulado são{" "}
+        <strong>projetadas</strong>; o resto é <strong>realizado</strong>, reconstruído a partir do
+        estoque atual andando pra trás até set/2025 (não é dado gravado historicamente — é a
+        matemática de conservação de estoque, já que o snapshot só guarda o valor de agora). Estoque
+        nunca aparece negativo, porque fisicamente nunca foi (ver como isso é calculado no aviso
+        abaixo). Estoque ideal = vendas projetadas × cobertura (meses, editável por grupo).
+        "Cobertura (meses)" mostra quanto o estoque final do mês cobre de vendas — é derivado, não é
+        uma previsão à parte. Nos meses futuros, "Recebimento" já inclui o "Falta comprar" do
+        próprio mês — a projeção assume que você compra o recomendado na hora, então o estoque
+        projetado nunca desaba: "Falta comprar" é a recomendação acumulada de quanto comprar em cada
+        mês pra manter a cobertura, não um estoque que vai faltar de verdade se você seguir a
+        recomendação.
       </p>
 
       <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-[var(--series-1)] bg-[var(--surface-1)] p-3">
@@ -62,13 +61,16 @@ export default async function MapaComprasPage() {
       </div>
 
       <p className="mb-4 text-xs text-[var(--text-muted)]">
-        Atenção: "Recebimento" (nos meses realizados) só enxerga produção interna (ordem de
-        produção) — o DAPIC não tem (ou eu ainda não achei) um endpoint de "compra de fornecedor"
-        separado disso. Grupo que entra em estoque de outro jeito pode ter meses com "Entrada não
-        capturada" no passado — isso mostra o tamanho do buraco de dado sem fingir que o estoque
-        físico ficou negativo (nunca ficou). Os meses mais recentes (perto de hoje) são os mais
-        confiáveis, já que partem direto do estoque real atual. Bonificações (brindes) seguem só no
-        histórico realizado — não são projetadas pra frente (fica 0 nos meses futuros).
+        Como funciona a conta de "Recebimento" nos meses realizados: parte da produção registrada
+        numa ordem de produção (DAPIC) num mês não vira necessariamente estoque vendável NAQUELE
+        mesmo mês (pode ter ido pro armazenador de defeito da loja, ficado retida em outra etapa,
+        etc. — o DAPIC separa um "armazenador de defeitos" por loja, fora do estoque disponível).
+        Quando a produção registrada de um mês é maior do que cabe pra fechar a conta (Estoque
+        Inicial daria negativo), "Recebimento" mostra só o que efetivamente coube — nunca o número
+        completo registrado, nem um número inventado maior que ele. Os meses mais recentes (perto
+        de hoje) são os mais confiáveis, já que partem direto do estoque real atual. Bonificações
+        (brindes) seguem só no histórico realizado — não são projetadas pra frente (fica 0 nos
+        meses futuros).
       </p>
 
       <MapaComprasGrid grupos={grupos} />
