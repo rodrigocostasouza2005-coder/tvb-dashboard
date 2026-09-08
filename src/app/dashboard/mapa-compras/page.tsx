@@ -35,6 +35,35 @@ export default async function MapaComprasPage() {
         recomendação.
       </p>
 
+      <div className="mb-4 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3">
+        <h2 className="mb-2 text-sm font-medium text-[var(--text-secondary)]">
+          Como chegamos no número de "Vendas" projetadas (colunas futuras, por produto)
+        </h2>
+        <ol className="list-decimal space-y-1 pl-5 text-xs text-[var(--text-muted)]">
+          <li>Pega a receita líquida do GRUPO (não do produto) no mesmo mês do ano anterior.</li>
+          <li>
+            Aplica o "Crescimento de receita esperado" que você define abaixo (ex: 10% → multiplica
+            por 1,10).
+          </li>
+          <li>
+            Reparte essa receita projetada do grupo entre os produtos dele, usando o % de
+            participação de cada produto na receita do grupo no último mês completo realizado —
+            esse percentual fica fixo, não muda mês a mês.
+          </li>
+          <li>
+            Converte a fatia de receita projetada de cada produto em unidades, dividindo pelo preço
+            médio de venda desse produto (média dos últimos 3 meses; sem venda nesse período, cai
+            pra média do histórico inteiro). Produto sem nenhuma venda histórica projeta 0.
+          </li>
+        </ol>
+        <p className="mt-2 text-xs text-[var(--text-muted)]">
+          Se o "mesmo mês do ano anterior" também cair num mês futuro (grupo com pouco histórico), a
+          conta usa o valor já projetado desse mês anterior como base — efeito cascata. Mesma lógica
+          da sua planilha ("Crescimento do Ticket" aplicado sobre receita, ano contra ano) — você
+          escolhe o número do crescimento, o resto é calculado.
+        </p>
+      </div>
+
       <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-[var(--series-1)] bg-[var(--surface-1)] p-3">
         <form action={updateCrescimentoAction} className="flex items-center gap-2">
           <label className="text-sm text-[var(--text-secondary)]">Crescimento de receita esperado (ano vs. ano):</label>
@@ -50,14 +79,6 @@ export default async function MapaComprasPage() {
             Salvar
           </button>
         </form>
-        <p className="text-xs text-[var(--text-muted)]">
-          Projeção por receita: receita de cada grupo no mesmo mês do ano anterior × (1 +
-          crescimento acima), distribuída pra cada produto pela % de participação dele na receita
-          do grupo no último mês completo, convertida pra unidades pelo preço médio de venda de
-          cada produto (últimos 3 meses). Mesma lógica da sua planilha ("Crescimento do Ticket"
-          aplicado sobre receita, ano contra ano) — você escolhe o número, não é calculado
-          sozinho.
-        </p>
       </div>
 
       <p className="mb-4 text-xs text-[var(--text-muted)]">
