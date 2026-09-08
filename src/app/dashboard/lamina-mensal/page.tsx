@@ -1,3 +1,4 @@
+import Image from "next/image";
 import { getSessionUser } from "@/lib/auth";
 import { getMonthlySnapshotKpi, getMonthlySalesByStore, getMonthlyReturnsTotal, getSalesByDimension, getReturnsByDimension, netByReturns, getTopClientes, getStores, type DashboardFilters, type Canal } from "@/lib/metrics";
 import { canSeeFinancials, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction, getGrupoRestriction } from "@/lib/permissions";
@@ -7,6 +8,7 @@ import { waHref } from "@/lib/whatsapp";
 import { StatTile } from "../stat-tile";
 import { TrendChart } from "./trend-chart";
 import { CollapsibleFilters } from "../collapsible-filters";
+import { LaminaExport } from "./lamina-export";
 
 const DATA_START_MONTH = "2025-09";
 
@@ -199,14 +201,20 @@ export default async function LaminaMensalPage({
     return `/dashboard/lamina-mensal?${params.toString()}`;
   })();
 
+  // A lâmina exportada não leva os controles de filtro (são interativos) — essa linha deixa o
+  // recorte auto-explicativo pra quem só recebe a imagem/PDF, sem precisar abrir o dashboard.
+  const escopoPartes: string[] = [];
+  if (canal !== "todos") escopoPartes.push(canal === "b2b" ? "Canal: Atacado (B2B)" : "Canal: Varejo (B2C)");
+  if (rawStoreSelection.length > 0) {
+    const nomes = storeOptions.filter((s) => rawStoreSelection.includes(s.id)).map((s) => s.name);
+    if (nomes.length) escopoPartes.push(`Lojas: ${nomes.join(", ")}`);
+  }
+
   return (
     <div className="mx-auto max-w-3xl">
-      {/* Cabeçalho estilo lâmina */}
+      {/* Barra de navegação — não faz parte da lâmina exportada (é interativa) */}
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border)] pb-4">
-        <div>
-          <h1 className="text-lg font-semibold text-[var(--text-primary)]">TVB Shorts — Lâmina Mensal</h1>
-          <p className="text-sm text-[var(--text-secondary)]">{formatMonthLabel(month)}</p>
-        </div>
+        <h1 className="text-lg font-semibold text-[var(--text-primary)]">Lâmina Mensal</h1>
         <div className="flex items-center gap-2 text-sm">
           <a href={baseQuery({ month: shiftMonth(month, -1) })} className="rounded-md border border-[var(--border)] px-2 py-1 text-[var(--text-secondary)] hover:bg-[var(--page-plane)]">
             ← {formatMonthShort(shiftMonth(month, -1))}
@@ -297,129 +305,152 @@ export default async function LaminaMensalPage({
         )}
       </CollapsibleFilters>
 
-      {/* KPIs principais */}
-      {showFinancials && (
-        <div className="mb-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
-          <StatTile
-            label="Receita bruta"
-            value={formatBRL(curKpi.revenueBruta)}
-            subValue={changeLabel(revenueBrutaChange, compareLabel)}
-            status={trendPoint(revenueBrutaChange)}
-          />
-          <StatTile
-            label="Receita líquida"
-            value={formatBRL(curRevenueLiquida)}
-            subValue={changeLabel(revenueLiquidaChange, compareLabel)}
-            status={trendPoint(revenueLiquidaChange)}
-          />
-          <StatTile
-            label="Ticket médio"
-            value={formatBRL(curTicket)}
-            subValue={changeLabel(ticketChange, compareLabel)}
-            status={trendPoint(ticketChange)}
-          />
-        </div>
-      )}
-      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
-        <StatTile
-          label="Peças brutas"
-          value={curKpi.unitsBruta.toLocaleString("pt-BR")}
-          subValue={changeLabel(unitsBrutaChange, compareLabel)}
-          status={trendPoint(unitsBrutaChange)}
-        />
-        <StatTile
-          label="Peças líquidas"
-          value={curUnitsLiquida.toLocaleString("pt-BR")}
-          subValue={changeLabel(unitsLiquidaChange, compareLabel)}
-          status={trendPoint(unitsLiquidaChange)}
-        />
-        <StatTile
-          label="Pedidos"
-          value={curKpi.orderCount.toLocaleString("pt-BR")}
-          subValue={changeLabel(ordersChange, compareLabel)}
-          status={trendPoint(ordersChange)}
-        />
-      </div>
+      {/* Área exportável — tudo daqui pra baixo vira a imagem/PDF baixado */}
+      <LaminaExport filename={`TVB-Lamina-${month}`}>
+        <div className="mx-auto rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-6 shadow-[0_1px_2px_rgba(0,0,0,0.04)] sm:p-8">
+          {/* Letterhead */}
+          <div className="mb-5 flex items-center justify-between gap-4 border-b-2 border-[var(--series-1)] pb-4">
+            <div className="flex items-center gap-3">
+              <div className="rounded-md bg-white p-1 leading-[0]">
+                <Image src="/tvb-logo.png" alt="TVB Shorts" width={36} height={28} className="rounded-sm" />
+              </div>
+              <div>
+                <div className="text-xs font-medium tracking-wide text-[var(--text-muted)] uppercase">TVB Shorts</div>
+                <h2 className="text-xl font-semibold text-[var(--text-primary)]">Lâmina Mensal — {formatMonthLabel(month)}</h2>
+                {escopoPartes.length > 0 && (
+                  <p className="mt-0.5 text-xs text-[var(--text-secondary)]">{escopoPartes.join(" · ")}</p>
+                )}
+              </div>
+            </div>
+          </div>
 
-      {canal === "b2b" && (
-        <p className="mb-6 -mt-3 text-xs text-[var(--text-muted)]">
-          * B2B não tem devolução (é sempre B2C) — líquida = bruta nessa visão.
-        </p>
-      )}
+          {/* KPIs principais */}
+          <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
+            {showFinancials && (
+              <>
+                <StatTile
+                  label="Receita bruta"
+                  value={formatBRL(curKpi.revenueBruta)}
+                  subValue={changeLabel(revenueBrutaChange, compareLabel)}
+                  status={trendPoint(revenueBrutaChange)}
+                />
+                <StatTile
+                  label="Receita líquida"
+                  value={formatBRL(curRevenueLiquida)}
+                  subValue={changeLabel(revenueLiquidaChange, compareLabel)}
+                  status={trendPoint(revenueLiquidaChange)}
+                />
+                <StatTile
+                  label="Ticket médio"
+                  value={formatBRL(curTicket)}
+                  subValue={changeLabel(ticketChange, compareLabel)}
+                  status={trendPoint(ticketChange)}
+                />
+              </>
+            )}
+            <StatTile
+              label="Peças brutas"
+              value={curKpi.unitsBruta.toLocaleString("pt-BR")}
+              subValue={changeLabel(unitsBrutaChange, compareLabel)}
+              status={trendPoint(unitsBrutaChange)}
+            />
+            <StatTile
+              label="Peças líquidas"
+              value={curUnitsLiquida.toLocaleString("pt-BR")}
+              subValue={changeLabel(unitsLiquidaChange, compareLabel)}
+              status={trendPoint(unitsLiquidaChange)}
+            />
+            <StatTile
+              label="Pedidos"
+              value={curKpi.orderCount.toLocaleString("pt-BR")}
+              subValue={changeLabel(ordersChange, compareLabel)}
+              status={trendPoint(ordersChange)}
+            />
+          </div>
 
-      {/* Tendência */}
-      {showFinancials && trendData.length >= 2 && (
-        <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-          <h2 className="mb-1 text-sm font-medium text-[var(--text-secondary)]">Tendência de receita líquida (últimos 6 meses)</h2>
-          <TrendChart data={trendData} />
-        </section>
-      )}
-
-      {/* Top produtos */}
-      <section className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-        <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Principais produtos faturados (receita líquida)</h2>
-        {top5.length === 0 ? (
-          <p className="text-sm text-[var(--text-muted)]">Sem vendas no período.</p>
-        ) : (
-          <ul className="flex flex-col gap-2">
-            {top5.map((p, i) => (
-              <li key={p.key} className="flex items-center gap-3">
-                <span className="w-4 text-xs font-medium text-[var(--text-muted)]">{i + 1}</span>
-                <span className="flex-1 truncate text-sm text-[var(--text-primary)]">{p.key}</span>
-                <div className="h-2 flex-1 max-w-[120px] overflow-hidden rounded-full bg-[var(--page-plane)]">
-                  <div
-                    className="h-full rounded-full bg-[var(--series-1)]"
-                    style={{ width: `${(p.revenue / maxRevenue) * 100}%` }}
-                  />
-                </div>
-                <span className="w-24 shrink-0 text-right text-xs tabular-nums text-[var(--text-secondary)]">
-                  {showFinancials ? formatBRL(p.revenue) : `${p.unitsSold.toLocaleString("pt-BR")} un.`}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      {showFinancials && (
-        <section className="mt-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-          <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Top 5 clientes do mês</h2>
-          {topClientes.length === 0 ? (
-            <p className="text-sm text-[var(--text-muted)]">Sem clientes identificados no período.</p>
-          ) : (
-            <ul className="flex flex-col gap-3">
-              {topClientes.map((c, i) => {
-                const telefone = c.telefone;
-                return (
-                  <li key={c.cliente} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-                    <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5">
-                      <span className="w-4 shrink-0 text-xs font-medium text-[var(--text-muted)]">{i + 1}</span>
-                      <span className="truncate text-sm text-[var(--text-primary)]">{c.cliente}</span>
-                      {telefone && (
-                        <a
-                          href={waHref(telefone)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="shrink-0 text-xs tabular-nums text-[var(--series-1)] hover:underline"
-                        >
-                          {telefone}
-                        </a>
-                      )}
-                    </span>
-                    <span className="shrink-0 text-right text-xs tabular-nums text-[var(--text-primary)]">
-                      {formatBRL(c.receitaLiquida)}
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
+          {canal === "b2b" && (
+            <p className="mb-6 -mt-4 text-xs text-[var(--text-muted)]">
+              * B2B não tem devolução (é sempre B2C) — líquida = bruta nessa visão.
+            </p>
           )}
-        </section>
-      )}
 
-      <p className="mt-6 text-center text-xs text-[var(--text-muted)]">
-        TVB Radar — gerado em {new Date().toLocaleDateString("pt-BR")}
-      </p>
+          {/* Tendência */}
+          {showFinancials && trendData.length >= 2 && (
+            <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--page-plane)] p-4">
+              <h3 className="mb-1 text-sm font-medium text-[var(--text-secondary)]">Tendência de receita líquida (últimos 6 meses)</h3>
+              <TrendChart data={trendData} />
+            </section>
+          )}
+
+          {/* Top produtos + Top clientes lado a lado — cabem os dois na largura fixa da lâmina */}
+          <div className={showFinancials ? "grid grid-cols-2 gap-4" : ""}>
+            <section className="rounded-lg border border-[var(--border)] bg-[var(--page-plane)] p-4">
+              <h3 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Principais produtos (receita líquida)</h3>
+              {top5.length === 0 ? (
+                <p className="text-sm text-[var(--text-muted)]">Sem vendas no período.</p>
+              ) : (
+                <ul className="flex flex-col gap-2">
+                  {top5.map((p, i) => (
+                    <li key={p.key} className="flex items-center gap-2">
+                      <span className="w-4 text-xs font-medium text-[var(--text-muted)]">{i + 1}</span>
+                      <span className="flex-1 truncate text-sm text-[var(--text-primary)]">{p.key}</span>
+                      <div className="h-2 w-16 shrink-0 overflow-hidden rounded-full bg-[var(--surface-1)]">
+                        <div
+                          className="h-full rounded-full bg-[var(--series-1)]"
+                          style={{ width: `${(p.revenue / maxRevenue) * 100}%` }}
+                        />
+                      </div>
+                      <span className="w-20 shrink-0 text-right text-xs tabular-nums text-[var(--text-secondary)]">
+                        {showFinancials ? formatBRL(p.revenue) : `${p.unitsSold.toLocaleString("pt-BR")} un.`}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+
+            {showFinancials && (
+              <section className="rounded-lg border border-[var(--border)] bg-[var(--page-plane)] p-4">
+                <h3 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Top 5 clientes do mês</h3>
+                {topClientes.length === 0 ? (
+                  <p className="text-sm text-[var(--text-muted)]">Sem clientes identificados no período.</p>
+                ) : (
+                  <ul className="flex flex-col gap-3">
+                    {topClientes.map((c, i) => {
+                      const telefone = c.telefone;
+                      return (
+                        <li key={c.cliente} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                          <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
+                            <span className="w-4 shrink-0 text-xs font-medium text-[var(--text-muted)]">{i + 1}</span>
+                            <span className="truncate text-sm text-[var(--text-primary)]">{c.cliente}</span>
+                            {telefone && (
+                              <a
+                                href={waHref(telefone)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="shrink-0 text-xs tabular-nums text-[var(--series-1)] hover:underline"
+                              >
+                                {telefone}
+                              </a>
+                            )}
+                          </span>
+                          <span className="shrink-0 text-right text-xs tabular-nums text-[var(--text-primary)]">
+                            {formatBRL(c.receitaLiquida)}
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </section>
+            )}
+          </div>
+
+          <p className="mt-6 border-t border-[var(--border)] pt-3 text-center text-xs text-[var(--text-muted)]">
+            TVB Radar — gerado em {new Date().toLocaleDateString("pt-BR")}
+          </p>
+        </div>
+      </LaminaExport>
     </div>
   );
 }
