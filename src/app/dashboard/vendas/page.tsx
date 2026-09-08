@@ -16,7 +16,7 @@ import {
   getStores,
   getMarcas,
   getTabelasPreco,
-  getAtacadoCidades,
+  getSiteVarejoCidades,
 } from "@/lib/metrics";
 import {
   canSeeFinancials,
@@ -67,7 +67,7 @@ export default async function VendasPage({
   // com cobertura de cidade praticamente completa (lojas físicas só tem ~50%, cliente avulso
   // sem cadastro não tem endereço). Respeita a mesma restrição de tabela de preço do usuário.
   const canSeeSiteMap = showFinancials && allowedTabelasPreco.includes("Tabela varejo");
-  const emptyAtacadoCidades: Awaited<ReturnType<typeof getAtacadoCidades>> = { rows: [], totalCidades: 0, totalEstados: 0 };
+  const emptyAtacadoCidades: Awaited<ReturnType<typeof getSiteVarejoCidades>> = { rows: [], totalCidades: 0, totalEstados: 0 };
 
   const emptySalesSubRows: Awaited<ReturnType<typeof getSalesByGrupoProduto>> = [];
   const emptyReturnSubRows: Awaited<ReturnType<typeof getReturnsByGrupoProduto>> = [];
@@ -103,7 +103,7 @@ export default async function VendasPage({
     getStores(allowedStores),
     getMarcas(allowedMarcas),
     getTabelasPreco(allowedTabelasPreco),
-    canSeeSiteMap ? getAtacadoCidades({ ...filters, tabelasPreco: ["Tabela varejo"] }) : Promise.resolve(emptyAtacadoCidades),
+    canSeeSiteMap ? getSiteVarejoCidades({ ...filters, tabelasPreco: ["Tabela varejo"] }) : Promise.resolve(emptyAtacadoCidades),
   ]);
   const totalUnits = rows.reduce((sum, r) => sum + r.unitsSold, 0);
   const totalReturned = returnRows.reduce((sum, r) => sum + r.unitsReturned, 0);

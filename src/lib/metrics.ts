@@ -3786,6 +3786,48 @@ export async function getAtacadoCidades(filters: DashboardFilters) {
   };
 }
 
+// Separada de getAtacadoCidades de propósito — bug achado pelo Rodrigo em 2026-09-08: o "Mapa de
+// vendas — Site" (aba Vendas) reaproveitava getAtacadoCidades passando tabelasPreco=["Tabela
+// varejo"], mas essa função sempre aplica canalWhere("b2b") por baixo dos panos (fix de
+// 2026-09-02, específico da aba Atacado-Cidades) — cruzar "é atacado" com "é varejo" ao mesmo
+// tempo sobrava quase nada (só RJ no teste real, deveria ter ~16 estados). Essa versão não tem
+// noção de canal nenhuma, só filtra por loja/tabela de preço/marca normal (saleWhere).
+export async function getSiteVarejoCidades(filters: DashboardFilters) {
+  const cdStore = await prisma.store.findFirst({ where: { code: "CD" } });
+  if (!cdStore) return { rows: [], totalCidades: 0, totalEstados: 0 };
+  if (filters.storeIds !== undefined && !filters.storeIds.includes(cdStore.id)) {
+    return { rows: [], totalCidades: 0, totalEstados: 0 };
+  }
+
+  const where: Prisma.SaleWhereInput = {
+    ...saleWhere(filters),
+    storeId: cdStore.id,
+    cidade: { not: null },
+  };
+
+  const rows = await prisma.sale.groupBy({
+    by: ["cidade", "estado"],
+    where,
+    _sum: { quantidade: true, valorTotalLiquido: true },
+    _count: { dapicVendaId: true },
+    orderBy: { _sum: { valorTotalLiquido: "desc" } },
+  });
+
+  const mapped = rows.map(r => ({
+    cidade: r.cidade ?? "—",
+    estado: r.estado ?? "—",
+    unidades: r._sum.quantidade ?? 0,
+    receita: r._sum.valorTotalLiquido ?? 0,
+    pedidos: r._count.dapicVendaId,
+  }));
+
+  return {
+    rows: mapped,
+    totalCidades: new Set(mapped.map(r => r.cidade)).size,
+    totalEstados: new Set(mapped.map(r => r.estado)).size,
+  };
+}
+
 export async function getAtacadoClientes(filters: DashboardFilters) {
   const cdStore = await prisma.store.findFirst({ where: { code: "CD" } });
   if (!cdStore) return { rows: [], totalClientes: 0, novosNoPeriodo: 0 };
