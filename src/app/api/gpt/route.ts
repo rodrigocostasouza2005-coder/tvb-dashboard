@@ -8,16 +8,18 @@ import {
   type Canal,
 } from "@/lib/metrics";
 import { brasiliaDayStart, brasiliaDayEnd, todayBrasiliaStr } from "@/lib/filters";
+import { verifyApiToken } from "@/lib/api-token";
 
 // API pra conectar o Radar num Custom GPT do ChatGPT (Actions) — pedido do Rodrigo em
 // 2026-09-08. Uma rota só (não uma por recurso) porque ele pediu "um link só": o parâmetro
-// "resource" escolhe o que consultar. Autenticação por token fixo (mesmo padrão do
-// CRON_SECRET em sync-runner.ts) — essa chave dá acesso a TUDO (sem a separação por
-// loja/marca/financeiro que o login normal tem), então é pra uso pessoal dele, não pra
-// compartilhar. Ver src/app/api/gpt/openapi/route.ts pro schema que ele cola no ChatGPT.
-function checkAuth(request: NextRequest): boolean {
+// "resource" escolhe o que consultar. Autenticação pelo token gerado no Painel Admin (ver
+// lib/api-token.ts) — essa chave dá acesso a TUDO (sem a separação por loja/marca/financeiro
+// que o login normal tem), então é pra uso pessoal dele, não pra compartilhar. Ver
+// src/app/api/gpt/openapi/route.ts pro schema que ele cola no ChatGPT.
+async function checkAuth(request: NextRequest): Promise<boolean> {
   const auth = request.headers.get("authorization");
-  return !!process.env.GPT_API_SECRET && auth === `Bearer ${process.env.GPT_API_SECRET}`;
+  const token = auth?.startsWith("Bearer ") ? auth.slice("Bearer ".length) : null;
+  return verifyApiToken(token);
 }
 
 function isDimension(v: string | null): v is Dimension {
@@ -29,7 +31,7 @@ function isCanal(v: string | null): v is Canal {
 }
 
 export async function GET(request: NextRequest) {
-  if (!checkAuth(request)) {
+  if (!(await checkAuth(request))) {
     return NextResponse.json({ error: "Não autorizado." }, { status: 401 });
   }
 

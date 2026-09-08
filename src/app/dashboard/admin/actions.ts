@@ -6,6 +6,7 @@ import { after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { hashPassword, getSessionUser } from "@/lib/auth";
 import { TABS, type TabKey } from "@/lib/tabs";
+import { generateApiToken } from "@/lib/api-token";
 import type { Role } from "@prisma/client";
 
 async function requireAdmin() {
@@ -150,5 +151,20 @@ export async function forceSyncAction(): Promise<{ ok: boolean; message: string 
   return {
     ok: true,
     message: "Sincronização iniciada! Você vai receber um aviso no Telegram quando terminar.",
+  };
+}
+
+// Gera (ou substitui) o token de API usado pelo Custom GPT/Conector MCP — o valor puro só existe
+// nesse retorno, nunca mais aparece depois (ver lib/api-token.ts).
+export async function generateApiTokenAction(): Promise<{ ok: boolean; message: string; token?: string }> {
+  await requireAdmin();
+
+  const token = await generateApiToken();
+  revalidatePath("/dashboard/admin");
+
+  return {
+    ok: true,
+    message: "Token gerado — copie agora, ele não vai aparecer de novo.",
+    token,
   };
 }

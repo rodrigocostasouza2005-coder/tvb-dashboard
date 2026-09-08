@@ -6,6 +6,8 @@ import { TABS, defaultAllowedTabs } from "@/lib/tabs";
 import { createUserAction, updateUserAction, resetPasswordAction, deleteUserAction } from "./actions";
 import { ForceSyncButton } from "./force-sync-button";
 import { SuccessBanner } from "./success-banner";
+import { ApiTokenSection } from "./api-token-section";
+import { getApiTokenStatus } from "@/lib/api-token";
 
 // A sincronização manual (ForceSyncButton) chama runSync() direto, que pode levar minutos
 // (estoque de 4 lojas + faturas) — sem isso a Server Action tomaria timeout no plano padrão.
@@ -91,11 +93,12 @@ export default async function AdminPage({
   if (user.role !== "ADMIN") redirect("/dashboard");
   const { ok } = await searchParams;
 
-  const [users, stores, marcas, tabelasPreco] = await Promise.all([
+  const [users, stores, marcas, tabelasPreco, apiTokenStatus] = await Promise.all([
     prisma.user.findMany({ orderBy: { createdAt: "asc" } }),
     getRawStores(),
     getMarcas(),
     getTabelasPreco(),
+    getApiTokenStatus(),
   ]);
 
   return (
@@ -118,6 +121,15 @@ export default async function AdminPage({
         </p>
         <ForceSyncButton />
       </section>
+
+      <ApiTokenSection
+        hasToken={apiTokenStatus.exists}
+        updatedAtLabel={
+          apiTokenStatus.updatedAt
+            ? apiTokenStatus.updatedAt.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })
+            : null
+        }
+      />
 
       <section className="mb-8 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
         <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Novo usuário</h2>
