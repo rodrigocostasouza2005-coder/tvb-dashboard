@@ -129,17 +129,20 @@ export default async function LaminaMensalPage({
   // devolve null (prev=0 é falsy), e os badges de variação somem sozinhos sem precisar de outra
   // condição espalhada pelo JSX.
   const zeroKpi = { unitsBruta: 0, revenueBruta: 0, orderCount: 0, unitsReturned: 0, valueReturned: 0 };
-  const [curKpi, cmpKpi, trendRaw, returnsPorMes, topProdutosBruta, returnsPorProduto, topClientes] = await Promise.all([
+  const [curKpi, cmpKpi, trendRaw, returnsPorMes, topGruposBruta, returnsPorGrupo, topProdutosBruta, returnsPorProduto, topClientes] = await Promise.all([
     getMonthlySnapshotKpi(curFilters, canal),
     isComparing ? getMonthlySnapshotKpi(cmpFilters, canal) : Promise.resolve(zeroKpi),
     getMonthlySalesByStore(trendFilters, canal),
     canal !== "b2b" ? getMonthlyReturnsTotal(trendFilters) : Promise.resolve(new Map<string, number>()),
+    getSalesByDimension(curFilters, "grupo", canal),
+    canal !== "b2b" ? getReturnsByDimension(curFilters, "grupo") : Promise.resolve([]),
     getSalesByDimension(curFilters, "produto", canal),
     canal !== "b2b" ? getReturnsByDimension(curFilters, "produto") : Promise.resolve([]),
     showFinancials ? getTopClientes(curFilters, null, 5, canal, true) : Promise.resolve([]),
   ]);
 
   // Devolução é sempre B2C — quando canal="b2b" nem buscamos devolução acima (líquida = bruta).
+  const topGrupos = netByReturns(topGruposBruta, returnsPorGrupo).sort((a, b) => b.revenue - a.revenue);
   const topProdutos = netByReturns(topProdutosBruta, returnsPorProduto).sort((a, b) => b.revenue - a.revenue);
 
   const trendData = trendRaw.data.map((d) => {
@@ -172,6 +175,8 @@ export default async function LaminaMensalPage({
 
   const top5 = topProdutos.slice(0, 5);
   const maxRevenue = Math.max(1, ...top5.map((p) => p.revenue));
+  const top5Grupos = topGrupos.slice(0, 5);
+  const maxRevenueGrupo = Math.max(1, ...top5Grupos.map((p) => p.revenue));
 
   const isCurrentMonth = month === todayMonth;
   const monthOptions = allMonthsSince(DATA_START_MONTH, todayMonth);
@@ -382,8 +387,33 @@ export default async function LaminaMensalPage({
             </section>
           )}
 
-          {/* Top produtos + Top clientes lado a lado — cabem os dois na largura fixa da lâmina */}
-          <div className={showFinancials ? "grid grid-cols-2 gap-4" : ""}>
+          {/* Principais grupos + Principais produtos lado a lado — cabem os dois na largura fixa da lâmina */}
+          <div className="mb-4 grid grid-cols-2 gap-4">
+            <section className="rounded-lg border border-[var(--border)] bg-[var(--page-plane)] p-4">
+              <h3 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Principais grupos (receita líquida)</h3>
+              {top5Grupos.length === 0 ? (
+                <p className="text-sm text-[var(--text-muted)]">Sem vendas no período.</p>
+              ) : (
+                <ul className="flex flex-col gap-2">
+                  {top5Grupos.map((g, i) => (
+                    <li key={g.key} className="flex items-center gap-2">
+                      <span className="w-4 text-xs font-medium text-[var(--text-muted)]">{i + 1}</span>
+                      <span className="flex-1 truncate text-sm text-[var(--text-primary)]">{g.key}</span>
+                      <div className="h-2 w-16 shrink-0 overflow-hidden rounded-full bg-[var(--surface-1)]">
+                        <div
+                          className="h-full rounded-full bg-[var(--series-1)]"
+                          style={{ width: `${(g.revenue / maxRevenueGrupo) * 100}%` }}
+                        />
+                      </div>
+                      <span className="w-20 shrink-0 text-right text-xs tabular-nums text-[var(--text-secondary)]">
+                        {showFinancials ? formatBRL(g.revenue) : `${g.unitsSold.toLocaleString("pt-BR")} un.`}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+
             <section className="rounded-lg border border-[var(--border)] bg-[var(--page-plane)] p-4">
               <h3 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Principais produtos (receita líquida)</h3>
               {top5.length === 0 ? (
@@ -408,43 +438,43 @@ export default async function LaminaMensalPage({
                 </ul>
               )}
             </section>
-
-            {showFinancials && (
-              <section className="rounded-lg border border-[var(--border)] bg-[var(--page-plane)] p-4">
-                <h3 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Top 5 clientes do mês</h3>
-                {topClientes.length === 0 ? (
-                  <p className="text-sm text-[var(--text-muted)]">Sem clientes identificados no período.</p>
-                ) : (
-                  <ul className="flex flex-col gap-3">
-                    {topClientes.map((c, i) => {
-                      const telefone = c.telefone;
-                      return (
-                        <li key={c.cliente} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-                          <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
-                            <span className="w-4 shrink-0 text-xs font-medium text-[var(--text-muted)]">{i + 1}</span>
-                            <span className="truncate text-sm text-[var(--text-primary)]">{c.cliente}</span>
-                            {telefone && (
-                              <a
-                                href={waHref(telefone)}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="shrink-0 text-xs tabular-nums text-[var(--series-1)] hover:underline"
-                              >
-                                {telefone}
-                              </a>
-                            )}
-                          </span>
-                          <span className="shrink-0 text-right text-xs tabular-nums text-[var(--text-primary)]">
-                            {formatBRL(c.receitaLiquida)}
-                          </span>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
-              </section>
-            )}
           </div>
+
+          {showFinancials && (
+            <section className="rounded-lg border border-[var(--border)] bg-[var(--page-plane)] p-4">
+              <h3 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Top 5 clientes do mês</h3>
+              {topClientes.length === 0 ? (
+                <p className="text-sm text-[var(--text-muted)]">Sem clientes identificados no período.</p>
+              ) : (
+                <ul className="flex flex-col gap-3">
+                  {topClientes.map((c, i) => {
+                    const telefone = c.telefone;
+                    return (
+                      <li key={c.cliente} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                        <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
+                          <span className="w-4 shrink-0 text-xs font-medium text-[var(--text-muted)]">{i + 1}</span>
+                          <span className="truncate text-sm text-[var(--text-primary)]">{c.cliente}</span>
+                          {telefone && (
+                            <a
+                              href={waHref(telefone)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="shrink-0 text-xs tabular-nums text-[var(--series-1)] hover:underline"
+                            >
+                              {telefone}
+                            </a>
+                          )}
+                        </span>
+                        <span className="shrink-0 text-right text-xs tabular-nums text-[var(--text-primary)]">
+                          {formatBRL(c.receitaLiquida)}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </section>
+          )}
 
           <p className="mt-6 border-t border-[var(--border)] pt-3 text-center text-xs text-[var(--text-muted)]">
             TVB Radar — gerado em {new Date().toLocaleDateString("pt-BR")}
