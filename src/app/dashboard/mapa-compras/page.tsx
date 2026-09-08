@@ -15,6 +15,9 @@ export default async function MapaComprasPage() {
     getMapaDeComprasDetalhado({ grupoIn }),
     getCrescimentoEsperado(),
   ]);
+  // Cobertura e Crescimento alimentam a recomendação de compra da empresa toda — só ADMIN/GESTAO
+  // edita (actions.ts já trava isso no servidor; aqui só escondemos o controle de quem não pode).
+  const canEdit = user.role === "ADMIN" || user.role === "GESTAO";
 
   return (
     <div>
@@ -65,20 +68,26 @@ export default async function MapaComprasPage() {
       </div>
 
       <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-[var(--series-1)] bg-[var(--surface-1)] p-3">
-        <form action={updateCrescimentoAction} className="flex items-center gap-2">
-          <label className="text-sm text-[var(--text-secondary)]">Crescimento de receita esperado (ano vs. ano):</label>
-          <input
-            type="number"
-            name="crescimentoPct"
-            defaultValue={crescimentoPct}
-            step={1}
-            className="w-20 rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1 text-right text-sm tabular-nums text-[var(--text-primary)]"
-          />
-          <span className="text-sm text-[var(--text-secondary)]">%</span>
-          <button type="submit" className="rounded-md border border-[var(--border)] px-2.5 py-1 text-sm text-[var(--text-secondary)] hover:bg-[var(--page-plane)]">
-            Salvar
-          </button>
-        </form>
+        {canEdit ? (
+          <form action={updateCrescimentoAction} className="flex items-center gap-2">
+            <label className="text-sm text-[var(--text-secondary)]">Crescimento de receita esperado (ano vs. ano):</label>
+            <input
+              type="number"
+              name="crescimentoPct"
+              defaultValue={crescimentoPct}
+              step={1}
+              className="w-20 rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1 text-right text-sm tabular-nums text-[var(--text-primary)]"
+            />
+            <span className="text-sm text-[var(--text-secondary)]">%</span>
+            <button type="submit" className="rounded-md border border-[var(--border)] px-2.5 py-1 text-sm text-[var(--text-secondary)] hover:bg-[var(--page-plane)]">
+              Salvar
+            </button>
+          </form>
+        ) : (
+          <span className="text-sm text-[var(--text-secondary)]">
+            Crescimento de receita esperado (ano vs. ano): <strong>{crescimentoPct}%</strong>
+          </span>
+        )}
       </div>
 
       <p className="mb-4 text-xs text-[var(--text-muted)]">
@@ -94,7 +103,7 @@ export default async function MapaComprasPage() {
         meses futuros).
       </p>
 
-      <MapaComprasGrid grupos={grupos} />
+      <MapaComprasGrid grupos={grupos} canEdit={canEdit} />
     </div>
   );
 }

@@ -80,7 +80,7 @@ function BlocoLinhas({ meses, indent = false }: { meses: MesLinha[]; indent?: bo
   );
 }
 
-function GrupoBloco({ grupo, mesesHeader }: { grupo: GrupoLinha; mesesHeader: string[] }) {
+function GrupoBloco({ grupo, mesesHeader, canEdit }: { grupo: GrupoLinha; mesesHeader: string[]; canEdit: boolean }) {
   const [aberto, setAberto] = useState(false);
   const faltaTotal = grupo.meses.reduce((s, m) => s + m.faltaComprar, 0);
 
@@ -95,7 +95,7 @@ function GrupoBloco({ grupo, mesesHeader }: { grupo: GrupoLinha; mesesHeader: st
         </td>
         {mesesHeader.map((mes, i) => (
           <td key={mes} className="bg-[var(--surface-1)] px-2 py-2">
-            {i === 0 && (
+            {i === 0 && canEdit && (
               <form action={updateCoberturaMetaAction} className="flex items-center gap-1 whitespace-nowrap">
                 <input type="hidden" name="grupo" value={grupo.grupo} />
                 <span className="text-[10px] text-[var(--text-muted)]">Cobertura</span>
@@ -109,6 +109,11 @@ function GrupoBloco({ grupo, mesesHeader }: { grupo: GrupoLinha; mesesHeader: st
                 />
                 <button type="submit" className="rounded-md border border-[var(--border)] px-1 text-[10px] text-[var(--text-muted)] hover:bg-[var(--page-plane)]" title="Salvar">✓</button>
               </form>
+            )}
+            {i === 0 && !canEdit && (
+              <span className="text-[10px] whitespace-nowrap text-[var(--text-muted)]">
+                Cobertura {grupo.coberturaMeses.toLocaleString("pt-BR")} meses
+              </span>
             )}
             {i === 1 && faltaTotal > 0 && (
               <span className="whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ backgroundColor: "color-mix(in srgb, var(--status-critical) 15%, transparent)", color: "var(--status-critical)" }}>
@@ -137,7 +142,7 @@ function GrupoBloco({ grupo, mesesHeader }: { grupo: GrupoLinha; mesesHeader: st
   );
 }
 
-export function MapaComprasGrid({ grupos }: { grupos: GrupoLinha[] }) {
+export function MapaComprasGrid({ grupos, canEdit }: { grupos: GrupoLinha[]; canEdit: boolean }) {
   const mesesHeader = grupos[0]?.meses.map((m) => m.mes) ?? [];
 
   return (
@@ -168,7 +173,7 @@ export function MapaComprasGrid({ grupos }: { grupos: GrupoLinha[] }) {
         </thead>
         <tbody>
           {grupos.map((grupo) => (
-            <GrupoBloco key={grupo.grupo} grupo={grupo} mesesHeader={mesesHeader} />
+            <GrupoBloco key={grupo.grupo} grupo={grupo} mesesHeader={mesesHeader} canEdit={canEdit} />
           ))}
           {grupos.length === 0 && (
             <tr>
