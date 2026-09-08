@@ -3101,6 +3101,59 @@ export async function getSugestoesRetiradaEstoque(
   return sugestoes.sort((a, b) => b.pctQuebrada - a.pctQuebrada || a.estoqueRestante - b.estoqueRestante);
 }
 
+// Grade de tamanho por texto de busca (grupo OU produto, contém, sem acento/case) — usada pela
+// API do GPT (/api/gpt), pedido do Rodrigo em 2026-09-08: perguntar "qual a grade de tal produto"
+// e ver, por loja, quanto tem de cada tamanho (incluindo os zerados), não só quem já está
+// "quebrado" acima do limiar (diferente de getSugestoesRetiradaEstoque, que só lista candidato a
+// retirada). Casa tanto "Classic Lisa" (grupo, agrega as cores todas) quanto "Classic Blue"
+// (produto específico).
+export async function getGradeTamanhoBusca(query: string, filters: Pick<DashboardFilters, "storeIds">) {
+  const sellingStores = await prisma.store.findMany({
+    where: {
+      sellsProducts: true,
+      code: { not: "CD" },
+      ...(filters.storeIds !== undefined ? { id: { in: filters.storeIds } } : {}),
+    },
+  });
+  const storeIds = sellingStores.map((s) => s.id);
+  const storeNameById = new Map(sellingStores.map((s) => [s.id, s.displayGroup ?? s.name]));
+
+  const rows = await prisma.stockSnapshot.findMany({
+    where: {
+      storeId: { in: storeIds },
+      grupo: { not: "(sem grupo)" },
+      OR: [
+        { grupo: { contains: query, mode: "insensitive" } },
+        { produto: { contains: query, mode: "insensitive" } },
+      ],
+    },
+    select: { storeId: true, tamanho: true, quantidadeDisponivel: true },
+  });
+
+  const porLoja = new Map<string, Map<string, number>>();
+  for (const r of rows) {
+    const tamanho = r.tamanho ?? "—";
+    const tamanhos = porLoja.get(r.storeId) ?? new Map<string, number>();
+    tamanhos.set(tamanho, (tamanhos.get(tamanho) ?? 0) + r.quantidadeDisponivel);
+    porLoja.set(r.storeId, tamanhos);
+  }
+
+  return [...porLoja.entries()]
+    .map(([storeId, tamanhosMap]) => {
+      const tamanhos = sortTamanhos([...tamanhosMap.keys()]).map((t) => ({ tamanho: t, quantidade: tamanhosMap.get(t)! }));
+      const zerados = tamanhos.filter((t) => t.quantidade === 0).length;
+      return {
+        loja: storeNameById.get(storeId) ?? storeId,
+        tamanhos,
+        tamanhosZerados: zerados,
+        tamanhosTotal: tamanhos.length,
+        pctQuebrada: tamanhos.length > 0 ? Math.round((zerados / tamanhos.length) * 1000) / 10 : 0,
+        gradeQuebrada: tamanhos.length > 0 && zerados / tamanhos.length >= LIMIAR_GRADE_QUEBRADA,
+      };
+    })
+    .sort((a, b) => b.pctQuebrada - a.pctQuebrada);
+}
+
 export type MesMapaCompras = {
   mes: string; // "2025-09"
   tipo: "realizado" | "projetado";
