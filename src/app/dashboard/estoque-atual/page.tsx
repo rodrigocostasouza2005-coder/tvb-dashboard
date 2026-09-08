@@ -42,6 +42,7 @@ export default async function EstoqueAtualPage({
   const showFinancials = canSeeFinancials(user);
   const totalQuantidade = rows.reduce((sum, r) => sum + r.quantidade, 0);
   const totalCusto = rows.reduce((sum, r) => sum + r.valorCusto, 0);
+  const totalVenda = rows.reduce((sum, r) => sum + r.valorVenda, 0);
 
   return (
     <div>
@@ -64,6 +65,12 @@ export default async function EstoqueAtualPage({
           <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
             <div className="text-xs font-medium text-[var(--text-muted)]">Valor de custo total</div>
             <div className="mt-1 text-2xl font-semibold tabular-nums">{formatBRL(totalCusto)}</div>
+          </div>
+        )}
+        {showFinancials && (
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
+            <div className="text-xs font-medium text-[var(--text-muted)]">Valor de venda total (varejo)</div>
+            <div className="mt-1 text-2xl font-semibold tabular-nums">{formatBRL(totalVenda)}</div>
           </div>
         )}
       </section>
@@ -128,6 +135,7 @@ export default async function EstoqueAtualPage({
                 </th>
                 <th className="px-4 py-2 font-medium">Quantidade</th>
                 {showFinancials && <th className="px-4 py-2 font-medium">Valor de custo</th>}
+                {showFinancials && <th className="px-4 py-2 font-medium">Valor de venda (varejo)</th>}
               </tr>
             </thead>
             <tbody>
@@ -139,11 +147,12 @@ export default async function EstoqueAtualPage({
                   <td className="px-4 py-2 font-medium">{r.key}</td>
                   <td className="px-4 py-2 tabular-nums">{r.quantidade.toLocaleString("pt-BR")}</td>
                   {showFinancials && <td className="px-4 py-2 tabular-nums">{formatBRL(r.valorCusto)}</td>}
+                  {showFinancials && <td className="px-4 py-2 tabular-nums">{formatBRL(r.valorVenda)}</td>}
                 </tr>
               ))}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={showFinancials ? 3 : 2} className="px-4 py-6 text-center text-[var(--text-muted)]">
+                  <td colSpan={showFinancials ? 4 : 2} className="px-4 py-6 text-center text-[var(--text-muted)]">
                     Sem estoque pro filtro selecionado.
                   </td>
                 </tr>

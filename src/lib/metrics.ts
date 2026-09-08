@@ -2900,38 +2900,68 @@ export async function getAllStores(allowedStoreIds?: string[]): Promise<StoreFil
   return groupStoresForFilter(stores);
 }
 
-export async function getEstoqueAtual(filters: Pick<DashboardFilters, "storeIds" | "grupoIn">, dimension: Dimension) {
-  const stock = await latestStockSnapshots(filters);
+// Preço de tabela "Tabela varejo" por cod (IdGradeProduto), pro valor de venda estimado do
+// estoque na aba Estoque Atual (pedido do Rodrigo em 2026-09-08: preço de venda varejo do lado
+// do de custo). Reaproveita o PriceCatalogCache já mantido pelo sync (ver
+// connectors/tabela-preco.ts) — o preço de cada tabela é o mesmo catálogo nacional independente
+// de qual loja fez a sync, confirmado comparando "cd-atacado" com "leblon" pro mesmo cod. Usa
+// "cd-atacado" por ser o cache mais completo (site+atacado enxerga todas as tabelas).
+let varejoPriceMapCache: { at: number; map: Map<string, number> } | null = null;
+const VAREJO_PRICE_CACHE_MS = 5 * 60 * 1000;
 
-  const byKey = new Map<string, { quantidade: number; valorCusto: number }>();
+async function getVarejoPriceMap(): Promise<Map<string, number>> {
+  if (varejoPriceMapCache && Date.now() - varejoPriceMapCache.at < VAREJO_PRICE_CACHE_MS) {
+    return varejoPriceMapCache.map;
+  }
+  const cache =
+    (await prisma.priceCatalogCache.findUnique({ where: { clientLabel: "cd-atacado" } })) ??
+    (await prisma.priceCatalogCache.findFirst());
+  const map = new Map<string, number>();
+  if (cache) {
+    const data = cache.data as Record<string, { table: string; valor: number }[]>;
+    for (const [cod, options] of Object.entries(data)) {
+      const varejo = options.find((o) => o.table === "Tabela varejo");
+      if (varejo) map.set(cod, varejo.valor);
+    }
+  }
+  varejoPriceMapCache = { at: Date.now(), map };
+  return map;
+}
+
+export async function getEstoqueAtual(filters: Pick<DashboardFilters, "storeIds" | "grupoIn">, dimension: Dimension) {
+  const [stock, varejoPrices] = await Promise.all([latestStockSnapshots(filters), getVarejoPriceMap()]);
+
+  const byKey = new Map<string, { quantidade: number; valorCusto: number; valorVenda: number }>();
   for (const s of stock) {
     const key = dimensionKey(dimension, s);
-    const acc = byKey.get(key) ?? { quantidade: 0, valorCusto: 0 };
+    const acc = byKey.get(key) ?? { quantidade: 0, valorCusto: 0, valorVenda: 0 };
     acc.quantidade += s.quantidadeDisponivel;
     acc.valorCusto += (s.valorCusto ?? 0) * s.quantidadeDisponivel;
+    acc.valorVenda += (varejoPrices.get(s.cod) ?? 0) * s.quantidadeDisponivel;
     byKey.set(key, acc);
   }
 
   return [...byKey.entries()]
-    .map(([key, v]) => ({ key, quantidade: v.quantidade, valorCusto: v.valorCusto }))
+    .map(([key, v]) => ({ key, quantidade: v.quantidade, valorCusto: v.valorCusto, valorVenda: v.valorVenda }))
     .sort((a, b) => b.quantidade - a.quantidade);
 }
 
 // Produtos dentro de cada grupo — usado pra expandir um grupo na aba Estoque Atual,
 // igual ao padrão getSalesByGrupoProduto/getGiftsByGrupoProduto.
 export async function getEstoqueAtualPorGrupoProduto(filters: Pick<DashboardFilters, "storeIds" | "grupoIn">) {
-  const stock = await latestStockSnapshots(filters);
+  const [stock, varejoPrices] = await Promise.all([latestStockSnapshots(filters), getVarejoPriceMap()]);
   // Chave composta separada — evita depender de split de string no nome do produto.
-  const byKey = new Map<string, { grupo: string; produto: string; quantidade: number; valorCusto: number }>();
+  const byKey = new Map<string, { grupo: string; produto: string; quantidade: number; valorCusto: number; valorVenda: number }>();
   for (const s of stock) {
     const mapKey = `${s.grupo}\x00${s.produto}`;
-    const acc = byKey.get(mapKey) ?? { grupo: s.grupo, produto: s.produto, quantidade: 0, valorCusto: 0 };
+    const acc = byKey.get(mapKey) ?? { grupo: s.grupo, produto: s.produto, quantidade: 0, valorCusto: 0, valorVenda: 0 };
     acc.quantidade += s.quantidadeDisponivel;
     acc.valorCusto += (s.valorCusto ?? 0) * s.quantidadeDisponivel;
+    acc.valorVenda += (varejoPrices.get(s.cod) ?? 0) * s.quantidadeDisponivel;
     byKey.set(mapKey, acc);
   }
   return [...byKey.values()]
-    .map((v) => ({ grupo: v.grupo, key: v.produto, quantidade: v.quantidade, valorCusto: v.valorCusto }))
+    .map((v) => ({ grupo: v.grupo, key: v.produto, quantidade: v.quantidade, valorCusto: v.valorCusto, valorVenda: v.valorVenda }))
     .sort((a, b) => b.quantidade - a.quantidade);
 }
 

@@ -2,8 +2,8 @@
 
 import { Fragment, useState } from "react";
 
-type Row = { key: string; quantidade: number; valorCusto: number };
-type ProdutoRow = { grupo: string; key: string; quantidade: number; valorCusto: number };
+type Row = { key: string; quantidade: number; valorCusto: number; valorVenda: number };
+type ProdutoRow = { grupo: string; key: string; quantidade: number; valorCusto: number; valorVenda: number };
 
 function formatBRL(value: number) {
   return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -40,6 +40,7 @@ export function ExpandableStockTable({
             <th className="px-4 py-2 font-medium">Quantidade</th>
             <th className="px-4 py-2 font-medium">% do total</th>
             {showFinancials && <th className="px-4 py-2 font-medium">Valor de custo</th>}
+            {showFinancials && <th className="px-4 py-2 font-medium">Valor de venda (varejo)</th>}
           </tr>
         </thead>
         <tbody>
@@ -70,6 +71,7 @@ export function ExpandableStockTable({
                     {totalQuantidade > 0 ? `${((r.quantidade / totalQuantidade) * 100).toFixed(1)}%` : "—"}
                   </td>
                   {showFinancials && <td className="px-4 py-2 tabular-nums">{formatBRL(r.valorCusto)}</td>}
+                  {showFinancials && <td className="px-4 py-2 tabular-nums">{formatBRL(r.valorVenda)}</td>}
                 </tr>
                 {isOpen &&
                   produtos.map((p) => (
@@ -84,6 +86,9 @@ export function ExpandableStockTable({
                       {showFinancials && (
                         <td className="px-4 py-1.5 tabular-nums text-[var(--text-secondary)]">{formatBRL(p.valorCusto)}</td>
                       )}
+                      {showFinancials && (
+                        <td className="px-4 py-1.5 tabular-nums text-[var(--text-secondary)]">{formatBRL(p.valorVenda)}</td>
+                      )}
                     </tr>
                   ))}
               </Fragment>
@@ -91,7 +96,7 @@ export function ExpandableStockTable({
           })}
           {rows.length === 0 && (
             <tr>
-              <td colSpan={showFinancials ? 4 : 3} className="px-4 py-6 text-center text-[var(--text-muted)]">
+              <td colSpan={showFinancials ? 5 : 3} className="px-4 py-6 text-center text-[var(--text-muted)]">
                 Sem estoque pro filtro selecionado.
               </td>
             </tr>
