@@ -3490,11 +3490,9 @@ export async function getMapaDeComprasDetalhado(
     });
   }
 
-  return grupos.sort((a, b) => {
-    const faltaA = a.meses[mesesPassados.length]?.faltaComprar ?? 0;
-    const faltaB = b.meses[mesesPassados.length]?.faltaComprar ?? 0;
-    return faltaB - faltaA;
-  });
+  // Ordem alfabética — pedido do Rodrigo em 2026-09-08 (antes era por "falta comprar" no mês
+  // atual, decrescente).
+  return grupos.sort((a, b) => a.grupo.localeCompare(b.grupo, "pt-BR"));
 }
 
 export async function setCoberturaMeta(grupo: string, mesesCobertura: number) {
