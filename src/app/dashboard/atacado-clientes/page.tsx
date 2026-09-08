@@ -1,6 +1,12 @@
 import { getSessionUser } from "@/lib/auth";
 import { getAtacadoClientes, getClienteRetencaoPorMes } from "@/lib/metrics";
-import { canSeeFinancials, getGrupoRestriction } from "@/lib/permissions";
+import {
+  canSeeFinancials,
+  getGrupoRestriction,
+  getStoreRestriction,
+  getMarcaRestriction,
+  getTabelaPrecoRestriction,
+} from "@/lib/permissions";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
@@ -20,7 +26,13 @@ export default async function AtacadoClientesPage({
   const filtrosOpen = (await searchParams).filtros === "1";
 
   const grupoIn = await getGrupoRestriction(user.role);
-  const filters = { ...parseFilters(await searchParams, {}), grupoIn };
+  const allowedStores = getStoreRestriction(user);
+  const allowedMarcas = getMarcaRestriction(user);
+  const allowedTabelasPreco = getTabelaPrecoRestriction(user);
+  const filters = {
+    ...parseFilters(await searchParams, { allowedStoreIds: allowedStores, allowedMarcas, allowedTabelasPreco }),
+    grupoIn,
+  };
   const showFinancials = canSeeFinancials(user);
 
   const [data, retencao] = await Promise.all([

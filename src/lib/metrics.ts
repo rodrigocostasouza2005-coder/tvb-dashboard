@@ -3679,6 +3679,11 @@ export async function getStockCoverage(
 export async function getAtacadoVendas(filters: DashboardFilters) {
   const cdStore = await prisma.store.findFirst({ where: { code: "CD" } });
   if (!cdStore) return { kpis: { receita: 0, pedidos: 0, unidades: 0, ticketMedio: 0 }, byDay: [], topProdutos: [] };
+  // Atacado só existe na loja CD — usuário restrito que não tem CD liberado não vê nada aqui
+  // (achado na auditoria de 2026-09-08: antes o storeId ficava hardcoded, ignorando a restrição).
+  if (filters.storeIds !== undefined && !filters.storeIds.includes(cdStore.id)) {
+    return { kpis: { receita: 0, pedidos: 0, unidades: 0, ticketMedio: 0 }, byDay: [], topProdutos: [] };
+  }
 
   // Cliente já classificado como atacado (canalWhere("b2b")), não tabelaPreco direto — achado na
   // auditoria de 2026-09-02: essa aba tinha o mesmo bug da Guarderia (cliente que negocia preço
@@ -3686,10 +3691,9 @@ export async function getAtacadoVendas(filters: DashboardFilters) {
   const b2bWhere = await canalWhere("b2b");
   const b2bClientes = [...(await getB2BClienteNomes())];
   const where: Prisma.SaleWhereInput = {
+    ...saleWhere(filters),
     storeId: cdStore.id,
-    saleDate: { gte: filters.from, lte: filters.to },
     AND: [b2bWhere],
-    ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
   };
 
   const [agg, byDayRaw, topGrupos] = await Promise.all([
@@ -3705,6 +3709,8 @@ export async function getAtacadoVendas(filters: DashboardFilters) {
         AND "saleDate" <= ${filters.to}
         AND ("tabelaPreco" = 'Tabela atacado' OR "clienteNome" = ANY(${b2bClientes}))
         ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
+        ${filters.marcas !== undefined ? Prisma.sql`AND "marca" = ANY(${filters.marcas})` : Prisma.empty}
+        ${filters.tabelasPreco !== undefined ? Prisma.sql`AND ("tabelaPreco" = ANY(${filters.tabelasPreco}) OR "tabelaPreco" IS NULL)` : Prisma.empty}
       GROUP BY day ORDER BY day ASC
     `,
     prisma.sale.groupBy({
@@ -3731,14 +3737,16 @@ export async function getAtacadoVendas(filters: DashboardFilters) {
 export async function getAtacadoCidades(filters: DashboardFilters) {
   const cdStore = await prisma.store.findFirst({ where: { code: "CD" } });
   if (!cdStore) return { rows: [], totalCidades: 0, totalEstados: 0 };
+  if (filters.storeIds !== undefined && !filters.storeIds.includes(cdStore.id)) {
+    return { rows: [], totalCidades: 0, totalEstados: 0 };
+  }
 
   // Mesmo fix de getAtacadoVendas — cliente já classificado como atacado, não tabelaPreco direto.
   const where: Prisma.SaleWhereInput = {
+    ...saleWhere(filters),
     storeId: cdStore.id,
-    saleDate: { gte: filters.from, lte: filters.to },
     cidade: { not: null },
     AND: [await canalWhere("b2b")],
-    ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
   };
 
   const rows = await prisma.sale.groupBy({
@@ -3767,6 +3775,9 @@ export async function getAtacadoCidades(filters: DashboardFilters) {
 export async function getAtacadoClientes(filters: DashboardFilters) {
   const cdStore = await prisma.store.findFirst({ where: { code: "CD" } });
   if (!cdStore) return { rows: [], totalClientes: 0, novosNoPeriodo: 0 };
+  if (filters.storeIds !== undefined && !filters.storeIds.includes(cdStore.id)) {
+    return { rows: [], totalClientes: 0, novosNoPeriodo: 0 };
+  }
 
   // Essa aba é especificamente sobre clientes de ATACADO (B2B) — sem esse filtro, misturava
   // com clientes de varejo do site (mesma loja física "Site+Atacado", canal diferente). Usa
@@ -3775,11 +3786,10 @@ export async function getAtacadoClientes(filters: DashboardFilters) {
   // null nessas linhas) ficava com pedidos/receita subcontados aqui.
   const b2bWhere = await canalWhere("b2b");
   const where: Prisma.SaleWhereInput = {
+    ...saleWhere(filters),
     storeId: cdStore.id,
     AND: [b2bWhere],
-    saleDate: { gte: filters.from, lte: filters.to },
     clienteNome: { not: null },
-    ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
   };
 
   const [rows, primeiraVendaGeral] = await Promise.all([
@@ -3794,7 +3804,7 @@ export async function getAtacadoClientes(filters: DashboardFilters) {
     }),
     prisma.sale.groupBy({
       by: ["clienteNome"],
-      where: { storeId: cdStore.id, AND: [b2bWhere], saleDate: { lt: filters.from }, clienteNome: { not: null } },
+      where: { ...saleWhere(filters), storeId: cdStore.id, AND: [b2bWhere], saleDate: { lt: filters.from }, clienteNome: { not: null } },
       _count: { id: true },
     }),
   ]);
@@ -3827,6 +3837,9 @@ export async function getAtacadoClientes(filters: DashboardFilters) {
 export async function getClienteRetencaoPorMes(filters: DashboardFilters) {
   const cdStore = await prisma.store.findFirst({ where: { code: "CD" } });
   if (!cdStore) return { months: [], compraram1x: 0, compraramMaisde1x: 0 };
+  if (filters.storeIds !== undefined && !filters.storeIds.includes(cdStore.id)) {
+    return { months: [], compraram1x: 0, compraramMaisde1x: 0 };
+  }
 
   // Mesmo filtro de getAtacadoClientes — cliente já classificado como atacado (canalWhere("b2b")),
   // não só a linha bater com "Tabela atacado" — não mistura com o varejo do site que passa pela
@@ -3835,16 +3848,22 @@ export async function getClienteRetencaoPorMes(filters: DashboardFilters) {
   const [salesInPeriod, allTimeFirst] = await Promise.all([
     prisma.sale.findMany({
       where: {
+        ...saleWhere(filters),
         storeId: cdStore.id,
         AND: [b2bWhere],
-        saleDate: { gte: filters.from, lte: filters.to },
         clienteNome: { not: null },
       },
       select: { clienteNome: true, saleDate: true, dapicVendaId: true },
     }),
     prisma.sale.groupBy({
       by: ["clienteNome"],
-      where: { storeId: cdStore.id, AND: [b2bWhere], clienteNome: { not: null }, saleDate: { lte: filters.to } },
+      where: {
+        ...saleWhere(filters),
+        storeId: cdStore.id,
+        AND: [b2bWhere],
+        clienteNome: { not: null },
+        saleDate: { lte: filters.to },
+      },
       _min: { saleDate: true },
     }),
   ]);
