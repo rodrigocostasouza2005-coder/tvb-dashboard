@@ -3088,7 +3088,10 @@ export type MesMapaCompras = {
   bonificacoes: number;
   estoqueFinal: number;
   estoqueIdeal: number;
-  // Meses de cobertura no fim do mês (estoqueFinal ÷ vendas) — derivado, não é projeção própria.
+  // Meses de cobertura no início do mês (estoqueInicial ÷ vendas) — derivado, não é projeção
+  // própria. Trocado de estoqueFinal pra estoqueInicial em 2026-09-08 a pedido do Rodrigo, pra
+  // bater com a convenção de "cobertura" usada no resto do app (estoque que já tinha ÷ ritmo de
+  // venda — ver diasCobertura em getReplenishmentRisk).
   coberturaAtual: number | null;
   faltaComprar: number;
 };
@@ -3112,6 +3115,10 @@ const COBERTURA_PADRAO_MESES = 2;
 // Primeiro mês com histórico granular por grupo/produto no Radar (dados do DAPIC começam em
 // set/2025 — antes disso só existe o site antigo, sem esse detalhe, ver primeiraCompraExterna).
 const MAPA_COMPRAS_INICIO = "2025-09";
+
+// Grupos fora do planejamento de compra (pedido do Rodrigo em 2026-09-08) — só nessa tela, os
+// outros grupos continuam aparecendo normalmente em Vendas/Estoque/etc.
+const MAPA_COMPRAS_GRUPOS_EXCLUIDOS = ["Ultra Dry", "Chapéu"];
 const MAPA_COMPRAS_MESES_FUTUROS = 12;
 
 function gerarListaMeses(inicio: string, fim: string): string[] {
@@ -3179,7 +3186,10 @@ export async function getMapaDeComprasDetalhado(
   const todosMeses = gerarListaMeses(MAPA_COMPRAS_INICIO, mesFim);
   const mesesPassados = todosMeses.filter((m) => m < mesAtual);
 
-  const grupoFiltro = filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty;
+  const grupoFiltro = Prisma.sql`
+    ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
+    AND "grupo" != ALL(${MAPA_COMPRAS_GRUPOS_EXCLUIDOS})
+  `;
 
   const [vendasRows, devolucaoRows, recebimentoRows, bonifRows, vendasParcialRows, recebimentoParcialRows, bonifParcialRows, estoqueAtualRows, metasRows, configRow] =
     await Promise.all([
@@ -3226,7 +3236,12 @@ export async function getMapaDeComprasDetalhado(
     `,
       prisma.stockSnapshot.groupBy({
         by: ["grupo", "produto"],
-        where: { grupo: { not: "(sem grupo)" }, ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}) },
+        where: {
+          grupo: {
+            notIn: ["(sem grupo)", ...MAPA_COMPRAS_GRUPOS_EXCLUIDOS],
+            ...(filters.grupoIn ? { in: filters.grupoIn } : {}),
+          },
+        },
         _sum: { quantidadeDisponivel: true },
       }),
       prisma.coberturaMeta.findMany(),
@@ -3381,7 +3396,7 @@ export async function getMapaDeComprasDetalhado(
         bonificacoes,
         estoqueFinal: estoqueFinalArred,
         estoqueIdeal: Math.round(vendas * coberturaMeses),
-        coberturaAtual: vendas > 0 ? Math.round((estoqueFinalArred / vendas) * 10) / 10 : null,
+        coberturaAtual: vendas > 0 ? Math.round((estoqueInicial / vendas) * 10) / 10 : null,
         faltaComprar: 0, // comprar pro passado não existe, só informativo
       });
       estoqueFinalCursor = estoqueInicial;
@@ -3429,7 +3444,7 @@ export async function getMapaDeComprasDetalhado(
         bonificacoes: 0,
         estoqueFinal: Math.round(estoqueFinal),
         estoqueIdeal: Math.round(estoqueIdeal),
-        coberturaAtual: vendasProjetadas > 0 ? Math.round((estoqueFinal / vendasProjetadas) * 10) / 10 : null,
+        coberturaAtual: vendasProjetadas > 0 ? Math.round((estoqueInicial / vendasProjetadas) * 10) / 10 : null,
         faltaComprar,
       });
       estoqueInicialCursor = estoqueFinal;
@@ -3443,10 +3458,11 @@ export async function getMapaDeComprasDetalhado(
       const linhas = series.map((s) => s[i]);
       const vendas = linhas.reduce((s, l) => s + l.vendas, 0);
       const estoqueFinal = linhas.reduce((s, l) => s + l.estoqueFinal, 0);
+      const estoqueInicial = linhas.reduce((s, l) => s + l.estoqueInicial, 0);
       return {
         mes,
         tipo: linhas[0]?.tipo ?? "realizado",
-        estoqueInicial: linhas.reduce((s, l) => s + l.estoqueInicial, 0),
+        estoqueInicial,
         recebimento: linhas.reduce((s, l) => s + l.recebimento, 0),
         vendas,
         bonificacoes: linhas.reduce((s, l) => s + l.bonificacoes, 0),
@@ -3454,7 +3470,7 @@ export async function getMapaDeComprasDetalhado(
         estoqueIdeal: linhas.reduce((s, l) => s + l.estoqueIdeal, 0),
         // Cobertura do grupo não é a média das coberturas por produto — recalcula do total
         // (senão um produto zerado com "cobertura null" distorceria a média).
-        coberturaAtual: vendas > 0 ? Math.round((estoqueFinal / vendas) * 10) / 10 : null,
+        coberturaAtual: vendas > 0 ? Math.round((estoqueInicial / vendas) * 10) / 10 : null,
         faltaComprar: linhas.reduce((s, l) => s + l.faltaComprar, 0),
       };
     });

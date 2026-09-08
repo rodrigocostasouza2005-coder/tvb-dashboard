@@ -27,8 +27,8 @@ export default async function MapaComprasPage() {
         matemática de conservação de estoque, já que o snapshot só guarda o valor de agora). Estoque
         nunca aparece negativo, porque fisicamente nunca foi (ver como isso é calculado no aviso
         abaixo). Estoque ideal = vendas projetadas × cobertura (meses, editável por grupo).
-        "Cobertura (meses)" mostra quanto o estoque final do mês cobre de vendas — é derivado, não é
-        uma previsão à parte. Nos meses futuros, "Recebimento" já inclui o "Falta comprar" do
+        "Cobertura (meses)" mostra quanto o estoque no INÍCIO do mês cobre de vendas — é derivado,
+        não é uma previsão à parte. Nos meses futuros, "Recebimento" já inclui o "Falta comprar" do
         próprio mês — a projeção assume que você compra o recomendado na hora, então o estoque
         projetado nunca desaba: "Falta comprar" é a recomendação acumulada de quanto comprar em cada
         mês pra manter a cobertura, não um estoque que vai faltar de verdade se você seguir a
