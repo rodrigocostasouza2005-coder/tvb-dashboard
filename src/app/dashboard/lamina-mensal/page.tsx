@@ -85,6 +85,10 @@ export default async function LaminaMensalPage({
   const month = typeof rawParams.month === "string" && /^\d{4}-\d{2}$/.test(rawParams.month)
     ? rawParams.month
     : todayMonth;
+  // Comparação é opt-in — só mostra variação (▲/▼) quando o usuário escolhe um mês e aperta
+  // "Comparar" (pedido do Rodrigo em 2026-09-08). Sem isso, "compareMonth" ainda existe como
+  // valor padrão pro <select>, mas não busca nem exibe nada.
+  const isComparing = typeof rawParams.compare === "string" && /^\d{4}-\d{2}$/.test(rawParams.compare);
   const compareMonth = typeof rawParams.compare === "string" && /^\d{4}-\d{2}$/.test(rawParams.compare)
     ? rawParams.compare
     : shiftMonth(month, -1);
@@ -119,9 +123,13 @@ export default async function LaminaMensalPage({
 
   const showFinancials = canSeeFinancials(user);
 
+  // cmpKpi só é buscado quando o usuário está de fato comparando — com zerado, pct() abaixo já
+  // devolve null (prev=0 é falsy), e os badges de variação somem sozinhos sem precisar de outra
+  // condição espalhada pelo JSX.
+  const zeroKpi = { unitsBruta: 0, revenueBruta: 0, orderCount: 0, unitsReturned: 0, valueReturned: 0 };
   const [curKpi, cmpKpi, trendRaw, returnsPorMes, topProdutosBruta, returnsPorProduto, topClientes] = await Promise.all([
     getMonthlySnapshotKpi(curFilters, canal),
-    getMonthlySnapshotKpi(cmpFilters, canal),
+    isComparing ? getMonthlySnapshotKpi(cmpFilters, canal) : Promise.resolve(zeroKpi),
     getMonthlySalesByStore(trendFilters, canal),
     canal !== "b2b" ? getMonthlyReturnsTotal(trendFilters) : Promise.resolve(new Map<string, number>()),
     getSalesByDimension(curFilters, "produto", canal),
