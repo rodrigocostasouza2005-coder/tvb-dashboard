@@ -150,6 +150,23 @@ function mensagemFollowUp(f: FollowUpComNota): string {
   return base;
 }
 
+// Achado em 2026-09-09: com ~100 clientes de follow-up, disparar tudo de uma vez via Promise.all
+// estourava o rate limit do DAPIC (429 em cascata, cada um com retry/backoff) e deixava a página
+// perto de 1min30 pra carregar. Rodando com um teto de chamadas simultâneas em vez de tudo junto,
+// o mesmo lote caiu pra ~15-20s (testado local, 105 clientes, zero 429).
+async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  async function worker() {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i]);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
 function agruparPorLoja<T extends { loja: string | null }>(itens: T[]): [string, T[]][] {
   const grupos = new Map<string, T[]>();
   for (const item of itens) {
@@ -324,11 +341,12 @@ export default async function ClientesSugestoesContatoPage({
 
   const sugestoesPorLoja = agruparPorLoja(sugestoes);
 
-  // Número da nota/cupom buscado ao vivo no DAPIC, só pra esse punhado de clientes do
-  // follow-up (não faz parte do sync em lote) — ver getNumeroNotaFiscal.
-  const followUpComNota: FollowUpComNota[] = await Promise.all(
-    followUp.map(async (f) => ({ ...f, numeroNota: await getNumeroNotaFiscal(f.storeId, f.dapicVendaId) }))
-  );
+  // Número da nota/cupom buscado ao vivo no DAPIC, um por cliente do follow-up (não faz parte
+  // do sync em lote) — ver getNumeroNotaFiscal. Concorrência limitada (ver mapWithConcurrency).
+  const followUpComNota: FollowUpComNota[] = await mapWithConcurrency(followUp, 8, async (f) => ({
+    ...f,
+    numeroNota: await getNumeroNotaFiscal(f.storeId, f.dapicVendaId),
+  }));
   const followUpPorLoja = agruparPorLoja(followUpComNota);
 
   // Marcações de "já contatei" (ver ContatoMarcado) pros clientes visíveis nessa página agora —
