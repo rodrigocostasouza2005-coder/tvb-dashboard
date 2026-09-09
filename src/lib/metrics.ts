@@ -1072,10 +1072,24 @@ export async function getReplenishment(filters: Pick<DashboardFilters, "storeIds
 // 2026-08-31 via scripts/backfill-primeira-compra-externa.ts) — sem isso, cliente que só voltou
 // a comprar recentemente aparecia como "novo" mesmo já sendo cliente desde 2021-2023 (achado
 // cruzando por CPF: 226 casos reais). Usa a data mais antiga entre as duas fontes.
-async function getPrimeiraCompraGlobalPorCliente(nomesNormalizados: string[]): Promise<Map<string, Date>> {
+// storeIds opcional: quando informado, restringe a busca de 1ª compra em Sale a essas lojas
+// (usado pela Visão Geral pra respeitar a restrição de loja do usuário — ver
+// getNovosERecorrentesClientes). ClienteCadastro.primeiraCompraExterna não tem loja (dado do
+// site antigo pré-DAPIC), então continua sempre global independente de storeIds.
+async function getPrimeiraCompraGlobalPorCliente(
+  nomesNormalizados: string[],
+  storeIds?: string[]
+): Promise<Map<string, Date>> {
   if (nomesNormalizados.length === 0) return new Map();
   const [saleRows, externaRows] = await Promise.all([
-    prisma.$queryRaw<{ norm: string; first: Date }[]>`
+    storeIds !== undefined
+      ? prisma.$queryRaw<{ norm: string; first: Date }[]>`
+          SELECT UPPER(TRIM("clienteNome")) AS norm, MIN("saleDate") AS first
+          FROM "Sale"
+          WHERE UPPER(TRIM("clienteNome")) = ANY(${nomesNormalizados}) AND "storeId" = ANY(${storeIds})
+          GROUP BY norm
+        `
+      : prisma.$queryRaw<{ norm: string; first: Date }[]>`
       SELECT UPPER(TRIM("clienteNome")) AS norm, MIN("saleDate") AS first
       FROM "Sale"
       WHERE UPPER(TRIM("clienteNome")) = ANY(${nomesNormalizados})
@@ -1112,7 +1126,7 @@ export async function getNovosERecorrentesClientes(filters: DashboardFilters) {
   const where: Prisma.SaleWhereInput = { ...saleWhere(filters), clienteNome: { not: null } };
   const clientesNoPeriodo = await prisma.sale.groupBy({ by: ["clienteNome"], where });
   const normSet = new Set(clientesNoPeriodo.map((c) => (c.clienteNome as string).trim().toUpperCase()));
-  const primeiraGlobal = await getPrimeiraCompraGlobalPorCliente([...normSet]);
+  const primeiraGlobal = await getPrimeiraCompraGlobalPorCliente([...normSet], filters.storeIds);
   let novos = 0;
   let recorrentes = 0;
   for (const norm of normSet) {
