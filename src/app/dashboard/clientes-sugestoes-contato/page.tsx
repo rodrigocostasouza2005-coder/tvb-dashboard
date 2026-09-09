@@ -27,23 +27,78 @@ function primeiroNome(nomeCompleto: string): string {
   return nomeCompleto.trim().split(/\s+/)[0];
 }
 
+// Mensagens com cupom, ditadas literalmente pelo Rodrigo em 2026-09-09 (texto de marketing dele,
+// não nosso) — substituem só Em risco/Inativo/Comprou só 1 vez/Aniversário. VIP esfriando e
+// Recorrente esfriando continuam com o texto antigo (ver mensagemSugestaoAntiga), ele não pediu
+// pra mudar essas duas. Diferente das mensagens antigas, essas NÃO ganham o gancho de estoque
+// (pedido explícito dele) e não usam s.detalhe (não mencionam "há quantos dias").
+function mensagemClientesFrios(nome: string): string {
+  return `Falaaa, ${nome}! 🌊
+
+Quanto tempo, hein? 😎 A gente percebeu que faz um tempinho que você não aparece por aqui e, vou te falar… *sentimos sua falta na família TVB!* 👊
+
+Nesse tempo, rolou novidade, chegaram coisas novas e a TVB continua naquela vibe que você já conhece. 🏄‍♂️🔥
+
+E como a gente quer te ver de volta por aqui, resolvemos liberar um *benefício exclusivo só pra você.* 👀
+
+*Use o cupom VOLTA10 e ganhe 10% OFF na sua próxima compra.* 🔥
+
+Então aproveita pra dar aquela passada, conferir as novidades e ver o que chegou por aqui. 😎
+
+*Porque a TVB tá sempre na mesma vibe… só tava faltando você por aqui. 🌊🤙*`;
+}
+
+function mensagemComprouUmaVez(nome: string): string {
+  return `Falaaa, ${nome}! 🌊
+
+Você já passou pela TVB uma vez e a gente queria te ver por aqui de novo! 😎👊
+
+Tem novidade chegando, coisas novas rolando e aquela vibe que você já conhece. 🏄‍♂️🔥
+
+E pra te dar um motivo a mais pra voltar, *separamos um benefício exclusivo pra você.* 👀
+
+*Use o cupom VOLTA10 e ganhe 10% OFF na sua próxima compra.* 🔥
+
+Então já sabe: aproveita o desconto, dá uma olhada no site e vem conferir o que tá rolando por aqui! 🤙
+
+*Porque a TVB tá sempre na mesma vibe… só tava faltando você por aqui. 🌊🤙*`;
+}
+
+function mensagemAniversario(nome: string): string {
+  return `Falaaa, ${nome}! 🎉🌊
+
+Hoje é seu dia e a gente não podia deixar passar em branco! 😎🎂
+
+Você já faz parte da família TVB e está sempre colando com a gente. Então, nada mais justo do que comemorar seu aniversário com um *presente especial nosso pra você!* 👊🔥
+
+Preparamos um *cupom exclusivo de aniversário*:
+
+🎁 *Use o cupom ANIVER15 e ganhe 15% OFF na sua próxima compra!*
+
+É o nosso jeito de agradecer por estar sempre com a gente e fazer parte da família TVB. 💙
+
+Então aproveita seu dia, comemora muito e já sabe: quando quiser dar aquela renovada na vibe, a TVB tá te esperando! 🏄‍♂️🔥
+
+*Que esse novo ciclo venha cheio de coisa boa, boas energias e, claro, muita vibe boa! 🌊🏄‍♂️*`;
+}
+
 // Mensagem pronta por motivo, pré-preenchida no WhatsApp (pedido do Rodrigo em 2026-09-08,
 // reescrita no mesmo dia depois de pedir pra tirar "produto favorito" e alinhar com o tom real
 // da marca) — ele ainda revisa/edita antes de mandar (waHref nunca envia sozinho).
 //
-// Duas coisas informaram a reescrita:
+// Duas coisas informaram a reescrita original:
 // 1) Tom de voz real da TVB Shorts (tvbshorts.com): informal, bem-humorado, cultura de surf/praia,
 //    sem "marketês" — usa até depoimento de cliente cru em vez de texto arrumadinho ("a gente
 //    manda pouco email, até porque dá muito trabalho :)"). Nada de linguagem corporativa.
 // 2) Boas práticas de reativação por WhatsApp: personalizar pelo HISTÓRICO real (aqui, dias sem
 //    comprar — já vem em s.detalhe) rende mais do que "achismo de gosto" tipo produto favorito;
-//    mensagem curta, tom próximo, sem prometer desconto (decisão comercial do Rodrigo, não algo
-//    pra eu inventar), sem urgência falsa.
+//    mensagem curta, tom próximo, sem urgência falsa.
 //
 // Gancho de estoque (pedido do Rodrigo, mesmo dia): quando o tamanho que o cliente mais compra do
 // produto favorito dele ainda está disponível na loja principal, entra uma linha a mais — só
-// nesse caso (nunca inventa disponibilidade, ver getTamanhoEstoqueParaClientes).
-function mensagemSugestao(s: SugestaoContato): string {
+// nesse caso (nunca inventa disponibilidade, ver getTamanhoEstoqueParaClientes). Só se aplica às
+// mensagens antigas (VIP/Recorrente esfriando) — as novas com cupom não ganham esse gancho.
+function mensagemSugestaoAntiga(s: SugestaoContato): string {
   const nome = primeiroNome(s.cliente);
   const base = (() => {
     switch (s.motivo) {
@@ -51,14 +106,6 @@ function mensagemSugestao(s: SugestaoContato): string {
         return `E aí ${nome}, sumiu! 😄 Faz um tempinho que você não passa aqui na TVB (${s.detalhe}) — bora dar uma olhada no que chegou de novo?`;
       case "Recorrente esfriando":
         return `Oi ${nome}, tudo bem? Notei que você não aparece por aqui há um tempo (${s.detalhe}). Só passando pra saber se tá tudo certo e se posso te ajudar a achar alguma coisa!`;
-      case "Em risco":
-        return `Oi ${nome}! Tudo bem? Aqui é da TVB Shorts, faz tempo que a gente não se fala (${s.detalhe}). Só passando pra saber como você tá.`;
-      case "Comprou só 1 vez":
-        return `Oi ${nome}! Aqui é da TVB Shorts. Vi que você deu uma passada por aqui ${s.detalhe} e queria saber se curtiu — e já aproveitar pra te mostrar as novidades que chegaram.`;
-      case "Inativo":
-        return `Oi ${nome}, quanto tempo! Aqui é da TVB Shorts — voltamos com bastante coisa nova e lembramos de você. Dá uma olhada quando puder 🌊`;
-      case "Aniversário":
-        return `Parabéns, ${nome}! 🎉🌊 A galera da TVB Shorts te deseja um feliz aniversário — boa onda pra esse novo ano de vida.`;
       default:
         return `Oi ${nome}, tudo bem? Aqui é da TVB Shorts!`;
     }
@@ -68,6 +115,21 @@ function mensagemSugestao(s: SugestaoContato): string {
     return `${base} Inclusive ainda temos o ${s.produtoFavorito} no seu tamanho (${s.tamanhoDisponivel}) aqui na loja!`;
   }
   return base;
+}
+
+function mensagemSugestao(s: SugestaoContato): string {
+  const nome = primeiroNome(s.cliente);
+  switch (s.motivo) {
+    case "Em risco":
+    case "Inativo":
+      return mensagemClientesFrios(nome);
+    case "Comprou só 1 vez":
+      return mensagemComprouUmaVez(nome);
+    case "Aniversário":
+      return mensagemAniversario(nome);
+    default:
+      return mensagemSugestaoAntiga(s);
+  }
 }
 
 type FollowUpComNota = FollowUpPosCompra & { numeroNota: string | null };
