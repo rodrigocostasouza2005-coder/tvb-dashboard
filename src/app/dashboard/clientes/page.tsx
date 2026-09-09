@@ -315,7 +315,9 @@ export default async function ClientesPage({
                 {aniversariantes.map((c) => (
                   <tr key={c.id} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
                     <td className="px-4 py-2 tabular-nums font-medium">{diaDoMes(c.dataNascimento)}</td>
-                    <td className="px-4 py-2">{c.nome}</td>
+                    <td className="px-4 py-2">
+                      <a href={clienteHref(c.nome)} className="hover:underline">{c.nome}</a>
+                    </td>
                     <td className="px-4 py-2">
                       {c.telefone || c.celular ? (
                         <a href={waHref(c.telefone ?? c.celular ?? "")} target="_blank" rel="noopener noreferrer" className="text-[var(--series-1)] hover:underline tabular-nums">
