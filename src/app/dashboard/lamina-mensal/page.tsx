@@ -46,6 +46,13 @@ function monthRange(monthStr: string) {
   return { from, to };
 }
 
+function monthEndStr(monthStr: string) {
+  const [year, m] = monthStr.split("-").map(Number);
+  const lastDay = new Date(year, m, 0).getDate();
+  const todayStr = todayBrasiliaStr(new Date());
+  return todayStr.slice(0, 7) === monthStr ? todayStr : `${monthStr}-${String(lastDay).padStart(2, "0")}`;
+}
+
 function shiftMonth(monthStr: string, delta: number) {
   const [year, m] = monthStr.split("-").map(Number);
   const d = new Date(year, m - 1 + delta, 1);
@@ -124,6 +131,14 @@ export default async function LaminaMensalPage({
   const trendFilters: DashboardFilters = { ...baseRestriction, from: trendFrom, to: curTo };
 
   const showFinancials = canSeeFinancials(user);
+
+  function clienteFichaHref(nome: string) {
+    const p = new URLSearchParams();
+    p.set("cliente", nome);
+    p.set("from", `${month}-01`);
+    p.set("to", monthEndStr(month));
+    return `/dashboard/clientes-ficha?${p.toString()}`;
+  }
 
   // cmpKpi só é buscado quando o usuário está de fato comparando — com zerado, pct() abaixo já
   // devolve null (prev=0 é falsy), e os badges de variação somem sozinhos sem precisar de outra
@@ -453,7 +468,7 @@ export default async function LaminaMensalPage({
                       <li key={c.cliente} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
                         <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
                           <span className="w-4 shrink-0 text-xs font-medium text-[var(--text-muted)]">{i + 1}</span>
-                          <span className="truncate text-sm text-[var(--text-primary)]">{c.cliente}</span>
+                          <a href={clienteFichaHref(c.cliente)} className="truncate text-sm text-[var(--text-primary)] hover:underline">{c.cliente}</a>
                           {telefone && (
                             <a
                               href={waHref(telefone)}
