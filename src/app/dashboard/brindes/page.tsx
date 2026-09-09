@@ -42,6 +42,14 @@ export default async function BrindesPage({
   const showFinancials = canSeeFinancials(user);
   const totalUnits = rows.reduce((sum, r) => sum + r.unitsSold, 0);
 
+  function clienteHref(nome: string) {
+    const p = new URLSearchParams();
+    for (const id of filters.storeIds ?? []) p.append("store", id);
+    for (const m of filters.marcas ?? []) p.append("marca", m);
+    p.set("cliente", nome);
+    return `/dashboard/clientes-ficha?${p.toString()}`;
+  }
+
   return (
     <div>
       <CollapsibleFilters defaultOpen={filtrosOpen}>
@@ -74,7 +82,9 @@ export default async function BrindesPage({
           <tbody>
             {clienteRows.map((r) => (
               <tr key={r.cliente} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
-                <td className="px-4 py-2 font-medium">{r.cliente}</td>
+                <td className="px-4 py-2 font-medium">
+                  <a href={clienteHref(r.cliente)} className="hover:underline">{r.cliente}</a>
+                </td>
                 <td className="px-4 py-2 tabular-nums">{r.unidades.toLocaleString("pt-BR")}</td>
                 {showFinancials && <td className="px-4 py-2 tabular-nums">{formatBRL(r.valor)}</td>}
               </tr>

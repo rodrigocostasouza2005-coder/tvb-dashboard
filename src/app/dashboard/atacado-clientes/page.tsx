@@ -35,6 +35,11 @@ export default async function AtacadoClientesPage({
   };
   const showFinancials = canSeeFinancials(user);
 
+  const clienteFichaParams = new URLSearchParams();
+  for (const id of filters.storeIds ?? []) clienteFichaParams.append("store", id);
+  for (const m of filters.marcas ?? []) clienteFichaParams.append("marca", m);
+  for (const t of filters.tabelasPreco ?? []) clienteFichaParams.append("tabelaPreco", t);
+
   const [data, retencao] = await Promise.all([
     getAtacadoClientes(filters),
     getClienteRetencaoPorMes(filters),
@@ -85,7 +90,7 @@ export default async function AtacadoClientesPage({
         </section>
       )}
 
-      <ClientesTable rows={data.rows} showReceita={showFinancials} />
+      <ClientesTable rows={data.rows} showReceita={showFinancials} filtrosQuery={clienteFichaParams.toString()} />
     </div>
   );
 }

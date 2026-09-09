@@ -137,7 +137,7 @@ function TabelaSugestoes({ loja, sugestoes, clienteHref }: { loja: string; suges
   );
 }
 
-function TabelaFollowUp({ loja, itens }: { loja: string; itens: FollowUpComNota[] }) {
+function TabelaFollowUp({ loja, itens, clienteHref }: { loja: string; itens: FollowUpComNota[]; clienteHref: (nome: string) => string }) {
   return (
     <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
       <h3 className="border-b border-[var(--gridline)] px-4 py-2.5 text-sm font-medium text-[var(--text-primary)]">{loja} <span className="font-normal text-[var(--text-muted)]">({itens.length})</span></h3>
@@ -154,7 +154,9 @@ function TabelaFollowUp({ loja, itens }: { loja: string; itens: FollowUpComNota[
         <tbody>
           {itens.map((f) => (
             <tr key={f.cliente} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
-              <td className="px-4 py-2 font-medium">{f.cliente}</td>
+              <td className="px-4 py-2 font-medium">
+                <a href={clienteHref(f.cliente)} className="hover:underline">{f.cliente}</a>
+              </td>
               <td className="px-4 py-2">
                 {f.telefone ? (
                   <a href={waHref(f.telefone, mensagemFollowUp(f))} target="_blank" rel="noopener noreferrer" className="text-[var(--series-1)] hover:underline tabular-nums">{f.telefone}</a>
@@ -251,7 +253,7 @@ export default async function ClientesSugestoesContatoPage({
         <p className="mb-3 text-xs text-[var(--text-muted)]">Clientes B2C que compraram há 7-10 dias — perguntar se gostou e conseguiu aproveitar o produto.</p>
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           {followUpPorLoja.map(([loja, itens]) => (
-            <TabelaFollowUp key={loja} loja={loja} itens={itens} />
+            <TabelaFollowUp key={loja} loja={loja} itens={itens} clienteHref={clienteHref} />
           ))}
           {followUpPorLoja.length === 0 && (
             <p className="text-sm text-[var(--text-muted)]">Nenhuma compra B2C nessa janela de 7-10 dias atrás.</p>

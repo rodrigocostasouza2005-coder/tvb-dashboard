@@ -77,6 +77,15 @@ export default async function PesquisaPage({
   const produtoHrefBase = `/dashboard/pesquisa?${baseParams.toString()}`;
   const clearProdutoHref = produtoHrefBase;
 
+  function clienteHref(nome: string) {
+    const p = new URLSearchParams();
+    for (const id of filters.storeIds ?? []) p.append("store", id);
+    for (const m of filters.marcas ?? []) p.append("marca", m);
+    for (const t of filters.tabelasPreco ?? []) p.append("tabelaPreco", t);
+    p.set("cliente", nome);
+    return `/dashboard/clientes-ficha?${p.toString()}`;
+  }
+
   return (
     <div>
       <CollapsibleFilters defaultOpen={filtrosOpen}>
@@ -151,7 +160,9 @@ export default async function PesquisaPage({
             <tbody>
               {clientes.map((c) => (
                 <tr key={c.cliente} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
-                  <td className="px-4 py-2 font-medium">{c.cliente}</td>
+                  <td className="px-4 py-2 font-medium">
+                    <a href={clienteHref(c.cliente)} className="hover:underline">{c.cliente}</a>
+                  </td>
                   <td className="px-4 py-2">
                     {c.telefone ? (
                       <a href={waHref(c.telefone)} target="_blank" rel="noopener noreferrer" className="text-[var(--series-1)] hover:underline tabular-nums">

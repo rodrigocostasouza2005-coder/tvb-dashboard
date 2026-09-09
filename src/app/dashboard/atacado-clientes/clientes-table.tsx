@@ -30,9 +30,26 @@ const selectClass =
 
 const LIMIT = 150;
 
-export function ClientesTable({ rows, showReceita = true }: { rows: ClienteRow[]; showReceita?: boolean }) {
+export function ClientesTable({
+  rows,
+  showReceita = true,
+  filtrosQuery = "",
+}: {
+  rows: ClienteRow[];
+  showReceita?: boolean;
+  // Query string com store/marca/tabelaPreco atuais (montada no server component), pra levar
+  // pra Ficha do Cliente — client component não recebe função do server, então recebe a string
+  // já pronta e só acrescenta o "cliente" no clique.
+  filtrosQuery?: string;
+}) {
   const [search, setSearch] = useState("");
   const [estadoFiltro, setEstadoFiltro] = useState("");
+
+  function clienteHref(nome: string) {
+    const p = new URLSearchParams(filtrosQuery);
+    p.set("cliente", nome);
+    return `/dashboard/clientes-ficha?${p.toString()}`;
+  }
 
   const estados = useMemo(() => [...new Set(rows.map((r) => r.estado))].sort(), [rows]);
 
@@ -100,7 +117,9 @@ export function ClientesTable({ rows, showReceita = true }: { rows: ClienteRow[]
                 key={i}
                 className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]"
               >
-                <td className="px-4 py-2 font-medium text-[var(--text-primary)]">{r.clienteNome}</td>
+                <td className="px-4 py-2 font-medium text-[var(--text-primary)]">
+                  <a href={clienteHref(r.clienteNome)} className="hover:underline">{r.clienteNome}</a>
+                </td>
                 <td className="px-4 py-2">
                   {r.telefone ? (
                     <a href={waHref(r.telefone)} target="_blank" rel="noopener noreferrer" className="text-[var(--series-1)] hover:underline tabular-nums">{r.telefone}</a>
