@@ -1400,6 +1400,52 @@ export async function getTopClientes(
   });
 }
 
+// Mesmo mês de início de dado usado na aba Lâmina Mensal (DATA_START_MONTH em
+// src/app/dashboard/lamina-mensal/page.tsx) — duplicado aqui de propósito (lib não deve
+// depender de arquivo de página).
+const TOP_CLIENTES_START_MONTH = "2025-09";
+
+function shiftMonthStr(monthStr: string, delta: number) {
+  const [year, m] = monthStr.split("-").map(Number);
+  const d = new Date(year, m - 1 + delta, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function monthRangeStr(monthStr: string) {
+  const [year, m] = monthStr.split("-").map(Number);
+  const from = brasiliaDayStart(`${monthStr}-01`);
+  const lastDay = new Date(year, m, 0).getDate();
+  const todayStr = todayBrasiliaStr(new Date());
+  const isCurrentMonth = todayStr.slice(0, 7) === monthStr;
+  const to = isCurrentMonth ? brasiliaDayEnd(todayStr) : brasiliaDayEnd(`${monthStr}-${String(lastDay).padStart(2, "0")}`);
+  return { from, to };
+}
+
+// Meses em que o cliente apareceu no Top 5 por receita líquida da empresa inteira (mesmo
+// critério da aba Lâmina Mensal: todas as lojas/marcas/tabelas, canal "todos") — usado como
+// "selo" na Ficha do Cliente. Sempre company-wide, independente da restrição de quem tá vendo a
+// ficha, porque é um fato histórico do cliente, não uma visão recortada por permissão.
+export async function getClienteTopMeses(clienteNome: string): Promise<string[]> {
+  const norm = clienteNome.trim().toUpperCase();
+  const hojeStr = todayBrasiliaStr(new Date());
+  const mesAtual = hojeStr.slice(0, 7);
+
+  const meses: string[] = [];
+  for (let cursor = TOP_CLIENTES_START_MONTH; cursor <= mesAtual; cursor = shiftMonthStr(cursor, 1)) {
+    meses.push(cursor);
+  }
+
+  const resultados = await Promise.all(
+    meses.map(async (mes) => {
+      const { from, to } = monthRangeStr(mes);
+      const top5 = await getTopClientes({ from, to }, null, 5, "todos", true);
+      return top5.some((c) => c.cliente.trim().toUpperCase() === norm) ? mes : null;
+    })
+  );
+
+  return resultados.filter((m): m is string => m !== null);
+}
+
 // ===== CRM de Clientes (2026-08-28) =====
 
 // KPIs da Visão Geral do CRM: ativos, novos (mesma regra de getNewClientsCount — 1ª compra da

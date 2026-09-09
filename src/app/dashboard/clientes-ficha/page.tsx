@@ -1,5 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
-import { getStores, getMarcas, getTabelasPreco, getClienteFicha } from "@/lib/metrics";
+import { getStores, getMarcas, getTabelasPreco, getClienteFicha, getClienteTopMeses } from "@/lib/metrics";
 import { canSeeFinancials, getMarcaRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
@@ -26,6 +26,12 @@ function formatDataNascimento(d: Date | null) {
 
 function formatData(d: Date) {
   return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "UTC" });
+}
+
+const MONTH_ABBR = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
+function formatMonthShort(monthStr: string) {
+  const [year, m] = monthStr.split("-");
+  return `${MONTH_ABBR[parseInt(m) - 1]}/${year.slice(2)}`;
 }
 
 export default async function ClientesFichaPage({
@@ -57,6 +63,7 @@ export default async function ClientesFichaPage({
     getTabelasPreco(allowedTabelasPreco),
     clienteNome ? getClienteFicha(filters, clienteNome) : Promise.resolve(null),
   ]);
+  const topMeses = ficha ? await getClienteTopMeses(ficha.cliente) : [];
   const showFinancials = canSeeFinancials(user);
 
   return (
@@ -101,7 +108,17 @@ export default async function ClientesFichaPage({
         <div className="flex flex-col gap-4">
           <div className="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
             <div>
-              <h2 className="text-base font-semibold text-[var(--text-primary)]">{ficha.cliente}</h2>
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-base font-semibold text-[var(--text-primary)]">{ficha.cliente}</h2>
+                {topMeses.length > 0 && (
+                  <span
+                    className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-300"
+                    title={`Top 5 clientes do mês (receita líquida, empresa toda) em: ${topMeses.map(formatMonthShort).join(", ")}`}
+                  >
+                    ⭐ Top 5 em {topMeses.map(formatMonthShort).join(", ")}
+                  </span>
+                )}
+              </div>
               <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm text-[var(--text-secondary)]">
                 {ficha.telefone && (
                   <a href={waHref(ficha.telefone)} target="_blank" rel="noopener noreferrer" className="text-[var(--series-1)] hover:underline tabular-nums">{ficha.telefone}</a>
