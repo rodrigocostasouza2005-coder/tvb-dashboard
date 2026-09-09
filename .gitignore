@@ -41,6 +41,11 @@ yarn-error.log*
 *.db-journal
 prisma/dev.db*
 
+# achado solto na raiz em 2026-09-09 com um access_token JWT real do DAPIC dentro — origem
+# desconhecida (não é escrito por nenhum código deste repo, cache de token é só via banco,
+# ver DapicTokenCache em dapic.ts). Nunca commitar por via das dúvidas.
+.dapic_access.tmp
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

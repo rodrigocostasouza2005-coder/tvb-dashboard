@@ -27,15 +27,19 @@ const EMPRESA = process.env.DAPIC_EMPRESA;
 export type DapicCredential = { label: string; tokenIntegracao: string };
 
 // A API manda datas sem timezone (ex: "2026-08-10T12:58:07.582", sem "Z"/offset). `new Date()`
-// sem timezone é interpretado como horário LOCAL DA MÁQUINA que roda o código — em produção
-// (Vercel, UTC) isso por acaso dava o resultado certo, mas rodando local (Windows em horário de
-// Brasília, UTC-3) deslocava a data em 3h. Confirmado real em 2026-08-11: causou duplicata de
-// venda (mesmo pedido gravado 2x com saleDate 3h diferente, porque a ordem dos itens também não
-// é garantida entre chamadas da API, então o item ganhou um itemIndex diferente na 2ª gravação e
-// escapou da proteção de idempotência). Sempre ancorar em UTC explicitamente, não importa onde o
-// código roda.
+// sem timezone é interpretado como horário LOCAL DA MÁQUINA que roda o código — por isso sempre
+// ancoramos um offset explícito, não importa onde o código roda (evita o bug de duplicata real de
+// 2026-08-11, causado por scripts locais interpretando a mesma string de jeito diferente da Vercel).
+//
+// Qual offset usar: até 2026-09-09 ancorava em "Z" (UTC), assumindo que o valor cru já era UTC.
+// Estava ERRADO — confirmado cruzando com export do próprio DAPIC/Power BI que o valor cru já é
+// horário de BRASÍLIA. Ancorar em UTC fazia toda venda entre 00h00-02h59 de Brasília cair no dia
+// ANTERIOR em qualquer relatório por dia (bug achado pelo Rodrigo comparando "Site e Atacado" do
+// dashboard com o valor líquido do DAPIC). Corrigido pra "-03:00" (Brasil não tem mais horário de
+// verão desde 2019, offset fixo o ano inteiro). Histórico já gravado (Sale/Return/Gift) corrigido
+// via backfill único (+3h em todo mundo, já que tudo tinha sido gravado 3h "cedo demais").
 export function parseDapicDateTime(raw: string): Date {
-  return new Date(raw.endsWith("Z") || /[+-]\d{2}:?\d{2}$/.test(raw) ? raw : `${raw}Z`);
+  return new Date(raw.endsWith("Z") || /[+-]\d{2}:?\d{2}$/.test(raw) ? raw : `${raw}-03:00`);
 }
 
 // DAPIC_CREDENTIALS: JSON tipo [{"label":"cd-atacado","tokenIntegracao":"..."}, ...]
