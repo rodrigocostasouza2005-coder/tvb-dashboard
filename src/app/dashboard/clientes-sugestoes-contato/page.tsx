@@ -18,6 +18,43 @@ const MOTIVO_COR: Record<string, string> = {
 
 const SEM_LOJA = "Sem loja identificada";
 
+function primeiroNome(nomeCompleto: string): string {
+  return nomeCompleto.trim().split(/\s+/)[0];
+}
+
+// Mensagem pronta por motivo, pré-preenchida no WhatsApp (pedido do Rodrigo em 2026-09-08) — ele
+// ainda revisa/edita antes de mandar (waHref nunca envia sozinho). Sem prometer desconto nenhum
+// (isso é decisão comercial dele, não algo pra eu inventar) — foco em reconexão/contexto.
+function mensagemSugestao(s: SugestaoContato): string {
+  const nome = primeiroNome(s.cliente);
+  const produto = s.produtoFavorito;
+  switch (s.motivo) {
+    case "VIP esfriando":
+      return `Oi ${nome}! Tudo bem? Faz um tempinho que você não aparece por aqui na TVB Shorts e sentimos sua falta 💙${produto ? ` Chegaram novidades parecidas com ${produto}, que sei que você curte.` : ""} Dá uma olhada quando puder!`;
+    case "Recorrente esfriando":
+      return `Oi ${nome}! Tudo bem? Notei que faz um tempo que você não compra com a gente${produto ? `, e lembrei de você porque chegou coisa nova parecida com ${produto}` : ""}. Quer que eu separe algumas opções pra você ver?`;
+    case "Em risco":
+      return `Oi ${nome}, tudo bem? Faz tempo que a gente não se fala! Queria saber se está tudo certo e se posso te ajudar com alguma coisa hoje.`;
+    case "Comprou só 1 vez":
+      return `Oi ${nome}! Tudo bem? Vi que você comprou com a gente${produto ? ` (o ${produto})` : ""} e queria saber se gostou! Chegaram novidades que acho que você vai curtir também.`;
+    case "Inativo":
+      return `Oi ${nome}, tudo bem? Faz um tempão que a gente não tem notícias suas! Voltamos com bastante coisa nova na TVB Shorts, dá uma olhada quando puder 🙂`;
+    case "Aniversário":
+      return `Parabéns, ${nome}! 🎉 A equipe da TVB Shorts te deseja um feliz aniversário! Passa aqui pra gente comemorar com você.`;
+    default:
+      return `Oi ${nome}, tudo bem? Aqui é da TVB Shorts!`;
+  }
+}
+
+function mensagemFollowUp(f: FollowUpPosCompra): string {
+  const nome = primeiroNome(f.cliente);
+  const produtos =
+    f.produtos.length === 1
+      ? f.produtos[0]
+      : `${f.produtos.slice(0, -1).join(", ")} e ${f.produtos[f.produtos.length - 1]}`;
+  return `Oi ${nome}! Tudo bem? Aqui é da TVB Shorts. Vim saber se você gostou do(a) ${produtos} que comprou com a gente — deu tudo certo? Qualquer coisa é só chamar!`;
+}
+
 function agruparPorLoja<T extends { loja: string | null }>(itens: T[]): [string, T[]][] {
   const grupos = new Map<string, T[]>();
   for (const item of itens) {
@@ -48,7 +85,7 @@ function TabelaSugestoes({ loja, sugestoes }: { loja: string; sugestoes: Sugesta
               <td className="px-4 py-2 font-medium">{s.cliente}</td>
               <td className="px-4 py-2">
                 {s.telefone ? (
-                  <a href={waHref(s.telefone)} target="_blank" rel="noopener noreferrer" className="text-[var(--series-1)] hover:underline tabular-nums">{s.telefone}</a>
+                  <a href={waHref(s.telefone, mensagemSugestao(s))} target="_blank" rel="noopener noreferrer" className="text-[var(--series-1)] hover:underline tabular-nums">{s.telefone}</a>
                 ) : (
                   <span className="text-[var(--text-muted)]">—</span>
                 )}
@@ -88,7 +125,7 @@ function TabelaFollowUp({ loja, itens }: { loja: string; itens: FollowUpPosCompr
               <td className="px-4 py-2 font-medium">{f.cliente}</td>
               <td className="px-4 py-2">
                 {f.telefone ? (
-                  <a href={waHref(f.telefone)} target="_blank" rel="noopener noreferrer" className="text-[var(--series-1)] hover:underline tabular-nums">{f.telefone}</a>
+                  <a href={waHref(f.telefone, mensagemFollowUp(f))} target="_blank" rel="noopener noreferrer" className="text-[var(--series-1)] hover:underline tabular-nums">{f.telefone}</a>
                 ) : (
                   <span className="text-[var(--text-muted)]">—</span>
                 )}
