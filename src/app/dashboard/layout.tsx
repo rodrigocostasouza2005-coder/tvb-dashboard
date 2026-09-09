@@ -24,7 +24,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   return (
     <div className="min-h-screen bg-[var(--page-plane)] text-[var(--text-primary)]">
-      <header className="border-b border-[var(--border)] bg-[var(--surface-1)]">
+      <header className="sticky top-0 z-30 border-b border-[var(--border)] bg-[var(--surface-1)]">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-3">
           <div className="flex items-center gap-3">
             <div className="rounded-md bg-white p-0.5 leading-[0]">

@@ -15,13 +15,10 @@ export const maxDuration = 300;
 
 const ROLES = ["ADMIN", "GESTAO", "VENDEDOR"] as const;
 
-// Altura fixa com scroll interno (pedido do Rodrigo em 2026-09-09) — sem isso, cada tab nova
-// adicionada ao app empurra o botão "Salvar"/"Criar usuário" pra mais longe, num formulário que
-// só cresce; agora o formulário fica de tamanho estável independente de quantas abas existirem.
 function TabCheckboxes({ name, checked }: { name: string; checked: Set<string> }) {
   const keyedTabs = TABS.filter((t): t is Extract<typeof t, { key: NonNullable<(typeof t)["key"]> }> => t.key !== undefined);
   return (
-    <div className="flex max-h-32 flex-wrap gap-x-3 gap-y-1 overflow-y-auto rounded-md border border-[var(--border)] p-2">
+    <div className="flex flex-wrap gap-x-3 gap-y-1">
       {keyedTabs.map((t) => (
         <label key={t.key} className="flex items-center gap-1 text-xs text-[var(--text-secondary)]">
           <input
