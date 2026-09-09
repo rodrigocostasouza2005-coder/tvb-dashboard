@@ -4,6 +4,7 @@ import { getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction } f
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { waHref } from "@/lib/whatsapp";
+import { getNumeroNotaFiscal } from "@/lib/connectors/nota-fiscal";
 import { FilterBar } from "../filter-bar";
 import { CollapsibleFilters } from "../collapsible-filters";
 
@@ -65,13 +66,22 @@ function mensagemSugestao(s: SugestaoContato): string {
   return base;
 }
 
-function mensagemFollowUp(f: FollowUpPosCompra): string {
+type FollowUpComNota = FollowUpPosCompra & { numeroNota: string | null };
+
+// Linha da nota/cupom, pedido do Rodrigo em 2026-09-09 pra facilitar caso o cliente precise
+// trocar — só entra quando a busca ao vivo no DAPIC acha um número (getNumeroNotaFiscal),
+// nunca inventa nem bloqueia o resto da mensagem se não achar.
+function mensagemFollowUp(f: FollowUpComNota): string {
   const nome = primeiroNome(f.cliente);
   const produtos =
     f.produtos.length === 1
       ? f.produtos[0]
       : `${f.produtos.slice(0, -1).join(", ")} e ${f.produtos[f.produtos.length - 1]}`;
-  return `Oi ${nome}! Aqui é da TVB Shorts. Passando pra saber se você curtiu o(a) ${produtos} — chegou tudo certinho, serviu bem? Qualquer coisa é só chamar!`;
+  const base = `Oi ${nome}! Aqui é da TVB Shorts. Passando pra saber se você curtiu o(a) ${produtos} — chegou tudo certinho, serviu bem? Qualquer coisa é só chamar!`;
+  if (f.numeroNota) {
+    return `${base} E se precisar trocar alguma coisa, já separa o número da nota aqui: ${f.numeroNota}.`;
+  }
+  return base;
 }
 
 function agruparPorLoja<T extends { loja: string | null }>(itens: T[]): [string, T[]][] {
@@ -125,7 +135,7 @@ function TabelaSugestoes({ loja, sugestoes }: { loja: string; sugestoes: Sugesta
   );
 }
 
-function TabelaFollowUp({ loja, itens }: { loja: string; itens: FollowUpPosCompra[] }) {
+function TabelaFollowUp({ loja, itens }: { loja: string; itens: FollowUpComNota[] }) {
   return (
     <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
       <h3 className="border-b border-[var(--gridline)] px-4 py-2.5 text-sm font-medium text-[var(--text-primary)]">{loja} <span className="font-normal text-[var(--text-muted)]">({itens.length})</span></h3>
@@ -135,6 +145,7 @@ function TabelaFollowUp({ loja, itens }: { loja: string; itens: FollowUpPosCompr
             <th className="px-4 py-2 font-medium">Cliente</th>
             <th className="px-4 py-2 font-medium">Contato</th>
             <th className="px-4 py-2 font-medium">Produto(s) comprado(s)</th>
+            <th className="px-4 py-2 font-medium">Nota/cupom</th>
             <th className="px-4 py-2 font-medium">Há quantos dias</th>
           </tr>
         </thead>
@@ -150,6 +161,7 @@ function TabelaFollowUp({ loja, itens }: { loja: string; itens: FollowUpPosCompr
                 )}
               </td>
               <td className="px-4 py-2 text-[var(--text-secondary)]">{f.produtos.join(", ")}</td>
+              <td className="px-4 py-2 tabular-nums text-[var(--text-secondary)]">{f.numeroNota ?? <span className="text-[var(--text-muted)]">—</span>}</td>
               <td className="px-4 py-2 tabular-nums">{f.diasAtras}</td>
             </tr>
           ))}
@@ -188,7 +200,13 @@ export default async function ClientesSugestoesContatoPage({
   ]);
 
   const sugestoesPorLoja = agruparPorLoja(sugestoes);
-  const followUpPorLoja = agruparPorLoja(followUp);
+
+  // Número da nota/cupom buscado ao vivo no DAPIC, só pra esse punhado de clientes do
+  // follow-up (não faz parte do sync em lote) — ver getNumeroNotaFiscal.
+  const followUpComNota: FollowUpComNota[] = await Promise.all(
+    followUp.map(async (f) => ({ ...f, numeroNota: await getNumeroNotaFiscal(f.storeId, f.dapicVendaId) }))
+  );
+  const followUpPorLoja = agruparPorLoja(followUpComNota);
 
   return (
     <div>

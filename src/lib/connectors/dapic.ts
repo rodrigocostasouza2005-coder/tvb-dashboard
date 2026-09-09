@@ -295,6 +295,20 @@ export class DapicClient {
     return this.fetchAllPages<DapicFaturaProduto>(`/faturas/${idFatura}/produtos`);
   }
 
+  // Detalhe completo da fatura — ao contrário da lista (fetchFaturas), traz o bloco Fiscal com
+  // o número da nota. Achado em 2026-09-09 investigando se dava pra mandar o número da nota no
+  // follow-up pós-compra. Usado sob demanda (não no sync em lote), então não precisa paginação.
+  fetchFaturaDetalhe(idFatura: number) {
+    return this.fetch<DapicFaturaDetalhe>(`/faturas/${idFatura}`);
+  }
+
+  // Detalhe de uma venda de PDV — a lista (fetchVendasPdv) não traz NFCE/NFE. Mesmo achado de
+  // 2026-09-09: pra loja física, é aqui que mora o número do cupom/nota, não em endpoint fiscal
+  // separado (o cupom NFC-e nem tem chave disponível pela API, só o número mesmo).
+  fetchVendaPdvDetalhe(id: number) {
+    return this.fetch<DapicVendaPdvDetalhe>(`/vendaspdv/${id}`);
+  }
+
   // Catálogo de tabelas de preço (ex: Varejo, Atacado) — nenhuma venda vem com esse campo
   // direto (nem /vendaspdv nem /faturas), só o endpoint abandonado /pedidosvendas tinha.
   // Achado em 2026-08-10, usado a partir de 2026-08-11 pra inferir qual tabela valeu numa venda
@@ -431,6 +445,20 @@ export type DapicVendaPdv = {
   Produtos: DapicVendaPdvProduto[];
 };
 
+// Campos reais de /vendaspdv/{id} (detalhe), confirmados em 2026-09-09 com o token leblon —
+// a lista não traz NFCE/NFE/IdNotaFiscal, só o detalhe. A maioria das vendas de loja física é
+// NFCE (cupom fiscal do consumidor) — nesse caso IdNotaFiscal vem null (o cupom não tem uma
+// "nota" ligada, só o número do cupom mesmo). NFE (nota fiscal eletrônica normal, mais rara em
+// loja física — devolução/entrada, algumas saídas maiores) vem com IdNotaFiscal preenchido,
+// que dá pra cruzar com /notasfiscais/{id} pra pegar a chave de 44 dígitos, se precisar dela.
+export type DapicVendaPdvDetalhe = {
+  Id: number;
+  IdNotaFiscal: number | null;
+  NFCE: number | null;
+  NFE: number | null;
+  CFE: number | null;
+};
+
 // Campos reais de /ordensproducao/produtos, confirmados em 2026-08-10 com o token da Matriz.
 // "Id" NÃO é uma chave única por linha (várias linhas de tamanhos diferentes do mesmo produto
 // numa mesma ordem repetem o mesmo Id) — usar (IdOrdemProducao, IdGradeProduto) como chave.
@@ -491,6 +519,20 @@ export type DapicFatura = {
   Cidade: string | null;
   Estado: string | null;
   Empresa: string;
+};
+
+// Campos reais de /faturas/{id} (detalhe), confirmados em 2026-09-09. Ao contrário da lista
+// (fetchFaturas), traz o bloco Fiscal — Site+Atacado sempre tem chave completa aqui (emissão
+// passa pelo próprio DAPIC via Shopify), diferente do cupom NFC-e de loja física.
+export type DapicFaturaDetalhe = {
+  Id: number;
+  Fiscal: {
+    IdNotaFiscal: number;
+    NumeroNota: number;
+    NumeroSerie: number;
+    ChaveNotaFiscal: string;
+    DataEmissao: string;
+  } | null;
 };
 
 // Campos reais de /faturas/{id}/produtos, confirmados em 2026-08-10. Produto vem com a

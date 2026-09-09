@@ -2837,6 +2837,11 @@ export type FollowUpPosCompra = {
   produtos: string[];
   diasAtras: number;
   loja: string | null;
+  // Venda mais recente do cliente na janela — usado pra buscar o número da nota/cupom fiscal
+  // ao vivo no DAPIC (ver getNumeroNotaFiscal em connectors/nota-fiscal.ts), sob demanda, não
+  // gravado no banco.
+  storeId: string;
+  dapicVendaId: number;
 };
 
 // Follow-up pós-compra — pedido do Rodrigo em 2026-08-31: clientes que compraram há 7-10 dias,
@@ -2857,20 +2862,32 @@ export async function getFollowUpPosCompra(filters: DashboardFilters): Promise<F
   };
   const rows = await prisma.sale.findMany({
     where,
-    select: { clienteNome: true, saleDate: true, produto: true, store: { select: { name: true, displayGroup: true } } },
+    select: {
+      clienteNome: true,
+      saleDate: true,
+      produto: true,
+      storeId: true,
+      dapicVendaId: true,
+      store: { select: { name: true, displayGroup: true } },
+    },
   });
   if (rows.length === 0) return [];
 
-  const porCliente = new Map<string, { nome: string; produtos: Set<string>; data: Date; loja: string }>();
+  const porCliente = new Map<
+    string,
+    { nome: string; produtos: Set<string>; data: Date; loja: string; storeId: string; dapicVendaId: number }
+  >();
   for (const r of rows) {
     const nome = r.clienteNome as string;
     const norm = nome.trim().toUpperCase();
     const loja = r.store.displayGroup ?? r.store.name;
-    const cur = porCliente.get(norm) ?? { nome, produtos: new Set<string>(), data: r.saleDate, loja };
+    const cur =
+      porCliente.get(norm) ??
+      { nome, produtos: new Set<string>(), data: r.saleDate, loja, storeId: r.storeId, dapicVendaId: r.dapicVendaId };
     cur.produtos.add(r.produto);
-    // Loja da compra mais recente dentro da janela — se comprou em 2 lojas na mesma janela
-    // (raro), fica a da compra mais nova.
-    if (r.saleDate > cur.data) { cur.data = r.saleDate; cur.loja = loja; }
+    // Loja/venda da compra mais recente dentro da janela — se comprou em 2 lojas na mesma
+    // janela (raro), fica a da compra mais nova (é dessa venda que sai o número da nota).
+    if (r.saleDate > cur.data) { cur.data = r.saleDate; cur.loja = loja; cur.storeId = r.storeId; cur.dapicVendaId = r.dapicVendaId; }
     porCliente.set(norm, cur);
   }
 
@@ -2888,6 +2905,8 @@ export async function getFollowUpPosCompra(filters: DashboardFilters): Promise<F
         produtos: [...c.produtos],
         diasAtras: Math.floor((now.getTime() - c.data.getTime()) / 86400000),
         loja: c.loja,
+        storeId: c.storeId,
+        dapicVendaId: c.dapicVendaId,
       };
     })
     // Sem telefone não dá pra chamar no WhatsApp — mesmo critério de getSugestoesDeContato.
