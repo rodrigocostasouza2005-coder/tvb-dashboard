@@ -107,13 +107,14 @@ model MapaComprasConfig {
 }
 
 // Token pra conectar o Radar num Custom GPT (ChatGPT) ou Conector MCP (Claude) — pedido do
-// Rodrigo em 2026-09-08. Uma linha só (id fixo "radar-api"), gerada/trocada pelo Painel Admin
-// (nunca aparece de novo depois de gerada, só o hash fica salvo — mesmo padrão de
-// User.passwordHash). Dá acesso total aos dados (sem a separação por loja/financeiro do login
-// normal), é pra uso pessoal dele.
+// Rodrigo em 2026-09-08. Uma linha só (id fixo "radar-api"), gerada/trocada e RE-VISUALIZADA
+// pelo Painel Admin (pedido dele: não quer ser forçado a reconectar ChatGPT/Claude só porque
+// esqueceu de copiar). Por isso fica em texto puro, não hash como User.passwordHash — decisão
+// consciente, é uma API key de uso pessoal, não uma senha. Dá acesso total aos dados (sem a
+// separação por loja/financeiro do login normal).
 model ApiToken {
   id        String   @id
-  tokenHash String
+  token     String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }

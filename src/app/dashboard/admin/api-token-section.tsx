@@ -1,20 +1,27 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import { generateApiTokenAction } from "./actions";
+import { generateApiTokenAction, revealApiTokenAction } from "./actions";
 
 type State = { ok: boolean; message: string; token?: string };
 
 const initialState: State = { ok: true, message: "" };
-
 const BASE_URL = "https://tvb-dashboard.vercel.app";
 
 export function ApiTokenSection({ hasToken, updatedAtLabel }: { hasToken: boolean; updatedAtLabel: string | null }) {
-  const [state, formAction, isPending] = useActionState<State, FormData>(
+  const [genState, generateAction, generating] = useActionState<State, FormData>(
     async () => generateApiTokenAction(),
     initialState
   );
+  const [revealState, revealActionForm, revealing] = useActionState<State, FormData>(
+    async () => revealApiTokenAction(),
+    initialState
+  );
   const [copied, setCopied] = useState<"token" | "mcp" | null>(null);
+
+  // O token mais recente que apareceu na tela, seja de gerar ou de revelar — os dois formulários
+  // mostram o mesmo bloco de resultado embaixo.
+  const token = genState.token ?? revealState.token;
 
   function copy(text: string, which: "token" | "mcp") {
     navigator.clipboard.writeText(text).then(() => {
@@ -36,28 +43,44 @@ export function ApiTokenSection({ hasToken, updatedAtLabel }: { hasToken: boolea
         {hasToken ? `Token ativo, gerado em ${updatedAtLabel}.` : "Nenhum token gerado ainda."}
       </p>
 
-      <form action={formAction} className="mb-3">
-        <button
-          type="submit"
-          disabled={isPending}
-          className="w-fit rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--page-plane)] disabled:opacity-50"
-        >
-          {isPending ? "Gerando..." : hasToken ? "Gerar novo token (substitui o atual)" : "Gerar token"}
-        </button>
-      </form>
+      <div className="mb-3 flex flex-wrap gap-2">
+        {hasToken && (
+          <form action={revealActionForm}>
+            <button
+              type="submit"
+              disabled={revealing}
+              className="w-fit rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--page-plane)] disabled:opacity-50"
+            >
+              {revealing ? "Buscando..." : "Ver token"}
+            </button>
+          </form>
+        )}
+        <form action={generateAction}>
+          <button
+            type="submit"
+            disabled={generating}
+            className="w-fit rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--page-plane)] disabled:opacity-50"
+          >
+            {generating ? "Gerando..." : hasToken ? "Gerar novo token (substitui o atual)" : "Gerar token"}
+          </button>
+        </form>
+      </div>
 
-      {state.token && (
+      {token && (
         <div className="mb-3 rounded-md border border-[var(--series-1)] bg-[var(--page-plane)] p-3">
-          <p className="mb-2 text-xs font-medium" style={{ color: "var(--status-critical)" }}>
-            {state.message} Depois de sair dessa página não tem como ver de novo — só gerar outro.
-          </p>
+          {genState.token && (
+            <p className="mb-2 text-xs font-medium" style={{ color: "var(--status-critical)" }}>
+              Token trocado — qualquer GPT/Claude já conectado com o token antigo vai parar de
+              funcionar até você atualizar a configuração lá.
+            </p>
+          )}
           <div className="flex items-center gap-2">
             <code className="flex-1 overflow-x-auto rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1 text-xs">
-              {state.token}
+              {token}
             </code>
             <button
               type="button"
-              onClick={() => copy(state.token!, "token")}
+              onClick={() => copy(token, "token")}
               className="shrink-0 rounded-md border border-[var(--border)] px-2 py-1 text-xs hover:bg-[var(--surface-1)]"
             >
               {copied === "token" ? "Copiado!" : "Copiar"}
@@ -75,18 +98,18 @@ export function ApiTokenSection({ hasToken, updatedAtLabel }: { hasToken: boolea
         <div className="flex items-center gap-2">
           <span>
             <strong>Claude (Configurações → Conectores → Adicionar conector personalizado):</strong>{" "}
-            {state.token ? (
+            {token ? (
               <code className="rounded bg-[var(--page-plane)] px-1 py-0.5">
-                {BASE_URL}/api/mcp/{state.token}
+                {BASE_URL}/api/mcp/{token}
               </code>
             ) : (
-              <span className="text-[var(--text-muted)]">gere um token acima pra ver o link completo</span>
+              <span className="text-[var(--text-muted)]">clique em "Ver token" ou "Gerar token" acima pra ver o link completo</span>
             )}
           </span>
-          {state.token && (
+          {token && (
             <button
               type="button"
-              onClick={() => copy(`${BASE_URL}/api/mcp/${state.token}`, "mcp")}
+              onClick={() => copy(`${BASE_URL}/api/mcp/${token}`, "mcp")}
               className="shrink-0 rounded-md border border-[var(--border)] px-2 py-1 text-xs hover:bg-[var(--page-plane)]"
             >
               {copied === "mcp" ? "Copiado!" : "Copiar"}

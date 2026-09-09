@@ -6,7 +6,7 @@ import { after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { hashPassword, getSessionUser } from "@/lib/auth";
 import { TABS, type TabKey } from "@/lib/tabs";
-import { generateApiToken } from "@/lib/api-token";
+import { generateApiToken, getApiToken } from "@/lib/api-token";
 import type { Role } from "@prisma/client";
 
 async function requireAdmin() {
@@ -154,17 +154,24 @@ export async function forceSyncAction(): Promise<{ ok: boolean; message: string 
   };
 }
 
-// Gera (ou substitui) o token de API usado pelo Custom GPT/Conector MCP — o valor puro só existe
-// nesse retorno, nunca mais aparece depois (ver lib/api-token.ts).
+// Gera (ou substitui) o token de API usado pelo Custom GPT/Conector MCP — invalida o anterior,
+// então só usar quando quiser trocar de verdade (qualquer coisa já conectada com o token antigo
+// para de funcionar até reconfigurar lá).
 export async function generateApiTokenAction(): Promise<{ ok: boolean; message: string; token?: string }> {
   await requireAdmin();
 
   const token = await generateApiToken();
   revalidatePath("/dashboard/admin");
 
-  return {
-    ok: true,
-    message: "Token gerado — copie agora, ele não vai aparecer de novo.",
-    token,
-  };
+  return { ok: true, message: "Novo token gerado.", token };
+}
+
+// Mostra o token atual sob demanda — não fica pré-carregado na página, só busca quando a pessoa
+// clica em "Ver token".
+export async function revealApiTokenAction(): Promise<{ ok: boolean; message: string; token?: string }> {
+  await requireAdmin();
+
+  const token = await getApiToken();
+  if (!token) return { ok: false, message: "Nenhum token gerado ainda." };
+  return { ok: true, message: "", token };
 }
