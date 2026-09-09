@@ -3025,6 +3025,20 @@ function groupStoresForFilter(stores: { id: string; name: string; displayGroup: 
   return [...grouped, ...standalone].sort((a, b) => a.name.localeCompare(b.name));
 }
 
+// Resolve um nome de loja/filial em texto livre (ex: "Rio Sul", "site e atacado") pro(s)
+// storeId(s) correspondente(s) — usado pelas integrações externas (MCP do Claude, Actions do
+// ChatGPT) pra permitir quebrar consulta por filial sem o chamador precisar saber o id interno.
+// undefined = não filtrou (nome vazio/não informado); null = nome dado não bateu com loja
+// nenhuma (chamador deve avisar e sugerir os nomes válidos, não seguir sem filtro).
+export async function resolveLojaNome(loja: string | undefined | null): Promise<string[] | null | undefined> {
+  if (!loja || !loja.trim()) return undefined;
+  const stores = await getStores();
+  const alvo = loja.trim().toLowerCase();
+  const match = stores.find((s) => s.name.toLowerCase().includes(alvo));
+  if (!match) return null;
+  return match.id.split("|");
+}
+
 // allowedStoreIds: restrição por usuário (ver getStoreRestriction) — quando presente, nem
 // aparece como opção pra escolher, não é só um filtro que já vem pré-marcado.
 export async function getStores(allowedStoreIds?: string[]): Promise<StoreFilterOption[]> {

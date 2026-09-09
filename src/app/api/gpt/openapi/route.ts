@@ -21,8 +21,15 @@ const OPENAPI_SPEC = {
             name: "resource",
             in: "query",
             required: true,
-            description: "Qual dado consultar.",
-            schema: { type: "string", enum: ["vendas", "estoque", "grade"] },
+            description: "Qual dado consultar. Use 'lojas' primeiro pra ver os nomes válidos de loja.",
+            schema: { type: "string", enum: ["vendas", "estoque", "grade", "lojas"] },
+          },
+          {
+            name: "loja",
+            in: "query",
+            required: false,
+            description: "Só pra 'vendas', 'estoque' e 'grade': nome da loja/filial pra filtrar (ex: 'Rio Sul', 'Barra', 'Leblon', 'Site e Atacado'). Use resource=lojas pra ver os nomes válidos. Padrão: todas as lojas.",
+            schema: { type: "string" },
           },
           {
             name: "dimension",

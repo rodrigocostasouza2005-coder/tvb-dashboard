@@ -4,6 +4,8 @@ import {
   getSalesByDimension,
   getEstoqueAtual,
   getGradeTamanhoBusca,
+  getStores,
+  resolveLojaNome,
   type Dimension,
   type Canal,
 } from "@/lib/metrics";
@@ -37,46 +39,64 @@ export async function GET(request: NextRequest) {
 
   const params = request.nextUrl.searchParams;
   const resource = params.get("resource");
+  const lojaParam = params.get("loja") ?? undefined;
 
-  if (resource === "vendas") {
-    const dimension = isDimension(params.get("dimension")) ? (params.get("dimension") as Dimension) : "grupo";
-    const canal = isCanal(params.get("canal")) ? (params.get("canal") as Canal) : "todos";
-    const fromStr = params.get("from");
-    const toStr = params.get("to");
-    // Padrão: últimos 30 dias, mesma convenção do resto do dashboard (ver DEFAULT_DIAS_ATRAS em
-    // filters.ts) — sem isso, sem período explícito buscaria o histórico inteiro à toa.
-    const defaultFromStr = todayBrasiliaStr(new Date(Date.now() - 30 * 86400000));
-    const from = fromStr ? brasiliaDayStart(fromStr) : brasiliaDayStart(defaultFromStr);
-    const to = toStr ? brasiliaDayEnd(toStr) : new Date();
-
-    const rows = await getSalesByDimension({ storeIds: undefined, marcas: undefined, tabelasPreco: undefined, from, to }, dimension, canal);
-    return NextResponse.json({
-      resource: "vendas",
-      dimension,
-      canal,
-      periodo: { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) },
-      // Corta em 30 — respostas grandes demais estouram limite de tamanho do GPT Actions e
-      // gastam contexto à toa pra uma pergunta em linguagem natural.
-      itens: rows.slice(0, 30),
-    });
+  if (resource === "lojas") {
+    const stores = await getStores();
+    return NextResponse.json({ resource: "lojas", lojas: stores.map((s) => s.name) });
   }
 
-  if (resource === "estoque") {
-    const dimension = isDimension(params.get("dimension")) ? (params.get("dimension") as Dimension) : "grupo";
-    const rows = await getEstoqueAtual({ storeIds: undefined, grupoIn: undefined }, dimension);
-    return NextResponse.json({
-      resource: "estoque",
-      dimension,
-      itens: rows.slice(0, 30),
-    });
-  }
+  if (resource === "vendas" || resource === "estoque" || resource === "grade") {
+    const storeIds = await resolveLojaNome(lojaParam);
+    if (storeIds === null) {
+      const stores = await getStores();
+      return NextResponse.json(
+        { error: `Loja "${lojaParam}" não encontrada.`, lojasValidas: stores.map((s) => s.name) },
+        { status: 400 }
+      );
+    }
 
-  if (resource === "grade") {
+    if (resource === "vendas") {
+      const dimension = isDimension(params.get("dimension")) ? (params.get("dimension") as Dimension) : "grupo";
+      const canal = isCanal(params.get("canal")) ? (params.get("canal") as Canal) : "todos";
+      const fromStr = params.get("from");
+      const toStr = params.get("to");
+      // Padrão: últimos 30 dias, mesma convenção do resto do dashboard (ver DEFAULT_DIAS_ATRAS em
+      // filters.ts) — sem isso, sem período explícito buscaria o histórico inteiro à toa.
+      const defaultFromStr = todayBrasiliaStr(new Date(Date.now() - 30 * 86400000));
+      const from = fromStr ? brasiliaDayStart(fromStr) : brasiliaDayStart(defaultFromStr);
+      const to = toStr ? brasiliaDayEnd(toStr) : new Date();
+
+      const rows = await getSalesByDimension({ storeIds, marcas: undefined, tabelasPreco: undefined, from, to }, dimension, canal);
+      return NextResponse.json({
+        resource: "vendas",
+        dimension,
+        canal,
+        loja: lojaParam ?? "todas",
+        periodo: { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) },
+        // Corta em 30 — respostas grandes demais estouram limite de tamanho do GPT Actions e
+        // gastam contexto à toa pra uma pergunta em linguagem natural.
+        itens: rows.slice(0, 30),
+      });
+    }
+
+    if (resource === "estoque") {
+      const dimension = isDimension(params.get("dimension")) ? (params.get("dimension") as Dimension) : "grupo";
+      const rows = await getEstoqueAtual({ storeIds, grupoIn: undefined }, dimension);
+      return NextResponse.json({
+        resource: "estoque",
+        dimension,
+        loja: lojaParam ?? "todas",
+        itens: rows.slice(0, 30),
+      });
+    }
+
+    // resource === "grade"
     const produto = params.get("produto");
     if (!produto) {
       return NextResponse.json({ error: "Parâmetro 'produto' é obrigatório pra resource=grade." }, { status: 400 });
     }
-    const rows = await getGradeTamanhoBusca(produto, { storeIds: undefined });
+    const rows = await getGradeTamanhoBusca(produto, { storeIds });
     if (rows.length === 0) {
       return NextResponse.json({ resource: "grade", produto, itens: [], aviso: "Nenhum produto/grupo encontrado com esse nome." });
     }
@@ -84,7 +104,7 @@ export async function GET(request: NextRequest) {
   }
 
   return NextResponse.json(
-    { error: "Parâmetro 'resource' precisa ser 'vendas', 'estoque' ou 'grade'." },
+    { error: "Parâmetro 'resource' precisa ser 'vendas', 'estoque', 'grade' ou 'lojas'." },
     { status: 400 }
   );
 }
