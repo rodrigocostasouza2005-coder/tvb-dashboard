@@ -1673,6 +1673,76 @@ export async function getProdutosLiquidosPorClientes(
   return result;
 }
 
+// Pra cada cliente, acha o tamanho que ele mais compra DENTRO do produto informado (geralmente o
+// produtoFavorito) e checa se ainda tem esse tamanho disponível na loja principal dele — pedido
+// do Rodrigo em 2026-09-08: "cruzar com o que temos em estoque, se o tamanho da pessoa ainda tem".
+// Só devolve `disponivel: true` quando bate de verdade (produto E tamanho E loja), nunca chuta —
+// a mensagem só menciona estoque quando isso vier preenchido.
+export async function getTamanhoEstoqueParaClientes(
+  itens: { cliente: string; produto: string; loja: string | null }[]
+): Promise<Map<string, { tamanho: string; disponivel: boolean }>> {
+  const result = new Map<string, { tamanho: string; disponivel: boolean }>();
+  if (itens.length === 0) return result;
+
+  const normalizedTargets = [...new Set(itens.map((i) => i.cliente.trim().toUpperCase()))];
+  const produtos = [...new Set(itens.map((i) => i.produto))];
+
+  const variantRows = await prisma.$queryRaw<{ nome: string; norm: string }[]>`
+    SELECT DISTINCT "clienteNome" AS nome, UPPER(TRIM("clienteNome")) AS norm
+    FROM "Sale"
+    WHERE UPPER(TRIM("clienteNome")) = ANY(${normalizedTargets})
+  `;
+  if (variantRows.length === 0) return result;
+  const allVariants = variantRows.map((r) => r.nome);
+
+  // Tamanho mais comprado por cliente+produto (todo o histórico, mesma janela de produtoFavorito).
+  const vendas = await prisma.sale.groupBy({
+    by: ["clienteNome", "produto", "tamanho"],
+    where: { clienteNome: { in: allVariants }, produto: { in: produtos }, tamanho: { not: null } },
+    _sum: { quantidade: true },
+  });
+  const tamanhoPorClienteProduto = new Map<string, Map<string, number>>();
+  for (const v of vendas) {
+    const norm = (v.clienteNome as string).trim().toUpperCase();
+    const key = `${norm}::${v.produto}`;
+    const m = tamanhoPorClienteProduto.get(key) ?? new Map<string, number>();
+    m.set(v.tamanho as string, (m.get(v.tamanho as string) ?? 0) + (v._sum.quantidade ?? 0));
+    tamanhoPorClienteProduto.set(key, m);
+  }
+
+  // Resolve "loja principal" (nome de exibição, pode agrupar mais de 1 loja física) de volta
+  // pros storeIds reais — StockSnapshot guarda por loja física, não por displayGroup.
+  const stores = await prisma.store.findMany();
+  const storeIdsPorNomeExibicao = new Map<string, string[]>();
+  for (const s of stores) {
+    const nome = s.displayGroup ?? s.name;
+    const arr = storeIdsPorNomeExibicao.get(nome) ?? [];
+    arr.push(s.id);
+    storeIdsPorNomeExibicao.set(nome, arr);
+  }
+
+  const estoque = await prisma.stockSnapshot.findMany({
+    where: { produto: { in: produtos } },
+    select: { storeId: true, produto: true, tamanho: true, quantidadeDisponivel: true },
+  });
+  const estoquePorProdutoTamanhoLoja = new Map<string, number>();
+  for (const e of estoque) {
+    const key = `${e.produto}::${e.tamanho ?? ""}::${e.storeId}`;
+    estoquePorProdutoTamanhoLoja.set(key, (estoquePorProdutoTamanhoLoja.get(key) ?? 0) + e.quantidadeDisponivel);
+  }
+
+  for (const item of itens) {
+    const norm = item.cliente.trim().toUpperCase();
+    const tamanhos = tamanhoPorClienteProduto.get(`${norm}::${item.produto}`);
+    const tamanhoTop = tamanhos ? [...tamanhos.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] : undefined;
+    if (!tamanhoTop || !item.loja) continue;
+    const storeIds = storeIdsPorNomeExibicao.get(item.loja) ?? [];
+    const disponivel = storeIds.some((id) => (estoquePorProdutoTamanhoLoja.get(`${item.produto}::${tamanhoTop}::${id}`) ?? 0) > 0);
+    result.set(norm, { tamanho: tamanhoTop, disponivel });
+  }
+  return result;
+}
+
 export type ClientePrecoBehavior = "full_price" | "promo_driven" | "mixed" | "sem_dado";
 
 // Tabelas reais confirmadas em produção em 2026-08-28 (Sale.tabelaPreco): "Tabela varejo",
@@ -2457,6 +2527,9 @@ export type SugestaoContato = {
   detalhe: string;
   produtoFavorito: string | null;
   loja: string | null;
+  // Tamanho que o cliente mais compra do produtoFavorito, só preenchido quando ainda tem
+  // disponível na loja principal dele agora — ver getTamanhoEstoqueParaClientes.
+  tamanhoDisponivel: string | null;
 };
 
 // "Sugestões de Contato" — reformulado pelo Rodrigo em 2026-08-31 depois da 1ª versão: só B2C
@@ -2534,7 +2607,7 @@ export async function getSugestoesDeContato(filters: DashboardFilters): Promise<
   const lojaPorNorm = new Map(segmentacao.map((s) => [s.cliente.trim().toUpperCase(), s.lojaPrincipal]));
 
   const seed = diaDoAno(new Date());
-  const selecionados: Omit<SugestaoContato, "produtoFavorito">[] = [];
+  const selecionados: Omit<SugestaoContato, "produtoFavorito" | "tamanhoDisponivel">[] = [];
   for (const s of fatiaDoDia(vipPool, POR_GRUPO_POR_DIA, seed)) {
     selecionados.push({ cliente: s.cliente, telefone: s.telefone, motivo: "VIP esfriando", detalhe: `${s.recenciaDias} dias sem comprar`, loja: s.lojaPrincipal });
   }
@@ -2563,10 +2636,22 @@ export async function getSugestoesDeContato(filters: DashboardFilters): Promise<
   // Produto favorito — em lote (1 query pros clientes do dia, nunca 1 por linha).
   const produtosPorCliente = await getProdutosLiquidosPorClientes(filters, selecionados.map((s) => s.cliente));
 
-  return selecionados.map((s) => ({
+  const comProdutoFavorito = selecionados.map((s) => ({
     ...s,
     produtoFavorito: produtosPorCliente.get(s.cliente.trim().toUpperCase())?.[0]?.produto ?? null,
   }));
+
+  // Tamanho + disponibilidade em estoque — também em lote, só pra quem tem produto favorito.
+  const tamanhoEstoquePorCliente = await getTamanhoEstoqueParaClientes(
+    comProdutoFavorito
+      .filter((s): s is typeof s & { produtoFavorito: string } => s.produtoFavorito !== null)
+      .map((s) => ({ cliente: s.cliente, produto: s.produtoFavorito, loja: s.loja }))
+  );
+
+  return comProdutoFavorito.map((s) => {
+    const info = tamanhoEstoquePorCliente.get(s.cliente.trim().toUpperCase());
+    return { ...s, tamanhoDisponivel: info?.disponivel ? info.tamanho : null };
+  });
 }
 
 export type FollowUpPosCompra = {

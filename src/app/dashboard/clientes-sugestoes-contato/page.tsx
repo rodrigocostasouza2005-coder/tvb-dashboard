@@ -34,24 +34,35 @@ function primeiroNome(nomeCompleto: string): string {
 //    comprar — já vem em s.detalhe) rende mais do que "achismo de gosto" tipo produto favorito;
 //    mensagem curta, tom próximo, sem prometer desconto (decisão comercial do Rodrigo, não algo
 //    pra eu inventar), sem urgência falsa.
+//
+// Gancho de estoque (pedido do Rodrigo, mesmo dia): quando o tamanho que o cliente mais compra do
+// produto favorito dele ainda está disponível na loja principal, entra uma linha a mais — só
+// nesse caso (nunca inventa disponibilidade, ver getTamanhoEstoqueParaClientes).
 function mensagemSugestao(s: SugestaoContato): string {
   const nome = primeiroNome(s.cliente);
-  switch (s.motivo) {
-    case "VIP esfriando":
-      return `E aí ${nome}, sumiu! 😄 Faz um tempinho que você não passa aqui na TVB (${s.detalhe}) — bora dar uma olhada no que chegou de novo?`;
-    case "Recorrente esfriando":
-      return `Oi ${nome}, tudo bem? Notei que você não aparece por aqui há um tempo (${s.detalhe}). Só passando pra saber se tá tudo certo e se posso te ajudar a achar alguma coisa!`;
-    case "Em risco":
-      return `Oi ${nome}! Tudo bem? Aqui é da TVB Shorts, faz tempo que a gente não se fala (${s.detalhe}). Só passando pra saber como você tá.`;
-    case "Comprou só 1 vez":
-      return `Oi ${nome}! Aqui é da TVB Shorts. Vi que você deu uma passada por aqui ${s.detalhe} e queria saber se curtiu — e já aproveitar pra te mostrar as novidades que chegaram.`;
-    case "Inativo":
-      return `Oi ${nome}, quanto tempo! Aqui é da TVB Shorts — voltamos com bastante coisa nova e lembramos de você. Dá uma olhada quando puder 🌊`;
-    case "Aniversário":
-      return `Parabéns, ${nome}! 🎉🌊 A galera da TVB Shorts te deseja um feliz aniversário — boa onda pra esse novo ano de vida.`;
-    default:
-      return `Oi ${nome}, tudo bem? Aqui é da TVB Shorts!`;
+  const base = (() => {
+    switch (s.motivo) {
+      case "VIP esfriando":
+        return `E aí ${nome}, sumiu! 😄 Faz um tempinho que você não passa aqui na TVB (${s.detalhe}) — bora dar uma olhada no que chegou de novo?`;
+      case "Recorrente esfriando":
+        return `Oi ${nome}, tudo bem? Notei que você não aparece por aqui há um tempo (${s.detalhe}). Só passando pra saber se tá tudo certo e se posso te ajudar a achar alguma coisa!`;
+      case "Em risco":
+        return `Oi ${nome}! Tudo bem? Aqui é da TVB Shorts, faz tempo que a gente não se fala (${s.detalhe}). Só passando pra saber como você tá.`;
+      case "Comprou só 1 vez":
+        return `Oi ${nome}! Aqui é da TVB Shorts. Vi que você deu uma passada por aqui ${s.detalhe} e queria saber se curtiu — e já aproveitar pra te mostrar as novidades que chegaram.`;
+      case "Inativo":
+        return `Oi ${nome}, quanto tempo! Aqui é da TVB Shorts — voltamos com bastante coisa nova e lembramos de você. Dá uma olhada quando puder 🌊`;
+      case "Aniversário":
+        return `Parabéns, ${nome}! 🎉🌊 A galera da TVB Shorts te deseja um feliz aniversário — boa onda pra esse novo ano de vida.`;
+      default:
+        return `Oi ${nome}, tudo bem? Aqui é da TVB Shorts!`;
+    }
+  })();
+
+  if (s.tamanhoDisponivel && s.produtoFavorito) {
+    return `${base} Inclusive ainda temos o ${s.produtoFavorito} no seu tamanho (${s.tamanhoDisponivel}) aqui na loja!`;
   }
+  return base;
 }
 
 function mensagemFollowUp(f: FollowUpPosCompra): string {
