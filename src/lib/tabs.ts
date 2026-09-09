@@ -5,7 +5,6 @@ export type TabKey =
   | "visao-geral"
   | "resumo-dia"
   | "vendas"
-  | "mensal"
   | "brindes"
   | "estoque-atual"
   | "estoque"
@@ -36,7 +35,7 @@ export type TabKey =
   | "estoque-retirada"
   | "mapa-compras";
 
-export type TabGroup = "visao-geral" | "resumo-dia" | "vendas" | "estoque" | "atacado" | "clientes" | "marketing" | "pesquisa" | "lamina" | "outros";
+export type TabGroup = "visao-geral" | "resumo-dia" | "vendas" | "estoque" | "atacado" | "clientes" | "marketing" | "pesquisa" | "lamina";
 
 export type TabEntry =
   | { key: TabKey; label: string; href: string; group: TabGroup; todo?: false }
@@ -92,9 +91,6 @@ export const TABS: TabEntry[] = [
 
   // pesquisa (direct link, like visao-geral)
   { key: "pesquisa", label: "Pesquisa", href: "/dashboard/pesquisa", group: "pesquisa" },
-
-  // not in nav but still have keys (keep for access control)
-  { key: "mensal", label: "Mensal", href: "/dashboard/mensal", group: "outros" },
 
   // back in nav
   { key: "marketing", label: "Marketing", href: "/dashboard/marketing", group: "marketing" },
