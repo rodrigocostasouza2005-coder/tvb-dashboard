@@ -3,10 +3,12 @@ import { NextResponse } from "next/server";
 import {
   getSalesByDimension,
   getSalesByStore,
+  getReturnsByDimension,
   getEstoqueAtual,
   getGradeTamanhoBusca,
   getStores,
   resolveLojaNome,
+  getLastEstoqueSyncTime,
   type Dimension,
   type Canal,
 } from "@/lib/metrics";
@@ -49,17 +51,34 @@ export async function GET(request: NextRequest) {
 
   if (resource === "vendas_por_loja") {
     const canal = isCanal(params.get("canal")) ? (params.get("canal") as Canal) : "todos";
+    const dimension = isDimension(params.get("dimension")) ? (params.get("dimension") as Dimension) : undefined;
     const fromStr = params.get("from");
     const toStr = params.get("to");
     const defaultFromStr = todayBrasiliaStr(new Date(Date.now() - 30 * 86400000));
     const from = fromStr ? brasiliaDayStart(fromStr) : brasiliaDayStart(defaultFromStr);
     const to = toStr ? brasiliaDayEnd(toStr) : new Date();
-    const rows = await getSalesByStore({ storeIds: undefined, marcas: undefined, tabelasPreco: undefined, from, to }, canal);
+    const rows = await getSalesByStore({ storeIds: undefined, marcas: undefined, tabelasPreco: undefined, from, to }, canal, dimension);
     return NextResponse.json({
       resource: "vendas_por_loja",
       canal,
       periodo: { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) },
       lojas: rows,
+    });
+  }
+
+  if (resource === "devolucoes") {
+    const dimension = isDimension(params.get("dimension")) ? (params.get("dimension") as Dimension) : "grupo";
+    const fromStr = params.get("from");
+    const toStr = params.get("to");
+    const defaultFromStr = todayBrasiliaStr(new Date(Date.now() - 30 * 86400000));
+    const from = fromStr ? brasiliaDayStart(fromStr) : brasiliaDayStart(defaultFromStr);
+    const to = toStr ? brasiliaDayEnd(toStr) : new Date();
+    const rows = await getReturnsByDimension({ storeIds: undefined, marcas: undefined, tabelasPreco: undefined, from, to }, dimension);
+    return NextResponse.json({
+      resource: "devolucoes",
+      dimension,
+      periodo: { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) },
+      itens: rows.slice(0, 30),
     });
   }
 
@@ -99,11 +118,15 @@ export async function GET(request: NextRequest) {
 
     if (resource === "estoque") {
       const dimension = isDimension(params.get("dimension")) ? (params.get("dimension") as Dimension) : "grupo";
-      const rows = await getEstoqueAtual({ storeIds, grupoIn: undefined }, dimension);
+      const [rows, atualizadoEm] = await Promise.all([
+        getEstoqueAtual({ storeIds, grupoIn: undefined }, dimension),
+        getLastEstoqueSyncTime(),
+      ]);
       return NextResponse.json({
         resource: "estoque",
         dimension,
         loja: lojaParam ?? "todas",
+        atualizadoEm,
         itens: rows.slice(0, 30),
       });
     }
@@ -113,15 +136,18 @@ export async function GET(request: NextRequest) {
     if (!produto) {
       return NextResponse.json({ error: "Parâmetro 'produto' é obrigatório pra resource=grade." }, { status: 400 });
     }
-    const rows = await getGradeTamanhoBusca(produto, { storeIds });
+    const [rows, atualizadoEm] = await Promise.all([
+      getGradeTamanhoBusca(produto, { storeIds }),
+      getLastEstoqueSyncTime(),
+    ]);
     if (rows.length === 0) {
       return NextResponse.json({ resource: "grade", produto, itens: [], aviso: "Nenhum produto/grupo encontrado com esse nome." });
     }
-    return NextResponse.json({ resource: "grade", produto, itens: rows });
+    return NextResponse.json({ resource: "grade", produto, atualizadoEm, itens: rows });
   }
 
   return NextResponse.json(
-    { error: "Parâmetro 'resource' precisa ser 'vendas', 'estoque', 'grade' ou 'lojas'." },
+    { error: "Parâmetro 'resource' precisa ser 'vendas', 'vendas_por_loja', 'devolucoes', 'estoque', 'grade' ou 'lojas'." },
     { status: 400 }
   );
 }

@@ -183,31 +183,64 @@ export async function getMonthlySnapshotKpi(filters: DashboardFilters, canal: Ca
 // gráfico de tendência da Visão Geral. Agrupar por dia em SQL é mais simples que em JS aqui
 // porque saleDate é timestamp; usa AT TIME ZONE pra não cair no dia errado perto da meia-noite
 // (mesmo cuidado de fuso já documentado em filters.ts).
+// Líquido de devolução (desconta por dia) desde 2026-09-09 — era a única exceção bruta que
+// sobrava no dashboard (Rodrigo achou receita de ontem do Barra "errada": R$2200 aqui vs
+// R$1853 líquido, diferença batendo exato com 1 devolução do dia). getSalesByDayPerStore já
+// era líquido, esse aqui tinha ficado pra trás.
 export async function getSalesByDay(filters: DashboardFilters) {
-  const rows = await prisma.$queryRaw<{ day: Date; units: bigint; revenue: number }[]>`
-    SELECT
-      (("saleDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo')::date AS day,
-      SUM("quantidade") AS units,
-      SUM("valorTotalLiquido") AS revenue
-    FROM "Sale"
-    WHERE "saleDate" >= ${filters.from}
-      AND "saleDate" <= ${filters.to}
-      ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
-      ${filters.marcas !== undefined ? Prisma.sql`AND "marca" = ANY(${filters.marcas})` : Prisma.empty}
-      ${filters.tabelasPreco !== undefined ? Prisma.sql`AND ("tabelaPreco" = ANY(${filters.tabelasPreco}) OR "tabelaPreco" IS NULL)` : Prisma.empty}
-      ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
-    GROUP BY day
-    ORDER BY day ASC
-  `;
+  const [salesRows, returnRows] = await Promise.all([
+    prisma.$queryRaw<{ day: Date; units: bigint; revenue: number }[]>`
+      SELECT
+        (("saleDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo')::date AS day,
+        SUM("quantidade") AS units,
+        SUM("valorTotalLiquido") AS revenue
+      FROM "Sale"
+      WHERE "saleDate" >= ${filters.from}
+        AND "saleDate" <= ${filters.to}
+        ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
+        ${filters.marcas !== undefined ? Prisma.sql`AND "marca" = ANY(${filters.marcas})` : Prisma.empty}
+        ${filters.tabelasPreco !== undefined ? Prisma.sql`AND ("tabelaPreco" = ANY(${filters.tabelasPreco}) OR "tabelaPreco" IS NULL)` : Prisma.empty}
+        ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
+      GROUP BY day
+      ORDER BY day ASC
+    `,
+    // Return não tem marca/tabelaPreco populado de forma confiável (mesma limitação de
+    // returnWhere() no resto do dashboard) — desconta só por loja/grupo/data.
+    prisma.$queryRaw<{ day: Date; units: bigint; value: number }[]>`
+      SELECT
+        (("returnDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo')::date AS day,
+        SUM("quantidade") AS units,
+        SUM("valorTotal") AS value
+      FROM "Return"
+      WHERE "returnDate" >= ${filters.from}
+        AND "returnDate" <= ${filters.to}
+        ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
+        ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
+      GROUP BY day
+      ORDER BY day ASC
+    `,
+  ]);
+
   // O SQL acima já resolveu o dia certo em horário de Brasília e devolveu como DATE — o driver
   // do Postgres traz DATE como Date em meia-noite UTC. Reformatar essa data usando timeZone
   // America/Sao_Paulo aqui jogaria pro dia anterior (meia-noite UTC = 21h do dia anterior em
   // Brasília), o mesmo tipo de bug de fuso já visto nesse projeto — por isso lê direto em UTC.
-  return rows.map((r) => ({
-    day: new Date(r.day).toISOString().slice(0, 10),
-    unitsSold: Number(r.units),
-    revenue: Number(r.revenue),
-  }));
+  const byDay = new Map<string, { unitsSold: number; revenue: number }>();
+  for (const r of salesRows) {
+    const day = new Date(r.day).toISOString().slice(0, 10);
+    byDay.set(day, { unitsSold: Number(r.units), revenue: Number(r.revenue) });
+  }
+  for (const r of returnRows) {
+    const day = new Date(r.day).toISOString().slice(0, 10);
+    const cur = byDay.get(day) ?? { unitsSold: 0, revenue: 0 };
+    cur.unitsSold -= Number(r.units);
+    cur.revenue -= Number(r.value);
+    byDay.set(day, cur);
+  }
+
+  return [...byDay.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([day, v]) => ({ day, ...v }));
 }
 
 // Mesma ideia de getSalesByDay, mas quebrado por loja — pro gráfico de comparação de lojas
@@ -311,19 +344,64 @@ export async function getSalesByDimension(filters: DashboardFilters, dimension: 
     .sort((a, b) => b.revenue - a.revenue);
 }
 
+async function groupSalesByStoreAndDimension(dimension: Dimension, where: Prisma.SaleWhereInput) {
+  switch (dimension) {
+    case "grupo":
+      return prisma.sale.groupBy({ by: ["storeId", "grupo"], where, _sum: { quantidade: true, valorTotalLiquido: true } });
+    case "produto":
+      return prisma.sale.groupBy({ by: ["storeId", "produto"], where, _sum: { quantidade: true, valorTotalLiquido: true } });
+    case "tamanho":
+      return prisma.sale.groupBy({ by: ["storeId", "tamanho"], where, _sum: { quantidade: true, valorTotalLiquido: true } });
+    case "colecao":
+      return prisma.sale.groupBy({ by: ["storeId", "colecao"], where, _sum: { quantidade: true, valorTotalLiquido: true } });
+  }
+}
+
 // Vendas quebradas por loja (1 linha por loja, não uma dimensão de produto) — pedido pras
 // integrações externas (MCP/GPT), que só tinham "loja" como filtro (1 de cada vez), sem jeito de
-// pedir a quebra por todas as lojas numa resposta só.
-export async function getSalesByStore(filters: DashboardFilters, canal: Canal = "todos") {
+// pedir a quebra por todas as lojas numa resposta só. "dimension" opcional cruza loja × grupo/
+// produto/tamanho/colecao (2026-09-09, mesmo pedido: "só total por loja, sem cruzar com produto").
+// "pedidos" conta pedido distinto (storeId+dapicVendaId), igual getTopClientes — não é linha de
+// item, pra ticketMedio não inflar em pedido com vários produtos.
+export async function getSalesByStore(filters: DashboardFilters, canal: Canal = "todos", dimension?: Dimension) {
   const where: Prisma.SaleWhereInput = canal === "todos" ? saleWhere(filters) : { AND: [saleWhere(filters), await canalWhere(canal)] };
-  const rows = await prisma.sale.groupBy({
-    by: ["storeId"],
-    where,
-    _sum: { quantidade: true, valorTotalLiquido: true },
-  });
-  const stores = await prisma.store.findMany({ where: { id: { in: rows.map((r) => r.storeId) } } });
+
+  const [stores, pedidosRows] = await Promise.all([
+    prisma.store.findMany({ where: { sellsProducts: true } }),
+    prisma.sale.groupBy({ by: ["storeId", "dapicVendaId"], where }),
+  ]);
   const nameById = new Map(stores.map((s) => [s.id, s.displayGroup ?? s.name]));
 
+  const pedidosByNome = new Map<string, Set<string>>();
+  for (const p of pedidosRows) {
+    const nome = nameById.get(p.storeId) ?? p.storeId;
+    const set = pedidosByNome.get(nome) ?? new Set<string>();
+    set.add(`${p.storeId}::${p.dapicVendaId}`);
+    pedidosByNome.set(nome, set);
+  }
+
+  if (dimension) {
+    const rows = await groupSalesByStoreAndDimension(dimension, where);
+    const byNome = new Map<string, { key: string; unidades: number; receita: number }[]>();
+    for (const r of rows) {
+      const nome = nameById.get(r.storeId) ?? r.storeId;
+      const key = dimensionKey(dimension, r as Parameters<typeof dimensionKey>[1]);
+      const arr = byNome.get(nome) ?? [];
+      arr.push({ key, unidades: r._sum.quantidade ?? 0, receita: r._sum.valorTotalLiquido ?? 0 });
+      byNome.set(nome, arr);
+    }
+    return [...byNome.entries()]
+      .map(([loja, itens]) => ({
+        loja,
+        pedidos: pedidosByNome.get(loja)?.size ?? 0,
+        itens: itens.sort((a, b) => b.receita - a.receita),
+      }))
+      .sort(
+        (a, b) => b.itens.reduce((s, i) => s + i.receita, 0) - a.itens.reduce((s, i) => s + i.receita, 0)
+      );
+  }
+
+  const rows = await prisma.sale.groupBy({ by: ["storeId"], where, _sum: { quantidade: true, valorTotalLiquido: true } });
   const merged = new Map<string, { loja: string; unidades: number; receita: number }>();
   for (const r of rows) {
     const nome = nameById.get(r.storeId) ?? r.storeId;
@@ -332,7 +410,22 @@ export async function getSalesByStore(filters: DashboardFilters, canal: Canal = 
     cur.receita += r._sum.valorTotalLiquido ?? 0;
     merged.set(nome, cur);
   }
-  return [...merged.values()].sort((a, b) => b.receita - a.receita);
+  return [...merged.values()]
+    .map((m) => {
+      const pedidos = pedidosByNome.get(m.loja)?.size ?? 0;
+      return { ...m, pedidos, ticketMedio: pedidos > 0 ? m.receita / pedidos : 0 };
+    })
+    .sort((a, b) => b.receita - a.receita);
+}
+
+// Última sync de estoque concluída com sucesso — pras integrações externas (MCP/GPT) saberem a
+// defasagem real do dado, já que o sync roda ~5x/dia (crons em vercel.json), não em tempo real.
+export async function getLastEstoqueSyncTime(): Promise<string | null> {
+  const last = await prisma.syncLog.findFirst({
+    where: { source: "STOCK", status: "SUCCESS" },
+    orderBy: { finishedAt: "desc" },
+  });
+  return last?.finishedAt ? last.finishedAt.toISOString() : null;
 }
 
 // Vendas por produto, com o grupo de cada um junto — usado pra "abrir" um grupo na aba Vendas
