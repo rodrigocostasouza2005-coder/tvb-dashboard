@@ -378,6 +378,24 @@ model PriorityGroup {
   grupo String @unique
 }
 
+// "Já contatei esse cliente" na aba Sugestões de Contato — marcado sozinho no clique do link do
+// WhatsApp (não é confirmação de entrega de verdade, isso exigiria WhatsApp Business API; é só a
+// aproximação "clicou = considerou contatado"). Pedido do Rodrigo em 2026-09-09, pra dar
+// visibilidade de quem da equipe já mandou mensagem pra quem, sem duplicar contato.
+// "chave" distingue a pendência específica dentro do mesmo cliente: motivo (ex: "VIP esfriando")
+// pras sugestões, ou dapicVendaId (como string) pro follow-up pós-compra — assim o mesmo cliente
+// pode ter marcações independentes se aparecer em mais de um motivo/compra ao mesmo tempo.
+model ContatoMarcado {
+  id           String   @id @default(cuid())
+  tipo         String
+  cliente      String
+  chave        String
+  contatadoPor String
+  contatadoEm  DateTime @default(now())
+
+  @@unique([tipo, cliente, chave])
+}
+
 enum SyncSource {
   SALES
   STOCK

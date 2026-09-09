@@ -2914,6 +2914,47 @@ export async function getFollowUpPosCompra(filters: DashboardFilters): Promise<F
     .sort((a, b) => a.diasAtras - b.diasAtras);
 }
 
+export type ContatoRealizado = {
+  cliente: string;
+  tipo: "sugestao" | "followup";
+  chave: string;
+  contatadoPor: string;
+  contatadoEm: Date;
+};
+
+export type ContatoPorVendedor = { vendedor: string; sugestoes: number; followUps: number; total: number };
+
+// "Contatos por Vendedor" — ranking de quem marcou mais contatos na aba Sugestões de Contato
+// (ver ContatoMarcado no schema e contato-whatsapp-link.tsx), pedido do Rodrigo em 2026-09-09
+// logo depois de pedir o check em si ("como cada login tá se saindo nas mensagens"). Marcação é
+// só "clicou no link do WhatsApp", não confirmação de entrega de verdade.
+export async function getContatosPorVendedor(from: Date, to: Date): Promise<{ ranking: ContatoPorVendedor[]; itens: ContatoRealizado[] }> {
+  const rows = await prisma.contatoMarcado.findMany({
+    where: { contatadoEm: { gte: from, lte: to } },
+    orderBy: { contatadoEm: "desc" },
+  });
+
+  const porVendedor = new Map<string, ContatoPorVendedor>();
+  for (const r of rows) {
+    const cur = porVendedor.get(r.contatadoPor) ?? { vendedor: r.contatadoPor, sugestoes: 0, followUps: 0, total: 0 };
+    if (r.tipo === "sugestao") cur.sugestoes += 1;
+    else cur.followUps += 1;
+    cur.total += 1;
+    porVendedor.set(r.contatadoPor, cur);
+  }
+
+  return {
+    ranking: [...porVendedor.values()].sort((a, b) => b.total - a.total),
+    itens: rows.map((r) => ({
+      cliente: r.cliente,
+      tipo: r.tipo as "sugestao" | "followup",
+      chave: r.chave,
+      contatadoPor: r.contatadoPor,
+      contatadoEm: r.contatadoEm,
+    })),
+  };
+}
+
 export async function getMonthlySalesByStore(filters: DashboardFilters, canal: Canal = "todos") {
   // Cliente já classificado como atacado (mesma regra de canalWhere) conta em "b2b" mesmo em
   // linhas com tabelaPreco null (preço negociado) — sem isso, cliente atacado que negocia preço

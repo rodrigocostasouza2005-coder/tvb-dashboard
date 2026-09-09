@@ -5,8 +5,12 @@ import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { waHref } from "@/lib/whatsapp";
 import { getNumeroNotaFiscal } from "@/lib/connectors/nota-fiscal";
+import { prisma } from "@/lib/prisma";
 import { FilterBar } from "../filter-bar";
 import { CollapsibleFilters } from "../collapsible-filters";
+import { ContatoWhatsappLink } from "./contato-whatsapp-link";
+
+type ContatoInfo = { contatadoPor: string; contatadoEm: string };
 
 const MOTIVO_COR: Record<string, string> = {
   "VIP esfriando": "var(--series-1)",
@@ -95,7 +99,17 @@ function agruparPorLoja<T extends { loja: string | null }>(itens: T[]): [string,
   return [...grupos.entries()].sort(([a], [b]) => (a === SEM_LOJA ? 1 : b === SEM_LOJA ? -1 : a.localeCompare(b)));
 }
 
-function TabelaSugestoes({ loja, sugestoes, clienteHref }: { loja: string; sugestoes: SugestaoContato[]; clienteHref: (nome: string) => string }) {
+function TabelaSugestoes({
+  loja,
+  sugestoes,
+  clienteHref,
+  contatosMap,
+}: {
+  loja: string;
+  sugestoes: SugestaoContato[];
+  clienteHref: (nome: string) => string;
+  contatosMap: Map<string, ContatoInfo>;
+}) {
   return (
     <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
       <h3 className="border-b border-[var(--gridline)] px-4 py-2.5 text-sm font-medium text-[var(--text-primary)]">{loja} <span className="font-normal text-[var(--text-muted)]">({sugestoes.length})</span></h3>
@@ -116,7 +130,14 @@ function TabelaSugestoes({ loja, sugestoes, clienteHref }: { loja: string; suges
               </td>
               <td className="px-4 py-2">
                 {s.telefone ? (
-                  <a href={waHref(s.telefone, mensagemSugestao(s))} target="_blank" rel="noopener noreferrer" className="text-[var(--series-1)] hover:underline tabular-nums">{s.telefone}</a>
+                  <ContatoWhatsappLink
+                    telefone={s.telefone}
+                    href={waHref(s.telefone, mensagemSugestao(s))}
+                    tipo="sugestao"
+                    cliente={s.cliente}
+                    chave={s.motivo}
+                    contatadoInicial={contatosMap.get(`sugestao|${s.cliente}|${s.motivo}`) ?? null}
+                  />
                 ) : (
                   <span className="text-[var(--text-muted)]">—</span>
                 )}
@@ -137,7 +158,17 @@ function TabelaSugestoes({ loja, sugestoes, clienteHref }: { loja: string; suges
   );
 }
 
-function TabelaFollowUp({ loja, itens, clienteHref }: { loja: string; itens: FollowUpComNota[]; clienteHref: (nome: string) => string }) {
+function TabelaFollowUp({
+  loja,
+  itens,
+  clienteHref,
+  contatosMap,
+}: {
+  loja: string;
+  itens: FollowUpComNota[];
+  clienteHref: (nome: string) => string;
+  contatosMap: Map<string, ContatoInfo>;
+}) {
   return (
     <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
       <h3 className="border-b border-[var(--gridline)] px-4 py-2.5 text-sm font-medium text-[var(--text-primary)]">{loja} <span className="font-normal text-[var(--text-muted)]">({itens.length})</span></h3>
@@ -159,7 +190,14 @@ function TabelaFollowUp({ loja, itens, clienteHref }: { loja: string; itens: Fol
               </td>
               <td className="px-4 py-2">
                 {f.telefone ? (
-                  <a href={waHref(f.telefone, mensagemFollowUp(f))} target="_blank" rel="noopener noreferrer" className="text-[var(--series-1)] hover:underline tabular-nums">{f.telefone}</a>
+                  <ContatoWhatsappLink
+                    telefone={f.telefone}
+                    href={waHref(f.telefone, mensagemFollowUp(f))}
+                    tipo="followup"
+                    cliente={f.cliente}
+                    chave={String(f.dapicVendaId)}
+                    contatadoInicial={contatosMap.get(`followup|${f.cliente}|${f.dapicVendaId}`) ?? null}
+                  />
                 ) : (
                   <span className="text-[var(--text-muted)]">—</span>
                 )}
@@ -221,6 +259,16 @@ export default async function ClientesSugestoesContatoPage({
   );
   const followUpPorLoja = agruparPorLoja(followUpComNota);
 
+  // Marcações de "já contatei" (ver ContatoMarcado) pros clientes visíveis nessa página agora —
+  // busca só pelo nome (não tem dado grande o suficiente pra precisar de filtro extra).
+  const clientesVisiveis = [...new Set([...sugestoes.map((s) => s.cliente), ...followUpComNota.map((f) => f.cliente)])];
+  const contatosMarcados = clientesVisiveis.length
+    ? await prisma.contatoMarcado.findMany({ where: { cliente: { in: clientesVisiveis } } })
+    : [];
+  const contatosMap = new Map<string, ContatoInfo>(
+    contatosMarcados.map((c) => [`${c.tipo}|${c.cliente}|${c.chave}`, { contatadoPor: c.contatadoPor, contatadoEm: c.contatadoEm.toISOString() }])
+  );
+
   return (
     <div>
       <CollapsibleFilters defaultOpen={filtrosOpen}>
@@ -241,7 +289,7 @@ export default async function ClientesSugestoesContatoPage({
 
       <div className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
         {sugestoesPorLoja.map(([loja, itens]) => (
-          <TabelaSugestoes key={loja} loja={loja} sugestoes={itens} clienteHref={clienteHref} />
+          <TabelaSugestoes key={loja} loja={loja} sugestoes={itens} clienteHref={clienteHref} contatosMap={contatosMap} />
         ))}
         {sugestoesPorLoja.length === 0 && (
           <p className="text-sm text-[var(--text-muted)]">Nenhuma sugestão hoje pro filtro selecionado.</p>
@@ -253,7 +301,7 @@ export default async function ClientesSugestoesContatoPage({
         <p className="mb-3 text-xs text-[var(--text-muted)]">Clientes B2C que compraram há 7-10 dias — perguntar se gostou e conseguiu aproveitar o produto.</p>
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           {followUpPorLoja.map(([loja, itens]) => (
-            <TabelaFollowUp key={loja} loja={loja} itens={itens} clienteHref={clienteHref} />
+            <TabelaFollowUp key={loja} loja={loja} itens={itens} clienteHref={clienteHref} contatosMap={contatosMap} />
           ))}
           {followUpPorLoja.length === 0 && (
             <p className="text-sm text-[var(--text-muted)]">Nenhuma compra B2C nessa janela de 7-10 dias atrás.</p>
