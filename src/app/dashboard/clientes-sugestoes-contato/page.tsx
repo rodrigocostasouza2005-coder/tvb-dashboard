@@ -22,25 +22,33 @@ function primeiroNome(nomeCompleto: string): string {
   return nomeCompleto.trim().split(/\s+/)[0];
 }
 
-// Mensagem pronta por motivo, pré-preenchida no WhatsApp (pedido do Rodrigo em 2026-09-08) — ele
-// ainda revisa/edita antes de mandar (waHref nunca envia sozinho). Sem prometer desconto nenhum
-// (isso é decisão comercial dele, não algo pra eu inventar) — foco em reconexão/contexto.
+// Mensagem pronta por motivo, pré-preenchida no WhatsApp (pedido do Rodrigo em 2026-09-08,
+// reescrita no mesmo dia depois de pedir pra tirar "produto favorito" e alinhar com o tom real
+// da marca) — ele ainda revisa/edita antes de mandar (waHref nunca envia sozinho).
+//
+// Duas coisas informaram a reescrita:
+// 1) Tom de voz real da TVB Shorts (tvbshorts.com): informal, bem-humorado, cultura de surf/praia,
+//    sem "marketês" — usa até depoimento de cliente cru em vez de texto arrumadinho ("a gente
+//    manda pouco email, até porque dá muito trabalho :)"). Nada de linguagem corporativa.
+// 2) Boas práticas de reativação por WhatsApp: personalizar pelo HISTÓRICO real (aqui, dias sem
+//    comprar — já vem em s.detalhe) rende mais do que "achismo de gosto" tipo produto favorito;
+//    mensagem curta, tom próximo, sem prometer desconto (decisão comercial do Rodrigo, não algo
+//    pra eu inventar), sem urgência falsa.
 function mensagemSugestao(s: SugestaoContato): string {
   const nome = primeiroNome(s.cliente);
-  const produto = s.produtoFavorito;
   switch (s.motivo) {
     case "VIP esfriando":
-      return `Oi ${nome}! Tudo bem? Faz um tempinho que você não aparece por aqui na TVB Shorts e sentimos sua falta 💙${produto ? ` Chegaram novidades parecidas com ${produto}, que sei que você curte.` : ""} Dá uma olhada quando puder!`;
+      return `E aí ${nome}, sumiu! 😄 Faz um tempinho que você não passa aqui na TVB (${s.detalhe}) — bora dar uma olhada no que chegou de novo?`;
     case "Recorrente esfriando":
-      return `Oi ${nome}! Tudo bem? Notei que faz um tempo que você não compra com a gente${produto ? `, e lembrei de você porque chegou coisa nova parecida com ${produto}` : ""}. Quer que eu separe algumas opções pra você ver?`;
+      return `Oi ${nome}, tudo bem? Notei que você não aparece por aqui há um tempo (${s.detalhe}). Só passando pra saber se tá tudo certo e se posso te ajudar a achar alguma coisa!`;
     case "Em risco":
-      return `Oi ${nome}, tudo bem? Faz tempo que a gente não se fala! Queria saber se está tudo certo e se posso te ajudar com alguma coisa hoje.`;
+      return `Oi ${nome}! Tudo bem? Aqui é da TVB Shorts, faz tempo que a gente não se fala (${s.detalhe}). Só passando pra saber como você tá.`;
     case "Comprou só 1 vez":
-      return `Oi ${nome}! Tudo bem? Vi que você comprou com a gente${produto ? ` (o ${produto})` : ""} e queria saber se gostou! Chegaram novidades que acho que você vai curtir também.`;
+      return `Oi ${nome}! Aqui é da TVB Shorts. Vi que você deu uma passada por aqui ${s.detalhe} e queria saber se curtiu — e já aproveitar pra te mostrar as novidades que chegaram.`;
     case "Inativo":
-      return `Oi ${nome}, tudo bem? Faz um tempão que a gente não tem notícias suas! Voltamos com bastante coisa nova na TVB Shorts, dá uma olhada quando puder 🙂`;
+      return `Oi ${nome}, quanto tempo! Aqui é da TVB Shorts — voltamos com bastante coisa nova e lembramos de você. Dá uma olhada quando puder 🌊`;
     case "Aniversário":
-      return `Parabéns, ${nome}! 🎉 A equipe da TVB Shorts te deseja um feliz aniversário! Passa aqui pra gente comemorar com você.`;
+      return `Parabéns, ${nome}! 🎉🌊 A galera da TVB Shorts te deseja um feliz aniversário — boa onda pra esse novo ano de vida.`;
     default:
       return `Oi ${nome}, tudo bem? Aqui é da TVB Shorts!`;
   }
@@ -52,7 +60,7 @@ function mensagemFollowUp(f: FollowUpPosCompra): string {
     f.produtos.length === 1
       ? f.produtos[0]
       : `${f.produtos.slice(0, -1).join(", ")} e ${f.produtos[f.produtos.length - 1]}`;
-  return `Oi ${nome}! Tudo bem? Aqui é da TVB Shorts. Vim saber se você gostou do(a) ${produtos} que comprou com a gente — deu tudo certo? Qualquer coisa é só chamar!`;
+  return `Oi ${nome}! Aqui é da TVB Shorts. Passando pra saber se você curtiu o(a) ${produtos} — chegou tudo certinho, serviu bem? Qualquer coisa é só chamar!`;
 }
 
 function agruparPorLoja<T extends { loja: string | null }>(itens: T[]): [string, T[]][] {
