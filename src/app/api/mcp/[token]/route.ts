@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { createMcpHandler } from "mcp-handler";
 import { z } from "zod";
 import { verifyApiToken } from "@/lib/api-token";
-import { getSalesByDimension, getEstoqueAtual, getGradeTamanhoBusca, getStores, resolveLojaNome } from "@/lib/metrics";
+import { getSalesByDimension, getSalesByStore, getEstoqueAtual, getGradeTamanhoBusca, getStores, resolveLojaNome } from "@/lib/metrics";
 import { brasiliaDayStart, brasiliaDayEnd, todayBrasiliaStr } from "@/lib/filters";
 
 // Conector MCP pra ligar o Radar no Claude (Conectores personalizados, Configurações →
@@ -80,6 +80,36 @@ const mcpHandler = createMcpHandler((server) => {
               periodo: { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) },
               loja: loja ?? "todas",
               itens: rows.slice(0, 30),
+            }),
+          },
+        ],
+      };
+    }
+  );
+
+  server.registerTool(
+    "consultar_vendas_por_loja",
+    {
+      title: "Consultar vendas por loja",
+      description: "Vendas totais (unidades e receita) quebradas por loja/filial, uma linha por loja, num período. Use essa ferramenta quando o pedido for comparar ou listar todas as lojas de uma vez — 'loja' em consultar_vendas só filtra pra 1 loja por chamada, não quebra.",
+      inputSchema: z.object({
+        canal: z.enum(["todos", "b2b", "b2c"]).default("todos"),
+        from: z.string().optional().describe("Data inicial YYYY-MM-DD"),
+        to: z.string().optional().describe("Data final YYYY-MM-DD"),
+      }),
+    },
+    async ({ canal, from: fromStr, to: toStr }) => {
+      const defaultFromStr = todayBrasiliaStr(new Date(Date.now() - 30 * 86400000));
+      const from = fromStr ? brasiliaDayStart(fromStr) : brasiliaDayStart(defaultFromStr);
+      const to = toStr ? brasiliaDayEnd(toStr) : new Date();
+      const rows = await getSalesByStore({ storeIds: undefined, marcas: undefined, tabelasPreco: undefined, from, to }, canal);
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify({
+              periodo: { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) },
+              lojas: rows,
             }),
           },
         ],

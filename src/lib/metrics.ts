@@ -311,6 +311,30 @@ export async function getSalesByDimension(filters: DashboardFilters, dimension: 
     .sort((a, b) => b.revenue - a.revenue);
 }
 
+// Vendas quebradas por loja (1 linha por loja, não uma dimensão de produto) — pedido pras
+// integrações externas (MCP/GPT), que só tinham "loja" como filtro (1 de cada vez), sem jeito de
+// pedir a quebra por todas as lojas numa resposta só.
+export async function getSalesByStore(filters: DashboardFilters, canal: Canal = "todos") {
+  const where: Prisma.SaleWhereInput = canal === "todos" ? saleWhere(filters) : { AND: [saleWhere(filters), await canalWhere(canal)] };
+  const rows = await prisma.sale.groupBy({
+    by: ["storeId"],
+    where,
+    _sum: { quantidade: true, valorTotalLiquido: true },
+  });
+  const stores = await prisma.store.findMany({ where: { id: { in: rows.map((r) => r.storeId) } } });
+  const nameById = new Map(stores.map((s) => [s.id, s.displayGroup ?? s.name]));
+
+  const merged = new Map<string, { loja: string; unidades: number; receita: number }>();
+  for (const r of rows) {
+    const nome = nameById.get(r.storeId) ?? r.storeId;
+    const cur = merged.get(nome) ?? { loja: nome, unidades: 0, receita: 0 };
+    cur.unidades += r._sum.quantidade ?? 0;
+    cur.receita += r._sum.valorTotalLiquido ?? 0;
+    merged.set(nome, cur);
+  }
+  return [...merged.values()].sort((a, b) => b.receita - a.receita);
+}
+
 // Vendas por produto, com o grupo de cada um junto — usado pra "abrir" um grupo na aba Vendas
 // e ver os produtos dele, sem precisar de uma chamada nova por grupo clicado.
 export async function getSalesByGrupoProduto(filters: DashboardFilters) {

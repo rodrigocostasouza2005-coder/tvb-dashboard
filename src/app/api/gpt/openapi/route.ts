@@ -21,8 +21,8 @@ const OPENAPI_SPEC = {
             name: "resource",
             in: "query",
             required: true,
-            description: "Qual dado consultar. Use 'lojas' primeiro pra ver os nomes válidos de loja.",
-            schema: { type: "string", enum: ["vendas", "estoque", "grade", "lojas"] },
+            description: "Qual dado consultar. Use 'lojas' primeiro pra ver os nomes válidos de loja. Use 'vendas_por_loja' quando o pedido for comparar/listar todas as lojas de uma vez (resource=vendas com 'loja' só filtra 1 loja por chamada, não quebra).",
+            schema: { type: "string", enum: ["vendas", "vendas_por_loja", "estoque", "grade", "lojas"] },
           },
           {
             name: "loja",

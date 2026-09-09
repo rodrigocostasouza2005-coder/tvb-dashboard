@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import {
   getSalesByDimension,
+  getSalesByStore,
   getEstoqueAtual,
   getGradeTamanhoBusca,
   getStores,
@@ -44,6 +45,22 @@ export async function GET(request: NextRequest) {
   if (resource === "lojas") {
     const stores = await getStores();
     return NextResponse.json({ resource: "lojas", lojas: stores.map((s) => s.name) });
+  }
+
+  if (resource === "vendas_por_loja") {
+    const canal = isCanal(params.get("canal")) ? (params.get("canal") as Canal) : "todos";
+    const fromStr = params.get("from");
+    const toStr = params.get("to");
+    const defaultFromStr = todayBrasiliaStr(new Date(Date.now() - 30 * 86400000));
+    const from = fromStr ? brasiliaDayStart(fromStr) : brasiliaDayStart(defaultFromStr);
+    const to = toStr ? brasiliaDayEnd(toStr) : new Date();
+    const rows = await getSalesByStore({ storeIds: undefined, marcas: undefined, tabelasPreco: undefined, from, to }, canal);
+    return NextResponse.json({
+      resource: "vendas_por_loja",
+      canal,
+      periodo: { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) },
+      lojas: rows,
+    });
   }
 
   if (resource === "vendas" || resource === "estoque" || resource === "grade") {
