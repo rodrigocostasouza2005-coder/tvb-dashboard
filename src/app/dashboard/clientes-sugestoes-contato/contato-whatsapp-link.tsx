@@ -12,6 +12,7 @@ export function ContatoWhatsappLink({
   cliente,
   chave,
   contatadoInicial,
+  podeVerCheck,
 }: {
   telefone: string;
   href: string;
@@ -19,6 +20,9 @@ export function ContatoWhatsappLink({
   cliente: string;
   chave: string;
   contatadoInicial: Contato | null;
+  // Pedido do Rodrigo em 2026-09-09: vendedor continua marcando ao clicar (o registro é
+  // gravado normalmente), só não VÊ o ✓ — só Admin/Gestão enxergam quem já foi contatado.
+  podeVerCheck: boolean;
 }) {
   const [contato, setContato] = useState<Contato | null>(contatadoInicial);
   const [, startTransition] = useTransition();
@@ -53,7 +57,7 @@ export function ContatoWhatsappLink({
       >
         {telefone}
       </a>
-      {contato && (
+      {podeVerCheck && contato && (
         <button
           type="button"
           onClick={handleUnmark}

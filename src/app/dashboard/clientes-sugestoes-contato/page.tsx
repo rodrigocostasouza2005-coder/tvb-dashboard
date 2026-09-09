@@ -104,11 +104,13 @@ function TabelaSugestoes({
   sugestoes,
   clienteHref,
   contatosMap,
+  podeVerCheck,
 }: {
   loja: string;
   sugestoes: SugestaoContato[];
   clienteHref: (nome: string) => string;
   contatosMap: Map<string, ContatoInfo>;
+  podeVerCheck: boolean;
 }) {
   return (
     <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
@@ -137,6 +139,7 @@ function TabelaSugestoes({
                     cliente={s.cliente}
                     chave={s.motivo}
                     contatadoInicial={contatosMap.get(`sugestao|${s.cliente}|${s.motivo}`) ?? null}
+                    podeVerCheck={podeVerCheck}
                   />
                 ) : (
                   <span className="text-[var(--text-muted)]">—</span>
@@ -163,11 +166,13 @@ function TabelaFollowUp({
   itens,
   clienteHref,
   contatosMap,
+  podeVerCheck,
 }: {
   loja: string;
   itens: FollowUpComNota[];
   clienteHref: (nome: string) => string;
   contatosMap: Map<string, ContatoInfo>;
+  podeVerCheck: boolean;
 }) {
   return (
     <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
@@ -197,6 +202,7 @@ function TabelaFollowUp({
                     cliente={f.cliente}
                     chave={String(f.dapicVendaId)}
                     contatadoInicial={contatosMap.get(`followup|${f.cliente}|${f.dapicVendaId}`) ?? null}
+                    podeVerCheck={podeVerCheck}
                   />
                 ) : (
                   <span className="text-[var(--text-muted)]">—</span>
@@ -221,6 +227,10 @@ export default async function ClientesSugestoesContatoPage({
   const user = await getSessionUser();
   if (!user) return null;
   requireTabAccess(user, user.role, "clientes-sugestoes-contato");
+
+  // Pedido do Rodrigo em 2026-09-09: vendedor continua marcando contato normalmente ao clicar
+  // (o registro grava do mesmo jeito), só não VÊ o ✓ — só Admin/Gestão enxergam quem já contatou.
+  const podeVerCheck = user.role !== "VENDEDOR";
 
   const allowedStores = getStoreRestriction(user);
   const allowedMarcas = getMarcaRestriction(user);
@@ -289,7 +299,7 @@ export default async function ClientesSugestoesContatoPage({
 
       <div className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
         {sugestoesPorLoja.map(([loja, itens]) => (
-          <TabelaSugestoes key={loja} loja={loja} sugestoes={itens} clienteHref={clienteHref} contatosMap={contatosMap} />
+          <TabelaSugestoes key={loja} loja={loja} sugestoes={itens} clienteHref={clienteHref} contatosMap={contatosMap} podeVerCheck={podeVerCheck} />
         ))}
         {sugestoesPorLoja.length === 0 && (
           <p className="text-sm text-[var(--text-muted)]">Nenhuma sugestão hoje pro filtro selecionado.</p>
@@ -301,7 +311,7 @@ export default async function ClientesSugestoesContatoPage({
         <p className="mb-3 text-xs text-[var(--text-muted)]">Clientes B2C que compraram há 7-10 dias — perguntar se gostou e conseguiu aproveitar o produto.</p>
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           {followUpPorLoja.map(([loja, itens]) => (
-            <TabelaFollowUp key={loja} loja={loja} itens={itens} clienteHref={clienteHref} contatosMap={contatosMap} />
+            <TabelaFollowUp key={loja} loja={loja} itens={itens} clienteHref={clienteHref} contatosMap={contatosMap} podeVerCheck={podeVerCheck} />
           ))}
           {followUpPorLoja.length === 0 && (
             <p className="text-sm text-[var(--text-muted)]">Nenhuma compra B2C nessa janela de 7-10 dias atrás.</p>
