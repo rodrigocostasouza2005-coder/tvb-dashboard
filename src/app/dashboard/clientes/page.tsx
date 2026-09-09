@@ -62,7 +62,7 @@ export default async function ClientesPage({
     getStores(allowedStores),
     getMarcas(allowedMarcas),
     getTabelasPreco(allowedTabelasPreco),
-    getVendedores(),
+    getVendedores(allowedStores),
     getClienteRetencaoVarejo(filters),
     getAniversariantesDoMes(filters, vendedor, aniversarioMes),
     getClientesCrmOverview(filters, canal),

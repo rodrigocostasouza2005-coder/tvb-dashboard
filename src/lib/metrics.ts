@@ -2894,11 +2894,11 @@ export async function getMonthlyReturnsTotal(filters: Pick<DashboardFilters, "st
   return new Map(rows.map((r) => [new Date(r.month).toISOString().slice(0, 7), Number(r.value)]));
 }
 
-export async function getVendedores(): Promise<string[]> {
+export async function getVendedores(allowedStoreIds?: string[]): Promise<string[]> {
   const rows = await prisma.sale.findMany({
     distinct: ["vendedor"],
     select: { vendedor: true },
-    where: { vendedor: { not: null } },
+    where: { vendedor: { not: null }, ...(allowedStoreIds !== undefined ? { storeId: { in: allowedStoreIds } } : {}) },
   });
   return rows.map((r) => r.vendedor as string).sort();
 }
