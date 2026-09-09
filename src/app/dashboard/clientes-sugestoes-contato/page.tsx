@@ -95,7 +95,7 @@ function agruparPorLoja<T extends { loja: string | null }>(itens: T[]): [string,
   return [...grupos.entries()].sort(([a], [b]) => (a === SEM_LOJA ? 1 : b === SEM_LOJA ? -1 : a.localeCompare(b)));
 }
 
-function TabelaSugestoes({ loja, sugestoes }: { loja: string; sugestoes: SugestaoContato[] }) {
+function TabelaSugestoes({ loja, sugestoes, clienteHref }: { loja: string; sugestoes: SugestaoContato[]; clienteHref: (nome: string) => string }) {
   return (
     <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
       <h3 className="border-b border-[var(--gridline)] px-4 py-2.5 text-sm font-medium text-[var(--text-primary)]">{loja} <span className="font-normal text-[var(--text-muted)]">({sugestoes.length})</span></h3>
@@ -111,7 +111,9 @@ function TabelaSugestoes({ loja, sugestoes }: { loja: string; sugestoes: Sugesta
         <tbody>
           {sugestoes.map((s, i) => (
             <tr key={`${s.cliente}-${i}`} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
-              <td className="px-4 py-2 font-medium">{s.cliente}</td>
+              <td className="px-4 py-2 font-medium">
+                <a href={clienteHref(s.cliente)} className="hover:underline">{s.cliente}</a>
+              </td>
               <td className="px-4 py-2">
                 {s.telefone ? (
                   <a href={waHref(s.telefone, mensagemSugestao(s))} target="_blank" rel="noopener noreferrer" className="text-[var(--series-1)] hover:underline tabular-nums">{s.telefone}</a>
@@ -199,6 +201,15 @@ export default async function ClientesSugestoesContatoPage({
     getFollowUpPosCompra(filters),
   ]);
 
+  function clienteHref(nome: string) {
+    const p = new URLSearchParams();
+    for (const id of filters.storeIds ?? []) p.append("store", id);
+    for (const m of filters.marcas ?? []) p.append("marca", m);
+    for (const t of filters.tabelasPreco ?? []) p.append("tabelaPreco", t);
+    p.set("cliente", nome);
+    return `/dashboard/clientes-ficha?${p.toString()}`;
+  }
+
   const sugestoesPorLoja = agruparPorLoja(sugestoes);
 
   // Número da nota/cupom buscado ao vivo no DAPIC, só pra esse punhado de clientes do
@@ -228,7 +239,7 @@ export default async function ClientesSugestoesContatoPage({
 
       <div className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
         {sugestoesPorLoja.map(([loja, itens]) => (
-          <TabelaSugestoes key={loja} loja={loja} sugestoes={itens} />
+          <TabelaSugestoes key={loja} loja={loja} sugestoes={itens} clienteHref={clienteHref} />
         ))}
         {sugestoesPorLoja.length === 0 && (
           <p className="text-sm text-[var(--text-muted)]">Nenhuma sugestão hoje pro filtro selecionado.</p>
