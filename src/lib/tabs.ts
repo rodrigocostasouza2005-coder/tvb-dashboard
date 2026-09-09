@@ -3,6 +3,7 @@ import type { Role } from "@prisma/client";
 
 export type TabKey =
   | "visao-geral"
+  | "resumo-dia"
   | "vendas"
   | "mensal"
   | "brindes"
@@ -34,7 +35,7 @@ export type TabKey =
   | "estoque-retirada"
   | "mapa-compras";
 
-export type TabGroup = "visao-geral" | "vendas" | "estoque" | "atacado" | "clientes" | "marketing" | "pesquisa" | "lamina" | "outros";
+export type TabGroup = "visao-geral" | "resumo-dia" | "vendas" | "estoque" | "atacado" | "clientes" | "marketing" | "pesquisa" | "lamina" | "outros";
 
 export type TabEntry =
   | { key: TabKey; label: string; href: string; group: TabGroup; todo?: false }
@@ -43,6 +44,9 @@ export type TabEntry =
 export const TABS: TabEntry[] = [
   // visao-geral
   { key: "visao-geral", label: "Visão Geral", href: "/dashboard", group: "visao-geral" },
+
+  // resumo do dia (direct link, like visao-geral) — pensada pro vendedor de loja física
+  { key: "resumo-dia", label: "Resumo do Dia", href: "/dashboard/resumo-dia", group: "resumo-dia" },
 
   // lamina mensal (direct link, like visao-geral)
   { key: "lamina-mensal", label: "Lâmina Mensal", href: "/dashboard/lamina-mensal", group: "lamina" },
@@ -96,6 +100,7 @@ export const TABS: TabEntry[] = [
 
 export const GROUPS: { key: TabGroup; label: string; single?: boolean }[] = [
   { key: "visao-geral", label: "Visão Geral", single: true },
+  { key: "resumo-dia", label: "Resumo do Dia", single: true },
   { key: "lamina", label: "Lâmina Mensal", single: true },
   { key: "vendas", label: "Vendas" },
   { key: "estoque", label: "Estoque" },

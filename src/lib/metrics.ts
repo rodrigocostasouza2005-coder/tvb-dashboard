@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
-import { todayBrasiliaStr, brasiliaDayStart } from "@/lib/filters";
+import { todayBrasiliaStr, brasiliaDayStart, brasiliaDayEnd } from "@/lib/filters";
 
 export type Dimension = "grupo" | "produto" | "tamanho" | "colecao";
 
@@ -3769,19 +3769,19 @@ export async function getLastSyncs() {
 // Exclui a coleção "BESTSELLER" (linha permanente/best-seller marcada assim no DAPIC) — esses
 // produtos naturalmente têm bastante estoque e podem ter uma janela de 30d fraca por acaso, mas
 // não são o que precisa de incentivo (Rodrigo confirmou em 2026-08-10, ex: Ultra Light Black).
-export async function getTopParaIncentivar(dias = 30, limit = 10) {
+export async function getTopParaIncentivar(dias = 30, limit = 10, storeIds?: string[]) {
   const desde = new Date();
   desde.setDate(desde.getDate() - dias);
 
   const [stock, vendas] = await Promise.all([
     prisma.stockSnapshot.groupBy({
       by: ["produto"],
-      where: { ...stockWhere({}), colecao: { not: "BESTSELLER" } },
+      where: { ...stockWhere({ storeIds }), colecao: { not: "BESTSELLER" } },
       _sum: { quantidadeDisponivel: true },
     }),
     prisma.sale.groupBy({
       by: ["produto"],
-      where: { saleDate: { gte: desde } },
+      where: { saleDate: { gte: desde }, ...(storeIds !== undefined ? { storeId: { in: storeIds } } : {}) },
       _sum: { quantidade: true },
     }),
   ]);
@@ -4345,4 +4345,72 @@ export async function getTopVendidosPorLoja(desde: Date, ate: Date, limit = 3) {
       produtos: produtos.sort((a, b) => b.quantidade - a.quantidade).slice(0, limit),
     }))
     .sort((a, b) => a.storeName.localeCompare(b.storeName));
+}
+
+// Aba "Resumo do Dia" (pensada pro vendedor de loja física) — vendas de hoje (dia calendário
+// Brasília) comparadas com a média diária dos `diasComparacao` dias anteriores, pra saber se o
+// dia tá bom ou fraco sem precisar decorar histórico.
+export async function getVendasHojeComComparacao(
+  filters: Pick<DashboardFilters, "storeIds" | "marcas" | "tabelasPreco" | "grupoIn">,
+  diasComparacao = 14
+) {
+  const hojeStr = todayBrasiliaStr(new Date());
+  const inicioHoje = brasiliaDayStart(hojeStr);
+  const fimHoje = brasiliaDayEnd(hojeStr);
+  const inicioComparacao = new Date(inicioHoje);
+  inicioComparacao.setDate(inicioComparacao.getDate() - diasComparacao);
+  const fimComparacao = new Date(inicioHoje.getTime() - 1);
+
+  const [hojeAgg, comparacaoAgg] = await Promise.all([
+    prisma.sale.aggregate({
+      where: saleWhere({ ...filters, from: inicioHoje, to: fimHoje }),
+      _sum: { quantidade: true, valorTotalLiquido: true },
+    }),
+    prisma.sale.aggregate({
+      where: saleWhere({ ...filters, from: inicioComparacao, to: fimComparacao }),
+      _sum: { quantidade: true, valorTotalLiquido: true },
+    }),
+  ]);
+
+  const hojeUnidades = hojeAgg._sum.quantidade ?? 0;
+  const hojeReceita = hojeAgg._sum.valorTotalLiquido ?? 0;
+  const mediaDiariaUnidades = (comparacaoAgg._sum.quantidade ?? 0) / diasComparacao;
+  const mediaDiariaReceita = (comparacaoAgg._sum.valorTotalLiquido ?? 0) / diasComparacao;
+
+  return {
+    hojeUnidades,
+    hojeReceita,
+    mediaDiariaUnidades,
+    mediaDiariaReceita,
+    variacaoUnidadesPct: mediaDiariaUnidades > 0 ? (hojeUnidades / mediaDiariaUnidades - 1) * 100 : null,
+    variacaoReceitaPct: mediaDiariaReceita > 0 ? (hojeReceita / mediaDiariaReceita - 1) * 100 : null,
+    diasComparacao,
+  };
+}
+
+// Ranking de produtos mais vendidos nos últimos 7 dias (dia calendário Brasília, inclusive
+// hoje) — janela de 1 dia só costuma ficar vazia/rala numa loja física pequena.
+export async function getMaisVendidosSemana(
+  filters: Pick<DashboardFilters, "storeIds" | "marcas" | "tabelasPreco" | "grupoIn">,
+  limit = 10
+) {
+  const hojeStr = todayBrasiliaStr(new Date());
+  const fim = brasiliaDayEnd(hojeStr);
+  const inicio = new Date(brasiliaDayStart(hojeStr));
+  inicio.setDate(inicio.getDate() - 6);
+
+  const vendas = await prisma.sale.groupBy({
+    by: ["produto"],
+    where: saleWhere({ ...filters, from: inicio, to: fim }),
+    _sum: { quantidade: true, valorTotalLiquido: true },
+  });
+
+  return vendas
+    .map((v) => ({
+      produto: v.produto,
+      unidades: v._sum.quantidade ?? 0,
+      receita: v._sum.valorTotalLiquido ?? 0,
+    }))
+    .sort((a, b) => b.unidades - a.unidades)
+    .slice(0, limit);
 }
