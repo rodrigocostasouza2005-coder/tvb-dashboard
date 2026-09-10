@@ -396,6 +396,22 @@ model ContatoMarcado {
   @@unique([tipo, cliente, chave])
 }
 
+// Cache do número de nota/cupom fiscal (ver getNumeroNotaFiscal em connectors/nota-fiscal.ts) —
+// achado em 2026-09-10: buscar isso ao vivo no DAPIC pra ~100 clientes do follow-up TODA VEZ que
+// alguém abre a aba Sugestões de Contato deixava a página perto de 1min de carregamento (mesmo
+// limitando a concorrência). O número de uma venda passada nunca muda, então cacheia pra sempre
+// depois da 1ª busca — só venda NOVA no follow-up (poucas por dia) precisa de busca ao vivo.
+// "numero" nulo é cacheado também (venda sem nota encontrada), pra não ficar tentando de novo.
+model NotaFiscalCache {
+  id           String   @id @default(cuid())
+  storeId      String
+  dapicVendaId Int
+  numero       String?
+  resolvedAt   DateTime @default(now())
+
+  @@unique([storeId, dapicVendaId])
+}
+
 enum SyncSource {
   SALES
   STOCK

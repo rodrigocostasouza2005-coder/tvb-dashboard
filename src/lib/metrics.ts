@@ -126,6 +126,22 @@ export type Canal = "todos" | "b2b" | "b2c";
 let b2bClientesCache: { set: Set<string>; expiresAt: number } | null = null;
 const B2B_CLIENTES_CACHE_MS = 5 * 60 * 1000;
 
+// Cache genérico com TTL, mesmo espírito do b2bClientesCache acima — achado em 2026-09-10:
+// getClienteSegmentacao/getAniversariantesDoMes escaneiam o histórico de Sale inteiro (dezenas de
+// milhares de linhas, sem índice pra isso) toda vez que são chamadas, o que deixava a aba
+// Sugestões de Contato (que chama as duas) perto de 40s pra carregar. Nenhuma das duas precisa
+// ser "ao vivo" (segmentação/aniversário não mudam minuto a minuto) — cacheia por instância de
+// servidor (não sobrevive entre invocações serverless frias, mas ajuda muito em picos de uso).
+const genericCache = new Map<string, { value: unknown; expiresAt: number }>();
+async function cacheAsync<T>(key: string, ttlMs: number, fn: () => Promise<T>): Promise<T> {
+  const hit = genericCache.get(key);
+  if (hit && hit.expiresAt > Date.now()) return hit.value as T;
+  const value = await fn();
+  genericCache.set(key, { value, expiresAt: Date.now() + ttlMs });
+  return value;
+}
+const HEAVY_QUERY_CACHE_MS = 15 * 60 * 1000;
+
 async function getB2BClienteNomes(): Promise<Set<string>> {
   if (b2bClientesCache && b2bClientesCache.expiresAt > Date.now()) return b2bClientesCache.set;
   const rows = await prisma.sale.findMany({
@@ -1691,6 +1707,17 @@ export async function getClienteSegmentacao(
   canal: Canal = "todos",
   referenceDate: Date = new Date()
 ): Promise<ClienteSegmentado[]> {
+  const key = `segmentacao:${canal}:${referenceDate.toISOString().slice(0, 10)}:${JSON.stringify({
+    storeIds: filters.storeIds, marcas: filters.marcas, tabelasPreco: filters.tabelasPreco,
+  })}`;
+  return cacheAsync(key, HEAVY_QUERY_CACHE_MS, () => computeClienteSegmentacao(filters, canal, referenceDate));
+}
+
+async function computeClienteSegmentacao(
+  filters: DashboardFilters,
+  canal: Canal,
+  referenceDate: Date
+): Promise<ClienteSegmentado[]> {
   const allTime: DashboardFilters = { ...filters, from: new Date(0), to: referenceDate };
   const where: Prisma.SaleWhereInput = {
     ...saleWhere(allTime),
@@ -2679,6 +2706,13 @@ export async function getClienteFicha(
 // de clientes que já aparece em getTopClientes, só que sem o limite de 30 e sem ordenar por
 // receita. Ordenado pelo dia do mês.
 export async function getAniversariantesDoMes(filters: DashboardFilters, vendedor: string | null | undefined, month: number, canal: Canal = "todos") {
+  const key = `aniversariantes:${vendedor ?? ""}:${month}:${canal}:${JSON.stringify({
+    storeIds: filters.storeIds, marcas: filters.marcas, tabelasPreco: filters.tabelasPreco,
+  })}`;
+  return cacheAsync(key, HEAVY_QUERY_CACHE_MS, () => computeAniversariantesDoMes(filters, vendedor, month, canal));
+}
+
+async function computeAniversariantesDoMes(filters: DashboardFilters, vendedor: string | null | undefined, month: number, canal: Canal) {
   const where: Prisma.SaleWhereInput = {
     ...saleWhere(filters),
     clienteNome: { not: null },

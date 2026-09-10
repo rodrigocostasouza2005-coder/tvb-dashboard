@@ -41,7 +41,22 @@ async function storeClientMap(): Promise<Map<string, DapicClient>> {
 //
 // Nunca lança — se a busca falhar ou não achar nada, retorna null e a mensagem de follow-up
 // simplesmente sai sem a linha da nota (decisão do Rodrigo, não trava o resto da mensagem).
+//
+// Cacheado em NotaFiscalCache (achado em 2026-09-10: buscar ao vivo pra ~100 clientes toda vez
+// que a aba de Sugestões de Contato abre deixava a página perto de 1min) — a nota de uma venda
+// passada nunca muda, então só busca de verdade na 1ª vez que aquela venda aparece no follow-up.
 export async function getNumeroNotaFiscal(storeId: string, dapicVendaId: number): Promise<string | null> {
+  const cached = await prisma.notaFiscalCache.findUnique({ where: { storeId_dapicVendaId: { storeId, dapicVendaId } } });
+  if (cached) return cached.numero;
+
+  const numero = await buscarNumeroNotaFiscal(storeId, dapicVendaId);
+  await prisma.notaFiscalCache
+    .create({ data: { storeId, dapicVendaId, numero } })
+    .catch(() => {}); // corrida rara (2 requests simultâneos pra mesma venda nova) — não é fatal, só perde o cache dessa vez.
+  return numero;
+}
+
+async function buscarNumeroNotaFiscal(storeId: string, dapicVendaId: number): Promise<string | null> {
   try {
     const map = await storeClientMap();
     const client = map.get(storeId);
