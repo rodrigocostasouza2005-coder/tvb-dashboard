@@ -412,6 +412,20 @@ model NotaFiscalCache {
   @@unique([storeId, dapicVendaId])
 }
 
+// Trava simples pra evitar 2 sincronizações completas rodando ao mesmo tempo — achado em
+// 2026-09-11: até então só existiam os 5 horários fixos diários (bem espaçados, nunca colidiam
+// de verdade), mas com o agendador externo batendo a cada 10min (pedido do Rodrigo, pra manter o
+// banco mais fresco) e uma sync completa podendo levar até ~4min e meio num dia lento do DAPIC, a
+// folga ficou pequena o suficiente pra virar risco real de sobreposição. Uma linha só (id fixo
+// "sync"): "rodando" = finishedAt nulo E startedAt recente; lock considerado travado (stale) e
+// destravável depois de LOCK_STALE_MIN, pra nunca ficar preso pra sempre se um processo morrer no
+// meio sem atualizar finishedAt.
+model SyncLock {
+  id         String    @id
+  startedAt  DateTime
+  finishedAt DateTime?
+}
+
 enum SyncSource {
   SALES
   STOCK

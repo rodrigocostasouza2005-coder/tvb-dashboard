@@ -576,8 +576,48 @@ async function doSync() {
 // retryBudgetMs: se a 1ª tentativa falhar, tenta de novo até esse tempo total passar (uma sync
 // completa já leva ~130-280s sozinha — maxDuration é 300s — então normalmente cabe só mais 1-2
 // tentativas, não um número fixo; por isso o retry é por orçamento de tempo, não por contagem).
+const SYNC_LOCK_ID = "sync";
+const SYNC_LOCK_STALE_MIN = 6;
+
+// Evita 2 sincronizações completas rodando ao mesmo tempo — virou risco real depois do
+// agendador externo de 10 em 10 min (2026-09-11), já que uma sync completa pode levar até ~4min
+// e meio num dia lento do DAPIC. "Travado" = já tem lock com finishedAt nulo E startedAt recente
+// (dentro de SYNC_LOCK_STALE_MIN); depois disso considera stale (processo deve ter morrido sem
+// atualizar finishedAt) e libera sozinho, pra nunca ficar preso pra sempre.
+async function acquireSyncLock(): Promise<boolean> {
+  const now = new Date();
+  const staleCutoff = new Date(now.getTime() - SYNC_LOCK_STALE_MIN * 60_000);
+  const existing = await prisma.syncLock.findUnique({ where: { id: SYNC_LOCK_ID } });
+  if (existing && existing.finishedAt === null && existing.startedAt > staleCutoff) {
+    return false;
+  }
+  await prisma.syncLock.upsert({
+    where: { id: SYNC_LOCK_ID },
+    create: { id: SYNC_LOCK_ID, startedAt: now, finishedAt: null },
+    update: { startedAt: now, finishedAt: null },
+  });
+  return true;
+}
+
+async function releaseSyncLock() {
+  await prisma.syncLock.update({ where: { id: SYNC_LOCK_ID }, data: { finishedAt: new Date() } }).catch(() => {});
+}
+
 export async function runSync(options: { silent?: boolean; retryBudgetMs?: number } = {}) {
   const { silent = false, retryBudgetMs = 0 } = options;
+
+  if (!(await acquireSyncLock())) {
+    return NextResponse.json({ ok: true, skipped: true, reason: "outra sincronização já em andamento" });
+  }
+
+  try {
+    return await runSyncLocked(silent, retryBudgetMs);
+  } finally {
+    await releaseSyncLock();
+  }
+}
+
+async function runSyncLocked(silent: boolean, retryBudgetMs: number) {
   const start = Date.now();
   let lastMessage = "";
   let attempt = 0;
