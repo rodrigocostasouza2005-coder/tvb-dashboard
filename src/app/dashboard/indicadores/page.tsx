@@ -111,6 +111,11 @@ export default async function IndicadoresPage({
     return `/dashboard/indicadores?${params.toString()}`;
   };
 
+  // Ordem alfabética + campo de busca (datalist nativo do navegador) — pedido do Rodrigo em
+  // 2026-09-11, antes era um <select> comum na ordem que getSalesByDimension devolvia
+  // (por receita/unidades) e sem jeito de digitar pra filtrar numa lista de centenas de produto.
+  const produtoOptionsOrdenados = [...produtoOptions].sort((a, b) => a.key.localeCompare(b.key, "pt-BR"));
+
   const produtoChartData = produtoSerie.map((p) => ({
     day: p.day,
     unitsBruta: p.unitsBruta,
@@ -156,17 +161,21 @@ export default async function IndicadoresPage({
       <form method="get" action="/dashboard/indicadores" className="mb-6 flex gap-2">
         {rawStoreSelection.map((id) => <input key={id} type="hidden" name="store" value={id} />)}
         <input type="hidden" name="canal" value={canal} />
-        <select
+        <input
+          type="text"
           name="produto"
+          list="produtos-datalist"
           defaultValue={produtoSelecionado ?? ""}
+          placeholder="Ver indicadores de um produto específico... (digite pra buscar)"
+          autoComplete="off"
           className="w-full max-w-sm rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-sm text-[var(--text-primary)]"
           style={{ colorScheme: "light dark" }}
-        >
-          <option value="">Ver indicadores de um produto específico...</option>
-          {produtoOptions.map((o) => (
-            <option key={o.key} value={o.key}>{o.key}</option>
+        />
+        <datalist id="produtos-datalist">
+          {produtoOptionsOrdenados.map((o) => (
+            <option key={o.key} value={o.key} />
           ))}
-        </select>
+        </datalist>
         <button type="submit" className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-3 py-1.5 text-sm hover:bg-[var(--page-plane)]">
           Ver
         </button>
