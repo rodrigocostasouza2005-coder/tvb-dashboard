@@ -27,14 +27,14 @@ export const TEMPLATE_KEYS: TemplateInfo[] = [
     label: "VIP esfriando",
     placeholders: ["nome", "detalhe"],
     defaultTexto: "E aí {nome}, sumiu! 😄 Faz um tempinho que você não passa aqui na TVB ({detalhe}) — bora dar uma olhada no que chegou de novo?",
-    extra: "Se o tamanho do produto favorito do cliente ainda estiver em estoque, uma linha extra é adicionada automaticamente no final.",
+    extra: "{detalhe} = há quanto tempo o cliente não compra, calculado automaticamente (ex: \"84 dias sem comprar\"). Se o tamanho do produto favorito dele ainda estiver em estoque, uma linha extra é adicionada automaticamente no final.",
   },
   {
     key: "recorrente_esfriando",
     label: "Recorrente esfriando",
     placeholders: ["nome", "detalhe"],
     defaultTexto: "Oi {nome}, tudo bem? Notei que você não aparece por aqui há um tempo ({detalhe}). Só passando pra saber se tá tudo certo e se posso te ajudar a achar alguma coisa!",
-    extra: "Se o tamanho do produto favorito do cliente ainda estiver em estoque, uma linha extra é adicionada automaticamente no final.",
+    extra: "{detalhe} = há quanto tempo o cliente não compra, calculado automaticamente (ex: \"84 dias sem comprar\"). Se o tamanho do produto favorito dele ainda estiver em estoque, uma linha extra é adicionada automaticamente no final.",
   },
   {
     key: "em_risco",
