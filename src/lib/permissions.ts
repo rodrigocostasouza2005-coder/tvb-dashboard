@@ -21,9 +21,13 @@ export function canSeeFinancials(user: { canSeeFinancials: boolean }) {
 // Retorna a lista de grupos que o usuário pode ver (undefined = sem restrição).
 // Usar como `filters.grupoIn` nas funções de lib/metrics.ts — funciona em qualquer
 // dimensão (grupo/produto/tamanho) porque filtra na origem (linha de venda/estoque).
-export async function getGrupoRestriction(role: Role): Promise<string[] | undefined> {
-  if (role !== "VENDEDOR") return undefined;
-  return getPriorityGroups();
+//
+// Desativado a pedido explícito do Rodrigo em 2026-09-11 ("eu quero que os vendedores vejam
+// tudo!!!!") — antes, VENDEDOR só via os grupos da tabela PriorityGroup (achado nesse mesmo dia:
+// o login do Rio Sul só mostrava 5 grupos). Mecanismo mantido (PriorityGroup, getPriorityGroups)
+// pra reativar fácil se ele mudar de ideia — só essa função é que decide se filtra ou não.
+export async function getGrupoRestriction(_role: Role): Promise<string[] | undefined> {
+  return undefined;
 }
 
 // Lojas que o usuário pode ver — administrável por usuário em /dashboard/admin
