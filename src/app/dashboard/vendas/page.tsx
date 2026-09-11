@@ -17,6 +17,7 @@ import {
   getMarcas,
   getTabelasPreco,
   getSiteVarejoCidades,
+  getTopClientes,
 } from "@/lib/metrics";
 import {
   canSeeFinancials,
@@ -74,7 +75,7 @@ export default async function VendasPage({
   const emptyTamanhoSalesRows: Awaited<ReturnType<typeof getSalesByGrupoProdutoTamanho>> = [];
   const emptyTamanhoReturnRows: Awaited<ReturnType<typeof getReturnsByGrupoProdutoTamanho>> = [];
 
-  const [rows, salesSubRows, salesTamanhoRows, salesByDay, salesByDayPerStore, returnRows, returnSubRows, returnTamanhoRows, returnsByDay, stores, marcas, tabelasPreco, siteCidades] = await Promise.all([
+  const [rows, salesSubRows, salesTamanhoRows, salesByDay, salesByDayPerStore, returnRows, returnSubRows, returnTamanhoRows, returnsByDay, stores, marcas, tabelasPreco, siteCidades, topClientes] = await Promise.all([
     getSalesByDimension(filters, dimension),
     dimension === "grupo"
       ? getSalesByGrupoProduto(filters)
@@ -104,6 +105,7 @@ export default async function VendasPage({
     getMarcas(allowedMarcas),
     getTabelasPreco(allowedTabelasPreco),
     canSeeSiteMap ? getSiteVarejoCidades({ ...filters, tabelasPreco: ["Tabela varejo"] }) : Promise.resolve(emptyAtacadoCidades),
+    showFinancials ? getTopClientes(filters, null, 5, "todos", true) : Promise.resolve([]),
   ]);
   const totalUnits = rows.reduce((sum, r) => sum + r.unitsSold, 0);
   const totalReturned = returnRows.reduce((sum, r) => sum + r.unitsReturned, 0);
@@ -115,6 +117,15 @@ export default async function VendasPage({
     siteEstadoMap.set(r.estado, { receita: prev.receita + r.receita, unidades: prev.unidades + r.unidades });
   }
   const siteEstadoRows = [...siteEstadoMap.entries()].map(([estado, v]) => ({ estado, ...v }));
+
+  function clienteHref(nome: string) {
+    const p = new URLSearchParams();
+    for (const id of filters.storeIds ?? []) p.append("store", id);
+    for (const m of filters.marcas ?? []) p.append("marca", m);
+    for (const t of filters.tabelasPreco ?? []) p.append("tabelaPreco", t);
+    p.set("cliente", nome);
+    return `/dashboard/clientes-ficha?${p.toString()}`;
+  }
 
   return (
     <div>
@@ -157,6 +168,34 @@ export default async function VendasPage({
         </h2>
         <TopBarChart data={top10} valueKey={showFinancials ? "revenue" : "unitsSold"} showCurrency={showFinancials} />
       </section>
+
+      {showFinancials && topClientes.length > 0 && (
+        <section className="mb-6 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+          <h2 className="border-b border-[var(--gridline)] px-4 py-2.5 text-sm font-medium text-[var(--text-secondary)]">Top 5 clientes</h2>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
+                <th className="px-4 py-2 font-medium">#</th>
+                <th className="px-4 py-2 font-medium">Cliente</th>
+                <th className="px-4 py-2 font-medium">Receita líquida</th>
+                <th className="px-4 py-2 font-medium">Pedidos</th>
+              </tr>
+            </thead>
+            <tbody>
+              {topClientes.map((c, i) => (
+                <tr key={c.cliente} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
+                  <td className="px-4 py-2 tabular-nums text-[var(--text-muted)]">{i + 1}</td>
+                  <td className="px-4 py-2 font-medium">
+                    <a href={clienteHref(c.cliente)} className="hover:underline">{c.cliente}</a>
+                  </td>
+                  <td className="px-4 py-2 tabular-nums">{formatBRL(c.receitaLiquida)}</td>
+                  <td className="px-4 py-2 tabular-nums">{c.pedidos}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )}
 
       <DimensionToggle basePath="/dashboard/vendas" searchParams={rawParams} current={dimension} />
 
