@@ -426,6 +426,20 @@ model SyncLock {
   finishedAt DateTime?
 }
 
+// Templates das mensagens de WhatsApp de Sugestões de Contato — pedido do Rodrigo em 2026-09-11
+// pra editar o texto de cada segmento numa tela, sem precisar me pedir toda vez que quiser mudar
+// uma palavra. "id" é uma chave fixa (ver TEMPLATE_KEYS em src/lib/message-templates.ts), "texto"
+// é o corpo com placeholders tipo {nome}/{detalhe}/{produtos} (cada chave só aceita os
+// placeholders que fazem sentido pra ela — ver TEMPLATE_KEYS). O gancho de estoque (produto
+// favorito) e o número da nota fiscal do follow-up continuam sendo acrescentados pelo código
+// depois do texto editável — são dinâmicos/condicionais demais pra virar texto livre com risco
+// de o Rodrigo quebrar o placeholder sem querer.
+model MensagemTemplate {
+  id           String   @id
+  texto        String
+  atualizadoEm DateTime @updatedAt
+}
+
 enum SyncSource {
   SALES
   STOCK

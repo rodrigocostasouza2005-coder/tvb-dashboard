@@ -6,6 +6,7 @@ import { requireTabAccess } from "@/lib/tabs";
 import { waHref } from "@/lib/whatsapp";
 import { getNumeroNotaFiscal } from "@/lib/connectors/nota-fiscal";
 import { prisma } from "@/lib/prisma";
+import { getMensagemTemplates, renderTemplate, type TemplateKey } from "@/lib/message-templates";
 import { FilterBar } from "../filter-bar";
 import { CollapsibleFilters } from "../collapsible-filters";
 import { ContatoWhatsappLink } from "./contato-whatsapp-link";
@@ -27,123 +28,51 @@ function primeiroNome(nomeCompleto: string): string {
   return nomeCompleto.trim().split(/\s+/)[0];
 }
 
-// Mensagens com cupom, ditadas literalmente pelo Rodrigo em 2026-09-09 (texto de marketing dele,
-// não nosso) — substituem só Em risco/Inativo/Comprou só 1 vez/Aniversário. VIP esfriando e
-// Recorrente esfriando continuam com o texto antigo (ver mensagemSugestaoAntiga), ele não pediu
-// pra mudar essas duas. Diferente das mensagens antigas, essas NÃO ganham o gancho de estoque
-// (pedido explícito dele) e não usam s.detalhe (não mencionam "há quantos dias").
-function mensagemClientesFrios(nome: string): string {
-  return `Falaaa, ${nome}! 🌊
+const MOTIVO_TO_TEMPLATE_KEY: Record<string, TemplateKey> = {
+  "VIP esfriando": "vip_esfriando",
+  "Recorrente esfriando": "recorrente_esfriando",
+  "Em risco": "em_risco",
+  "Inativo": "inativo",
+  "Comprou só 1 vez": "comprou_1_vez",
+  "Aniversário": "aniversario",
+};
 
-Quanto tempo, hein? 😎 A gente percebeu que faz um tempinho que você não aparece por aqui e, vou te falar… *sentimos sua falta na família TVB!* 👊
+// Gancho de estoque (pedido do Rodrigo em 2026-09-08): quando o tamanho que o cliente mais
+// compra do produto favorito dele ainda está disponível na loja principal, entra uma linha a
+// mais — só nesse caso (nunca inventa disponibilidade, ver getTamanhoEstoqueParaClientes). Só
+// nos 2 motivos "esfriando" — os motivos com cupom (pedido dele em 2026-09-09) não ganham esse
+// gancho. Não é texto editável na tela de templates, é sempre acrescentado pelo código.
+const MOTIVOS_COM_GANCHO_ESTOQUE = new Set<TemplateKey>(["vip_esfriando", "recorrente_esfriando"]);
 
-Nesse tempo, rolou novidade, chegaram coisas novas e a TVB continua naquela vibe que você já conhece. 🏄‍♂️🔥
-
-E como a gente quer te ver de volta por aqui, resolvemos liberar um *benefício exclusivo só pra você.* 👀
-
-*Use o cupom VOLTA10 e ganhe 10% OFF na sua próxima compra.* 🔥
-
-Então aproveita pra dar aquela passada, conferir as novidades e ver o que chegou por aqui. 😎
-
-*Porque a TVB tá sempre na mesma vibe… só tava faltando você por aqui. 🌊🤙*`;
-}
-
-function mensagemComprouUmaVez(nome: string): string {
-  return `Falaaa, ${nome}! 🌊
-
-Você já passou pela TVB uma vez e a gente queria te ver por aqui de novo! 😎👊
-
-Tem novidade chegando, coisas novas rolando e aquela vibe que você já conhece. 🏄‍♂️🔥
-
-E pra te dar um motivo a mais pra voltar, *separamos um benefício exclusivo pra você.* 👀
-
-*Use o cupom VOLTA10 e ganhe 10% OFF na sua próxima compra.* 🔥
-
-Então já sabe: aproveita o desconto, dá uma olhada no site e vem conferir o que tá rolando por aqui! 🤙
-
-*Porque a TVB tá sempre na mesma vibe… só tava faltando você por aqui. 🌊🤙*`;
-}
-
-function mensagemAniversario(nome: string): string {
-  return `Falaaa, ${nome}! 🎉🌊
-
-Hoje é seu dia e a gente não podia deixar passar em branco! 😎🎂
-
-Você já faz parte da família TVB e está sempre colando com a gente. Então, nada mais justo do que comemorar seu aniversário com um *presente especial nosso pra você!* 👊🔥
-
-Preparamos um *cupom exclusivo de aniversário*:
-
-🎁 *Use o cupom ANIVER15 e ganhe 15% OFF na sua próxima compra!*
-
-É o nosso jeito de agradecer por estar sempre com a gente e fazer parte da família TVB. 💙
-
-Então aproveita seu dia, comemora muito e já sabe: quando quiser dar aquela renovada na vibe, a TVB tá te esperando! 🏄‍♂️🔥
-
-*Que esse novo ciclo venha cheio de coisa boa, boas energias e, claro, muita vibe boa! 🌊🏄‍♂️*`;
-}
-
-// Mensagem pronta por motivo, pré-preenchida no WhatsApp (pedido do Rodrigo em 2026-09-08,
-// reescrita no mesmo dia depois de pedir pra tirar "produto favorito" e alinhar com o tom real
-// da marca) — ele ainda revisa/edita antes de mandar (waHref nunca envia sozinho).
-//
-// Duas coisas informaram a reescrita original:
-// 1) Tom de voz real da TVB Shorts (tvbshorts.com): informal, bem-humorado, cultura de surf/praia,
-//    sem "marketês" — usa até depoimento de cliente cru em vez de texto arrumadinho ("a gente
-//    manda pouco email, até porque dá muito trabalho :)"). Nada de linguagem corporativa.
-// 2) Boas práticas de reativação por WhatsApp: personalizar pelo HISTÓRICO real (aqui, dias sem
-//    comprar — já vem em s.detalhe) rende mais do que "achismo de gosto" tipo produto favorito;
-//    mensagem curta, tom próximo, sem urgência falsa.
-//
-// Gancho de estoque (pedido do Rodrigo, mesmo dia): quando o tamanho que o cliente mais compra do
-// produto favorito dele ainda está disponível na loja principal, entra uma linha a mais — só
-// nesse caso (nunca inventa disponibilidade, ver getTamanhoEstoqueParaClientes). Só se aplica às
-// mensagens antigas (VIP/Recorrente esfriando) — as novas com cupom não ganham esse gancho.
-function mensagemSugestaoAntiga(s: SugestaoContato): string {
+// Mensagem pronta por motivo, pré-preenchida no WhatsApp — o texto em si vem de
+// MensagemTemplate (editável em /dashboard/marketing-templates, pedido do Rodrigo em
+// 2026-09-11), essa função só resolve os placeholders e acrescenta o gancho de estoque quando
+// aplicável. Ele ainda revisa/edita antes de mandar (waHref nunca envia sozinho).
+function mensagemSugestao(s: SugestaoContato, templates: Record<TemplateKey, string>): string {
   const nome = primeiroNome(s.cliente);
-  const base = (() => {
-    switch (s.motivo) {
-      case "VIP esfriando":
-        return `E aí ${nome}, sumiu! 😄 Faz um tempinho que você não passa aqui na TVB (${s.detalhe}) — bora dar uma olhada no que chegou de novo?`;
-      case "Recorrente esfriando":
-        return `Oi ${nome}, tudo bem? Notei que você não aparece por aqui há um tempo (${s.detalhe}). Só passando pra saber se tá tudo certo e se posso te ajudar a achar alguma coisa!`;
-      default:
-        return `Oi ${nome}, tudo bem? Aqui é da TVB Shorts!`;
-    }
-  })();
+  const key = MOTIVO_TO_TEMPLATE_KEY[s.motivo];
+  const texto = key ? templates[key] : "Oi {nome}, tudo bem? Aqui é da TVB Shorts!";
+  const base = renderTemplate(texto, { nome, detalhe: s.detalhe });
 
-  if (s.tamanhoDisponivel && s.produtoFavorito) {
+  if (key && MOTIVOS_COM_GANCHO_ESTOQUE.has(key) && s.tamanhoDisponivel && s.produtoFavorito) {
     return `${base} Inclusive ainda temos o ${s.produtoFavorito} no seu tamanho (${s.tamanhoDisponivel}) aqui na loja!`;
   }
   return base;
 }
 
-function mensagemSugestao(s: SugestaoContato): string {
-  const nome = primeiroNome(s.cliente);
-  switch (s.motivo) {
-    case "Em risco":
-    case "Inativo":
-      return mensagemClientesFrios(nome);
-    case "Comprou só 1 vez":
-      return mensagemComprouUmaVez(nome);
-    case "Aniversário":
-      return mensagemAniversario(nome);
-    default:
-      return mensagemSugestaoAntiga(s);
-  }
-}
-
 type FollowUpComNota = FollowUpPosCompra & { numeroNota: string | null };
 
 // Linha da nota/cupom, pedido do Rodrigo em 2026-09-09 pra facilitar caso o cliente precise
-// trocar — só entra quando a busca ao vivo no DAPIC acha um número (getNumeroNotaFiscal),
-// nunca inventa nem bloqueia o resto da mensagem se não achar.
-function mensagemFollowUp(f: FollowUpComNota): string {
+// trocar — só entra quando a busca ao vivo no DAPIC acha um número (getNumeroNotaFiscal), nunca
+// inventa nem bloqueia o resto da mensagem se não achar. Não é texto editável, sempre acrescentado
+// pelo código (mesmo espírito do gancho de estoque acima).
+function mensagemFollowUp(f: FollowUpComNota, templates: Record<TemplateKey, string>): string {
   const nome = primeiroNome(f.cliente);
   const produtos =
     f.produtos.length === 1
       ? f.produtos[0]
       : `${f.produtos.slice(0, -1).join(", ")} e ${f.produtos[f.produtos.length - 1]}`;
-  const base = `Oi ${nome}! Aqui é da TVB Shorts. Passando pra saber se você curtiu o(a) ${produtos} — chegou tudo certinho, serviu bem? Qualquer coisa é só chamar!`;
+  const base = renderTemplate(templates.follow_up, { nome, produtos });
   if (f.numeroNota) {
     return `${base} E se precisar trocar alguma coisa, já separa o número da nota aqui: ${f.numeroNota}.`;
   }
@@ -184,12 +113,14 @@ function TabelaSugestoes({
   clienteHref,
   contatosMap,
   podeVerCheck,
+  templates,
 }: {
   loja: string;
   sugestoes: SugestaoContato[];
   clienteHref: (nome: string) => string;
   contatosMap: Map<string, ContatoInfo>;
   podeVerCheck: boolean;
+  templates: Record<TemplateKey, string>;
 }) {
   return (
     <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
@@ -213,7 +144,7 @@ function TabelaSugestoes({
                 {s.telefone ? (
                   <ContatoWhatsappLink
                     telefone={s.telefone}
-                    href={waHref(s.telefone, mensagemSugestao(s))}
+                    href={waHref(s.telefone, mensagemSugestao(s, templates))}
                     tipo="sugestao"
                     cliente={s.cliente}
                     chave={s.motivo}
@@ -246,12 +177,14 @@ function TabelaFollowUp({
   clienteHref,
   contatosMap,
   podeVerCheck,
+  templates,
 }: {
   loja: string;
   itens: FollowUpComNota[];
   clienteHref: (nome: string) => string;
   contatosMap: Map<string, ContatoInfo>;
   podeVerCheck: boolean;
+  templates: Record<TemplateKey, string>;
 }) {
   return (
     <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
@@ -276,7 +209,7 @@ function TabelaFollowUp({
                 {f.telefone ? (
                   <ContatoWhatsappLink
                     telefone={f.telefone}
-                    href={waHref(f.telefone, mensagemFollowUp(f))}
+                    href={waHref(f.telefone, mensagemFollowUp(f, templates))}
                     tipo="followup"
                     cliente={f.cliente}
                     chave={String(f.dapicVendaId)}
@@ -322,12 +255,13 @@ export default async function ClientesSugestoesContatoPage({
     allowedTabelasPreco,
   });
 
-  const [stores, marcas, tabelasPreco, sugestoes, followUp] = await Promise.all([
+  const [stores, marcas, tabelasPreco, sugestoes, followUp, templates] = await Promise.all([
     getStores(allowedStores),
     getMarcas(allowedMarcas),
     getTabelasPreco(allowedTabelasPreco),
     getSugestoesDeContato(filters),
     getFollowUpPosCompra(filters),
+    getMensagemTemplates(),
   ]);
 
   function clienteHref(nome: string) {
@@ -379,7 +313,7 @@ export default async function ClientesSugestoesContatoPage({
 
       <div className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
         {sugestoesPorLoja.map(([loja, itens]) => (
-          <TabelaSugestoes key={loja} loja={loja} sugestoes={itens} clienteHref={clienteHref} contatosMap={contatosMap} podeVerCheck={podeVerCheck} />
+          <TabelaSugestoes key={loja} loja={loja} sugestoes={itens} clienteHref={clienteHref} contatosMap={contatosMap} podeVerCheck={podeVerCheck} templates={templates} />
         ))}
         {sugestoesPorLoja.length === 0 && (
           <p className="text-sm text-[var(--text-muted)]">Nenhuma sugestão hoje pro filtro selecionado.</p>
@@ -391,7 +325,7 @@ export default async function ClientesSugestoesContatoPage({
         <p className="mb-3 text-xs text-[var(--text-muted)]">Clientes B2C que compraram há 7-10 dias — perguntar se gostou e conseguiu aproveitar o produto.</p>
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           {followUpPorLoja.map(([loja, itens]) => (
-            <TabelaFollowUp key={loja} loja={loja} itens={itens} clienteHref={clienteHref} contatosMap={contatosMap} podeVerCheck={podeVerCheck} />
+            <TabelaFollowUp key={loja} loja={loja} itens={itens} clienteHref={clienteHref} contatosMap={contatosMap} podeVerCheck={podeVerCheck} templates={templates} />
           ))}
           {followUpPorLoja.length === 0 && (
             <p className="text-sm text-[var(--text-muted)]">Nenhuma compra B2C nessa janela de 7-10 dias atrás.</p>

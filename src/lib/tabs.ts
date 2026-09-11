@@ -30,6 +30,7 @@ export type TabKey =
   | "clientes-ficha"
   | "clientes-produto"
   | "clientes-produtos-entrada"
+  | "marketing-templates"
   | "clientes-sugestoes-contato"
   | "contatos-vendedores"
   | "estoque-retirada"
@@ -88,6 +89,7 @@ export const TABS: TabEntry[] = [
   // marketing
   { key: "top-mais-vendidos", label: "Top 10 mais vendidos", href: "/dashboard/top-mais-vendidos", group: "marketing" },
   { key: "top-menos-vendidos", label: "Top 10 menos vendidos", href: "/dashboard/top-menos-vendidos", group: "marketing" },
+  { key: "marketing-templates", label: "Templates de Mensagem", href: "/dashboard/marketing-templates", group: "marketing" },
 
   // pesquisa (direct link, like visao-geral)
   { key: "pesquisa", label: "Pesquisa", href: "/dashboard/pesquisa", group: "pesquisa" },
@@ -109,7 +111,7 @@ export const GROUPS: { key: TabGroup; label: string; single?: boolean }[] = [
 ];
 
 const BLOCKED_BY_DEFAULT_FOR_VENDEDOR: TabKey[] = [
-  "clientes", "clientes-segmentacao", "clientes-ficha", "clientes-produto", "clientes-produtos-entrada", "vendedores", "estoque-minimo", "contatos-vendedores",
+  "clientes", "clientes-segmentacao", "clientes-ficha", "clientes-produto", "clientes-produtos-entrada", "vendedores", "estoque-minimo", "contatos-vendedores", "marketing-templates",
 ];
 
 export function defaultAllowedTabs(role: Role): TabKey[] {
