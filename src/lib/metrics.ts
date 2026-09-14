@@ -4715,20 +4715,23 @@ function faixaTicket(valor: number): (typeof TICKET_FAIXAS)[number] {
   return TICKET_FAIXAS[5];
 }
 
-// Ticket = valor total do pedido (soma das linhas que passam no filtro — mesmo critério de
-// "ticket médio" já usado em Indicadores, não necessariamente o pedido inteiro se um filtro de
-// grupo/coleção só pegar parte dele). Quebrado por loja, faixa de valor e mês — pensado pra
-// virar 1 tabela/gráfico por loja, igual a planilha manual que o Rodrigo já tinha.
+// Ticket = valor líquido do pedido: soma das linhas de venda que passam no filtro, MENOS
+// qualquer devolução gravada no mesmo dapicVendaId (troca dentro do mesmo fechamento de PDV —
+// achado real em 2026-09-14 checando o banco: ~13% dos pedidos têm venda E devolução juntas no
+// mesmo dapicVendaId; sem descontar, o ticket ficava inflado pelo valor do item trocado, que o
+// cliente não pagou de fato). Devolução "solta" (pedido só com devolução, sem venda) não entra
+// aqui — nunca existiu nesse CTE, que só parte da tabela Sale. Quebrado por loja, faixa de valor
+// e mês — pensado pra virar 1 tabela/gráfico por loja, igual a planilha manual que o Rodrigo já tinha.
 export async function getTicketPorFaixaMensal(
   filters: Pick<DashboardFilters, "storeIds" | "marcas" | "tabelasPreco" | "colecaoIn" | "grupoIn">
 ) {
   const pedidos = await prisma.$queryRaw<{ storeId: string; orderday: Date; valor: number }[]>`
-    WITH pedidos AS (
+    WITH vendas AS (
       SELECT
         "storeId",
         "dapicVendaId",
         MIN("saleDate") AS "saleDate",
-        SUM("valorTotalLiquido") AS valor
+        SUM("valorTotalLiquido") AS "valorVenda"
       FROM "Sale"
       WHERE "dapicVendaId" IS NOT NULL
         ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
@@ -4737,12 +4740,19 @@ export async function getTicketPorFaixaMensal(
         ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
         ${filters.colecaoIn ? Prisma.sql`AND "colecao" = ANY(${filters.colecaoIn})` : Prisma.empty}
       GROUP BY "storeId", "dapicVendaId"
+    ),
+    devolucoes AS (
+      SELECT "storeId", "dapicVendaId", SUM("valorTotal") AS "valorDevolvido"
+      FROM "Return"
+      WHERE "dapicVendaId" IS NOT NULL
+      GROUP BY "storeId", "dapicVendaId"
     )
     SELECT
-      "storeId",
-      (("saleDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo')::date AS orderday,
-      valor::float AS valor
-    FROM pedidos
+      v."storeId",
+      ((v."saleDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo')::date AS orderday,
+      (v."valorVenda" - COALESCE(d."valorDevolvido", 0))::float AS valor
+    FROM vendas v
+    LEFT JOIN devolucoes d ON d."storeId" = v."storeId" AND d."dapicVendaId" = v."dapicVendaId"
   `;
 
   const stores = await prisma.store.findMany();
@@ -4779,25 +4789,38 @@ export async function getTicketPorFaixaMensal(
   return { months, rows };
 }
 
-// Mix de tamanho por mês, dentro de 1 grupo só (% do vendido daquele grupo naquele mês que veio
-// de cada tamanho) — mesma ideia das abas por família (Ultra Light/Classic/Camisa) da planilha
-// manual, só que qualquer grupo pode ser escolhido em vez de 3 fixos.
+// Mix de tamanho por mês, dentro de 1 grupo só (% do vendido LÍQUIDO daquele grupo naquele mês
+// que veio de cada tamanho — desconta devolução, mesmo critério "líquido" usado no resto do
+// dashboard, ver netByReturns) — mesma ideia das abas por família (Ultra Light/Classic/Camisa)
+// da planilha manual, só que qualquer grupo pode ser escolhido em vez de 3 fixos.
 export async function getTamanhoMixMensal(
   filters: Pick<DashboardFilters, "storeIds" | "marcas" | "tabelasPreco" | "colecaoIn">,
   grupo: string
 ) {
   const rows = await prisma.$queryRaw<{ tamanho: string; month: Date; qty: number }[]>`
-    SELECT
-      "tamanho",
-      date_trunc('month', (("saleDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo'))::date AS month,
-      SUM("quantidade")::float AS qty
-    FROM "Sale"
-    WHERE "grupo" = ${grupo}
-      AND "tamanho" IS NOT NULL
-      ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
-      ${filters.marcas !== undefined ? Prisma.sql`AND "marca" = ANY(${filters.marcas})` : Prisma.empty}
-      ${filters.tabelasPreco !== undefined ? Prisma.sql`AND ("tabelaPreco" = ANY(${filters.tabelasPreco}) OR "tabelaPreco" IS NULL)` : Prisma.empty}
-      ${filters.colecaoIn ? Prisma.sql`AND "colecao" = ANY(${filters.colecaoIn})` : Prisma.empty}
+    SELECT "tamanho", month, SUM(qty)::float AS qty FROM (
+      SELECT
+        "tamanho",
+        date_trunc('month', (("saleDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo')) AS month,
+        "quantidade" AS qty
+      FROM "Sale"
+      WHERE "grupo" = ${grupo}
+        AND "tamanho" IS NOT NULL
+        ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
+        ${filters.marcas !== undefined ? Prisma.sql`AND "marca" = ANY(${filters.marcas})` : Prisma.empty}
+        ${filters.tabelasPreco !== undefined ? Prisma.sql`AND ("tabelaPreco" = ANY(${filters.tabelasPreco}) OR "tabelaPreco" IS NULL)` : Prisma.empty}
+        ${filters.colecaoIn ? Prisma.sql`AND "colecao" = ANY(${filters.colecaoIn})` : Prisma.empty}
+      UNION ALL
+      SELECT
+        "tamanho",
+        date_trunc('month', (("returnDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo')) AS month,
+        -"quantidade" AS qty
+      FROM "Return"
+      WHERE "grupo" = ${grupo}
+        AND "tamanho" IS NOT NULL
+        ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
+        ${filters.colecaoIn ? Prisma.sql`AND ("colecao" = ANY(${filters.colecaoIn}) OR "colecao" IS NULL)` : Prisma.empty}
+    ) combined
     GROUP BY "tamanho", month
   `;
 
