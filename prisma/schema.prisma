@@ -188,6 +188,10 @@ model Return {
   tamanho      String?
   marca        String?
   tabelaPreco  String?
+  // A API (/vendaspdv) já manda Colecao pra linhas de devolução também, mas a sync nunca
+  // salvava esse campo — adicionado em 2026-09-14. Registros sincronizados antes disso ficam
+  // com colecao=null pra sempre (não dá pra recuperar retroativamente sem re-buscar na API).
+  colecao      String?
   quantidade   Int
   valorTotal   Float
   returnDate   DateTime

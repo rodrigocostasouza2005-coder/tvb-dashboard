@@ -35,8 +35,9 @@ export type DashboardFilters = {
   // Restringe a tamanhos específicos — filtro de Tamanho na aba Estoque x Vendas (pedido do
   // Rodrigo em 2026-09-01, mesma UX do filtro de Grupo).
   tamanhoIn?: string[];
-  // Restringe a coleções específicas — filtro de Coleção na aba Estoque x Vendas (mesmo pedido).
-  // Return não tem campo colecao no schema, então só entra em saleWhere/stockWhere.
+  // Restringe a coleções específicas — filtro básico de Coleção. Return só passou a gravar
+  // colecao em 2026-09-14 — returnWhere() trata null como "passa" pra não sumir com o histórico
+  // antigo de devolução (ver comentário lá).
   colecaoIn?: string[];
 };
 
@@ -44,11 +45,16 @@ function returnWhere(filters: DashboardFilters): Prisma.ReturnWhereInput {
   // marca e tabelaPreco ainda não estão populados nos registros históricos de devolução
   // (backfill pendente) — filtrar por esses campos zeraria todas as devoluções. Por ora
   // só filtramos por loja, período e grupo (que já existiam antes).
+  // colecao começou a ser gravada em 2026-09-14 (achado do Rodrigo: devolução de outra coleção
+  // estava sendo descontada do líquido da coleção filtrada) — devoluções sincronizadas antes
+  // disso ficam com colecao=null pra sempre, então o filtro passa null também (senão o histórico
+  // inteiro de devolução sumiria assim que alguém filtrasse por coleção).
   return {
     returnDate: { gte: filters.from, lte: filters.to },
     ...(filters.storeIds !== undefined ? { storeId: { in: filters.storeIds } } : {}),
     ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
     ...(filters.tamanhoIn ? { tamanho: { in: filters.tamanhoIn } } : {}),
+    ...(filters.colecaoIn ? { OR: [{ colecao: { in: filters.colecaoIn } }, { colecao: null }] } : {}),
   };
 }
 
@@ -217,11 +223,13 @@ export async function getSalesByDay(filters: DashboardFilters) {
         ${filters.marcas !== undefined ? Prisma.sql`AND "marca" = ANY(${filters.marcas})` : Prisma.empty}
         ${filters.tabelasPreco !== undefined ? Prisma.sql`AND ("tabelaPreco" = ANY(${filters.tabelasPreco}) OR "tabelaPreco" IS NULL)` : Prisma.empty}
         ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
+        ${filters.colecaoIn ? Prisma.sql`AND "colecao" = ANY(${filters.colecaoIn})` : Prisma.empty}
       GROUP BY day
       ORDER BY day ASC
     `,
     // Return não tem marca/tabelaPreco populado de forma confiável (mesma limitação de
-    // returnWhere() no resto do dashboard) — desconta só por loja/grupo/data.
+    // returnWhere() no resto do dashboard) — desconta por loja/grupo/data/coleção (coleção com
+    // passthrough de null, mesmo motivo do returnWhere()).
     prisma.$queryRaw<{ day: Date; units: bigint; value: number }[]>`
       SELECT
         (("returnDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo')::date AS day,
@@ -232,6 +240,7 @@ export async function getSalesByDay(filters: DashboardFilters) {
         AND "returnDate" <= ${filters.to}
         ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
         ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
+        ${filters.colecaoIn ? Prisma.sql`AND ("colecao" = ANY(${filters.colecaoIn}) OR "colecao" IS NULL)` : Prisma.empty}
       GROUP BY day
       ORDER BY day ASC
     `,
@@ -279,11 +288,13 @@ export async function getSalesByDayPerStore(filters: DashboardFilters) {
         ${filters.marcas !== undefined ? Prisma.sql`AND "marca" = ANY(${filters.marcas})` : Prisma.empty}
         ${filters.tabelasPreco !== undefined ? Prisma.sql`AND ("tabelaPreco" = ANY(${filters.tabelasPreco}) OR "tabelaPreco" IS NULL)` : Prisma.empty}
         ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
+        ${filters.colecaoIn ? Prisma.sql`AND "colecao" = ANY(${filters.colecaoIn})` : Prisma.empty}
       GROUP BY day, "storeId"
       ORDER BY day ASC
     `,
     // Return não tem marca/tabelaPreco populado de forma confiável (mesmo motivo/limitação já
-    // documentada em returnWhere() — filtra só por loja/grupo/data, igual o resto do dashboard.
+    // documentada em returnWhere()) — filtra por loja/grupo/data/coleção (coleção com passthrough
+    // de null, mesmo motivo do returnWhere()).
     prisma.$queryRaw<{ day: Date; storeId: string; units: bigint }[]>`
       SELECT
         (("returnDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo')::date AS day,
@@ -294,6 +305,7 @@ export async function getSalesByDayPerStore(filters: DashboardFilters) {
         AND "returnDate" <= ${filters.to}
         ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
         ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
+        ${filters.colecaoIn ? Prisma.sql`AND ("colecao" = ANY(${filters.colecaoIn}) OR "colecao" IS NULL)` : Prisma.empty}
       GROUP BY day, "storeId"
       ORDER BY day ASC
     `,

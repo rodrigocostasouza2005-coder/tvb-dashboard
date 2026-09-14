@@ -132,6 +132,7 @@ async function syncVendas(client: DapicClient, storeId: string | null, dias: num
           cor: item.Cor ?? null,
           tamanho: item.Tamanho ?? null,
           marca: item.Marca ?? null,
+          colecao: item.Colecao ?? null,
           tabelaPreco: inferTabelaPreco(cod, item.ValorUnitario, priceCatalog),
           quantidade: item.Quantidade,
           valorTotal: item.ValorLiquido,

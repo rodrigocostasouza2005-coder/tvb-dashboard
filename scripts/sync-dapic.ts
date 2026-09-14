@@ -152,6 +152,7 @@ async function syncVendas(client: DapicClient, storeId: string | null) {
           grupo: item.Grupo ?? "(sem grupo)",
           cor: item.Cor ?? null,
           tamanho: item.Tamanho ?? null,
+          colecao: item.Colecao ?? null,
           quantidade: item.Quantidade,
           valorTotal: item.ValorLiquido,
           returnDate: saleDate,
