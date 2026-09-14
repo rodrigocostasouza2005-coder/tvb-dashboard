@@ -5,6 +5,7 @@ export type TabKey =
   | "visao-geral"
   | "resumo-dia"
   | "vendas"
+  | "analise-vendas"
   | "brindes"
   | "estoque-atual"
   | "estoque"
@@ -58,6 +59,7 @@ export const TABS: TabEntry[] = [
   { key: "brindes", label: "Brinde", href: "/dashboard/brindes", group: "vendas" },
   { key: "curva-abc", label: "Curva ABC", href: "/dashboard/curva-abc", group: "vendas" },
   { key: "indicadores", label: "Indicadores no Tempo", href: "/dashboard/indicadores", group: "vendas" },
+  { key: "analise-vendas", label: "Análise", href: "/dashboard/analise-vendas", group: "vendas" },
   { label: "Comparativo vs. meta/ano ant.", group: "vendas", todo: true },
 
   // estoque

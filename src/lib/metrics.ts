@@ -4686,3 +4686,130 @@ export async function getMaisVendidosSemana(
     .sort((a, b) => b.unidades - a.unidades)
     .slice(0, limit);
 }
+
+// Aba "Análise" (dentro de Vendas), pedido do Rodrigo em 2026-09-14: ele tinha duas planilhas
+// manuais (análise de ticket e análise por tamanho) e queria "algo parecido" dentro do
+// dashboard — refeito aqui como cálculo ao vivo em cima do Sale, em vez de importar as
+// planilhas (que eram só um retrato manual e ficavam desatualizadas).
+
+const TICKET_FAIXAS = ["até 300", "300-400", "400-500", "500-600", "600-700", "Acima de 700"] as const;
+
+function faixaTicket(valor: number): (typeof TICKET_FAIXAS)[number] {
+  if (valor <= 300) return TICKET_FAIXAS[0];
+  if (valor <= 400) return TICKET_FAIXAS[1];
+  if (valor <= 500) return TICKET_FAIXAS[2];
+  if (valor <= 600) return TICKET_FAIXAS[3];
+  if (valor <= 700) return TICKET_FAIXAS[4];
+  return TICKET_FAIXAS[5];
+}
+
+// Ticket = valor total do pedido (soma das linhas que passam no filtro — mesmo critério de
+// "ticket médio" já usado em Indicadores, não necessariamente o pedido inteiro se um filtro de
+// grupo/coleção só pegar parte dele). Quebrado por loja, faixa de valor e mês — pensado pra
+// virar 1 tabela/gráfico por loja, igual a planilha manual que o Rodrigo já tinha.
+export async function getTicketPorFaixaMensal(
+  filters: Pick<DashboardFilters, "storeIds" | "marcas" | "tabelasPreco" | "colecaoIn" | "grupoIn">
+) {
+  const pedidos = await prisma.$queryRaw<{ storeId: string; orderday: Date; valor: number }[]>`
+    WITH pedidos AS (
+      SELECT
+        "storeId",
+        "dapicVendaId",
+        MIN("saleDate") AS "saleDate",
+        SUM("valorTotalLiquido") AS valor
+      FROM "Sale"
+      WHERE "dapicVendaId" IS NOT NULL
+        ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
+        ${filters.marcas !== undefined ? Prisma.sql`AND "marca" = ANY(${filters.marcas})` : Prisma.empty}
+        ${filters.tabelasPreco !== undefined ? Prisma.sql`AND ("tabelaPreco" = ANY(${filters.tabelasPreco}) OR "tabelaPreco" IS NULL)` : Prisma.empty}
+        ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
+        ${filters.colecaoIn ? Prisma.sql`AND "colecao" = ANY(${filters.colecaoIn})` : Prisma.empty}
+      GROUP BY "storeId", "dapicVendaId"
+    )
+    SELECT
+      "storeId",
+      (("saleDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo')::date AS orderday,
+      valor::float AS valor
+    FROM pedidos
+  `;
+
+  const stores = await prisma.store.findMany();
+  const storeName = new Map(stores.map((s) => [s.id, s.displayGroup ?? s.name]));
+
+  const monthsSet = new Set<string>();
+  // loja -> faixa -> mês -> contagem de pedidos
+  const grid = new Map<string, Map<string, Map<string, number>>>();
+  for (const p of pedidos) {
+    // Mesmo motivo do comentário em getSalesByDay: o SQL já resolveu o dia certo em horário de
+    // Brasília e devolveu como DATE — reformatar aqui com timeZone jogaria pro mês errado.
+    const month = new Date(p.orderday).toISOString().slice(0, 7);
+    monthsSet.add(month);
+    const store = storeName.get(p.storeId) ?? p.storeId;
+    const faixa = faixaTicket(p.valor);
+    if (!grid.has(store)) grid.set(store, new Map());
+    const byFaixa = grid.get(store)!;
+    if (!byFaixa.has(faixa)) byFaixa.set(faixa, new Map());
+    const byMonth = byFaixa.get(faixa)!;
+    byMonth.set(month, (byMonth.get(month) ?? 0) + 1);
+  }
+
+  const months = [...monthsSet].sort();
+  const rows = [...grid.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([storeName, byFaixa]) => ({
+      storeName,
+      faixas: TICKET_FAIXAS.map((label) => ({
+        label,
+        counts: months.map((m) => byFaixa.get(label)?.get(m) ?? 0),
+      })),
+    }));
+
+  return { months, rows };
+}
+
+// Mix de tamanho por mês, dentro de 1 grupo só (% do vendido daquele grupo naquele mês que veio
+// de cada tamanho) — mesma ideia das abas por família (Ultra Light/Classic/Camisa) da planilha
+// manual, só que qualquer grupo pode ser escolhido em vez de 3 fixos.
+export async function getTamanhoMixMensal(
+  filters: Pick<DashboardFilters, "storeIds" | "marcas" | "tabelasPreco" | "colecaoIn">,
+  grupo: string
+) {
+  const rows = await prisma.$queryRaw<{ tamanho: string; month: Date; qty: number }[]>`
+    SELECT
+      "tamanho",
+      date_trunc('month', (("saleDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo'))::date AS month,
+      SUM("quantidade")::float AS qty
+    FROM "Sale"
+    WHERE "grupo" = ${grupo}
+      AND "tamanho" IS NOT NULL
+      ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
+      ${filters.marcas !== undefined ? Prisma.sql`AND "marca" = ANY(${filters.marcas})` : Prisma.empty}
+      ${filters.tabelasPreco !== undefined ? Prisma.sql`AND ("tabelaPreco" = ANY(${filters.tabelasPreco}) OR "tabelaPreco" IS NULL)` : Prisma.empty}
+      ${filters.colecaoIn ? Prisma.sql`AND "colecao" = ANY(${filters.colecaoIn})` : Prisma.empty}
+    GROUP BY "tamanho", month
+  `;
+
+  const monthsSet = new Set<string>();
+  const totalByMonth = new Map<string, number>();
+  const byTamanho = new Map<string, Map<string, number>>();
+  for (const r of rows) {
+    const month = new Date(r.month).toISOString().slice(0, 7);
+    monthsSet.add(month);
+    totalByMonth.set(month, (totalByMonth.get(month) ?? 0) + r.qty);
+    if (!byTamanho.has(r.tamanho)) byTamanho.set(r.tamanho, new Map());
+    byTamanho.get(r.tamanho)!.set(month, r.qty);
+  }
+
+  const months = [...monthsSet].sort();
+  const tamanhos = sortTamanhos([...byTamanho.keys()]);
+  const rowsOut = tamanhos.map((t) => ({
+    tamanho: t,
+    pct: months.map((m) => {
+      const total = totalByMonth.get(m) ?? 0;
+      const qty = byTamanho.get(t)?.get(m) ?? 0;
+      return total > 0 ? (qty / total) * 100 : 0;
+    }),
+  }));
+
+  return { months, rows: rowsOut };
+}
