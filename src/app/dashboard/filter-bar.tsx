@@ -7,7 +7,7 @@ type Store = { id: string; name: string };
 // Cada filtro (Loja/Marca/Tabela de preço/Data) fica no seu próprio dropdown, em vez de um
 // bloco só com tudo junto — pedido do Rodrigo em 2026-08-24 pra deixar mais organizado.
 // <details>/<summary> nativo: abre/fecha sem precisar de client component nem JS.
-function FilterDropdown({ label, count, children }: { label: string; count: number; children: ReactNode }) {
+export function FilterDropdown({ label, count, children }: { label: string; count: number; children: ReactNode }) {
   return (
     <details className="group relative">
       <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-3 py-1.5 text-[var(--text-secondary)] hover:bg-[var(--page-plane)] [&::-webkit-details-marker]:hidden">
@@ -26,7 +26,7 @@ function FilterDropdown({ label, count, children }: { label: string; count: numb
   );
 }
 
-function CheckboxList({
+export function CheckboxList({
   name,
   options,
   selected,

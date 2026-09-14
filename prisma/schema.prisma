@@ -444,6 +444,43 @@ model MensagemTemplate {
   atualizadoEm DateTime @updatedAt
 }
 
+enum ContentTipo {
+  STORY
+  POST
+}
+
+enum ContentClassificacao {
+  QUALIFICADO
+  BASICO
+}
+
+// Registro individual de 1 conteúdo (1 story ou 1 post), não agregado mensal — pedido explícito
+// do Rodrigo em 2026-09-14 pra manter os dados flexíveis o bastante pra qualquer corte de
+// análise (dia/semana/mês, por pessoa, por tipo, por classificação) sem precisar reestruturar
+// depois. "classificacao" é sempre lançada manualmente (nunca inferida por engajamento) — decisão
+// de processo da equipe, não uma métrica calculada. "perfil" é texto livre (mesmo padrão de
+// Sale.vendedor/clienteNome — sem tabela de cadastro de pessoa separada), com autocomplete via
+// getDistinctPerfis() pra evitar variação de digitação sem travar quem for novo.
+model ContentPerformance {
+  id            String               @id @default(cuid())
+  perfil        String
+  tipo          ContentTipo
+  classificacao ContentClassificacao
+  data          DateTime
+  // Nem todo conteúdo tem engajamento disponível na hora do lançamento — opcional de propósito,
+  // pra não forçar um "0" que contaminaria médias.
+  engajamento   Int?
+  observacoes   String?
+  // Nome de quem lançou o registro (auditoria simples, mesmo espírito de ContatoMarcado.contatadoPor).
+  registradoPor String?
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+
+  @@index([perfil])
+  @@index([data])
+  @@index([tipo])
+}
+
 enum SyncSource {
   SALES
   STOCK

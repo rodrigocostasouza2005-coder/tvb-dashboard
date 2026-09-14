@@ -35,9 +35,11 @@ export type TabKey =
   | "clientes-sugestoes-contato"
   | "contatos-vendedores"
   | "estoque-retirada"
-  | "mapa-compras";
+  | "mapa-compras"
+  | "performance"
+  | "analise-performance";
 
-export type TabGroup = "visao-geral" | "resumo-dia" | "vendas" | "estoque" | "atacado" | "clientes" | "marketing" | "pesquisa" | "lamina";
+export type TabGroup = "visao-geral" | "resumo-dia" | "vendas" | "estoque" | "atacado" | "clientes" | "marketing" | "pesquisa" | "lamina" | "performance";
 
 export type TabEntry =
   | { key: TabKey; label: string; href: string; group: TabGroup; todo?: false }
@@ -96,6 +98,10 @@ export const TABS: TabEntry[] = [
   // pesquisa (direct link, like visao-geral)
   { key: "pesquisa", label: "Pesquisa", href: "/dashboard/pesquisa", group: "pesquisa" },
 
+  // performance — registro (Performance) e análise (Análise de Performance) de conteúdo/influenciador
+  { key: "performance", label: "Performance", href: "/dashboard/performance", group: "performance" },
+  { key: "analise-performance", label: "Análise de Performance", href: "/dashboard/analise-performance", group: "performance" },
+
   // back in nav
   { key: "marketing", label: "Marketing", href: "/dashboard/marketing", group: "marketing" },
 ];
@@ -110,10 +116,12 @@ export const GROUPS: { key: TabGroup; label: string; single?: boolean }[] = [
   { key: "clientes", label: "Clientes" },
   { key: "marketing", label: "Marketing" },
   { key: "pesquisa", label: "Pesquisa", single: true },
+  { key: "performance", label: "Performance" },
 ];
 
 const BLOCKED_BY_DEFAULT_FOR_VENDEDOR: TabKey[] = [
   "clientes", "clientes-segmentacao", "clientes-ficha", "clientes-produto", "clientes-produtos-entrada", "vendedores", "estoque-minimo", "contatos-vendedores", "marketing-templates",
+  "performance", "analise-performance",
 ];
 
 export function defaultAllowedTabs(role: Role): TabKey[] {
