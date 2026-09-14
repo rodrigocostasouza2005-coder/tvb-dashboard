@@ -1,13 +1,53 @@
 import { getSessionUser } from "@/lib/auth";
 import { getStockVsSales, getStores, getMarcas, getTabelasPreco, getDistinctColecoes } from "@/lib/metrics";
 import { getGrupoRestriction, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
-import { parseFilters, parseDimension, type RawSearchParams } from "@/lib/filters";
+import { parseFilters, parseDimension, toDateInputValue, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
+import {
+  getSessoesPorDia,
+  getConversoes,
+  getOrigemTrafego,
+  getPaginasMaisVistas,
+  type Ga4Sessao,
+  type Ga4Conversao,
+  type Ga4OrigemTrafego,
+  type Ga4PaginaMaisVista,
+} from "@/lib/connectors/google-analytics";
 import { FilterBar } from "../filter-bar";
 import { CollapsibleFilters } from "../collapsible-filters";
 import { DimensionToggle } from "../dimension-toggle";
+import { StatTile } from "../stat-tile";
 import { statusFor } from "../status-filter";
 import { MetricBarChart } from "../metric-bar-chart";
+import { IndicatorChart } from "../indicadores/indicator-chart";
+
+function formatPct(v: number | null) {
+  return v != null ? `${v.toFixed(1)}%` : "—";
+}
+
+// GA4 é uma fonte à parte do DAPIC (tráfego do site, não venda/estoque por loja) — se a conta de
+// serviço ainda não tiver sido configurada, ou o Google estiver fora do ar, a aba inteira de
+// Marketing não pode cair por causa disso. Ver connectors/google-analytics.ts.
+async function getGa4Seguro(from: string, to: string): Promise<{
+  conversao: Ga4Conversao;
+  sessoesPorDia: Ga4Sessao[];
+  origemTrafego: Ga4OrigemTrafego[];
+  paginasMaisVistas: Ga4PaginaMaisVista[];
+} | null> {
+  try {
+    const range = { startDate: from, endDate: to };
+    const [conversao, sessoesPorDia, origemTrafego, paginasMaisVistas] = await Promise.all([
+      getConversoes(range),
+      getSessoesPorDia(range),
+      getOrigemTrafego(range),
+      getPaginasMaisVistas(range, 10),
+    ]);
+    return { conversao, sessoesPorDia, origemTrafego, paginasMaisVistas };
+  } catch (e) {
+    console.error("[marketing] GA4 falhou:", e instanceof Error ? e.message : e);
+    return null;
+  }
+}
 
 export default async function MarketingPage({
   searchParams,
@@ -30,18 +70,21 @@ export default async function MarketingPage({
     grupoIn,
   };
 
-  const [rows, stores, marcas, tabelasPreco, colecoes] = await Promise.all([
+  const [rows, stores, marcas, tabelasPreco, colecoes, ga4] = await Promise.all([
     getStockVsSales(filters, dimension),
     getStores(allowedStores),
     getMarcas(allowedMarcas),
     getTabelasPreco(allowedTabelasPreco),
     getDistinctColecoes(),
+    getGa4Seguro(toDateInputValue(filters.from), toDateInputValue(filters.to)),
   ]);
 
   const ranked = rows
     .map((r) => ({ ...r, pushScore: r.currentStock - r.unitsSold }))
     .sort((a, b) => b.pushScore - a.pushScore)
     .slice(0, 50);
+
+  const sessoesChartData = ga4?.sessoesPorDia.map((s) => ({ day: s.data, sessoes: s.sessoes })) ?? [];
 
   return (
     <div>
@@ -56,6 +99,84 @@ export default async function MarketingPage({
           filters={filters}
         />
       </CollapsibleFilters>
+      <h2 className="mb-3 text-base font-semibold">Site (Google Analytics)</h2>
+      {ga4 ? (
+        <>
+          <section className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-3">
+            <StatTile label="Sessões no período" value={ga4.conversao.sessoes.toLocaleString("pt-BR")} />
+            <StatTile label="Conversões" value={ga4.conversao.conversoes.toLocaleString("pt-BR")} />
+            <StatTile label="Taxa de conversão" value={formatPct(ga4.conversao.taxaConversaoPct)} />
+          </section>
+
+          <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
+            <h3 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Sessões por dia</h3>
+            <IndicatorChart
+              data={sessoesChartData}
+              format="number"
+              granularity="day"
+              series={[{ key: "sessoes", name: "Sessões", color: "var(--series-1)" }]}
+            />
+          </section>
+
+          <section className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+              <h3 className="border-b border-[var(--gridline)] px-4 py-2.5 text-sm font-medium text-[var(--text-secondary)]">Origem de tráfego</h3>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
+                    <th className="px-4 py-2 font-medium">Canal</th>
+                    <th className="px-4 py-2 font-medium text-right">Sessões</th>
+                    <th className="px-4 py-2 font-medium text-right">Conversões</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ga4.origemTrafego.map((o) => (
+                    <tr key={o.canal} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
+                      <td className="px-4 py-2 font-medium">{o.canal}</td>
+                      <td className="px-4 py-2 text-right tabular-nums">{o.sessoes.toLocaleString("pt-BR")}</td>
+                      <td className="px-4 py-2 text-right tabular-nums">{o.conversoes.toLocaleString("pt-BR")}</td>
+                    </tr>
+                  ))}
+                  {ga4.origemTrafego.length === 0 && (
+                    <tr><td colSpan={3} className="px-4 py-6 text-center text-[var(--text-muted)]">Sem dado no período.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+              <h3 className="border-b border-[var(--gridline)] px-4 py-2.5 text-sm font-medium text-[var(--text-secondary)]">Páginas mais vistas</h3>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
+                    <th className="px-4 py-2 font-medium">Página</th>
+                    <th className="px-4 py-2 font-medium text-right">Visualizações</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ga4.paginasMaisVistas.map((p) => (
+                    <tr key={p.caminho} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
+                      <td className="px-4 py-2">
+                        <div className="font-medium text-[var(--text-primary)]">{p.titulo || p.caminho}</div>
+                        <div className="text-xs text-[var(--text-muted)]">{p.caminho}</div>
+                      </td>
+                      <td className="px-4 py-2 text-right tabular-nums">{p.visualizacoes.toLocaleString("pt-BR")}</td>
+                    </tr>
+                  ))}
+                  {ga4.paginasMaisVistas.length === 0 && (
+                    <tr><td colSpan={2} className="px-4 py-6 text-center text-[var(--text-muted)]">Sem dado no período.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </>
+      ) : (
+        <p className="mb-6 text-xs text-[var(--text-muted)]">
+          Google Analytics ainda não conectado (ou a conexão falhou) — sem dado de site pra mostrar aqui.
+        </p>
+      )}
+
       <DimensionToggle basePath="/dashboard/marketing" searchParams={rawParams} current={dimension} />
 
       <h2 className="mb-1 text-sm font-medium text-[var(--text-primary)]">
@@ -121,7 +242,7 @@ export default async function MarketingPage({
       </div>
 
       <p className="mt-8 text-xs text-[var(--text-muted)]">
-        Outras métricas de marketing (origem de tráfego, campanhas, CAC etc) ainda não estão conectadas.
+        Outras métricas de marketing (campanhas, CAC etc) ainda não estão conectadas.
       </p>
     </div>
   );
