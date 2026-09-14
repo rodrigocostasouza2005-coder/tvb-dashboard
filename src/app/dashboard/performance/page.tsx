@@ -62,6 +62,7 @@ export default async function PerformancePage({
         <StatTile label="Stories" value={summary.stories.toLocaleString("pt-BR")} />
         <StatTile label="Posts" value={summary.posts.toLocaleString("pt-BR")} />
         <StatTile label="Reposts" value={summary.reposts.toLocaleString("pt-BR")} />
+        <StatTile label="Visitas" value={summary.visitas.toLocaleString("pt-BR")} />
         <StatTile label="% qualificados" value={formatPct(summary.pctQualificados)} subValue={`${summary.qualificados} de ${summary.totalConteudos}`} />
       </section>
 

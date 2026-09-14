@@ -46,7 +46,7 @@ export function PerformanceFilterBar({
           <FilterDropdown label="Tipo" count={selectedTipos.size}>
             <CheckboxList
               name="tipo"
-              options={[{ value: "STORY", label: "Story" }, { value: "POST", label: "Post" }, { value: "REPOST", label: "Repost" }]}
+              options={[{ value: "STORY", label: "Story" }, { value: "POST", label: "Post" }, { value: "REPOST", label: "Repost" }, { value: "VISITA", label: "Visita" }]}
               selected={selectedTipos}
             />
           </FilterDropdown>

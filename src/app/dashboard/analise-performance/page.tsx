@@ -20,7 +20,7 @@ import { StatTile } from "../stat-tile";
 import { PerformanceFilterBar } from "../performance/performance-filter-bar";
 import { IndicatorChart } from "../indicadores/indicator-chart";
 
-const TIPO_LABEL: Record<string, string> = { STORY: "Story", POST: "Post", REPOST: "Repost" };
+const TIPO_LABEL: Record<string, string> = { STORY: "Story", POST: "Post", REPOST: "Repost", VISITA: "Visita" };
 
 function formatPct(v: number | null) {
   return v != null ? `${v.toFixed(1)}%` : "—";
@@ -189,6 +189,7 @@ export default async function AnalisePerformancePage({
         <StatTile label="Stories" value={formatNum(summary.stories)} />
         <StatTile label="Posts" value={formatNum(summary.posts)} />
         <StatTile label="Reposts" value={formatNum(summary.reposts)} />
+        <StatTile label="Visitas" value={formatNum(summary.visitas)} />
         <StatTile label="% qualificados" value={formatPct(summary.pctQualificados)} subValue={`${summary.qualificados} de ${summary.totalConteudos}`} />
         <StatTile label="Qualificados" value={formatNum(summary.qualificados)} />
         <StatTile label="Básicos" value={formatNum(summary.basicos)} />
@@ -252,7 +253,7 @@ export default async function AnalisePerformancePage({
                   <td className="px-4 py-2 font-medium">
                     <a href={perfilHref(r.perfil)} className="hover:underline">{r.perfil}</a>
                   </td>
-                  <td className="px-4 py-2 text-right tabular-nums">{r.conteudos} <span className="text-xs text-[var(--text-muted)]">({r.stories}S/{r.posts}P/{r.reposts}R)</span></td>
+                  <td className="px-4 py-2 text-right tabular-nums">{r.conteudos} <span className="text-xs text-[var(--text-muted)]">({r.stories}S/{r.posts}P/{r.reposts}R/{r.visitas}V)</span></td>
                   <td className="px-4 py-2 text-right tabular-nums">{r.qualificados}</td>
                   <td className="px-4 py-2 text-right tabular-nums">{formatPct(r.pctQualificacao)}</td>
                   <td className="px-4 py-2 text-right tabular-nums">{formatNum(r.engajamentoTotal)}</td>
@@ -455,7 +456,7 @@ export default async function AnalisePerformancePage({
           {perfilDetalhe ? (
             <div className="flex flex-col gap-4">
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                <StatTile label="Conteúdos" value={formatNum(perfilDetalhe.totalConteudos)} subValue={`${perfilDetalhe.stories}S / ${perfilDetalhe.posts}P / ${perfilDetalhe.reposts}R`} />
+                <StatTile label="Conteúdos" value={formatNum(perfilDetalhe.totalConteudos)} subValue={`${perfilDetalhe.stories}S / ${perfilDetalhe.posts}P / ${perfilDetalhe.reposts}R / ${perfilDetalhe.visitas}V`} />
                 <StatTile label="% qualificação" value={formatPct(perfilDetalhe.pctQualificacao)} subValue={`${perfilDetalhe.qualificados} de ${perfilDetalhe.totalConteudos}`} />
                 <StatTile label="Engajamento total" value={formatNum(perfilDetalhe.engajamentoTotal)} />
                 <StatTile label="Engajamento médio" value={formatNum(perfilDetalhe.engajamentoMedio)} />

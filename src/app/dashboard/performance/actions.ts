@@ -23,7 +23,7 @@ function parseForm(formData: FormData) {
   const storeId = String(formData.get("storeId") ?? "").trim();
 
   if (!perfil || !dataStr) throw new Error("Perfil e data são obrigatórios.");
-  if (tipo !== "STORY" && tipo !== "POST" && tipo !== "REPOST") throw new Error("Tipo inválido.");
+  if (tipo !== "STORY" && tipo !== "POST" && tipo !== "REPOST" && tipo !== "VISITA") throw new Error("Tipo inválido.");
   if (classificacao !== "QUALIFICADO" && classificacao !== "BASICO") throw new Error("Classificação inválida.");
 
   return {

@@ -449,6 +449,7 @@ enum ContentTipo {
   STORY
   POST
   REPOST
+  VISITA
 }
 
 enum ContentClassificacao {

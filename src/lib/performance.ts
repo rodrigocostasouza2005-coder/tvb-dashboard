@@ -11,7 +11,7 @@ export type PerformanceFilters = {
   to: Date;
 };
 
-const TIPOS_VALIDOS: ContentTipo[] = ["STORY", "POST", "REPOST"];
+const TIPOS_VALIDOS: ContentTipo[] = ["STORY", "POST", "REPOST", "VISITA"];
 
 // Mesmo padrão de parseFilters() em lib/filters.ts (dias em horário de Brasília, padrão de
 // período recente) — domínio diferente (conteúdo/influenciador, não venda/estoque), por isso um
@@ -87,6 +87,7 @@ export async function getPerformanceSummary(filters: PerformanceFilters) {
   const stories = rows.filter((r) => r.tipo === "STORY").length;
   const posts = rows.filter((r) => r.tipo === "POST").length;
   const reposts = rows.filter((r) => r.tipo === "REPOST").length;
+  const visitas = rows.filter((r) => r.tipo === "VISITA").length;
   const qualificados = rows.filter((r) => r.classificacao === "QUALIFICADO").length;
   const basicos = rows.filter((r) => r.classificacao === "BASICO").length;
   const comEngajamento = rows.filter((r) => r.engajamento != null);
@@ -97,6 +98,7 @@ export async function getPerformanceSummary(filters: PerformanceFilters) {
     stories,
     posts,
     reposts,
+    visitas,
     qualificados,
     basicos,
     pctQualificados: pct(qualificados, totalConteudos),
@@ -114,6 +116,7 @@ export type RankingRow = {
   stories: number;
   posts: number;
   reposts: number;
+  visitas: number;
   qualificados: number;
   pctQualificacao: number | null;
   engajamentoTotal: number | null;
@@ -144,6 +147,7 @@ export async function getPerformanceRanking(filters: PerformanceFilters): Promis
       stories: itens.filter((i) => i.tipo === "STORY").length,
       posts: itens.filter((i) => i.tipo === "POST").length,
       reposts: itens.filter((i) => i.tipo === "REPOST").length,
+      visitas: itens.filter((i) => i.tipo === "VISITA").length,
       qualificados,
       pctQualificacao: pct(qualificados, itens.length),
       engajamentoTotal: comEng.length > 0 ? engajamentoTotal : null,
@@ -204,7 +208,7 @@ export async function getStoriesVsPosts(filters: PerformanceFilters) {
   });
   const total = rows.length;
 
-  return (["STORY", "POST", "REPOST"] as const).map((tipo) => {
+  return (["STORY", "POST", "REPOST", "VISITA"] as const).map((tipo) => {
     const itens = rows.filter((r) => r.tipo === tipo);
     const qualificados = itens.filter((r) => r.classificacao === "QUALIFICADO").length;
     const comEng = itens.filter((r) => r.engajamento != null);
@@ -307,6 +311,7 @@ export async function getPerfilDetalhe(perfil: string, filters: PerformanceFilte
     stories: rows.filter((r) => r.tipo === "STORY").length,
     posts: rows.filter((r) => r.tipo === "POST").length,
     reposts: rows.filter((r) => r.tipo === "REPOST").length,
+    visitas: rows.filter((r) => r.tipo === "VISITA").length,
     qualificados,
     basicos: rows.filter((r) => r.classificacao === "BASICO").length,
     pctQualificacao: pct(qualificados, rows.length),

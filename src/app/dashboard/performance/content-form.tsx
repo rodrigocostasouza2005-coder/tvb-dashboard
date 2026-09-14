@@ -48,6 +48,7 @@ export function ContentForm({
           <option value="STORY">Story</option>
           <option value="POST">Post</option>
           <option value="REPOST">Repost</option>
+          <option value="VISITA">Visita</option>
         </select>
       </div>
 

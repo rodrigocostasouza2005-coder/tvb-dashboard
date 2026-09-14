@@ -3,12 +3,12 @@
 import { useMemo, useState } from "react";
 import { deleteContentAction } from "./actions";
 
-const TIPO_LABEL: Record<string, string> = { STORY: "Story", POST: "Post", REPOST: "Repost" };
+const TIPO_LABEL: Record<string, string> = { STORY: "Story", POST: "Post", REPOST: "Repost", VISITA: "Visita" };
 
 type Row = {
   id: string;
   perfil: string;
-  tipo: "STORY" | "POST" | "REPOST";
+  tipo: "STORY" | "POST" | "REPOST" | "VISITA";
   classificacao: "QUALIFICADO" | "BASICO";
   data: string;
   engajamento: number | null;
@@ -65,6 +65,7 @@ export function ContentTable({ rows, canEdit }: { rows: Row[]; canEdit: boolean 
                 <option value="STORY">Story</option>
                 <option value="POST">Post</option>
                 <option value="REPOST">Repost</option>
+                <option value="VISITA">Visita</option>
               </select>
             </th>
             <th className="px-4 py-1.5">
