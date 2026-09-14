@@ -4,6 +4,7 @@ import { useState } from "react";
 import { BRAZIL_STATES, BRAZIL_VIEWBOX } from "@/lib/brazil-states-geo";
 
 type Row = { estado: string; receita: number; unidades: number };
+type CityRow = { cidade: string; receita: number; unidades: number };
 
 const SCALE = ["var(--seq-1)", "var(--seq-2)", "var(--seq-3)", "var(--seq-4)", "var(--seq-5)"];
 
@@ -11,8 +12,12 @@ function formatBRL(value: number) {
   return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
 }
 
-export function BrazilMap({ rows }: { rows: Row[] }) {
+// citiesByState opcional: quando vem preenchido, clicar num estado abre um dropdown com as
+// cidades daquele estado (em vez de precisar navegar pra outra aba/tabela) — pedido do Rodrigo
+// em 2026-09-14. Sem esse prop o mapa continua se comportando como antes (só hover).
+export function BrazilMap({ rows, citiesByState }: { rows: Row[]; citiesByState?: Map<string, CityRow[]> }) {
   const [hover, setHover] = useState<{ uf: string; x: number; y: number } | null>(null);
+  const [selectedUf, setSelectedUf] = useState<string | null>(null);
 
   const byUf = new Map(rows.map((r) => [r.estado, r]));
   // Quantil em vez de linear: a receita é muito concentrada (RJ domina), então uma escala
@@ -52,6 +57,7 @@ export function BrazilMap({ rows }: { rows: Row[] }) {
               setHover({ uf: s.uf, x: e.clientX - rect.left, y: e.clientY - rect.top });
             }}
             onMouseLeave={() => setHover((h) => (h?.uf === s.uf ? null : h))}
+            onClick={() => citiesByState && setSelectedUf((cur) => (cur === s.uf ? null : s.uf))}
             style={{ cursor: "pointer", transition: "fill 0.15s" }}
           />
         ))}
@@ -88,7 +94,42 @@ export function BrazilMap({ rows }: { rows: Row[] }) {
         ))}
         <span>Mais</span>
         <span className="ml-2">— receita por estado</span>
+        {citiesByState && <span className="ml-2">· clique num estado pra ver as cidades</span>}
       </div>
+
+      {selectedUf && citiesByState && (
+        <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3 shadow-md">
+          <div className="mb-2 flex items-center justify-between">
+            <h4 className="text-sm font-medium text-[var(--text-primary)]">
+              {BRAZIL_STATES.find((s) => s.uf === selectedUf)?.name ?? selectedUf} — cidades
+            </h4>
+            <button
+              type="button"
+              onClick={() => setSelectedUf(null)}
+              className="rounded-md px-1.5 text-[var(--text-muted)] hover:bg-[var(--page-plane)]"
+              aria-label="Fechar"
+            >
+              ×
+            </button>
+          </div>
+          <ul className="flex max-h-64 flex-col gap-1 overflow-y-auto text-sm">
+            {[...(citiesByState.get(selectedUf) ?? [])]
+              .sort((a, b) => b.receita - a.receita)
+              .map((c) => (
+                <li key={c.cidade} className="flex items-center justify-between gap-3 border-b border-[var(--gridline)] py-1 last:border-0">
+                  <span className="text-[var(--text-primary)]">{c.cidade}</span>
+                  <span className="flex shrink-0 items-center gap-3 tabular-nums text-[var(--text-secondary)]">
+                    <span>{formatBRL(c.receita)}</span>
+                    <span className="text-[var(--text-muted)]">{c.unidades.toLocaleString("pt-BR")} un.</span>
+                  </span>
+                </li>
+              ))}
+            {(citiesByState.get(selectedUf) ?? []).length === 0 && (
+              <li className="text-[var(--text-muted)]">Sem cidade identificada nesse estado no período.</li>
+            )}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }

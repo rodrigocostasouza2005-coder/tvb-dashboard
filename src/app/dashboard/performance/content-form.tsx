@@ -5,7 +5,17 @@ import type { ContentPerformance } from "@prisma/client";
 const inputClass =
   "rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-sm text-[var(--text-primary)]";
 
-export function ContentForm({ perfis, editing }: { perfis: string[]; editing: ContentPerformance | null }) {
+type Store = { id: string; name: string };
+
+export function ContentForm({
+  perfis,
+  stores,
+  editing,
+}: {
+  perfis: string[];
+  stores: Store[];
+  editing: ContentPerformance | null;
+}) {
   const action = editing ? updateContentAction : createContentAction;
 
   return (
@@ -37,6 +47,23 @@ export function ContentForm({ perfis, editing }: { perfis: string[]; editing: Co
         <select id="tipo" name="tipo" defaultValue={editing?.tipo ?? "STORY"} required className={inputClass} style={{ colorScheme: "light dark" }}>
           <option value="STORY">Story</option>
           <option value="POST">Post</option>
+          <option value="REPOST">Repost</option>
+        </select>
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <label className="text-xs font-medium text-[var(--text-muted)]" htmlFor="storeId">Loja</label>
+        <select
+          id="storeId"
+          name="storeId"
+          defaultValue={editing?.storeId ?? ""}
+          className={inputClass}
+          style={{ colorScheme: "light dark" }}
+        >
+          <option value="">Sem loja / não se aplica</option>
+          {stores.map((s) => (
+            <option key={s.id} value={s.id}>{s.name}</option>
+          ))}
         </select>
       </div>
 

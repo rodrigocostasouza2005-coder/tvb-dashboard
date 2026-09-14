@@ -342,6 +342,69 @@ export async function getSalesByDayPerStore(filters: DashboardFilters) {
   return { data, series };
 }
 
+// Mesma ideia de getSalesByDayPerStore, mas quebrado por coleção em vez de loja — pedido do
+// Rodrigo em 2026-09-14: o comparativo de coleção virar linha do tempo (StoreCompareChart), não
+// só um ranking de barra do total do período. Líquido (desconta devolução por dia+coleção).
+export async function getSalesByDayPerColecao(filters: DashboardFilters) {
+  const [salesRows, returnRows] = await Promise.all([
+    prisma.$queryRaw<{ day: Date; colecao: string | null; units: bigint }[]>`
+      SELECT
+        (("saleDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo')::date AS day,
+        "colecao",
+        SUM("quantidade") AS units
+      FROM "Sale"
+      WHERE "saleDate" >= ${filters.from}
+        AND "saleDate" <= ${filters.to}
+        ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
+        ${filters.marcas !== undefined ? Prisma.sql`AND "marca" = ANY(${filters.marcas})` : Prisma.empty}
+        ${filters.tabelasPreco !== undefined ? Prisma.sql`AND ("tabelaPreco" = ANY(${filters.tabelasPreco}) OR "tabelaPreco" IS NULL)` : Prisma.empty}
+        ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
+        ${filters.colecaoIn ? Prisma.sql`AND "colecao" = ANY(${filters.colecaoIn})` : Prisma.empty}
+      GROUP BY day, "colecao"
+      ORDER BY day ASC
+    `,
+    prisma.$queryRaw<{ day: Date; colecao: string | null; units: bigint }[]>`
+      SELECT
+        (("returnDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo')::date AS day,
+        "colecao",
+        SUM("quantidade") AS units
+      FROM "Return"
+      WHERE "returnDate" >= ${filters.from}
+        AND "returnDate" <= ${filters.to}
+        ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
+        ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
+        ${filters.colecaoIn ? Prisma.sql`AND ("colecao" = ANY(${filters.colecaoIn}) OR "colecao" IS NULL)` : Prisma.empty}
+      GROUP BY day, "colecao"
+      ORDER BY day ASC
+    `,
+  ]);
+
+  const byDay = new Map<string, Record<string, number>>();
+  const seriesNames = new Set<string>();
+  for (const r of salesRows) {
+    const seriesName = r.colecao?.trim() || "(sem coleção)";
+    const day = new Date(r.day).toISOString().slice(0, 10);
+    seriesNames.add(seriesName);
+    const dayRow = byDay.get(day) ?? {};
+    dayRow[seriesName] = (dayRow[seriesName] ?? 0) + Number(r.units);
+    byDay.set(day, dayRow);
+  }
+  for (const r of returnRows) {
+    const seriesName = r.colecao?.trim() || "(sem coleção)";
+    const day = new Date(r.day).toISOString().slice(0, 10);
+    const dayRow = byDay.get(day) ?? {};
+    dayRow[seriesName] = (dayRow[seriesName] ?? 0) - Number(r.units);
+    byDay.set(day, dayRow);
+  }
+
+  const series = [...seriesNames].sort();
+  const data = [...byDay.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([day, values]) => ({ day, ...values }));
+
+  return { data, series };
+}
+
 async function groupSalesByDimension(dimension: Dimension, where: Prisma.SaleWhereInput) {
   switch (dimension) {
     case "grupo":

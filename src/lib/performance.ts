@@ -6,19 +6,23 @@ export type PerformanceFilters = {
   perfilIn?: string[];
   tipoIn?: ContentTipo[];
   classificacaoIn?: ContentClassificacao[];
+  storeIds?: string[];
   from: Date;
   to: Date;
 };
+
+const TIPOS_VALIDOS: ContentTipo[] = ["STORY", "POST", "REPOST"];
 
 // Mesmo padrão de parseFilters() em lib/filters.ts (dias em horário de Brasília, padrão de
 // período recente) — domínio diferente (conteúdo/influenciador, não venda/estoque), por isso um
 // parser próprio em vez de reaproveitar parseFilters, que é todo desenhado em cima de loja/marca.
 export function parsePerformanceFilters(params: RawSearchParams): PerformanceFilters {
   const perfilSelecionado = toArray(params.perfil);
-  const tipoSelecionado = toArray(params.tipo).filter((t): t is ContentTipo => t === "STORY" || t === "POST");
+  const tipoSelecionado = toArray(params.tipo).filter((t): t is ContentTipo => TIPOS_VALIDOS.includes(t as ContentTipo));
   const classificacaoSelecionada = toArray(params.classificacao).filter(
     (c): c is ContentClassificacao => c === "QUALIFICADO" || c === "BASICO"
   );
+  const storeSelecionada = toArray(params.store);
 
   const DEFAULT_DIAS_ATRAS = 90;
   const now = new Date();
@@ -32,6 +36,7 @@ export function parsePerformanceFilters(params: RawSearchParams): PerformanceFil
     perfilIn: perfilSelecionado.length > 0 ? perfilSelecionado : undefined,
     tipoIn: tipoSelecionado.length > 0 ? tipoSelecionado : undefined,
     classificacaoIn: classificacaoSelecionada.length > 0 ? classificacaoSelecionada : undefined,
+    storeIds: storeSelecionada.length > 0 ? storeSelecionada : undefined,
     from,
     to,
   };
@@ -43,6 +48,7 @@ function contentWhere(filters: PerformanceFilters): Prisma.ContentPerformanceWhe
     ...(filters.perfilIn ? { perfil: { in: filters.perfilIn } } : {}),
     ...(filters.tipoIn ? { tipo: { in: filters.tipoIn } } : {}),
     ...(filters.classificacaoIn ? { classificacao: { in: filters.classificacaoIn } } : {}),
+    ...(filters.storeIds ? { storeId: { in: filters.storeIds } } : {}),
   };
 }
 
@@ -55,6 +61,7 @@ export async function getContentRecords(filters: PerformanceFilters) {
   return prisma.contentPerformance.findMany({
     where: contentWhere(filters),
     orderBy: { data: "desc" },
+    include: { store: { select: { name: true } } },
   });
 }
 
@@ -79,6 +86,7 @@ export async function getPerformanceSummary(filters: PerformanceFilters) {
   const totalConteudos = rows.length;
   const stories = rows.filter((r) => r.tipo === "STORY").length;
   const posts = rows.filter((r) => r.tipo === "POST").length;
+  const reposts = rows.filter((r) => r.tipo === "REPOST").length;
   const qualificados = rows.filter((r) => r.classificacao === "QUALIFICADO").length;
   const basicos = rows.filter((r) => r.classificacao === "BASICO").length;
   const comEngajamento = rows.filter((r) => r.engajamento != null);
@@ -88,6 +96,7 @@ export async function getPerformanceSummary(filters: PerformanceFilters) {
     totalConteudos,
     stories,
     posts,
+    reposts,
     qualificados,
     basicos,
     pctQualificados: pct(qualificados, totalConteudos),
@@ -104,6 +113,7 @@ export type RankingRow = {
   conteudos: number;
   stories: number;
   posts: number;
+  reposts: number;
   qualificados: number;
   pctQualificacao: number | null;
   engajamentoTotal: number | null;
@@ -133,11 +143,56 @@ export async function getPerformanceRanking(filters: PerformanceFilters): Promis
       conteudos: itens.length,
       stories: itens.filter((i) => i.tipo === "STORY").length,
       posts: itens.filter((i) => i.tipo === "POST").length,
+      reposts: itens.filter((i) => i.tipo === "REPOST").length,
       qualificados,
       pctQualificacao: pct(qualificados, itens.length),
       engajamentoTotal: comEng.length > 0 ? engajamentoTotal : null,
       engajamentoMedio: avg(engajamentoTotal, comEng.length),
       comEngajamento: comEng.length,
+    };
+  });
+}
+
+export type LojaPerformanceRow = {
+  storeId: string;
+  storeName: string;
+  conteudos: number;
+  qualificados: number;
+  pctQualificacao: number | null;
+  engajamentoTotal: number | null;
+  engajamentoMedio: number | null;
+};
+
+// Indicadores por loja física — pedido do Rodrigo em 2026-09-14 ("também se foi na loja, quero
+// ver esses indicadores"). Só entra aqui conteúdo com storeId preenchido (loja é opcional no
+// lançamento); conteúdo sem loja não aparece nessa quebra, mas continua contando normalmente em
+// todo o resto (ranking por pessoa, cards gerais etc).
+export async function getPerformancePorLoja(filters: PerformanceFilters): Promise<LojaPerformanceRow[]> {
+  const rows = await prisma.contentPerformance.findMany({
+    where: { ...contentWhere(filters), storeId: { not: null } },
+    select: { storeId: true, classificacao: true, engajamento: true, store: { select: { name: true } } },
+  });
+
+  const byStore = new Map<string, { storeName: string; itens: typeof rows }>();
+  for (const r of rows) {
+    if (!r.storeId || !r.store) continue;
+    const cur = byStore.get(r.storeId) ?? { storeName: r.store.name, itens: [] };
+    cur.itens.push(r);
+    byStore.set(r.storeId, cur);
+  }
+
+  return [...byStore.entries()].map(([storeId, { storeName, itens }]) => {
+    const qualificados = itens.filter((i) => i.classificacao === "QUALIFICADO").length;
+    const comEng = itens.filter((i) => i.engajamento != null);
+    const engajamentoTotal = comEng.reduce((s, i) => s + (i.engajamento ?? 0), 0);
+    return {
+      storeId,
+      storeName,
+      conteudos: itens.length,
+      qualificados,
+      pctQualificacao: pct(qualificados, itens.length),
+      engajamentoTotal: comEng.length > 0 ? engajamentoTotal : null,
+      engajamentoMedio: avg(engajamentoTotal, comEng.length),
     };
   });
 }
@@ -149,7 +204,7 @@ export async function getStoriesVsPosts(filters: PerformanceFilters) {
   });
   const total = rows.length;
 
-  return (["STORY", "POST"] as const).map((tipo) => {
+  return (["STORY", "POST", "REPOST"] as const).map((tipo) => {
     const itens = rows.filter((r) => r.tipo === tipo);
     const qualificados = itens.filter((r) => r.classificacao === "QUALIFICADO").length;
     const comEng = itens.filter((r) => r.engajamento != null);
@@ -236,6 +291,7 @@ export async function getPerfilDetalhe(perfil: string, filters: PerformanceFilte
   const rows = await prisma.contentPerformance.findMany({
     where: { ...contentWhere({ ...filters, perfilIn: undefined }), perfil },
     orderBy: { data: "desc" },
+    include: { store: { select: { name: true } } },
   });
   if (rows.length === 0) return null;
 
@@ -250,6 +306,7 @@ export async function getPerfilDetalhe(perfil: string, filters: PerformanceFilte
     totalConteudos: rows.length,
     stories: rows.filter((r) => r.tipo === "STORY").length,
     posts: rows.filter((r) => r.tipo === "POST").length,
+    reposts: rows.filter((r) => r.tipo === "REPOST").length,
     qualificados,
     basicos: rows.filter((r) => r.classificacao === "BASICO").length,
     pctQualificacao: pct(qualificados, rows.length),

@@ -2,6 +2,7 @@ import { getSessionUser } from "@/lib/auth";
 import { requireTabAccess } from "@/lib/tabs";
 import { parsePerformanceFilters } from "@/lib/performance";
 import { getContentRecords, getContentById, getDistinctPerfis, getPerformanceSummary } from "@/lib/performance";
+import { getRawStores } from "@/lib/metrics";
 import { toDateInputValue } from "@/lib/filters";
 import { CollapsibleFilters } from "../collapsible-filters";
 import { StatTile } from "../stat-tile";
@@ -29,12 +30,15 @@ export default async function PerformancePage({
   const filters = parsePerformanceFilters(rawParams);
   const editId = typeof rawParams.edit === "string" ? rawParams.edit : null;
 
-  const [records, perfis, summary, editing] = await Promise.all([
+  const [records, perfis, allStores, summary, editing] = await Promise.all([
     getContentRecords(filters),
     getDistinctPerfis(),
+    getRawStores(),
     getPerformanceSummary(filters),
     editId ? getContentById(editId) : Promise.resolve(null),
   ]);
+  // Só lojas físicas de venda fazem sentido aqui — conteúdo não é "feito" no CD nem em armazéns.
+  const stores = allStores.filter((s) => s.sellsProducts);
 
   return (
     <div>
@@ -50,13 +54,14 @@ export default async function PerformancePage({
       </p>
 
       <CollapsibleFilters defaultOpen={filtrosOpen}>
-        <PerformanceFilterBar action="/dashboard/performance" perfis={perfis} filters={filters} />
+        <PerformanceFilterBar action="/dashboard/performance" perfis={perfis} stores={stores} filters={filters} />
       </CollapsibleFilters>
 
       <section className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
         <StatTile label="Total de conteúdos" value={summary.totalConteudos.toLocaleString("pt-BR")} />
         <StatTile label="Stories" value={summary.stories.toLocaleString("pt-BR")} />
         <StatTile label="Posts" value={summary.posts.toLocaleString("pt-BR")} />
+        <StatTile label="Reposts" value={summary.reposts.toLocaleString("pt-BR")} />
         <StatTile label="% qualificados" value={formatPct(summary.pctQualificados)} subValue={`${summary.qualificados} de ${summary.totalConteudos}`} />
       </section>
 
@@ -65,7 +70,7 @@ export default async function PerformancePage({
           <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">
             {editing ? `Editando registro de ${editing.perfil} (${toDateInputValue(editing.data)})` : "Novo registro"}
           </h2>
-          <ContentForm perfis={perfis} editing={editing} />
+          <ContentForm perfis={perfis} stores={stores} editing={editing} />
         </section>
       )}
 
@@ -79,6 +84,7 @@ export default async function PerformancePage({
           data: r.data.toISOString(),
           engajamento: r.engajamento,
           observacoes: r.observacoes,
+          storeName: r.store?.name ?? null,
         }))}
       />
     </div>

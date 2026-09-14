@@ -5,6 +5,7 @@ import {
   getSalesByDimension,
   getSalesByDay,
   getSalesByDayPerStore,
+  getSalesByDayPerColecao,
   getStores,
   getMarcas,
   getTabelasPreco,
@@ -70,11 +71,12 @@ export default async function OverviewPage({
     grupoIn,
   };
   const dimension = parseDimension(rawParams);
-  const [kpi, salesByDimension, salesByColecao, salesByDay, salesByDayPerStore, stores, marcas, tabelasPreco, colecoes, syncs, clientesNovosRecorrentes] =
+  const [kpi, salesByDimension, salesByColecao, salesByDayPerColecao, salesByDay, salesByDayPerStore, stores, marcas, tabelasPreco, colecoes, syncs, clientesNovosRecorrentes] =
     await Promise.all([
       getKpiSummary(filters),
       getSalesByDimension(filters, dimension),
       getSalesByDimension(filters, "colecao"),
+      getSalesByDayPerColecao(filters),
       getSalesByDay(filters),
       getSalesByDayPerStore(filters),
       getStores(allowedStores),
@@ -188,9 +190,14 @@ export default async function OverviewPage({
         </div>
       </section>
 
+      <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
+        <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Comparativo por coleção (unidades líquidas)</h2>
+        <StoreCompareChart data={salesByDayPerColecao.data} series={salesByDayPerColecao.series} />
+      </section>
+
       <section className="mb-6">
         <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">
-          Comparativo por coleção {showFinancials ? "(receita bruta)" : "(unidades brutas)"}
+          Ranking por coleção (total do período) {showFinancials ? "(receita bruta)" : "(unidades brutas)"}
         </h2>
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">

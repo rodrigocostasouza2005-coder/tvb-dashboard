@@ -66,6 +66,7 @@ model Store {
   gifts               Gift[]
   syncLogs            SyncLog[]
   stockMinimumRules   StockMinimumRule[]
+  contentPerformances ContentPerformance[]
 }
 
 // Estoque mínimo definido manualmente pelo Rodrigo (o valor que vem do DAPIC nem sempre é
@@ -447,6 +448,7 @@ model MensagemTemplate {
 enum ContentTipo {
   STORY
   POST
+  REPOST
 }
 
 enum ContentClassificacao {
@@ -471,14 +473,22 @@ model ContentPerformance {
   // pra não forçar um "0" que contaminaria médias.
   engajamento   Int?
   observacoes   String?
+  // Loja física onde o conteúdo foi feito (opcional — pedido do Rodrigo em 2026-09-14, pra ver
+  // performance também por loja, não só por pessoa). Reaproveita o Store já existente em vez de
+  // duplicar cadastro de loja. Null = conteúdo não amarrado a uma loja específica (ex: feito fora
+  // do ponto de venda).
+  storeId       String?
   // Nome de quem lançou o registro (auditoria simples, mesmo espírito de ContatoMarcado.contatadoPor).
   registradoPor String?
   createdAt     DateTime             @default(now())
   updatedAt     DateTime             @updatedAt
 
+  store Store? @relation(fields: [storeId], references: [id])
+
   @@index([perfil])
   @@index([data])
   @@index([tipo])
+  @@index([storeId])
 }
 
 enum SyncSource {

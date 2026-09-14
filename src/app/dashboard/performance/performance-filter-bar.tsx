@@ -5,15 +5,19 @@ import { FilterDropdown, CheckboxList } from "../filter-bar";
 // Mesmo padrão visual do FilterBar (loja/marca/data), reaproveitando os mesmos componentes de
 // dropdown — domínio diferente (perfil/tipo/classificação em vez de loja/marca), por isso um
 // filtro próprio em vez de encaixar à força no FilterBar existente.
+type Store = { id: string; name: string };
+
 export function PerformanceFilterBar({
   action,
   perfis,
+  stores,
   filters,
   showTipoClassificacao = false,
   extraHidden,
 }: {
   action: string;
   perfis: string[];
+  stores: Store[];
   filters: PerformanceFilters;
   showTipoClassificacao?: boolean;
   extraHidden?: Record<string, string>;
@@ -21,6 +25,7 @@ export function PerformanceFilterBar({
   const selectedPerfis = new Set(filters.perfilIn ?? []);
   const selectedTipos = new Set(filters.tipoIn ?? []);
   const selectedClassificacoes = new Set(filters.classificacaoIn ?? []);
+  const selectedStores = new Set(filters.storeIds ?? []);
 
   return (
     <form action={action} method="GET" className="mb-6 flex flex-wrap items-start gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-3 text-sm">
@@ -32,12 +37,16 @@ export function PerformanceFilterBar({
         <CheckboxList name="perfil" options={perfis.map((p) => ({ value: p, label: p }))} selected={selectedPerfis} />
       </FilterDropdown>
 
+      <FilterDropdown label="Loja" count={selectedStores.size}>
+        <CheckboxList name="store" options={stores.map((s) => ({ value: s.id, label: s.name }))} selected={selectedStores} />
+      </FilterDropdown>
+
       {showTipoClassificacao && (
         <>
           <FilterDropdown label="Tipo" count={selectedTipos.size}>
             <CheckboxList
               name="tipo"
-              options={[{ value: "STORY", label: "Story" }, { value: "POST", label: "Post" }]}
+              options={[{ value: "STORY", label: "Story" }, { value: "POST", label: "Post" }, { value: "REPOST", label: "Repost" }]}
               selected={selectedTipos}
             />
           </FilterDropdown>

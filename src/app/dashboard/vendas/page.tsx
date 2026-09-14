@@ -7,6 +7,7 @@ import {
   getSalesByProdutoTamanho,
   getSalesByDay,
   getSalesByDayPerStore,
+  getSalesByDayPerColecao,
   getReturnsByDimension,
   getReturnsByGrupoProduto,
   getReturnsByGrupoProdutoTamanho,
@@ -76,9 +77,10 @@ export default async function VendasPage({
   const emptyTamanhoSalesRows: Awaited<ReturnType<typeof getSalesByGrupoProdutoTamanho>> = [];
   const emptyTamanhoReturnRows: Awaited<ReturnType<typeof getReturnsByGrupoProdutoTamanho>> = [];
 
-  const [rows, salesByColecao, salesSubRows, salesTamanhoRows, salesByDay, salesByDayPerStore, returnRows, returnSubRows, returnTamanhoRows, returnsByDay, stores, marcas, tabelasPreco, colecoes, siteCidades, topClientes] = await Promise.all([
+  const [rows, salesByColecao, salesByDayPerColecao, salesSubRows, salesTamanhoRows, salesByDay, salesByDayPerStore, returnRows, returnSubRows, returnTamanhoRows, returnsByDay, stores, marcas, tabelasPreco, colecoes, siteCidades, topClientes] = await Promise.all([
     getSalesByDimension(filters, dimension),
     getSalesByDimension(filters, "colecao"),
+    getSalesByDayPerColecao(filters),
     dimension === "grupo"
       ? getSalesByGrupoProduto(filters)
       : dimension === "tamanho"
@@ -116,9 +118,13 @@ export default async function VendasPage({
   const top10Colecao = salesByColecao.slice(0, 10);
 
   const siteEstadoMap = new Map<string, { receita: number; unidades: number }>();
+  const citiesByState = new Map<string, { cidade: string; receita: number; unidades: number }[]>();
   for (const r of siteCidades.rows) {
     const prev = siteEstadoMap.get(r.estado) ?? { receita: 0, unidades: 0 };
     siteEstadoMap.set(r.estado, { receita: prev.receita + r.receita, unidades: prev.unidades + r.unidades });
+    const cidades = citiesByState.get(r.estado) ?? [];
+    cidades.push({ cidade: r.cidade, receita: r.receita, unidades: r.unidades });
+    citiesByState.set(r.estado, cidades);
   }
   const siteEstadoRows = [...siteEstadoMap.entries()].map(([estado, v]) => ({ estado, ...v }));
 
@@ -162,7 +168,7 @@ export default async function VendasPage({
           <p className="mb-3 text-xs text-[var(--text-muted)]">
             Só o canal varejo do site (endereço de entrega). Lojas físicas não entram — a maior parte da venda avulsa não tem cidade cadastrada.
           </p>
-          <BrazilMap rows={siteEstadoRows} />
+          <BrazilMap rows={siteEstadoRows} citiesByState={citiesByState} />
         </section>
       )}
 
@@ -174,9 +180,14 @@ export default async function VendasPage({
         <TopBarChart data={top10} valueKey={showFinancials ? "revenue" : "unitsSold"} showCurrency={showFinancials} />
       </section>
 
+      <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
+        <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Comparativo por coleção (unidades líquidas)</h2>
+        <StoreCompareChart data={salesByDayPerColecao.data} series={salesByDayPerColecao.series} />
+      </section>
+
       <section className="mb-6">
         <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">
-          Comparativo por coleção {showFinancials ? "(receita bruta)" : "(unidades brutas)"}
+          Ranking por coleção (total do período) {showFinancials ? "(receita bruta)" : "(unidades brutas)"}
         </h2>
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">

@@ -20,9 +20,10 @@ function parseForm(formData: FormData) {
   const dataStr = String(formData.get("data") ?? "");
   const engajamentoRaw = String(formData.get("engajamento") ?? "").trim();
   const observacoes = String(formData.get("observacoes") ?? "").trim();
+  const storeId = String(formData.get("storeId") ?? "").trim();
 
   if (!perfil || !dataStr) throw new Error("Perfil e data são obrigatórios.");
-  if (tipo !== "STORY" && tipo !== "POST") throw new Error("Tipo inválido.");
+  if (tipo !== "STORY" && tipo !== "POST" && tipo !== "REPOST") throw new Error("Tipo inválido.");
   if (classificacao !== "QUALIFICADO" && classificacao !== "BASICO") throw new Error("Classificação inválida.");
 
   return {
@@ -32,6 +33,7 @@ function parseForm(formData: FormData) {
     data: new Date(`${dataStr}T12:00:00.000-03:00`),
     engajamento: engajamentoRaw === "" ? null : Number(engajamentoRaw),
     observacoes: observacoes === "" ? null : observacoes,
+    storeId: storeId === "" ? null : storeId,
   };
 }
 

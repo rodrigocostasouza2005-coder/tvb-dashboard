@@ -5,6 +5,7 @@ import {
   getDistinctPerfis,
   getPerformanceSummary,
   getPerformanceRanking,
+  getPerformancePorLoja,
   getStoriesVsPosts,
   getQualificadoVsBasico,
   getPerformanceEvolucao,
@@ -12,11 +13,14 @@ import {
   type Granularidade,
   type RankingRow,
 } from "@/lib/performance";
+import { getRawStores } from "@/lib/metrics";
 import type { RawSearchParams } from "@/lib/filters";
 import { CollapsibleFilters } from "../collapsible-filters";
 import { StatTile } from "../stat-tile";
 import { PerformanceFilterBar } from "../performance/performance-filter-bar";
 import { IndicatorChart } from "../indicadores/indicator-chart";
+
+const TIPO_LABEL: Record<string, string> = { STORY: "Story", POST: "Post", REPOST: "Repost" };
 
 function formatPct(v: number | null) {
   return v != null ? `${v.toFixed(1)}%` : "—";
@@ -62,22 +66,27 @@ export default async function AnalisePerformancePage({
     rawParams.g === "dia" || rawParams.g === "semana" ? rawParams.g : "mes";
   const verPerfil = typeof rawParams.verPerfil === "string" && rawParams.verPerfil ? rawParams.verPerfil : null;
 
-  const [perfis, summary, rankingRaw, storiesVsPosts, qualificadoVsBasico, evolucao, perfilDetalhe] =
+  const [perfis, allStores, summary, rankingRaw, porLoja, storiesVsPosts, qualificadoVsBasico, evolucao, perfilDetalhe] =
     await Promise.all([
       getDistinctPerfis(),
+      getRawStores(),
       getPerformanceSummary(filters),
       getPerformanceRanking(filters),
+      getPerformancePorLoja(filters),
       getStoriesVsPosts(filters),
       getQualificadoVsBasico(filters),
       getPerformanceEvolucao(filters, granularidade),
       verPerfil ? getPerfilDetalhe(verPerfil, filters) : Promise.resolve(null),
     ]);
+  const stores = allStores.filter((s) => s.sellsProducts);
 
   const ranking = sortRanking(rankingRaw, sort);
+  const porLojaOrdenado = [...porLoja].sort((a, b) => (b.pctQualificacao ?? 0) - (a.pctQualificacao ?? 0));
 
   function baseParams() {
     const p = new URLSearchParams();
     for (const v of filters.perfilIn ?? []) p.append("perfil", v);
+    for (const v of filters.storeIds ?? []) p.append("store", v);
     for (const v of filters.tipoIn ?? []) p.append("tipo", v);
     for (const v of filters.classificacaoIn ?? []) p.append("classificacao", v);
     return p;
@@ -168,6 +177,7 @@ export default async function AnalisePerformancePage({
         <PerformanceFilterBar
           action="/dashboard/analise-performance"
           perfis={perfis}
+          stores={stores}
           filters={filters}
           showTipoClassificacao
           extraHidden={{ sort, g: granularidade }}
@@ -178,6 +188,7 @@ export default async function AnalisePerformancePage({
         <StatTile label="Total de conteúdos" value={formatNum(summary.totalConteudos)} />
         <StatTile label="Stories" value={formatNum(summary.stories)} />
         <StatTile label="Posts" value={formatNum(summary.posts)} />
+        <StatTile label="Reposts" value={formatNum(summary.reposts)} />
         <StatTile label="% qualificados" value={formatPct(summary.pctQualificados)} subValue={`${summary.qualificados} de ${summary.totalConteudos}`} />
         <StatTile label="Qualificados" value={formatNum(summary.qualificados)} />
         <StatTile label="Básicos" value={formatNum(summary.basicos)} />
@@ -241,7 +252,7 @@ export default async function AnalisePerformancePage({
                   <td className="px-4 py-2 font-medium">
                     <a href={perfilHref(r.perfil)} className="hover:underline">{r.perfil}</a>
                   </td>
-                  <td className="px-4 py-2 text-right tabular-nums">{r.conteudos} <span className="text-xs text-[var(--text-muted)]">({r.stories}S/{r.posts}P)</span></td>
+                  <td className="px-4 py-2 text-right tabular-nums">{r.conteudos} <span className="text-xs text-[var(--text-muted)]">({r.stories}S/{r.posts}P/{r.reposts}R)</span></td>
                   <td className="px-4 py-2 text-right tabular-nums">{r.qualificados}</td>
                   <td className="px-4 py-2 text-right tabular-nums">{formatPct(r.pctQualificacao)}</td>
                   <td className="px-4 py-2 text-right tabular-nums">{formatNum(r.engajamentoTotal)}</td>
@@ -276,7 +287,7 @@ export default async function AnalisePerformancePage({
             <tbody>
               {storiesVsPosts.map((s) => (
                 <tr key={s.tipo} className="border-b border-[var(--gridline)] last:border-0">
-                  <td className="py-1.5 font-medium">{s.tipo === "STORY" ? "Story" : "Post"}</td>
+                  <td className="py-1.5 font-medium">{TIPO_LABEL[s.tipo]}</td>
                   <td className="py-1.5 text-right tabular-nums">{s.quantidade}</td>
                   <td className="py-1.5 text-right tabular-nums">{formatPct(s.participacaoPct)}</td>
                   <td className="py-1.5 text-right tabular-nums">{formatPct(s.pctQualificados)}</td>
@@ -307,6 +318,45 @@ export default async function AnalisePerformancePage({
                   <td className="py-1.5 text-right tabular-nums">{formatNum(c.engajamentoMedio)}</td>
                 </tr>
               ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="mb-8">
+        <h2 className="mb-1 text-base font-semibold">Indicadores por loja</h2>
+        <p className="mb-3 text-xs text-[var(--text-muted)]">
+          Só entra aqui conteúdo com loja marcada no lançamento — conteúdo sem loja não some do
+          resto da página, só não aparece nessa quebra específica.
+        </p>
+        <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
+                <th className="px-4 py-2 font-medium">Loja</th>
+                <th className="px-4 py-2 font-medium text-right">Conteúdos</th>
+                <th className="px-4 py-2 font-medium text-right">Qualificados</th>
+                <th className="px-4 py-2 font-medium text-right">% Qualificação</th>
+                <th className="px-4 py-2 font-medium text-right">Engajamento médio</th>
+              </tr>
+            </thead>
+            <tbody>
+              {porLojaOrdenado.map((l) => (
+                <tr key={l.storeId} className="border-b border-[var(--gridline)] last:border-0">
+                  <td className="px-4 py-2 font-medium">{l.storeName}</td>
+                  <td className="px-4 py-2 text-right tabular-nums">{l.conteudos}</td>
+                  <td className="px-4 py-2 text-right tabular-nums">{l.qualificados}</td>
+                  <td className="px-4 py-2 text-right tabular-nums">{formatPct(l.pctQualificacao)}</td>
+                  <td className="px-4 py-2 text-right tabular-nums">{formatNum(l.engajamentoMedio)}</td>
+                </tr>
+              ))}
+              {porLojaOrdenado.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="px-4 py-6 text-center text-[var(--text-muted)]">
+                    Nenhum conteúdo com loja marcada no período/filtro selecionado.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -405,7 +455,7 @@ export default async function AnalisePerformancePage({
           {perfilDetalhe ? (
             <div className="flex flex-col gap-4">
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                <StatTile label="Conteúdos" value={formatNum(perfilDetalhe.totalConteudos)} subValue={`${perfilDetalhe.stories}S / ${perfilDetalhe.posts}P`} />
+                <StatTile label="Conteúdos" value={formatNum(perfilDetalhe.totalConteudos)} subValue={`${perfilDetalhe.stories}S / ${perfilDetalhe.posts}P / ${perfilDetalhe.reposts}R`} />
                 <StatTile label="% qualificação" value={formatPct(perfilDetalhe.pctQualificacao)} subValue={`${perfilDetalhe.qualificados} de ${perfilDetalhe.totalConteudos}`} />
                 <StatTile label="Engajamento total" value={formatNum(perfilDetalhe.engajamentoTotal)} />
                 <StatTile label="Engajamento médio" value={formatNum(perfilDetalhe.engajamentoMedio)} />
@@ -416,7 +466,7 @@ export default async function AnalisePerformancePage({
                   <ul className="flex flex-col gap-1.5 text-sm">
                     {perfilDetalhe.melhoresConteudos.map((c) => (
                       <li key={c.id} className="flex items-center justify-between gap-2 rounded-md border border-[var(--border)] px-2 py-1.5">
-                        <span className="text-[var(--text-secondary)]">{c.tipo === "STORY" ? "Story" : "Post"} — {new Date(c.data).toLocaleDateString("pt-BR", { timeZone: "UTC" })}</span>
+                        <span className="text-[var(--text-secondary)]">{TIPO_LABEL[c.tipo]} — {new Date(c.data).toLocaleDateString("pt-BR", { timeZone: "UTC" })}</span>
                         <span className="tabular-nums font-medium">{c.engajamento?.toLocaleString("pt-BR")}</span>
                       </li>
                     ))}
@@ -428,7 +478,7 @@ export default async function AnalisePerformancePage({
                   <ul className="flex flex-col gap-1.5 text-sm">
                     {perfilDetalhe.pioresConteudos.map((c) => (
                       <li key={c.id} className="flex items-center justify-between gap-2 rounded-md border border-[var(--border)] px-2 py-1.5">
-                        <span className="text-[var(--text-secondary)]">{c.tipo === "STORY" ? "Story" : "Post"} — {new Date(c.data).toLocaleDateString("pt-BR", { timeZone: "UTC" })}</span>
+                        <span className="text-[var(--text-secondary)]">{TIPO_LABEL[c.tipo]} — {new Date(c.data).toLocaleDateString("pt-BR", { timeZone: "UTC" })}</span>
                         <span className="tabular-nums font-medium">{c.engajamento?.toLocaleString("pt-BR")}</span>
                       </li>
                     ))}
