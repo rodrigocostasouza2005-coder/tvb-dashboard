@@ -1,5 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
-import { getStockVsSales, getStores, getMarcas, getTabelasPreco } from "@/lib/metrics";
+import { getStockVsSales, getStores, getMarcas, getTabelasPreco, getDistinctColecoes } from "@/lib/metrics";
 import { getGrupoRestriction, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
 import { parseFilters, parseDimension, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
@@ -30,11 +30,12 @@ export default async function MarketingPage({
     grupoIn,
   };
 
-  const [rows, stores, marcas, tabelasPreco] = await Promise.all([
+  const [rows, stores, marcas, tabelasPreco, colecoes] = await Promise.all([
     getStockVsSales(filters, dimension),
     getStores(allowedStores),
     getMarcas(allowedMarcas),
     getTabelasPreco(allowedTabelasPreco),
+    getDistinctColecoes(),
   ]);
 
   const ranked = rows
@@ -50,6 +51,7 @@ export default async function MarketingPage({
           stores={stores}
           marcas={marcas}
           tabelasPreco={tabelasPreco}
+          colecoes={colecoes}
           showTabelaPreco
           filters={filters}
         />

@@ -42,7 +42,6 @@ export default async function EstoquePage({
         : grupoSelecionado
       : grupoPermitido;
   const tamanhoSelecionado = toArray(rawParams.tamanho);
-  const colecaoSelecionada = toArray(rawParams.colecao);
   const allowedStores = getStoreRestriction(user);
   const allowedMarcas = getMarcaRestriction(user);
   const allowedTabelasPreco = getTabelaPrecoRestriction(user);
@@ -50,7 +49,6 @@ export default async function EstoquePage({
     ...parseFilters(rawParams, { allowedStoreIds: allowedStores, allowedMarcas, allowedTabelasPreco }),
     grupoIn,
     tamanhoIn: tamanhoSelecionado.length > 0 ? tamanhoSelecionado : undefined,
-    colecaoIn: colecaoSelecionada.length > 0 ? colecaoSelecionada : undefined,
   };
 
   const [rows, totalEstoque, stores, marcas, tabelasPreco, todosGrupos, todosTamanhos, todasColecoes] = await Promise.all([
@@ -74,6 +72,7 @@ export default async function EstoquePage({
           stores={stores}
           marcas={marcas}
           tabelasPreco={tabelasPreco}
+          colecoes={todasColecoes}
           showTabelaPreco
           filters={filters}
         />
@@ -82,7 +81,6 @@ export default async function EstoquePage({
       <div className="flex flex-wrap gap-4">
         <MultiSelectFilter paramName="grupo" label="Grupo de produto" placeholder="Todos os grupos" options={opcoesGrupo} current={grupoSelecionado} />
         <MultiSelectFilter paramName="tamanho" label="Tamanho" placeholder="Todos os tamanhos" options={todosTamanhos} current={tamanhoSelecionado} />
-        <MultiSelectFilter paramName="colecao" label="Coleção" placeholder="Todas as coleções" options={todasColecoes} current={colecaoSelecionada} />
       </div>
 
       <section className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-3">

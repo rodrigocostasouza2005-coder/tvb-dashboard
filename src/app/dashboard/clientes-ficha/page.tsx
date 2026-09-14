@@ -1,5 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
-import { getStores, getMarcas, getTabelasPreco, getClienteFicha, getClienteTopMeses } from "@/lib/metrics";
+import { getStores, getMarcas, getTabelasPreco, getDistinctColecoes, getClienteFicha, getClienteTopMeses } from "@/lib/metrics";
 import { canSeeFinancials, getMarcaRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
@@ -57,10 +57,11 @@ export default async function ClientesFichaPage({
   });
   const clienteNome = typeof rawParams.cliente === "string" && rawParams.cliente ? rawParams.cliente : null;
 
-  const [stores, marcas, tabelasPreco, ficha] = await Promise.all([
+  const [stores, marcas, tabelasPreco, colecoes, ficha] = await Promise.all([
     getStores(allowedStores),
     getMarcas(allowedMarcas),
     getTabelasPreco(allowedTabelasPreco),
+    getDistinctColecoes(),
     clienteNome ? getClienteFicha(filters, clienteNome) : Promise.resolve(null),
   ]);
   const topMeses = ficha ? await getClienteTopMeses(ficha.cliente) : [];
@@ -74,6 +75,7 @@ export default async function ClientesFichaPage({
           stores={stores}
           marcas={marcas}
           tabelasPreco={tabelasPreco}
+          colecoes={colecoes}
           showTabelaPreco
           showDate={false}
           filters={filters}

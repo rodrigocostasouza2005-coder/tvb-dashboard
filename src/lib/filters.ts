@@ -49,6 +49,9 @@ export function parseFilters(params: RawSearchParams, restrictions: FilterRestri
   );
   const marcas = crossWithAllowed(toArray(params.marca), restrictions.allowedMarcas);
   const tabelasPreco = crossWithAllowed(toArray(params.tabelaPreco), restrictions.allowedTabelasPreco);
+  // Coleção não tem restrição de permissão hoje (diferente de loja/marca/tabela de preço).
+  const colecaoSelecionada = toArray(params.colecao);
+  const colecaoIn = colecaoSelecionada.length > 0 ? colecaoSelecionada : undefined;
 
   const now = new Date();
 
@@ -85,6 +88,7 @@ export function parseFilters(params: RawSearchParams, restrictions: FilterRestri
     storeIds,
     marcas,
     tabelasPreco,
+    colecaoIn,
     from,
     to,
   };

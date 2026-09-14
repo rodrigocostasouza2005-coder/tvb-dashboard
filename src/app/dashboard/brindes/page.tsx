@@ -1,5 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
-import { getGiftsByDimension, getGiftsByGrupoProduto, getGiftsByCliente, getGiftsByDayByStore, getStores, getMarcas } from "@/lib/metrics";
+import { getGiftsByDimension, getGiftsByGrupoProduto, getGiftsByCliente, getGiftsByDayByStore, getStores, getMarcas, getDistinctColecoes } from "@/lib/metrics";
 import { canSeeFinancials, getGrupoRestriction, getStoreRestriction, getMarcaRestriction } from "@/lib/permissions";
 import { parseFilters, parseDimension, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
@@ -31,13 +31,14 @@ export default async function BrindesPage({
   const allowedMarcas = getMarcaRestriction(user);
   const filters = { ...parseFilters(rawParams, { allowedStoreIds: allowedStores, allowedMarcas }), grupoIn };
 
-  const [rows, produtoRows, clienteRows, trendResult, stores, marcas] = await Promise.all([
+  const [rows, produtoRows, clienteRows, trendResult, stores, marcas, colecoes] = await Promise.all([
     getGiftsByDimension(filters, dimension),
     dimension === "grupo" ? getGiftsByGrupoProduto(filters) : Promise.resolve([]),
     getGiftsByCliente(filters),
     getGiftsByDayByStore(filters),
     getStores(allowedStores),
     getMarcas(allowedMarcas),
+    getDistinctColecoes(),
   ]);
   const showFinancials = canSeeFinancials(user);
   const totalUnits = rows.reduce((sum, r) => sum + r.unitsSold, 0);
@@ -53,7 +54,7 @@ export default async function BrindesPage({
   return (
     <div>
       <CollapsibleFilters defaultOpen={filtrosOpen}>
-        <FilterBar action="/dashboard/brindes" stores={stores} marcas={marcas} filters={filters} />
+        <FilterBar action="/dashboard/brindes" stores={stores} marcas={marcas} colecoes={colecoes} filters={filters} />
       </CollapsibleFilters>
       <p className="mb-3 text-xs text-[var(--text-muted)]">
         Itens dados como brinde (Tipo=Brinde na API) — não entram na contagem de vendas nem de

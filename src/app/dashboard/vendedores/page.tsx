@@ -1,5 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
-import { getVendedorRanking, getStores, getMarcas, getTabelasPreco } from "@/lib/metrics";
+import { getVendedorRanking, getStores, getMarcas, getTabelasPreco, getDistinctColecoes } from "@/lib/metrics";
 import { canSeeFinancials, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
@@ -29,11 +29,12 @@ export default async function VendedoresPage({
     allowedMarcas,
     allowedTabelasPreco,
   });
-  const [rows, stores, marcas, tabelasPreco] = await Promise.all([
+  const [rows, stores, marcas, tabelasPreco, colecoes] = await Promise.all([
     getVendedorRanking(filters),
     getStores(allowedStores),
     getMarcas(allowedMarcas),
     getTabelasPreco(allowedTabelasPreco),
+    getDistinctColecoes(),
   ]);
   const showFinancials = canSeeFinancials(user);
 
@@ -58,6 +59,7 @@ export default async function VendedoresPage({
           stores={stores}
           marcas={marcas}
           tabelasPreco={tabelasPreco}
+          colecoes={colecoes}
           showTabelaPreco
           filters={filters}
         />

@@ -20,15 +20,9 @@ export default async function ReposicaoPage({
   const filtrosOpen = rawParams.filtros === "1";
   const grupoIn = await getGrupoRestriction(user.role);
   const allowedStores = getStoreRestriction(user);
-  const colecaoSelecionada = Array.isArray(rawParams.colecao)
-    ? rawParams.colecao
-    : typeof rawParams.colecao === "string" && rawParams.colecao
-    ? [rawParams.colecao]
-    : [];
   const filters = {
     ...parseFilters(rawParams, { allowedStoreIds: allowedStores }),
     grupoIn,
-    colecaoIn: colecaoSelecionada.length ? colecaoSelecionada : undefined,
   };
   const [rows, stores, marcas, colecoes] = await Promise.all([
     getReplenishment(filters),
@@ -39,57 +33,15 @@ export default async function ReposicaoPage({
 
   const exportParams = new URLSearchParams();
   for (const id of filters.storeIds ?? []) exportParams.append("store", id);
-  for (const c of colecaoSelecionada) exportParams.append("colecao", c);
+  for (const c of filters.colecaoIn ?? []) exportParams.append("colecao", c);
   exportParams.set("from", toDateInputValue(filters.from));
   exportParams.set("to", toDateInputValue(filters.to));
-
-  function colecaoToggleHref(colecao: string) {
-    const next = colecaoSelecionada.includes(colecao)
-      ? colecaoSelecionada.filter((c) => c !== colecao)
-      : [...colecaoSelecionada, colecao];
-    const params = new URLSearchParams();
-    for (const id of filters.storeIds ?? []) params.append("store", id);
-    for (const c of next) params.append("colecao", c);
-    return `/dashboard/reposicao?${params.toString()}`;
-  }
-  const colecaoAllHref = (() => {
-    const params = new URLSearchParams();
-    for (const id of filters.storeIds ?? []) params.append("store", id);
-    return `/dashboard/reposicao?${params.toString()}`;
-  })();
 
   return (
     <div>
       <CollapsibleFilters defaultOpen={filtrosOpen}>
-        <FilterBar action="/dashboard/reposicao" stores={stores} marcas={marcas} filters={filters} showMarca={false} showDate={false} />
+        <FilterBar action="/dashboard/reposicao" stores={stores} marcas={marcas} colecoes={colecoes} filters={filters} showMarca={false} showDate={false} />
       </CollapsibleFilters>
-
-      <div className="mb-3 flex flex-wrap items-center gap-1.5">
-        <span className="mr-1 text-xs text-[var(--text-muted)]">Coleção:</span>
-        <a
-          href={colecaoAllHref}
-          className={`rounded-md border px-2.5 py-1 text-xs font-medium transition-colors ${
-            colecaoSelecionada.length === 0
-              ? "border-[var(--series-1)] bg-[var(--series-1)] text-white"
-              : "border-[var(--border)] bg-[var(--surface-1)] text-[var(--text-secondary)] hover:bg-[var(--page-plane)]"
-          }`}
-        >
-          Todas
-        </a>
-        {colecoes.map((c) => (
-          <a
-            key={c}
-            href={colecaoToggleHref(c)}
-            className={`rounded-md border px-2.5 py-1 text-xs font-medium transition-colors ${
-              colecaoSelecionada.includes(c)
-                ? "border-[var(--series-1)] bg-[var(--series-1)] text-white"
-                : "border-[var(--border)] bg-[var(--surface-1)] text-[var(--text-secondary)] hover:bg-[var(--page-plane)]"
-            }`}
-          >
-            {c}
-          </a>
-        ))}
-      </div>
 
       <div className="mb-3 flex items-center justify-between">
         <p className="text-xs text-[var(--text-muted)]">

@@ -1,5 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
-import { getSalesByGrupoProduto, getReturnsByGrupoProduto, netByReturns, getStores, getMarcas, getTabelasPreco } from "@/lib/metrics";
+import { getSalesByGrupoProduto, getReturnsByGrupoProduto, netByReturns, getStores, getMarcas, getTabelasPreco, getDistinctColecoes } from "@/lib/metrics";
 import { canSeeFinancials, getGrupoRestriction, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
@@ -33,12 +33,13 @@ export default async function TopMaisVendidosPage({
     grupoIn,
   };
 
-  const [allRowsBrutas, returns, stores, marcas, tabelasPreco] = await Promise.all([
+  const [allRowsBrutas, returns, stores, marcas, tabelasPreco, colecoes] = await Promise.all([
     getSalesByGrupoProduto(filters),
     getReturnsByGrupoProduto(filters),
     getStores(allowedStores),
     getMarcas(allowedMarcas),
     getTabelasPreco(allowedTabelasPreco),
+    getDistinctColecoes(),
   ]);
   // Líquido (desconta devolução) — pedido do Rodrigo em 2026-08-24. Reordena depois de
   // descontar, já que a devolução pode mudar quem é "mais vendido" de verdade.
@@ -55,6 +56,7 @@ export default async function TopMaisVendidosPage({
           stores={stores}
           marcas={marcas}
           tabelasPreco={tabelasPreco}
+          colecoes={colecoes}
           showTabelaPreco
           filters={filters}
         />

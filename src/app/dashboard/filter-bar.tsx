@@ -58,23 +58,28 @@ export function FilterBar({
   stores,
   marcas,
   tabelasPreco,
+  colecoes,
   filters,
   showMarca = true,
   showTabelaPreco = false,
+  showColecao = true,
   showDate = true,
 }: {
   action: string;
   stores: Store[];
   marcas: string[];
   tabelasPreco?: string[];
+  colecoes?: string[];
   filters: DashboardFilters;
   showMarca?: boolean;
   showTabelaPreco?: boolean;
+  showColecao?: boolean;
   showDate?: boolean;
 }) {
   const selectedStores = new Set(filters.storeIds ?? []);
   const selectedMarcas = new Set(filters.marcas ?? []);
   const selectedTabelas = new Set(filters.tabelasPreco ?? []);
+  const selectedColecoes = new Set(filters.colecaoIn ?? []);
 
   return (
     <form
@@ -102,6 +107,16 @@ export function FilterBar({
             name="tabelaPreco"
             options={(tabelasPreco ?? []).map((t) => ({ value: t, label: t }))}
             selected={selectedTabelas}
+          />
+        </FilterDropdown>
+      )}
+
+      {showColecao && (
+        <FilterDropdown label="Coleção" count={selectedColecoes.size}>
+          <CheckboxList
+            name="colecao"
+            options={(colecoes ?? []).map((c) => ({ value: c, label: c }))}
+            selected={selectedColecoes}
           />
         </FilterDropdown>
       )}

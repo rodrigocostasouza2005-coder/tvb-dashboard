@@ -1,5 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
-import { getStores, getSugestoesRetiradaEstoque, type SugestaoRetirada } from "@/lib/metrics";
+import { getStores, getMarcas, getSugestoesRetiradaEstoque, getDistinctColecoes, type SugestaoRetirada } from "@/lib/metrics";
 import { getGrupoRestriction, getStoreRestriction } from "@/lib/permissions";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
@@ -88,9 +88,11 @@ export default async function EstoqueRetiradaPage({
     grupoIn,
   };
 
-  const [storesTodas, sugestoes] = await Promise.all([
+  const [storesTodas, marcas, colecoes, sugestoes] = await Promise.all([
     getStores(allowedStores),
-    getSugestoesRetiradaEstoque({ storeIds: filters.storeIds, grupoIn: filters.grupoIn }),
+    getMarcas(),
+    getDistinctColecoes(),
+    getSugestoesRetiradaEstoque({ storeIds: filters.storeIds, grupoIn: filters.grupoIn, colecaoIn: filters.colecaoIn }),
   ]);
 
   const porLoja = agruparPorLoja(sugestoes);
@@ -105,7 +107,8 @@ export default async function EstoqueRetiradaPage({
         <FilterBar
           action="/dashboard/estoque-retirada"
           stores={stores}
-          marcas={[]}
+          marcas={marcas}
+          colecoes={colecoes}
           showMarca={false}
           showDate={false}
           filters={filters}

@@ -16,6 +16,7 @@ import {
   getStores,
   getMarcas,
   getTabelasPreco,
+  getDistinctColecoes,
   getSiteVarejoCidades,
   getTopClientes,
 } from "@/lib/metrics";
@@ -75,7 +76,7 @@ export default async function VendasPage({
   const emptyTamanhoSalesRows: Awaited<ReturnType<typeof getSalesByGrupoProdutoTamanho>> = [];
   const emptyTamanhoReturnRows: Awaited<ReturnType<typeof getReturnsByGrupoProdutoTamanho>> = [];
 
-  const [rows, salesSubRows, salesTamanhoRows, salesByDay, salesByDayPerStore, returnRows, returnSubRows, returnTamanhoRows, returnsByDay, stores, marcas, tabelasPreco, siteCidades, topClientes] = await Promise.all([
+  const [rows, salesSubRows, salesTamanhoRows, salesByDay, salesByDayPerStore, returnRows, returnSubRows, returnTamanhoRows, returnsByDay, stores, marcas, tabelasPreco, colecoes, siteCidades, topClientes] = await Promise.all([
     getSalesByDimension(filters, dimension),
     dimension === "grupo"
       ? getSalesByGrupoProduto(filters)
@@ -104,6 +105,7 @@ export default async function VendasPage({
     getStores(allowedStores),
     getMarcas(allowedMarcas),
     getTabelasPreco(allowedTabelasPreco),
+    getDistinctColecoes(),
     canSeeSiteMap ? getSiteVarejoCidades({ ...filters, tabelasPreco: ["Tabela varejo"] }) : Promise.resolve(emptyAtacadoCidades),
     showFinancials ? getTopClientes(filters, null, 5, "todos", true) : Promise.resolve([]),
   ]);
@@ -135,6 +137,7 @@ export default async function VendasPage({
           stores={stores}
           marcas={marcas}
           tabelasPreco={tabelasPreco}
+          colecoes={colecoes}
           showTabelaPreco
           filters={filters}
         />

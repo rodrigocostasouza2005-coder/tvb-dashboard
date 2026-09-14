@@ -1,5 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
-import { getStockCoverage, getAllStores, getMarcas, getTabelasPreco } from "@/lib/metrics";
+import { getStockCoverage, getAllStores, getMarcas, getTabelasPreco, getDistinctColecoes } from "@/lib/metrics";
 import { getGrupoRestriction, getStoreRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
@@ -26,11 +26,12 @@ export default async function CoberturaPage({
     grupoIn,
   };
 
-  const [rows, stores, marcas, tabelasPreco] = await Promise.all([
+  const [rows, stores, marcas, tabelasPreco, colecoes] = await Promise.all([
     getStockCoverage(filters),
     getAllStores(allowedStores),
     getMarcas(),
     getTabelasPreco(allowedTabelasPreco),
+    getDistinctColecoes(),
   ]);
 
   const critico = rows.filter((r) => r.status === "critico").length;
@@ -47,6 +48,7 @@ export default async function CoberturaPage({
           stores={stores}
           marcas={marcas}
           tabelasPreco={tabelasPreco}
+          colecoes={colecoes}
           showTabelaPreco
           showDate={false}
           showMarca={false}

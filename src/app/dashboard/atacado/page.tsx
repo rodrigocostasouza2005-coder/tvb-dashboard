@@ -1,5 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
-import { getAtacadoVendas } from "@/lib/metrics";
+import { getAtacadoVendas, getDistinctColecoes } from "@/lib/metrics";
 import {
   canSeeFinancials,
   getGrupoRestriction,
@@ -37,7 +37,7 @@ export default async function AtacadoPage({
   const showFinancials = canSeeFinancials(user);
 
   // getAtacadoVendas já filtra só B2B por dentro (canalWhere("b2b"), cliente-level).
-  const data = await getAtacadoVendas(filters);
+  const [data, colecoes] = await Promise.all([getAtacadoVendas(filters), getDistinctColecoes()]);
 
   const { kpis, byDay, topProdutos } = data;
 
@@ -49,6 +49,7 @@ export default async function AtacadoPage({
           stores={[]}
           marcas={[]}
           tabelasPreco={[]}
+          colecoes={colecoes}
           showMarca={false}
           showDate
           filters={filters}

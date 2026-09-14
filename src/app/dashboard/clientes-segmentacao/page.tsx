@@ -1,5 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
-import { getStores, getMarcas, getTabelasPreco, getClienteSegmentacao, getPrimeiraVendaData, getProdutosLiquidosPorClientes, type Canal, type ClienteSegmento } from "@/lib/metrics";
+import { getStores, getMarcas, getTabelasPreco, getDistinctColecoes, getClienteSegmentacao, getPrimeiraVendaData, getProdutosLiquidosPorClientes, type Canal, type ClienteSegmento } from "@/lib/metrics";
 import { canSeeFinancials, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
@@ -87,10 +87,11 @@ export default async function ClientesSegmentacaoPage({
   const mesParam = typeof rawParams.mes === "string" ? rawParams.mes : null;
   const referenceDate = mesParam ? fimDoMes(mesParam) : null;
 
-  const [stores, marcas, tabelasPreco, primeiraVenda, segmentacao] = await Promise.all([
+  const [stores, marcas, tabelasPreco, colecoes, primeiraVenda, segmentacao] = await Promise.all([
     getStores(allowedStores),
     getMarcas(allowedMarcas),
     getTabelasPreco(allowedTabelasPreco),
+    getDistinctColecoes(),
     getPrimeiraVendaData(),
     referenceDate ? getClienteSegmentacao(filters, canal, referenceDate) : getClienteSegmentacao(filters, canal),
   ]);
@@ -151,6 +152,7 @@ export default async function ClientesSegmentacaoPage({
           stores={stores}
           marcas={marcas}
           tabelasPreco={tabelasPreco}
+          colecoes={colecoes}
           showTabelaPreco
           filters={filters}
         />

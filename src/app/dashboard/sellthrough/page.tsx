@@ -27,7 +27,9 @@ export default async function SellthroughPage({
 
   const rawParams = await searchParams;
   const filtrosOpen = rawParams.filtros === "1";
-  const colecaoParam = typeof rawParams.colecao === "string" && rawParams.colecao ? rawParams.colecao : undefined;
+  // Nome de parâmetro próprio (não "colecao") pra não colidir com o filtro básico de Coleção
+  // (multi-seleção, no topo) — esse aqui é um drilldown de 1 coleção só, pro detalhe por produto.
+  const colecaoParam = typeof rawParams.colecaoDetalhe === "string" && rawParams.colecaoDetalhe ? rawParams.colecaoDetalhe : undefined;
 
   const grupoIn = await getGrupoRestriction(user.role);
   const allowedStores = getStoreRestriction(user);
@@ -61,6 +63,7 @@ export default async function SellthroughPage({
           stores={stores}
           marcas={marcas}
           tabelasPreco={tabelasPreco}
+          colecoes={colecoes}
           showTabelaPreco
           showDate={false}
           filters={filters}
@@ -100,7 +103,7 @@ export default async function SellthroughPage({
         <h2 className="text-base font-semibold">Detalhe por produto</h2>
         <form method="GET" action="/dashboard/sellthrough" className="flex items-center gap-2">
           <select
-            name="colecao"
+            name="colecaoDetalhe"
             defaultValue={colecaoParam ?? ""}
             className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1 text-sm text-[var(--text-primary)]"
           >

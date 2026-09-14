@@ -1,5 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
-import { getStores, getMarcas, getTabelasPreco, getSalesByDimension, getClientesPorDimensao, getCrossSellPorDimensao, type Canal } from "@/lib/metrics";
+import { getStores, getMarcas, getTabelasPreco, getDistinctColecoes, getSalesByDimension, getClientesPorDimensao, getCrossSellPorDimensao, type Canal } from "@/lib/metrics";
 import { canSeeFinancials, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
@@ -39,10 +39,11 @@ export default async function ClientesProdutoPage({
       ? [rawParams.pcKey]
       : [];
 
-  const [stores, marcas, tabelasPreco, pcOptions] = await Promise.all([
+  const [stores, marcas, tabelasPreco, colecoes, pcOptions] = await Promise.all([
     getStores(allowedStores),
     getMarcas(allowedMarcas),
     getTabelasPreco(allowedTabelasPreco),
+    getDistinctColecoes(),
     getSalesByDimension(filters, pcDim, canal),
   ]);
   const showFinancials = canSeeFinancials(user);
@@ -86,6 +87,7 @@ export default async function ClientesProdutoPage({
           stores={stores}
           marcas={marcas}
           tabelasPreco={tabelasPreco}
+          colecoes={colecoes}
           showTabelaPreco
           filters={filters}
         />

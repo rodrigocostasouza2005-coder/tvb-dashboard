@@ -1,5 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
-import { searchStockVsSalesComTamanhos, getTopClientes, getDailySalesByProduto, getStores, getMarcas, getTabelasPreco } from "@/lib/metrics";
+import { searchStockVsSalesComTamanhos, getTopClientes, getDailySalesByProduto, getStores, getMarcas, getTabelasPreco, getDistinctColecoes } from "@/lib/metrics";
 import { canSeeFinancials, getGrupoRestriction, getMarcaRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
 import { parseFilters, brasiliaDayStart, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
@@ -46,12 +46,13 @@ export default async function PesquisaPage({
   const dataInicioRange = brasiliaDayStart(DATA_START_MONTH + "-01");
   const dataFimRange = new Date();
 
-  const [{ rows, tamanhos }, clientes, stores, marcas, tabelasPreco, produtoSerie] = await Promise.all([
+  const [{ rows, tamanhos }, clientes, stores, marcas, tabelasPreco, colecoes, produtoSerie] = await Promise.all([
     searchStockVsSalesComTamanhos(filters, query),
     query.trim() ? getTopClientes(filters, null, 20, "todos", true, query) : Promise.resolve([]),
     getStores(allowedStores),
     getMarcas(allowedMarcas),
     getTabelasPreco(allowedTabelasPreco),
+    getDistinctColecoes(),
     produtoSelecionado
       ? getDailySalesByProduto(
           { storeIds: filters.storeIds, marcas: filters.marcas, tabelasPreco: filters.tabelasPreco, grupoIn, from: dataInicioRange, to: dataFimRange },
@@ -94,6 +95,7 @@ export default async function PesquisaPage({
           stores={stores}
           marcas={marcas}
           tabelasPreco={tabelasPreco}
+          colecoes={colecoes}
           showTabelaPreco
           filters={filters}
         />

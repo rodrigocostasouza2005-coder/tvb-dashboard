@@ -1,5 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
-import { getAtacadoCidades } from "@/lib/metrics";
+import { getAtacadoCidades, getDistinctColecoes } from "@/lib/metrics";
 import {
   canSeeFinancials,
   getGrupoRestriction,
@@ -37,7 +37,7 @@ export default async function AtacadoCidadesPage({
   const showFinancials = canSeeFinancials(user);
 
   // getAtacadoCidades já filtra só B2B por dentro (canalWhere("b2b"), cliente-level).
-  const data = await getAtacadoCidades(filters);
+  const [data, colecoes] = await Promise.all([getAtacadoCidades(filters), getDistinctColecoes()]);
 
   const totalReceita = data.rows.reduce((sum, r) => sum + r.receita, 0);
 
@@ -56,6 +56,7 @@ export default async function AtacadoCidadesPage({
           stores={[]}
           marcas={[]}
           tabelasPreco={[]}
+          colecoes={colecoes}
           showMarca={false}
           showDate
           filters={filters}

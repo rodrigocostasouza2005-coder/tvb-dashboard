@@ -1,5 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
-import { getAtacadoClientes, getClienteRetencaoPorMes } from "@/lib/metrics";
+import { getAtacadoClientes, getClienteRetencaoPorMes, getDistinctColecoes } from "@/lib/metrics";
 import {
   canSeeFinancials,
   getGrupoRestriction,
@@ -40,9 +40,10 @@ export default async function AtacadoClientesPage({
   for (const m of filters.marcas ?? []) clienteFichaParams.append("marca", m);
   for (const t of filters.tabelasPreco ?? []) clienteFichaParams.append("tabelaPreco", t);
 
-  const [data, retencao] = await Promise.all([
+  const [data, retencao, colecoes] = await Promise.all([
     getAtacadoClientes(filters),
     getClienteRetencaoPorMes(filters),
+    getDistinctColecoes(),
   ]);
 
   const totalReceita = data.rows.reduce((sum, r) => sum + r.receita, 0);
@@ -55,6 +56,7 @@ export default async function AtacadoClientesPage({
           stores={[]}
           marcas={[]}
           tabelasPreco={[]}
+          colecoes={colecoes}
           showMarca={false}
           showDate
           filters={filters}

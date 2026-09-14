@@ -1,5 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
-import { getSalesByGrupoProduto, getStores, getMarcas, getTabelasPreco } from "@/lib/metrics";
+import { getSalesByGrupoProduto, getStores, getMarcas, getTabelasPreco, getDistinctColecoes } from "@/lib/metrics";
 import { canSeeFinancials, getGrupoRestriction, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
@@ -141,11 +141,12 @@ export default async function CurvaAbcPage({
     grupoIn,
   };
 
-  const [allRows, stores, marcas, tabelasPreco] = await Promise.all([
+  const [allRows, stores, marcas, tabelasPreco, colecoes] = await Promise.all([
     getSalesByGrupoProduto(filters),
     getStores(allowedStores),
     getMarcas(allowedMarcas),
     getTabelasPreco(allowedTabelasPreco),
+    getDistinctColecoes(),
   ]);
 
   const showFinancials = canSeeFinancials(user);
@@ -179,6 +180,7 @@ export default async function CurvaAbcPage({
           stores={stores}
           marcas={marcas}
           tabelasPreco={tabelasPreco}
+          colecoes={colecoes}
           showTabelaPreco
           filters={filters}
         />

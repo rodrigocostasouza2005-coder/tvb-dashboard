@@ -3407,7 +3407,7 @@ export type SugestaoRetirada = {
 const LIMIAR_GRADE_QUEBRADA = 0.4;
 
 export async function getSugestoesRetiradaEstoque(
-  filters: Pick<DashboardFilters, "storeIds" | "grupoIn">
+  filters: Pick<DashboardFilters, "storeIds" | "grupoIn" | "colecaoIn">
 ): Promise<SugestaoRetirada[]> {
   // Fora o CD/Site e Atacado — pedido do Rodrigo em 2026-09-02: "retirar da loja" é sobre
   // espaço físico de prateleira, não faz sentido pro estoque do site/depósito central.
@@ -3426,6 +3426,7 @@ export async function getSugestoesRetiradaEstoque(
       storeId: { in: storeIds },
       grupo: { not: "(sem grupo)" },
       ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
+      ...(filters.colecaoIn ? { colecao: { in: filters.colecaoIn } } : {}),
     },
     select: { storeId: true, grupo: true, produto: true, tamanho: true, quantidadeDisponivel: true },
   });

@@ -8,6 +8,7 @@ import {
   getStores,
   getMarcas,
   getTabelasPreco,
+  getDistinctColecoes,
   getLastSyncs,
   getNovosERecorrentesClientes,
 } from "@/lib/metrics";
@@ -69,7 +70,7 @@ export default async function OverviewPage({
     grupoIn,
   };
   const dimension = parseDimension(rawParams);
-  const [kpi, salesByDimension, salesByDay, salesByDayPerStore, stores, marcas, tabelasPreco, syncs, clientesNovosRecorrentes] =
+  const [kpi, salesByDimension, salesByDay, salesByDayPerStore, stores, marcas, tabelasPreco, colecoes, syncs, clientesNovosRecorrentes] =
     await Promise.all([
       getKpiSummary(filters),
       getSalesByDimension(filters, dimension),
@@ -78,6 +79,7 @@ export default async function OverviewPage({
       getStores(allowedStores),
       getMarcas(allowedMarcas),
       getTabelasPreco(allowedTabelasPreco),
+      getDistinctColecoes(),
       getLastSyncs(),
       getNovosERecorrentesClientes(filters),
     ]);
@@ -94,6 +96,7 @@ export default async function OverviewPage({
           stores={stores}
           marcas={marcas}
           tabelasPreco={tabelasPreco}
+          colecoes={colecoes}
           showTabelaPreco
           filters={filters}
         />

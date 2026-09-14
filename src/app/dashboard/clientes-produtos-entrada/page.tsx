@@ -1,5 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
-import { getStores, getMarcas, getTabelasPreco, getProdutosPortaDeEntrada, type Canal } from "@/lib/metrics";
+import { getStores, getMarcas, getTabelasPreco, getDistinctColecoes, getProdutosPortaDeEntrada, type Canal } from "@/lib/metrics";
 import { canSeeFinancials, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
@@ -31,10 +31,11 @@ export default async function ClientesProdutosEntradaPage({
   });
   const canal: Canal = rawParams.canal === "b2b" || rawParams.canal === "b2c" ? rawParams.canal : "todos";
 
-  const [stores, marcas, tabelasPreco, entrada] = await Promise.all([
+  const [stores, marcas, tabelasPreco, colecoes, entrada] = await Promise.all([
     getStores(allowedStores),
     getMarcas(allowedMarcas),
     getTabelasPreco(allowedTabelasPreco),
+    getDistinctColecoes(),
     getProdutosPortaDeEntrada(filters, canal),
   ]);
   const showFinancials = canSeeFinancials(user);
@@ -56,6 +57,7 @@ export default async function ClientesProdutosEntradaPage({
           stores={stores}
           marcas={marcas}
           tabelasPreco={tabelasPreco}
+          colecoes={colecoes}
           showTabelaPreco
           filters={filters}
         />

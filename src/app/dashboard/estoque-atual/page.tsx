@@ -1,5 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
-import { getEstoqueAtual, getEstoqueAtualPorGrupoProduto, getEstoquePorArmazenador, getAllStores, getMarcas } from "@/lib/metrics";
+import { getEstoqueAtual, getEstoqueAtualPorGrupoProduto, getEstoquePorArmazenador, getAllStores, getMarcas, getDistinctColecoes } from "@/lib/metrics";
 import { getGrupoRestriction, canSeeFinancials, getStoreRestriction } from "@/lib/permissions";
 import { parseFilters, parseDimension, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
@@ -31,12 +31,13 @@ export default async function EstoqueAtualPage({
   const filters = { ...parseFilters(rawParams, { allowedStoreIds: allowedStores }), grupoIn };
   const q = typeof rawParams.q === "string" ? rawParams.q.trim().toLowerCase() : "";
 
-  const [allRows, produtoRows, porArmazenador, stores, marcas] = await Promise.all([
+  const [allRows, produtoRows, porArmazenador, stores, marcas, colecoes] = await Promise.all([
     getEstoqueAtual(filters, dimension),
     dimension === "grupo" ? getEstoqueAtualPorGrupoProduto(filters) : Promise.resolve([] as Awaited<ReturnType<typeof getEstoqueAtualPorGrupoProduto>>),
     getEstoquePorArmazenador(filters),
     getAllStores(allowedStores),
     getMarcas(),
+    getDistinctColecoes(),
   ]);
   const rows = q ? allRows.filter((r) => r.key.toLowerCase().includes(q)) : allRows;
   const showFinancials = canSeeFinancials(user);
@@ -47,7 +48,7 @@ export default async function EstoqueAtualPage({
   return (
     <div>
       <CollapsibleFilters defaultOpen={filtrosOpen}>
-        <FilterBar action="/dashboard/estoque-atual" stores={stores} marcas={marcas} filters={filters} showMarca={false} />
+        <FilterBar action="/dashboard/estoque-atual" stores={stores} marcas={marcas} colecoes={colecoes} filters={filters} showMarca={false} />
       </CollapsibleFilters>
       <DimensionToggle basePath="/dashboard/estoque-atual" searchParams={rawParams} current={dimension} />
 

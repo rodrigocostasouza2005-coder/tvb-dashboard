@@ -1,5 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
-import { getMonthlySnapshotKpi, getSalesByDimension, getDailySalesByProduto, getStores, getMarcas, getTabelasPreco, type DashboardFilters, type Canal } from "@/lib/metrics";
+import { getMonthlySnapshotKpi, getSalesByDimension, getDailySalesByProduto, getStores, getMarcas, getTabelasPreco, getDistinctColecoes, type DashboardFilters, type Canal } from "@/lib/metrics";
 import { canSeeFinancials, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction, getGrupoRestriction } from "@/lib/permissions";
 import { parseFilters, brasiliaDayStart, brasiliaDayEnd, todayBrasiliaStr, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
@@ -54,11 +54,13 @@ export default async function IndicadoresPage({
   const allowedMarcas = getMarcaRestriction(user);
   const allowedTabelasPreco = getTabelaPrecoRestriction(user);
 
-  const selectedStoreIds = parseFilters(rawParams, { allowedStoreIds: allowedStores }).storeIds ?? allowedStores;
+  const parsedFilters = parseFilters(rawParams, { allowedStoreIds: allowedStores });
+  const selectedStoreIds = parsedFilters.storeIds ?? allowedStores;
   const baseRestriction = {
     storeIds: selectedStoreIds,
     marcas: allowedMarcas,
     tabelasPreco: allowedTabelasPreco,
+    colecaoIn: parsedFilters.colecaoIn,
     grupoIn,
   };
 
@@ -69,7 +71,7 @@ export default async function IndicadoresPage({
   const dataFimRange = new Date();
 
   const months = allMonthsSince(DATA_START_MONTH, todayMonth);
-  const [kpisPerMonth, stores, marcas, tabelasPreco, produtoOptions, produtoSerie] = await Promise.all([
+  const [kpisPerMonth, stores, marcas, tabelasPreco, colecoes, produtoOptions, produtoSerie] = await Promise.all([
     Promise.all(
       months.map(async (month) => {
         const { from, to } = monthRange(month);
@@ -80,6 +82,7 @@ export default async function IndicadoresPage({
     getStores(allowedStores),
     getMarcas(allowedMarcas),
     getTabelasPreco(allowedTabelasPreco),
+    getDistinctColecoes(),
     getSalesByDimension({ ...baseRestriction, from: dataInicioRange, to: dataFimRange }, "produto", canal),
     produtoSelecionado
       ? getDailySalesByProduto({ ...baseRestriction, from: dataInicioRange, to: dataFimRange }, produtoSelecionado, canal)
@@ -132,6 +135,7 @@ export default async function IndicadoresPage({
           stores={stores}
           marcas={marcas}
           tabelasPreco={tabelasPreco}
+          colecoes={colecoes}
           showTabelaPreco
           showDate={false}
           filters={{ ...baseRestriction, from: brasiliaDayStart(DATA_START_MONTH + "-01"), to: new Date() }}

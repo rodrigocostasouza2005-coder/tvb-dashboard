@@ -1,6 +1,6 @@
 import { getSessionUser } from "@/lib/auth";
 import {
-  getTopClientes, getStores, getMarcas, getTabelasPreco, getVendedores, getClienteRetencaoVarejo,
+  getTopClientes, getStores, getMarcas, getTabelasPreco, getDistinctColecoes, getVendedores, getClienteRetencaoVarejo,
   getAniversariantesDoMes, getClientesCrmOverview, getReceitaHistoricaExterna, getDistribuicaoPedidos, type Canal,
 } from "@/lib/metrics";
 import { canSeeFinancials, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
@@ -57,11 +57,12 @@ export default async function ClientesPage({
     ? aniversarioMesParsed
     : parseInt(todayBrasiliaStr(new Date()).slice(5, 7), 10);
 
-  const [rows, stores, marcas, tabelasPreco, vendedores, retencao, aniversariantes, overview, historicoExterno, distribuicaoPedidos] = await Promise.all([
+  const [rows, stores, marcas, tabelasPreco, colecoes, vendedores, retencao, aniversariantes, overview, historicoExterno, distribuicaoPedidos] = await Promise.all([
     getTopClientes(filters, vendedor, 30, canal, true),
     getStores(allowedStores),
     getMarcas(allowedMarcas),
     getTabelasPreco(allowedTabelasPreco),
+    getDistinctColecoes(),
     getVendedores(allowedStores),
     getClienteRetencaoVarejo(filters),
     getAniversariantesDoMes(filters, vendedor, aniversarioMes),
@@ -104,6 +105,7 @@ export default async function ClientesPage({
           stores={stores}
           marcas={marcas}
           tabelasPreco={tabelasPreco}
+          colecoes={colecoes}
           showTabelaPreco
           filters={filters}
         />

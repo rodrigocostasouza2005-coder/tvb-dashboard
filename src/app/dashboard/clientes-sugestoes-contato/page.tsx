@@ -1,5 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
-import { getStores, getMarcas, getTabelasPreco, getSugestoesDeContato, getFollowUpPosCompra, type SugestaoContato, type FollowUpPosCompra } from "@/lib/metrics";
+import { getStores, getMarcas, getTabelasPreco, getDistinctColecoes, getSugestoesDeContato, getFollowUpPosCompra, type SugestaoContato, type FollowUpPosCompra } from "@/lib/metrics";
 import { getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
@@ -255,10 +255,11 @@ export default async function ClientesSugestoesContatoPage({
     allowedTabelasPreco,
   });
 
-  const [stores, marcas, tabelasPreco, sugestoes, followUp, templates] = await Promise.all([
+  const [stores, marcas, tabelasPreco, colecoes, sugestoes, followUp, templates] = await Promise.all([
     getStores(allowedStores),
     getMarcas(allowedMarcas),
     getTabelasPreco(allowedTabelasPreco),
+    getDistinctColecoes(),
     getSugestoesDeContato(filters),
     getFollowUpPosCompra(filters),
     getMensagemTemplates(),
@@ -301,6 +302,7 @@ export default async function ClientesSugestoesContatoPage({
           stores={stores}
           marcas={marcas}
           tabelasPreco={tabelasPreco}
+          colecoes={colecoes}
           showTabelaPreco
           showDate={false}
           filters={filters}
