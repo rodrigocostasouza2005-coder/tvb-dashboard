@@ -76,8 +76,9 @@ export default async function VendasPage({
   const emptyTamanhoSalesRows: Awaited<ReturnType<typeof getSalesByGrupoProdutoTamanho>> = [];
   const emptyTamanhoReturnRows: Awaited<ReturnType<typeof getReturnsByGrupoProdutoTamanho>> = [];
 
-  const [rows, salesSubRows, salesTamanhoRows, salesByDay, salesByDayPerStore, returnRows, returnSubRows, returnTamanhoRows, returnsByDay, stores, marcas, tabelasPreco, colecoes, siteCidades, topClientes] = await Promise.all([
+  const [rows, salesByColecao, salesSubRows, salesTamanhoRows, salesByDay, salesByDayPerStore, returnRows, returnSubRows, returnTamanhoRows, returnsByDay, stores, marcas, tabelasPreco, colecoes, siteCidades, topClientes] = await Promise.all([
     getSalesByDimension(filters, dimension),
+    getSalesByDimension(filters, "colecao"),
     dimension === "grupo"
       ? getSalesByGrupoProduto(filters)
       : dimension === "tamanho"
@@ -112,6 +113,7 @@ export default async function VendasPage({
   const totalUnits = rows.reduce((sum, r) => sum + r.unitsSold, 0);
   const totalReturned = returnRows.reduce((sum, r) => sum + r.unitsReturned, 0);
   const top10 = rows.slice(0, 10);
+  const top10Colecao = salesByColecao.slice(0, 10);
 
   const siteEstadoMap = new Map<string, { receita: number; unidades: number }>();
   for (const r of siteCidades.rows) {
@@ -170,6 +172,48 @@ export default async function VendasPage({
           {showFinancials ? "por receita bruta" : "por vendas brutas"}
         </h2>
         <TopBarChart data={top10} valueKey={showFinancials ? "revenue" : "unitsSold"} showCurrency={showFinancials} />
+      </section>
+
+      <section className="mb-6">
+        <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">
+          Comparativo por coleção {showFinancials ? "(receita bruta)" : "(unidades brutas)"}
+        </h2>
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
+            <TopBarChart
+              data={top10Colecao}
+              valueKey={showFinancials ? "revenue" : "unitsSold"}
+              showCurrency={showFinancials}
+            />
+          </div>
+          <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
+                  <th className="px-4 py-2 font-medium">Coleção</th>
+                  <th className="px-4 py-2 font-medium">Unidades brutas</th>
+                  {showFinancials && <th className="px-4 py-2 font-medium">Receita bruta</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {top10Colecao.map((c) => (
+                  <tr key={c.key} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
+                    <td className="px-4 py-2 font-medium">{c.key}</td>
+                    <td className="px-4 py-2 tabular-nums">{c.unitsSold.toLocaleString("pt-BR")}</td>
+                    {showFinancials && <td className="px-4 py-2 tabular-nums">{formatBRL(c.revenue)}</td>}
+                  </tr>
+                ))}
+                {top10Colecao.length === 0 && (
+                  <tr>
+                    <td colSpan={showFinancials ? 3 : 2} className="px-4 py-6 text-center text-[var(--text-muted)]">
+                      Sem vendas no período/filtro selecionado.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
       </section>
 
       {showFinancials && topClientes.length > 0 && (

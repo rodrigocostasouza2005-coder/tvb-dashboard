@@ -70,10 +70,11 @@ export default async function OverviewPage({
     grupoIn,
   };
   const dimension = parseDimension(rawParams);
-  const [kpi, salesByDimension, salesByDay, salesByDayPerStore, stores, marcas, tabelasPreco, colecoes, syncs, clientesNovosRecorrentes] =
+  const [kpi, salesByDimension, salesByColecao, salesByDay, salesByDayPerStore, stores, marcas, tabelasPreco, colecoes, syncs, clientesNovosRecorrentes] =
     await Promise.all([
       getKpiSummary(filters),
       getSalesByDimension(filters, dimension),
+      getSalesByDimension(filters, "colecao"),
       getSalesByDay(filters),
       getSalesByDayPerStore(filters),
       getStores(allowedStores),
@@ -87,6 +88,7 @@ export default async function OverviewPage({
   const showFinancials = canSeeFinancials(user);
   const top10 = salesByDimension.slice(0, 10);
   const dimensionLabel = dimension === "produto" ? "Produto" : dimension === "tamanho" ? "Tamanho" : "Grupo";
+  const top10Colecao = salesByColecao.slice(0, 10);
 
   return (
     <div>
@@ -174,6 +176,48 @@ export default async function OverviewPage({
                   </tr>
                 ))}
                 {top10.length === 0 && (
+                  <tr>
+                    <td colSpan={showFinancials ? 3 : 2} className="px-4 py-6 text-center text-[var(--text-muted)]">
+                      Sem vendas no período/filtro selecionado.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section className="mb-6">
+        <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">
+          Comparativo por coleção {showFinancials ? "(receita bruta)" : "(unidades brutas)"}
+        </h2>
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
+            <TopBarChart
+              data={top10Colecao}
+              valueKey={showFinancials ? "revenue" : "unitsSold"}
+              showCurrency={showFinancials}
+            />
+          </div>
+          <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
+                  <th className="px-4 py-2 font-medium">Coleção</th>
+                  <th className="px-4 py-2 font-medium">Unidades brutas</th>
+                  {showFinancials && <th className="px-4 py-2 font-medium">Receita bruta</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {top10Colecao.map((c) => (
+                  <tr key={c.key} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
+                    <td className="px-4 py-2 font-medium">{c.key}</td>
+                    <td className="px-4 py-2 tabular-nums">{c.unitsSold.toLocaleString("pt-BR")}</td>
+                    {showFinancials && <td className="px-4 py-2 tabular-nums">{formatBRL(c.revenue)}</td>}
+                  </tr>
+                ))}
+                {top10Colecao.length === 0 && (
                   <tr>
                     <td colSpan={showFinancials ? 3 : 2} className="px-4 py-6 text-center text-[var(--text-muted)]">
                       Sem vendas no período/filtro selecionado.
