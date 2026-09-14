@@ -38,8 +38,15 @@ export type DapicCredential = { label: string; tokenIntegracao: string };
 // dashboard com o valor líquido do DAPIC). Corrigido pra "-03:00" (Brasil não tem mais horário de
 // verão desde 2019, offset fixo o ano inteiro). Histórico já gravado (Sale/Return/Gift) corrigido
 // via backfill único (+3h em todo mundo, já que tudo tinha sido gravado 3h "cedo demais").
+// Achado em 2026-09-14 investigando a Inadimplência vazia: /contas/parcelas às vezes manda
+// DataEmissao/DataVencimento só como "YYYY-MM-DD" (sem hora), diferente de vendaspdv/faturas que
+// sempre mandam datetime completo. Sem o "T00:00:00", virava "2025-09-22-03:00" — não é ISO
+// válido, `new Date(...)` retornava Invalid Date (não lança erro, só o objeto fica NaN por
+// dentro) — e isso só estourava depois, no Prisma, na hora de gravar (createMany rejeitando o
+// lote inteiro). Meia-noite em Brasília é a interpretação mais razoável pra uma data sem hora.
 export function parseDapicDateTime(raw: string): Date {
-  return new Date(raw.endsWith("Z") || /[+-]\d{2}:?\d{2}$/.test(raw) ? raw : `${raw}-03:00`);
+  const withTime = raw.includes("T") ? raw : `${raw}T00:00:00`;
+  return new Date(withTime.endsWith("Z") || /[+-]\d{2}:?\d{2}$/.test(withTime) ? withTime : `${withTime}-03:00`);
 }
 
 // DAPIC_CREDENTIALS: JSON tipo [{"label":"cd-atacado","tokenIntegracao":"..."}, ...]

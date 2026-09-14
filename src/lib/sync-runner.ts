@@ -347,11 +347,27 @@ async function syncParcelas(client: DapicClient) {
   const parcelas = await client.fetchParcelas("2024-01-01", toDateStr(new Date()), "Aberta");
   await prisma.parcela.deleteMany({});
   if (parcelas.length === 0) return 0;
+
+  // Achado em 2026-09-14: a Inadimplência ficou zerada meses porque /contas/parcelas às vezes
+  // manda data sem hora ("2025-09-22"), e uma linha assim derrubava o createMany do lote inteiro
+  // (500 linhas boas descartadas por 1 ruim) — silencioso, porque Parcela nem tem SyncSource
+  // próprio pra aparecer como falha na Visão Geral. parseDapicDateTime já trata data sem hora
+  // agora, mas mantém esse filtro como cinto de segurança: pula só a linha realmente inválida
+  // (data quebrada de outro jeito) em vez de descartar o lote todo de novo no futuro.
+  const rowsValidas = parcelas.filter((p) => {
+    const emissao = parseDapicDateTime(p.DataEmissao);
+    const vencimento = parseDapicDateTime(p.DataVencimento);
+    return !isNaN(emissao.getTime()) && !isNaN(vencimento.getTime());
+  });
+  if (rowsValidas.length < parcelas.length) {
+    console.error(`[syncParcelas] ${parcelas.length - rowsValidas.length} parcela(s) com data inválida, ignoradas.`);
+  }
+
   const BATCH = 500;
   let count = 0;
-  for (let i = 0; i < parcelas.length; i += BATCH) {
-    const batch = parcelas.slice(i, i + BATCH);
-    await prisma.parcela.createMany({
+  for (let i = 0; i < rowsValidas.length; i += BATCH) {
+    const batch = rowsValidas.slice(i, i + BATCH);
+    const r = await prisma.parcela.createMany({
       data: batch.map((p) => ({
         idParcela: p.IdParcela,
         idConta: p.IdConta,
@@ -372,7 +388,7 @@ async function syncParcelas(client: DapicClient) {
       })),
       skipDuplicates: true,
     });
-    count += batch.length;
+    count += r.count;
   }
   return count;
 }
