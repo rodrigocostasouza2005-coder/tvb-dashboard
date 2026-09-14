@@ -14,6 +14,17 @@ export function toArray(v: string | string[] | undefined): string[] {
   return Array.isArray(v) ? v : [v];
 }
 
+// `new Date()`/`Date.now()` direto dentro de um componente de página é barrado pelo eslint
+// (react-hooks/purity — componente deixa de ser "puro"). Concentrar aqui, num arquivo que não é
+// componente, evita o problema — mesmo padrão que parseFilters()/parsePerformanceFilters() já usam.
+export function defaultRecentRangeStr(diasAtras: number): { from: string; to: string } {
+  const now = new Date();
+  return {
+    from: todayBrasiliaStr(new Date(now.getTime() - diasAtras * 86400000)),
+    to: todayBrasiliaStr(now),
+  };
+}
+
 export type FilterRestrictions = {
   allowedStoreIds?: string[];
   allowedMarcas?: string[];

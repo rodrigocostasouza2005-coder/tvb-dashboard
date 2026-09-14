@@ -60,19 +60,56 @@ export async function getSessoesPorDia(range: Ga4DateRange): Promise<Ga4Sessao[]
   }));
 }
 
-export type Ga4Conversao = { sessoes: number; conversoes: number; taxaConversaoPct: number | null };
+export type Ga4Conversao = {
+  sessoes: number;
+  usuarios: number;
+  conversoes: number;
+  taxaConversaoPct: number | null;
+};
 
 export async function getConversoes(range: Ga4DateRange): Promise<Ga4Conversao> {
   const [response] = await getClient().runReport({
     property: getPropertyPath(),
     dateRanges: [range],
-    metrics: [{ name: "sessions" }, { name: "conversions" }],
+    metrics: [{ name: "sessions" }, { name: "totalUsers" }, { name: "conversions" }],
   });
 
   const row = response.rows?.[0];
   const sessoes = Number(row?.metricValues?.[0].value ?? 0);
-  const conversoes = Number(row?.metricValues?.[1].value ?? 0);
-  return { sessoes, conversoes, taxaConversaoPct: sessoes > 0 ? (conversoes / sessoes) * 100 : null };
+  const usuarios = Number(row?.metricValues?.[1].value ?? 0);
+  const conversoes = Number(row?.metricValues?.[2].value ?? 0);
+  return { sessoes, usuarios, conversoes, taxaConversaoPct: sessoes > 0 ? (conversoes / sessoes) * 100 : null };
+}
+
+// Nomes de canal ("Default Channel Group") vêm sempre em inglês da API, não tem opção de
+// idioma — traduzido aqui pra ficar legível pro Rodrigo. Lista fixa dos grupos padrão do GA4
+// (Google Analytics 4 Help, "Default channel group"); canal novo que o Google inventar e não
+// estiver aqui aparece sem tradução (melhor que traduzir errado).
+const CANAL_TRADUZIDO: Record<string, string> = {
+  "Direct": "Direto",
+  "Organic Search": "Busca orgânica",
+  "Paid Search": "Busca paga",
+  "Organic Social": "Social orgânico",
+  "Paid Social": "Social pago",
+  "Organic Video": "Vídeo orgânico",
+  "Paid Video": "Vídeo pago",
+  "Organic Shopping": "Shopping orgânico",
+  "Paid Shopping": "Shopping pago",
+  "Email": "E-mail",
+  "Affiliates": "Afiliados",
+  "Referral": "Referência",
+  "Display": "Display",
+  "SMS": "SMS",
+  "Mobile Push Notifications": "Notificação push",
+  "Audio": "Áudio",
+  "Cross-network": "Múltiplos canais",
+  "Unassigned": "Não atribuído",
+  "AI Assistant": "Assistente de IA",
+  "AI Search": "Busca por IA",
+};
+
+function traduzirCanal(canal: string): string {
+  return CANAL_TRADUZIDO[canal] ?? canal;
 }
 
 export type Ga4OrigemTrafego = { canal: string; sessoes: number; conversoes: number };
@@ -87,7 +124,7 @@ export async function getOrigemTrafego(range: Ga4DateRange): Promise<Ga4OrigemTr
   });
 
   return (response.rows ?? []).map((r) => ({
-    canal: r.dimensionValues?.[0].value ?? "(não definido)",
+    canal: traduzirCanal(r.dimensionValues?.[0].value ?? "(não definido)"),
     sessoes: Number(r.metricValues?.[0].value ?? 0),
     conversoes: Number(r.metricValues?.[1].value ?? 0),
   }));

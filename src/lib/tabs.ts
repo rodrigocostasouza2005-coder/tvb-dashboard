@@ -37,7 +37,8 @@ export type TabKey =
   | "estoque-retirada"
   | "mapa-compras"
   | "performance"
-  | "analise-performance";
+  | "analise-performance"
+  | "analytics-site";
 
 export type TabGroup = "visao-geral" | "resumo-dia" | "vendas" | "estoque" | "atacado" | "clientes" | "marketing" | "pesquisa" | "lamina" | "performance";
 
@@ -94,6 +95,7 @@ export const TABS: TabEntry[] = [
   { key: "top-mais-vendidos", label: "Top 10 mais vendidos", href: "/dashboard/top-mais-vendidos", group: "marketing" },
   { key: "top-menos-vendidos", label: "Top 10 menos vendidos", href: "/dashboard/top-menos-vendidos", group: "marketing" },
   { key: "marketing-templates", label: "Templates de Mensagem", href: "/dashboard/marketing-templates", group: "marketing" },
+  { key: "analytics-site", label: "Analytics do Site", href: "/dashboard/analytics-site", group: "marketing" },
 
   // pesquisa (direct link, like visao-geral)
   { key: "pesquisa", label: "Pesquisa", href: "/dashboard/pesquisa", group: "pesquisa" },
