@@ -1,11 +1,12 @@
 import { getSessionUser } from "@/lib/auth";
-import { getStockVsSales, getStores, getMarcas, getTabelasPreco, getDistinctColecoes } from "@/lib/metrics";
+import { getStockVsSales, getStores, getMarcas, getTabelasPreco, getDistinctColecoes, getDistinctGrupos } from "@/lib/metrics";
 import { getGrupoRestriction, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
 import { parseFilters, parseDimension, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
 import { CollapsibleFilters } from "../collapsible-filters";
 import { DimensionToggle } from "../dimension-toggle";
+import { GrupoProdutoSelect } from "./grupo-produto-select";
 import { statusFor } from "../status-filter";
 import { MetricBarChart } from "../metric-bar-chart";
 
@@ -21,22 +22,37 @@ export default async function MarketingPage({
   const rawParams = await searchParams;
   const filtrosOpen = rawParams.filtros === "1";
   const dimension = parseDimension(rawParams);
-  const grupoIn = await getGrupoRestriction(user.role);
+  const grupoRestriction = await getGrupoRestriction(user.role);
   const allowedStores = getStoreRestriction(user);
   const allowedMarcas = getMarcaRestriction(user);
   const allowedTabelasPreco = getTabelaPrecoRestriction(user);
+
+  // Dropdown "Grupo de produto" (2026-09-15) — escolher um grupo aqui estreita o ranking pra só
+  // os produtos/tamanhos daquele grupo. Cruza com a restrição de grupo do usuário do mesmo jeito
+  // que loja/marca/tabela de preço já fazem, pra um grupo fora da permissão não vazar dado.
+  const grupoFiltro = typeof rawParams.grupoFiltro === "string" && rawParams.grupoFiltro ? rawParams.grupoFiltro : undefined;
+  const grupoIn = grupoFiltro
+    ? grupoRestriction
+      ? grupoRestriction.includes(grupoFiltro)
+        ? [grupoFiltro]
+        : grupoRestriction
+      : [grupoFiltro]
+    : grupoRestriction;
+
   const filters = {
     ...parseFilters(rawParams, { allowedStoreIds: allowedStores, allowedMarcas, allowedTabelasPreco }),
     grupoIn,
   };
 
-  const [rows, stores, marcas, tabelasPreco, colecoes] = await Promise.all([
+  const [rows, stores, marcas, tabelasPreco, colecoes, gruposAll] = await Promise.all([
     getStockVsSales(filters, dimension),
     getStores(allowedStores),
     getMarcas(allowedMarcas),
     getTabelasPreco(allowedTabelasPreco),
     getDistinctColecoes(),
+    getDistinctGrupos(),
   ]);
+  const grupoOptions = grupoRestriction ? gruposAll.filter((g) => grupoRestriction.includes(g)) : gruposAll;
 
   const ranked = rows
     .map((r) => ({ ...r, pushScore: r.currentStock - r.unitsSold }))
@@ -63,6 +79,7 @@ export default async function MarketingPage({
       </p>
 
       <DimensionToggle basePath="/dashboard/marketing" searchParams={rawParams} current={dimension} />
+      <GrupoProdutoSelect basePath="/dashboard/marketing" searchParams={rawParams} grupos={grupoOptions} current={grupoFiltro} />
 
       <h2 className="mb-1 text-sm font-medium text-[var(--text-primary)]">
         Prioridade de exposição (estoque parado)
