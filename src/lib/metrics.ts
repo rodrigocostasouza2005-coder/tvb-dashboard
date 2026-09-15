@@ -1320,9 +1320,10 @@ export async function getReplenishmentPorVendas(
   });
   const vendasByKey = new Map(saleAgg.map((s) => [`${s.storeId}::${s.cod}`, s._sum.quantidade ?? 0]));
 
-  // Alvo de cobertura pra calcular a quantidade sugerida: o mesmo "ok" (30 dias) usado em
-  // getStockCoverage — repõe até dar pra aguentar um mês no ritmo de venda atual.
-  const ALVO_DIAS_COBERTURA = 30;
+  // Alvo de cobertura pra calcular a quantidade sugerida: 7 dias, não 30 — a reposição na TVB é
+  // semanal (Rodrigo corrigiu isso em 2026-09-15), então repor mirando um mês inteiro de cobertura
+  // infla a sugestão à toa (o próximo ciclo de reposição já chega bem antes disso).
+  const ALVO_DIAS_COBERTURA = 7;
 
   // Só entra na tabela quem já estava abaixo do mínimo (candidato de sempre) OU quem o giro real
   // aponta como zona crítica/atenção (< 30 dias de cobertura) — evita listar o estoque inteiro da
