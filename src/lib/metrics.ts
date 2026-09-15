@@ -1279,12 +1279,18 @@ export async function getReplenishment(filters: Pick<DashboardFilters, "storeIds
 // cruzada com o estoque atual. Vendeu mais na semana passada do que tem disponível agora? Repõe.
 // Não vendeu mais do que tem? Não repõe.
 //
-// Exceção (mesma sessão, Rodrigo pegou o ponto cego): se zerou E não vendeu NADA na semana — não
-// porque não tinha demanda, mas porque não tinha o que vender — a venda registrada não reflete a
-// demanda real. Sem essa exceção, o item nunca mais aparece pra repor (zerou → vendeu 0 → não
-// sugere → continua zerado → vendeu 0 de novo → ...), bola de neve. Nesse caso específico usa o
-// mínimo cadastrado como rede de segurança (única situação em que esse modo ainda olha pro
-// mínimo).
+// Duas correções em cima disso, mesma sessão de 2026-09-15:
+// 1) Se zerou E não vendeu NADA na semana — não porque não tinha demanda, mas porque não tinha o
+//    que vender — a venda registrada não reflete a demanda real. Sem isso o item nunca mais
+//    aparece pra repor (zerou → vendeu 0 → não sugere → continua zerado → ...), bola de neve.
+// 2) Rodrigo achou baixo demais a sugestão de "Ultra Light Treko Reverso" tam. 40 na Barra: só
+//    vendeu 1 na semana, estoque 0, sugeria repor 1 — sem folga nenhuma, mesmo o CD tendo de
+//    sobra (29 un.) e existindo um mínimo cadastrado de 4 pra esse grupo/tamanho. Regra dele:
+//    "se tiver muito em estoque [no CD], vale a pena colocar o mínimo". Então quando o CD tem
+//    folga suficiente pra cobrir o mínimo cadastrado sem chegar perto do próprio piso, a
+//    sugestão vira o MAIOR entre "cobrir a venda da semana" e "chegar no mínimo" — não só a
+//    conta seca da venda. Quando o CD não tem folga (ou não existe mínimo cadastrado), continua
+//    só pela venda, como antes.
 export async function getReplenishmentPorVendas(
   filters: Pick<DashboardFilters, "storeIds" | "grupoIn"> & { colecaoIn?: string[] }
 ) {
@@ -1328,15 +1334,36 @@ export async function getReplenishmentPorVendas(
       const estoqueNaOrigem = cdStockByCod.get(s.cod) ?? 0;
       const vendasSemanaAnterior = vendasByKey.get(`${s.storeId}::${s.cod}`) ?? 0;
       const zerouSemHistoricoDeVenda = s.quantidadeDisponivel === 0 && vendasSemanaAnterior === 0;
-      const estoqueMinimo = zerouSemHistoricoDeVenda ? matchMinimumRule(minimumRules, s) ?? s.estoqueMinimo : null;
+      const precisaReporPelaVenda = vendasSemanaAnterior > s.quantidadeDisponivel;
 
-      const precisaRepor = vendasSemanaAnterior > s.quantidadeDisponivel || (zerouSemHistoricoDeVenda && !!estoqueMinimo);
+      const estoqueMinimo = matchMinimumRule(minimumRules, s) ?? s.estoqueMinimo;
+      const necessidadeMinimo = estoqueMinimo != null ? estoqueMinimo - s.quantidadeDisponivel : null;
 
-      // Caso normal: repõe o suficiente pra cobrir se a próxima semana repetir o mesmo ritmo.
-      // Caso "zerou sem venda pra basear a conta": não tem dado de demanda real, usa o mínimo.
-      const necessidade = zerouSemHistoricoDeVenda ? estoqueMinimo ?? 0 : vendasSemanaAnterior - s.quantidadeDisponivel;
       // Nunca zera o CD (pedido do Rodrigo em 2026-09-15) — o teto é o estoque do CD menos 1.
       const tetoSemZerarCD = Math.max(estoqueNaOrigem - 1, 0);
+      // "CD tem de sobra" = dá pra cobrir o mínimo cadastrado inteiro sem chegar perto do teto.
+      const cdTemDeSobra = necessidadeMinimo != null && necessidadeMinimo > 0 && tetoSemZerarCD >= necessidadeMinimo;
+
+      let precisaRepor: boolean;
+      let necessidade: number;
+      if (zerouSemHistoricoDeVenda) {
+        // Sem dado de venda confiável pra basear a conta — só repõe se existir mínimo cadastrado
+        // e o CD aguentar cobrir ele inteiro.
+        precisaRepor = cdTemDeSobra;
+        necessidade = necessidadeMinimo ?? 0;
+      } else if (precisaReporPelaVenda) {
+        precisaRepor = true;
+        // CD com folga e mínimo pedindo mais que a venda da semana? Usa o mínimo (pedido do
+        // Rodrigo: "se tiver muito em estoque, vale a pena colocar o mínimo"). Senão, só a venda.
+        necessidade =
+          cdTemDeSobra && necessidadeMinimo !== null
+            ? Math.max(vendasSemanaAnterior - s.quantidadeDisponivel, necessidadeMinimo)
+            : vendasSemanaAnterior - s.quantidadeDisponivel;
+      } else {
+        precisaRepor = false;
+        necessidade = 0;
+      }
+
       const falta = precisaRepor ? Math.min(Math.max(necessidade, 1), tetoSemZerarCD) : 0;
 
       return {
