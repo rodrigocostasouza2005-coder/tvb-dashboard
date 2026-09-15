@@ -1249,21 +1249,27 @@ export async function getReplenishment(filters: Pick<DashboardFilters, "storeIds
         // Menos de 4 unidades na origem = não compensa repor agora.
         (cdStockByCod.get(s.cod) ?? 0) > 3
     )
-    .map((s) => ({
-      storeId: s.storeId,
-      storeName: storeName.get(s.storeId) ?? s.storeId,
-      produto: s.produto,
-      grupo: s.grupo,
-      colecao: s.colecao,
-      tamanho: s.tamanho,
-      quantidadeDisponivel: s.quantidadeDisponivel,
-      estoqueMinimo: s.estoqueMinimo as number,
-      falta: Math.min((s.estoqueMinimo as number) - s.quantidadeDisponivel, cdStockByCod.get(s.cod) ?? 0),
-      origemSugerida: cdStore?.name ?? "—",
-      estoqueNaOrigem: cdStockByCod.get(s.cod) ?? 0,
-    }))
-    // Por loja primeiro, maior falta primeiro dentro de cada loja.
-    .sort((a, b) => a.storeName.localeCompare(b.storeName) || b.falta - a.falta);
+    .map((s) => {
+      const estoqueNaOrigem = cdStockByCod.get(s.cod) ?? 0;
+      // Nunca zera o CD (pedido do Rodrigo em 2026-09-15) — o teto é o estoque do CD menos 1,
+      // não o estoque do CD inteiro, então sempre sobra pelo menos 1 unidade lá.
+      const tetoSemZerarCD = Math.max(estoqueNaOrigem - 1, 0);
+      return {
+        storeId: s.storeId,
+        storeName: storeName.get(s.storeId) ?? s.storeId,
+        produto: s.produto,
+        grupo: s.grupo,
+        colecao: s.colecao,
+        tamanho: s.tamanho,
+        quantidadeDisponivel: s.quantidadeDisponivel,
+        estoqueMinimo: s.estoqueMinimo as number,
+        falta: Math.min((s.estoqueMinimo as number) - s.quantidadeDisponivel, tetoSemZerarCD),
+        origemSugerida: cdStore?.name ?? "—",
+        estoqueNaOrigem,
+      };
+    })
+    // Por loja primeiro, depois produto em ordem alfabética (pedido do Rodrigo em 2026-09-15).
+    .sort((a, b) => a.storeName.localeCompare(b.storeName) || a.produto.localeCompare(b.produto, "pt-BR"));
 }
 
 // Modo "Vendas" da tela de Reposição (2026-09-15, pedido do Rodrigo) — NÃO mexe em
@@ -1329,7 +1335,9 @@ export async function getReplenishmentPorVendas(
       // Caso normal: repõe o suficiente pra cobrir se a próxima semana repetir o mesmo ritmo.
       // Caso "zerou sem venda pra basear a conta": não tem dado de demanda real, usa o mínimo.
       const necessidade = zerouSemHistoricoDeVenda ? estoqueMinimo ?? 0 : vendasSemanaAnterior - s.quantidadeDisponivel;
-      const falta = precisaRepor ? Math.min(Math.max(necessidade, 1), estoqueNaOrigem) : 0;
+      // Nunca zera o CD (pedido do Rodrigo em 2026-09-15) — o teto é o estoque do CD menos 1.
+      const tetoSemZerarCD = Math.max(estoqueNaOrigem - 1, 0);
+      const falta = precisaRepor ? Math.min(Math.max(necessidade, 1), tetoSemZerarCD) : 0;
 
       return {
         storeId: s.storeId,
@@ -1348,7 +1356,8 @@ export async function getReplenishmentPorVendas(
       };
     })
     .filter((r) => r.precisaRepor)
-    .sort((a, b) => a.storeName.localeCompare(b.storeName) || b.falta - a.falta);
+    // Por loja primeiro, depois produto em ordem alfabética (pedido do Rodrigo em 2026-09-15).
+    .sort((a, b) => a.storeName.localeCompare(b.storeName) || a.produto.localeCompare(b.produto, "pt-BR"));
 }
 
 // "Cliente novo" = a 1ª compra dele de todas (sem limite de data, dentro do resto do filtro
