@@ -114,44 +114,16 @@ export default async function AnalyticsSitePage({
         </p>
       ) : (
         <>
-          <section className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
+          {/* ── Visão Geral ── */}
+          <section className="mb-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
             <StatTile label="Sessões" value={conversao!.sessoes.toLocaleString("pt-BR")} />
             <StatTile label="Usuários" value={conversao!.usuarios.toLocaleString("pt-BR")} />
             <StatTile label="Conversões" value={conversao!.conversoes.toLocaleString("pt-BR")} />
             <StatTile label="Taxa de conversão" value={formatPct(conversao!.taxaConversaoPct)} />
           </section>
 
-          <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
-            <h2 className="mb-1 text-sm font-medium text-[var(--text-secondary)]">Funil de compra</h2>
-            <p className="mb-3 text-xs text-[var(--text-muted)]">
-              Viu o produto → carrinho → checkout → pagamento → compra. % embaixo de cada barra é
-              a queda em relação à etapa anterior.
-            </p>
-            <div className="flex flex-col gap-2">
-              {funil.map((f) => (
-                <div key={f.etapa} className="flex items-center gap-3">
-                  <div className="w-32 shrink-0 text-xs text-[var(--text-secondary)]">{f.etapa}</div>
-                  <div className="h-6 flex-1 overflow-hidden rounded-md bg-[var(--page-plane)]">
-                    <div
-                      className="flex h-full items-center justify-end rounded-md bg-[var(--series-1)] px-2 text-xs font-medium text-white"
-                      style={{ width: `${Math.max(f.pctDoInicio ?? 0, 3)}%` }}
-                    >
-                      {f.eventos.toLocaleString("pt-BR")}
-                    </div>
-                  </div>
-                  <div className="w-16 shrink-0 text-right text-xs tabular-nums text-[var(--text-muted)]">
-                    {f.pctDoAnterior != null ? formatPct(f.pctDoAnterior) : "—"}
-                  </div>
-                </div>
-              ))}
-              {funil.every((f) => f.eventos === 0) && (
-                <p className="text-sm text-[var(--text-muted)]">Sem evento de e-commerce no período.</p>
-              )}
-            </div>
-          </section>
-
-          <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
-            <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Sessões por dia</h2>
+          <section className="mb-10 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
+            <h3 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Sessões por dia</h3>
             <IndicatorChart
               data={sessoesChartData}
               format="number"
@@ -160,8 +132,10 @@ export default async function AnalyticsSitePage({
             />
           </section>
 
+          {/* ── Aquisição: de onde vem o tráfego ── */}
+          <h2 className="mb-3 text-base font-semibold">Aquisição — de onde vem o tráfego</h2>
           <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
-            <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Origem de tráfego</h2>
+            <h3 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Origem de tráfego</h3>
             {origemPie.length > 0 ? (
               <PieChart data={origemPie} />
             ) : (
@@ -202,9 +176,36 @@ export default async function AnalyticsSitePage({
             </div>
           </section>
 
+          <section className="mb-10 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+            <h3 className="border-b border-[var(--gridline)] px-4 py-2.5 text-sm font-medium text-[var(--text-secondary)]">Campanhas</h3>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
+                  <th className="px-4 py-2 font-medium">Campanha</th>
+                  <th className="px-4 py-2 font-medium text-right">Sessões</th>
+                  <th className="px-4 py-2 font-medium text-right">Conversões</th>
+                </tr>
+              </thead>
+              <tbody>
+                {campanhas.map((c) => (
+                  <tr key={c.campanha} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
+                    <td className="px-4 py-2 font-medium">{c.campanha}</td>
+                    <td className="px-4 py-2 text-right tabular-nums">{c.sessoes.toLocaleString("pt-BR")}</td>
+                    <td className="px-4 py-2 text-right tabular-nums">{c.conversoes.toLocaleString("pt-BR")}</td>
+                  </tr>
+                ))}
+                {campanhas.length === 0 && (
+                  <tr><td colSpan={3} className="px-4 py-6 text-center text-[var(--text-muted)]">Sem dado no período.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </section>
+
+          {/* ── Público: quem visita ── */}
+          <h2 className="mb-3 text-base font-semibold">Público — quem visita</h2>
           <section className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
             <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-              <h2 className="border-b border-[var(--gridline)] px-4 py-2.5 text-sm font-medium text-[var(--text-secondary)]">Dispositivo</h2>
+              <h3 className="border-b border-[var(--gridline)] px-4 py-2.5 text-sm font-medium text-[var(--text-secondary)]">Dispositivo</h3>
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
@@ -231,7 +232,7 @@ export default async function AnalyticsSitePage({
             </div>
 
             <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-              <h2 className="border-b border-[var(--gridline)] px-4 py-2.5 text-sm font-medium text-[var(--text-secondary)]">Novo vs. Recorrente</h2>
+              <h3 className="border-b border-[var(--gridline)] px-4 py-2.5 text-sm font-medium text-[var(--text-secondary)]">Novo vs. Recorrente</h3>
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
@@ -258,62 +259,37 @@ export default async function AnalyticsSitePage({
             </div>
           </section>
 
-          <section className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-              <h2 className="border-b border-[var(--gridline)] px-4 py-2.5 text-sm font-medium text-[var(--text-secondary)]">Campanhas</h2>
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
-                    <th className="px-4 py-2 font-medium">Campanha</th>
-                    <th className="px-4 py-2 font-medium text-right">Sessões</th>
-                    <th className="px-4 py-2 font-medium text-right">Conversões</th>
+          <section className="mb-10 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+            <h3 className="border-b border-[var(--gridline)] px-4 py-2.5 text-sm font-medium text-[var(--text-secondary)]">Cidades</h3>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
+                  <th className="px-4 py-2 font-medium">Cidade</th>
+                  <th className="px-4 py-2 font-medium">Estado</th>
+                  <th className="px-4 py-2 font-medium text-right">Sessões</th>
+                </tr>
+              </thead>
+              <tbody>
+                {geografia.map((g) => (
+                  <tr key={`${g.cidade}-${g.estado}`} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
+                    <td className="px-4 py-2 font-medium">{g.cidade}</td>
+                    <td className="px-4 py-2 text-[var(--text-secondary)]">{g.estado}</td>
+                    <td className="px-4 py-2 text-right tabular-nums">{g.sessoes.toLocaleString("pt-BR")}</td>
                   </tr>
-                </thead>
-                <tbody>
-                  {campanhas.map((c) => (
-                    <tr key={c.campanha} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
-                      <td className="px-4 py-2 font-medium">{c.campanha}</td>
-                      <td className="px-4 py-2 text-right tabular-nums">{c.sessoes.toLocaleString("pt-BR")}</td>
-                      <td className="px-4 py-2 text-right tabular-nums">{c.conversoes.toLocaleString("pt-BR")}</td>
-                    </tr>
-                  ))}
-                  {campanhas.length === 0 && (
-                    <tr><td colSpan={3} className="px-4 py-6 text-center text-[var(--text-muted)]">Sem dado no período.</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-              <h2 className="border-b border-[var(--gridline)] px-4 py-2.5 text-sm font-medium text-[var(--text-secondary)]">Cidades</h2>
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
-                    <th className="px-4 py-2 font-medium">Cidade</th>
-                    <th className="px-4 py-2 font-medium">Estado</th>
-                    <th className="px-4 py-2 font-medium text-right">Sessões</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {geografia.map((g) => (
-                    <tr key={`${g.cidade}-${g.estado}`} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
-                      <td className="px-4 py-2 font-medium">{g.cidade}</td>
-                      <td className="px-4 py-2 text-[var(--text-secondary)]">{g.estado}</td>
-                      <td className="px-4 py-2 text-right tabular-nums">{g.sessoes.toLocaleString("pt-BR")}</td>
-                    </tr>
-                  ))}
-                  {geografia.length === 0 && (
-                    <tr><td colSpan={3} className="px-4 py-6 text-center text-[var(--text-muted)]">Sem dado no período.</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+                ))}
+                {geografia.length === 0 && (
+                  <tr><td colSpan={3} className="px-4 py-6 text-center text-[var(--text-muted)]">Sem dado no período.</td></tr>
+                )}
+              </tbody>
+            </table>
           </section>
 
-          <section className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-            <h2 className="border-b border-[var(--gridline)] px-4 py-2.5 text-sm font-medium text-[var(--text-secondary)]">
+          {/* ── Comportamento: o que o visitante vê ── */}
+          <h2 className="mb-3 text-base font-semibold">Comportamento — o que o visitante vê</h2>
+          <section className="mb-10 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+            <h3 className="border-b border-[var(--gridline)] px-4 py-2.5 text-sm font-medium text-[var(--text-secondary)]">
               Páginas mais vistas
-            </h2>
+            </h3>
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
@@ -340,6 +316,36 @@ export default async function AnalyticsSitePage({
                 )}
               </tbody>
             </table>
+          </section>
+
+          {/* ── Conversão: o desfecho ── */}
+          <h2 className="mb-3 text-base font-semibold">Conversão — o funil de compra</h2>
+          <section className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
+            <p className="mb-4 text-xs text-[var(--text-muted)]">
+              Viu o produto → carrinho → checkout → pagamento → compra. O número à direita de cada
+              barra é a queda em relação à etapa anterior.
+            </p>
+            <div className="flex flex-col gap-2">
+              {funil.map((f) => (
+                <div key={f.etapa} className="flex items-center gap-3">
+                  <div className="w-32 shrink-0 text-xs text-[var(--text-secondary)]">{f.etapa}</div>
+                  <div className="h-6 flex-1 overflow-hidden rounded-md bg-[var(--page-plane)]">
+                    <div
+                      className="flex h-full items-center justify-end rounded-md bg-[var(--series-1)] px-2 text-xs font-medium text-white"
+                      style={{ width: `${Math.max(f.pctDoInicio ?? 0, 3)}%` }}
+                    >
+                      {f.eventos.toLocaleString("pt-BR")}
+                    </div>
+                  </div>
+                  <div className="w-16 shrink-0 text-right text-xs tabular-nums text-[var(--text-muted)]">
+                    {f.pctDoAnterior != null ? formatPct(f.pctDoAnterior) : "início"}
+                  </div>
+                </div>
+              ))}
+              {funil.every((f) => f.eventos === 0) && (
+                <p className="text-sm text-[var(--text-muted)]">Sem evento de e-commerce no período.</p>
+              )}
+            </div>
           </section>
         </>
       )}
