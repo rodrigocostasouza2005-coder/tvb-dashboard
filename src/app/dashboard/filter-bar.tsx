@@ -64,6 +64,7 @@ export function FilterBar({
   showTabelaPreco = false,
   showColecao = true,
   showDate = true,
+  extraParams,
 }: {
   action: string;
   stores: Store[];
@@ -75,6 +76,11 @@ export function FilterBar({
   showTabelaPreco?: boolean;
   showColecao?: boolean;
   showDate?: boolean;
+  // Params extras que não são filtro em si (ex: "modo" da Reposição) mas precisam sobreviver ao
+  // GET de "Aplicar" — sem isso, o form só reenvia os campos que ele mesmo controla e o resto da
+  // URL (fora dos search params nativos do browser) se perde. Opcional, default nenhum, então
+  // não muda nada pras páginas que não passam isso.
+  extraParams?: Record<string, string>;
 }) {
   const selectedStores = new Set(filters.storeIds ?? []);
   const selectedMarcas = new Set(filters.marcas ?? []);
@@ -90,6 +96,8 @@ export function FilterBar({
       {/* Se o Aplicar veio daqui, o painel de filtros estava aberto — mantém aberto na
           próxima página em vez de fechar (CollapsibleFilters lê isso via searchParams). */}
       <input type="hidden" name="filtros" value="1" />
+      {extraParams &&
+        Object.entries(extraParams).map(([key, value]) => <input key={key} type="hidden" name={key} value={value} />)}
 
       <FilterDropdown label="Loja" count={selectedStores.size}>
         <CheckboxList name="store" options={stores.map((s) => ({ value: s.id, label: s.name }))} selected={selectedStores} />

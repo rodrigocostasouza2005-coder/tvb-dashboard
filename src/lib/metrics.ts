@@ -1266,6 +1266,135 @@ export async function getReplenishment(filters: Pick<DashboardFilters, "storeIds
     .sort((a, b) => a.storeName.localeCompare(b.storeName) || b.falta - a.falta);
 }
 
+// Modo "Vendas" da tela de Reposição (2026-09-15, pedido do Rodrigo) — NÃO mexe em
+// getReplenishment acima, que continua sendo o modo "Estoque Mínimo" de sempre, inalterado.
+// Em vez de só comparar estoque atual com o mínimo cadastrado, olha o giro (vendas no período ÷
+// estoque disponível) pra não sugerir reposição de produto/tamanho que tem mínimo baixo mas não
+// está vendendo, e pra pegar o caso oposto (giro alto, estoque baixo) mesmo quando o mínimo
+// cadastrado não pegaria. Reaproveita a mesma régua de "dias de cobertura" já validada em
+// getStockCoverage (crítico < 7 dias, atenção < 30, ok/excesso >= 30) pra manter o conceito
+// consistente com o resto do app, em vez de inventar um limiar novo.
+export type ReplenishmentMotivo = "alto-giro" | "baixo-giro" | "estoque-suficiente" | "sem-necessidade";
+
+export const REPLENISHMENT_MOTIVO_LABEL: Record<ReplenishmentMotivo, string> = {
+  "alto-giro": "Alto giro / estoque baixo",
+  "baixo-giro": "Baixo giro",
+  "estoque-suficiente": "Estoque suficiente",
+  "sem-necessidade": "Sem necessidade de reposição",
+};
+
+export async function getReplenishmentPorVendas(
+  filters: Pick<DashboardFilters, "storeIds" | "grupoIn" | "from" | "to"> & { colecaoIn?: string[] }
+) {
+  // Mesma busca-base do modo Estoque Mínimo (estoque, regras de mínimo, lojas, estoque no CD) —
+  // duplicada aqui de propósito em vez de extrair uma função compartilhada, pra não arriscar
+  // alterar o comportamento de getReplenishment ao mexer num helper comum.
+  const [stockAll, minimumRules, allStores] = await Promise.all([
+    latestStockSnapshots(filters),
+    prisma.stockMinimumRule.findMany(),
+    prisma.store.findMany(),
+  ]);
+  const stock = filters.colecaoIn?.length ? stockAll.filter((s) => s.colecao && filters.colecaoIn!.includes(s.colecao)) : stockAll;
+  const storeName = new Map(allStores.map((s) => [s.id, s.name]));
+
+  const cdStore = allStores.find((s) => s.code === "CD") ?? null;
+  const cdStockByCod = new Map<string, number>();
+  if (cdStore) {
+    const cdStock = await latestStockSnapshots({ storeIds: [cdStore.id] });
+    for (const s of cdStock) cdStockByCod.set(s.cod, s.quantidadeDisponivel);
+  }
+
+  // Mesmo piso de "não compensa repor agora" do modo Estoque Mínimo (menos de 4 unidades na
+  // origem), aplicado antes de buscar vendas pra não gastar query com quem não vai aparecer.
+  const candidatos = stock.filter((s) => (!cdStore || s.storeId !== cdStore.id) && (cdStockByCod.get(s.cod) ?? 0) > 3);
+  if (candidatos.length === 0) return [];
+
+  const storeIds = [...new Set(candidatos.map((s) => s.storeId))];
+  const cods = [...new Set(candidatos.map((s) => s.cod))];
+  const diasNoPeriodo = Math.max(1, (filters.to.getTime() - filters.from.getTime()) / 86400000);
+
+  const saleAgg = await prisma.sale.groupBy({
+    by: ["storeId", "cod"],
+    where: { storeId: { in: storeIds }, cod: { in: cods }, saleDate: { gte: filters.from, lte: filters.to } },
+    _sum: { quantidade: true },
+  });
+  const vendasByKey = new Map(saleAgg.map((s) => [`${s.storeId}::${s.cod}`, s._sum.quantidade ?? 0]));
+
+  // Alvo de cobertura pra calcular a quantidade sugerida: o mesmo "ok" (30 dias) usado em
+  // getStockCoverage — repõe até dar pra aguentar um mês no ritmo de venda atual.
+  const ALVO_DIAS_COBERTURA = 30;
+
+  // Só entra na tabela quem já estava abaixo do mínimo (candidato de sempre) OU quem o giro real
+  // aponta como zona crítica/atenção (< 30 dias de cobertura) — evita listar o estoque inteiro da
+  // loja (a imensa maioria nunca esteve em risco por nenhum dos dois critérios). O motivo de cada
+  // linha explica se a sugestão realmente se sustenta ou não, incluindo os "falsos positivos" do
+  // mínimo (produto abaixo do mínimo cadastrado mas com giro baixo/zero).
+  return candidatos
+    .map((s) => {
+      const estoqueMinimo = matchMinimumRule(minimumRules, s) ?? s.estoqueMinimo;
+      const estoqueNaOrigem = cdStockByCod.get(s.cod) ?? 0;
+      const vendasNoPeriodo = vendasByKey.get(`${s.storeId}::${s.cod}`) ?? 0;
+      const avgDailySales = vendasNoPeriodo / diasNoPeriodo;
+      const diasCobertura = avgDailySales > 0 ? s.quantidadeDisponivel / avgDailySales : null;
+      const abaixoDoMinimo = estoqueMinimo != null && s.quantidadeDisponivel < estoqueMinimo;
+
+      if (!abaixoDoMinimo && (diasCobertura === null || diasCobertura >= 30)) return null;
+
+      let motivo: ReplenishmentMotivo;
+      let sugerirReposicao: boolean;
+      if (diasCobertura === null) {
+        // Estava abaixo do mínimo (senão nem chegava aqui, ver filtro acima) mas não vendeu nada
+        // no período — o mínimo baixo sozinho não justifica reposição.
+        motivo = "sem-necessidade";
+        sugerirReposicao = false;
+      } else if (diasCobertura < 7) {
+        motivo = "alto-giro";
+        sugerirReposicao = true;
+      } else if (diasCobertura < 30) {
+        // Zona de atenção: giro real existe mas não é urgente por si só — só sugere se também
+        // estiver abaixo do mínimo cadastrado (usa o mínimo como referência extra aqui, sem
+        // deixar ele decidir sozinho, exatamente como o Rodrigo pediu).
+        sugerirReposicao = abaixoDoMinimo;
+        motivo = sugerirReposicao ? "alto-giro" : "baixo-giro";
+      } else {
+        // >= 30 dias de cobertura: só chegou aqui por estar abaixo do mínimo cadastrado, mas no
+        // ritmo de venda real isso não é risco — falso positivo do modo Estoque Mínimo.
+        motivo = "estoque-suficiente";
+        sugerirReposicao = false;
+      }
+
+      const alvoUnidades = Math.ceil(avgDailySales * ALVO_DIAS_COBERTURA);
+      const necessidade = Math.max(alvoUnidades, estoqueMinimo ?? 0) - s.quantidadeDisponivel;
+      const falta = sugerirReposicao ? Math.min(Math.max(necessidade, 1), estoqueNaOrigem) : 0;
+
+      return {
+        storeId: s.storeId,
+        storeName: storeName.get(s.storeId) ?? s.storeId,
+        produto: s.produto,
+        grupo: s.grupo,
+        colecao: s.colecao,
+        tamanho: s.tamanho,
+        quantidadeDisponivel: s.quantidadeDisponivel,
+        estoqueMinimo: estoqueMinimo ?? 0,
+        vendasNoPeriodo,
+        diasCobertura: diasCobertura === null ? null : Math.round(diasCobertura),
+        falta,
+        sugerirReposicao,
+        motivo,
+        origemSugerida: cdStore?.name ?? "—",
+        estoqueNaOrigem,
+      };
+    })
+    .filter((r): r is NonNullable<typeof r> => r !== null)
+    // Sugestões reais primeiro, depois por loja, maior falta primeiro dentro de cada grupo.
+    .sort(
+      (a, b) =>
+        Number(b.sugerirReposicao) - Number(a.sugerirReposicao) ||
+        a.storeName.localeCompare(b.storeName) ||
+        b.falta - a.falta
+    );
+}
+
 // "Cliente novo" = a 1ª compra dele de todas (sem limite de data, dentro do resto do filtro
 // aplicado — loja/marca/tabela de preço/grupo) caiu dentro do período escolhido no filtro de
 // data. Pedido do Rodrigo em 2026-08-11 pro card da Visão Geral.

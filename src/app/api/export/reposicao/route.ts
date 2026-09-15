@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { getSessionUser } from "@/lib/auth";
-import { getReplenishment } from "@/lib/metrics";
+import { getReplenishment, getReplenishmentPorVendas, REPLENISHMENT_MOTIVO_LABEL } from "@/lib/metrics";
 import { getGrupoRestriction, getStoreRestriction } from "@/lib/permissions";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import ExcelJS from "exceljs";
@@ -37,57 +37,108 @@ export async function GET(request: NextRequest) {
   const colecaoParam = rawParams.colecao;
   const colecaoIn = Array.isArray(colecaoParam) ? colecaoParam : typeof colecaoParam === "string" && colecaoParam ? [colecaoParam] : undefined;
   const filters = { ...parseFilters(rawParams, { allowedStoreIds: allowedStores }), grupoIn, colecaoIn };
-  const rows = (await getReplenishment(filters)).slice().sort((a, b) =>
-    a.storeName.localeCompare(b.storeName, "pt-BR") ||
-    a.grupo.localeCompare(b.grupo, "pt-BR") ||
-    a.produto.localeCompare(b.produto, "pt-BR") ||
-    compareTamanho(a.tamanho, b.tamanho)
-  );
+  // "modo" segue o mesmo default da tela (Estoque Mínimo) — exportar sem esse param continua
+  // exportando exatamente como sempre.
+  const modo = rawParams.modo === "vendas" ? "vendas" : "minimo";
 
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet("Reposição");
 
-  const header = [
-    "Loja",
-    "Coleção",
-    "Grupo",
-    "Produto",
-    "Tamanho",
-    "Estoque atual",
-    "Estoque mínimo",
-    "Repor",
-    "Origem sugerida",
-    "Estoque na origem",
-  ];
+  if (modo === "minimo") {
+    const rows = (await getReplenishment(filters)).slice().sort((a, b) =>
+      a.storeName.localeCompare(b.storeName, "pt-BR") ||
+      a.grupo.localeCompare(b.grupo, "pt-BR") ||
+      a.produto.localeCompare(b.produto, "pt-BR") ||
+      compareTamanho(a.tamanho, b.tamanho)
+    );
 
-  // Coluna "Repor" é a 8ª (1-based)
-  const REPOR_COL = 8;
+    const header = [
+      "Loja",
+      "Coleção",
+      "Grupo",
+      "Produto",
+      "Tamanho",
+      "Estoque atual",
+      "Estoque mínimo",
+      "Repor",
+      "Origem sugerida",
+      "Estoque na origem",
+    ];
 
-  ws.addRow(header);
+    // Coluna "Repor" é a 8ª (1-based)
+    const REPOR_COL = 8;
 
-  for (const r of rows) {
-    ws.addRow([
-      r.storeName,
-      r.colecao ?? "",
-      r.grupo,
-      r.produto,
-      r.tamanho ?? "",
-      r.quantidadeDisponivel,
-      r.estoqueMinimo,
-      r.falta,
-      r.origemSugerida,
-      r.estoqueNaOrigem,
-    ]);
+    ws.addRow(header);
+
+    for (const r of rows) {
+      ws.addRow([
+        r.storeName,
+        r.colecao ?? "",
+        r.grupo,
+        r.produto,
+        r.tamanho ?? "",
+        r.quantidadeDisponivel,
+        r.estoqueMinimo,
+        r.falta,
+        r.origemSugerida,
+        r.estoqueNaOrigem,
+      ]);
+    }
+
+    ws.getColumn(REPOR_COL).eachCell((cell) => {
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFF00" } };
+    });
+  } else {
+    const rows = (await getReplenishmentPorVendas(filters)).slice().sort((a, b) =>
+      a.storeName.localeCompare(b.storeName, "pt-BR") ||
+      a.grupo.localeCompare(b.grupo, "pt-BR") ||
+      a.produto.localeCompare(b.produto, "pt-BR") ||
+      compareTamanho(a.tamanho, b.tamanho)
+    );
+
+    const header = [
+      "Loja",
+      "Coleção",
+      "Grupo",
+      "Produto",
+      "Tamanho",
+      "Estoque atual",
+      "Vendido no período",
+      "Dias de cobertura",
+      "Estoque mínimo",
+      "Repor",
+      "Motivo",
+      "Origem sugerida",
+      "Estoque na origem",
+    ];
+
+    // Coluna "Repor" é a 10ª (1-based)
+    const REPOR_COL = 10;
+
+    ws.addRow(header);
+
+    for (const r of rows) {
+      ws.addRow([
+        r.storeName,
+        r.colecao ?? "",
+        r.grupo,
+        r.produto,
+        r.tamanho ?? "",
+        r.quantidadeDisponivel,
+        r.vendasNoPeriodo,
+        r.diasCobertura ?? "",
+        r.estoqueMinimo,
+        r.sugerirReposicao ? r.falta : 0,
+        REPLENISHMENT_MOTIVO_LABEL[r.motivo],
+        r.origemSugerida,
+        r.estoqueNaOrigem,
+      ]);
+    }
+
+    ws.getColumn(REPOR_COL).eachCell((cell) => {
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFF00" } };
+    });
   }
-
-  // Pintar toda a coluna "Repor" de amarelo (cabeçalho + dados)
-  ws.getColumn(REPOR_COL).eachCell((cell) => {
-    cell.fill = {
-      type: "pattern",
-      pattern: "solid",
-      fgColor: { argb: "FFFFFF00" },
-    };
-  });
 
   const buf = await wb.xlsx.writeBuffer();
 
