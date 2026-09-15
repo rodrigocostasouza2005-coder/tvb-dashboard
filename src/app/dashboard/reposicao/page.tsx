@@ -1,13 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
-import {
-  getReplenishment,
-  getReplenishmentPorVendas,
-  getStores,
-  getMarcas,
-  getDistinctColecoes,
-  REPLENISHMENT_MOTIVO_LABEL,
-  type ReplenishmentMotivo,
-} from "@/lib/metrics";
+import { getReplenishment, getReplenishmentPorVendas, getStores, getMarcas, getDistinctColecoes } from "@/lib/metrics";
 import { getGrupoRestriction, getStoreRestriction } from "@/lib/permissions";
 import { parseFilters, toDateInputValue, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
@@ -15,13 +7,6 @@ import { FilterBar } from "../filter-bar";
 import { CollapsibleFilters } from "../collapsible-filters";
 import { MetricBarChart } from "../metric-bar-chart";
 import { ModoToggle, parseReplenishmentModo } from "./modo-toggle";
-
-const MOTIVO_COLOR_VAR: Record<ReplenishmentMotivo, string> = {
-  "alto-giro": "--status-critical",
-  "baixo-giro": "--status-warning",
-  "estoque-suficiente": "--status-good",
-  "sem-necessidade": "--text-muted",
-};
 
 export default async function ReposicaoPage({
   searchParams,
@@ -44,7 +29,8 @@ export default async function ReposicaoPage({
 
   // Modo "Estoque Mínimo" continua chamando exatamente a mesma função de sempre
   // (getReplenishment), sem nenhuma alteração de comportamento. "Vendas" é um cálculo à parte
-  // (getReplenishmentPorVendas) — ver lib/metrics.ts.
+  // (getReplenishmentPorVendas) — ver lib/metrics.ts. getReplenishmentPorVendas já devolve só o
+  // que precisa ser reposto (vendeu mais na semana passada do que tem disponível agora).
   const [rowsMinimo, rowsVendas, stores, marcas, colecoes] = await Promise.all([
     modo === "minimo" ? getReplenishment(filters) : Promise.resolve([]),
     modo === "vendas" ? getReplenishmentPorVendas(filters) : Promise.resolve([]),
@@ -60,10 +46,7 @@ export default async function ReposicaoPage({
   exportParams.set("to", toDateInputValue(filters.to));
   exportParams.set("modo", modo);
 
-  // Modo Vendas só mostra o que realmente vai ser reposto — o resto (baixo giro, estoque
-  // suficiente, sem venda no período) fica de fora da tabela, pedido do Rodrigo em 2026-09-15.
-  const rowsVendasVisiveis = rowsVendas.filter((r) => r.sugerirReposicao);
-  const chartRows = modo === "minimo" ? rowsMinimo : rowsVendasVisiveis;
+  const rows = modo === "minimo" ? rowsMinimo : rowsVendas;
 
   return (
     <div>
@@ -77,7 +60,7 @@ export default async function ReposicaoPage({
           colecoes={colecoes}
           filters={filters}
           showMarca={false}
-          showDate={modo === "vendas"}
+          showDate={false}
           extraParams={{ modo }}
         />
       </CollapsibleFilters>
@@ -91,9 +74,8 @@ export default async function ReposicaoPage({
             </>
           ) : (
             <>
-              Calculado pelo giro real (vendas no período ÷ estoque disponível), não só pelo
-              estoque mínimo cadastrado — evita sugerir reposição de item parado só porque o
-              mínimo é baixo, e pega item de giro alto mesmo quando o mínimo não pegaria.
+              Cruza a venda da semana anterior com o estoque disponível agora — só aparece quem
+              vendeu mais na semana passada do que tem disponível.
             </>
           )}
         </p>
@@ -105,25 +87,12 @@ export default async function ReposicaoPage({
         </a>
       </div>
 
-      {modo === "vendas" && (
-        <div
-          className="mb-3 inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium"
-          style={{
-            borderColor: "var(--series-1)",
-            backgroundColor: "color-mix(in srgb, var(--series-1) 10%, transparent)",
-            color: "var(--series-1)",
-          }}
-        >
-          Calculado pelo modo Vendas (giro) — período: {toDateInputValue(filters.from)} a {toDateInputValue(filters.to)}
-        </div>
-      )}
-
-      {chartRows.length > 0 && (
+      {rows.length > 0 && (
         <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
           <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Unidades faltando por loja</h2>
           <MetricBarChart
             data={Object.entries(
-              chartRows.reduce<Record<string, number>>((acc, r) => {
+              rows.reduce<Record<string, number>>((acc, r) => {
                 acc[r.storeName] = (acc[r.storeName] ?? 0) + r.falta;
                 return acc;
               }, {})
@@ -179,7 +148,7 @@ export default async function ReposicaoPage({
         </div>
       ) : (
         <div className="overflow-x-auto overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-          <table className="w-full min-w-[1100px] text-sm">
+          <table className="w-full min-w-[950px] text-sm">
             <thead>
               <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
                 <th className="px-4 py-2 font-medium">Loja</th>
@@ -187,48 +156,32 @@ export default async function ReposicaoPage({
                 <th className="px-4 py-2 font-medium">Produto</th>
                 <th className="px-4 py-2 font-medium">Tamanho</th>
                 <th className="px-4 py-2 font-medium">Estoque</th>
-                <th className="px-4 py-2 font-medium">Vendido no período</th>
-                <th className="px-4 py-2 font-medium">Dias de cobertura</th>
+                <th className="px-4 py-2 font-medium">Vendido na semana anterior</th>
                 <th className="px-4 py-2 font-medium">Repor</th>
-                <th className="px-4 py-2 font-medium">Mínimo</th>
-                <th className="px-4 py-2 font-medium">Motivo</th>
                 <th className="px-4 py-2 font-medium">Repor de</th>
                 <th className="px-4 py-2 font-medium">Disponível na origem</th>
               </tr>
             </thead>
             <tbody>
-              {rowsVendasVisiveis.map((r, i) => (
+              {rowsVendas.map((r, i) => (
                 <tr key={i} className="border-b border-[var(--gridline)] last:border-0">
                   <td className="px-4 py-2">{r.storeName}</td>
                   <td className="px-4 py-2 text-[var(--text-secondary)]">{r.colecao ?? "—"}</td>
                   <td className="px-4 py-2 font-medium">{r.produto}</td>
                   <td className="px-4 py-2">{r.tamanho ?? "—"}</td>
                   <td className="px-4 py-2 tabular-nums">{r.quantidadeDisponivel}</td>
-                  <td className="px-4 py-2 tabular-nums">{r.vendasNoPeriodo}</td>
-                  <td className="px-4 py-2 tabular-nums">{r.diasCobertura ?? "—"}</td>
+                  <td className="px-4 py-2 tabular-nums">{r.vendasSemanaAnterior}</td>
                   <td className="px-4 py-2 tabular-nums font-medium" style={{ color: "var(--status-critical)" }}>
                     {r.falta}
-                  </td>
-                  <td className="px-4 py-2 tabular-nums">{r.estoqueMinimo}</td>
-                  <td className="px-4 py-2">
-                    <span
-                      className="rounded-full px-2 py-0.5 text-xs font-medium"
-                      style={{
-                        backgroundColor: `color-mix(in srgb, var(${MOTIVO_COLOR_VAR[r.motivo]}) 15%, transparent)`,
-                        color: `var(${MOTIVO_COLOR_VAR[r.motivo]})`,
-                      }}
-                    >
-                      {REPLENISHMENT_MOTIVO_LABEL[r.motivo]}
-                    </span>
                   </td>
                   <td className="px-4 py-2 text-[var(--text-secondary)]">{r.origemSugerida}</td>
                   <td className="px-4 py-2 tabular-nums">{r.estoqueNaOrigem}</td>
                 </tr>
               ))}
-              {rowsVendasVisiveis.length === 0 && (
+              {rowsVendas.length === 0 && (
                 <tr>
-                  <td colSpan={12} className="px-4 py-6 text-center text-[var(--text-muted)]">
-                    Nada com risco de ruptura pelo giro real no filtro atual.
+                  <td colSpan={9} className="px-4 py-6 text-center text-[var(--text-muted)]">
+                    Nada vendeu mais que o estoque disponível na semana anterior.
                   </td>
                 </tr>
               )}
