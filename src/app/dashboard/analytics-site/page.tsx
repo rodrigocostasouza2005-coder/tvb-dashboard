@@ -3,6 +3,11 @@ import {
   getConversoes,
   getOrigemTrafego,
   getPaginasMaisVistas,
+  getDispositivos,
+  getGeografia,
+  getNovoVsRecorrente,
+  getCampanhas,
+  getFunilCompra,
 } from "@/lib/connectors/google-analytics";
 import { getSessionUser } from "@/lib/auth";
 import { requireTabAccess } from "@/lib/tabs";
@@ -34,15 +39,26 @@ export default async function AnalyticsSitePage({
   let sessoesPorDia: Awaited<ReturnType<typeof getSessoesPorDia>> = [];
   let origemTrafego: Awaited<ReturnType<typeof getOrigemTrafego>> = [];
   let paginasMaisVistas: Awaited<ReturnType<typeof getPaginasMaisVistas>> = [];
+  let dispositivos: Awaited<ReturnType<typeof getDispositivos>> = [];
+  let geografia: Awaited<ReturnType<typeof getGeografia>> = [];
+  let novoVsRecorrente: Awaited<ReturnType<typeof getNovoVsRecorrente>> = [];
+  let campanhas: Awaited<ReturnType<typeof getCampanhas>> = [];
+  let funil: Awaited<ReturnType<typeof getFunilCompra>> = [];
 
   try {
     const range = { startDate: from, endDate: to };
-    [conversao, sessoesPorDia, origemTrafego, paginasMaisVistas] = await Promise.all([
-      getConversoes(range),
-      getSessoesPorDia(range),
-      getOrigemTrafego(range),
-      getPaginasMaisVistas(range, 20),
-    ]);
+    [conversao, sessoesPorDia, origemTrafego, paginasMaisVistas, dispositivos, geografia, novoVsRecorrente, campanhas, funil] =
+      await Promise.all([
+        getConversoes(range),
+        getSessoesPorDia(range),
+        getOrigemTrafego(range),
+        getPaginasMaisVistas(range, 20),
+        getDispositivos(range),
+        getGeografia(range, 15),
+        getNovoVsRecorrente(range),
+        getCampanhas(range, 15),
+        getFunilCompra(range),
+      ]);
   } catch (e) {
     erro = e instanceof Error ? e.message : "Erro desconhecido buscando dados do Google Analytics.";
   }
@@ -106,6 +122,35 @@ export default async function AnalyticsSitePage({
           </section>
 
           <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
+            <h2 className="mb-1 text-sm font-medium text-[var(--text-secondary)]">Funil de compra</h2>
+            <p className="mb-3 text-xs text-[var(--text-muted)]">
+              Viu o produto → carrinho → checkout → pagamento → compra. % embaixo de cada barra é
+              a queda em relação à etapa anterior.
+            </p>
+            <div className="flex flex-col gap-2">
+              {funil.map((f) => (
+                <div key={f.etapa} className="flex items-center gap-3">
+                  <div className="w-32 shrink-0 text-xs text-[var(--text-secondary)]">{f.etapa}</div>
+                  <div className="h-6 flex-1 overflow-hidden rounded-md bg-[var(--page-plane)]">
+                    <div
+                      className="flex h-full items-center justify-end rounded-md bg-[var(--series-1)] px-2 text-xs font-medium text-white"
+                      style={{ width: `${Math.max(f.pctDoInicio ?? 0, 3)}%` }}
+                    >
+                      {f.eventos.toLocaleString("pt-BR")}
+                    </div>
+                  </div>
+                  <div className="w-16 shrink-0 text-right text-xs tabular-nums text-[var(--text-muted)]">
+                    {f.pctDoAnterior != null ? formatPct(f.pctDoAnterior) : "—"}
+                  </div>
+                </div>
+              ))}
+              {funil.every((f) => f.eventos === 0) && (
+                <p className="text-sm text-[var(--text-muted)]">Sem evento de e-commerce no período.</p>
+              )}
+            </div>
+          </section>
+
+          <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
             <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Sessões por dia</h2>
             <IndicatorChart
               data={sessoesChartData}
@@ -151,6 +196,114 @@ export default async function AnalyticsSitePage({
                     <tr>
                       <td colSpan={5} className="px-4 py-6 text-center text-[var(--text-muted)]">Sem dado no período.</td>
                     </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+              <h2 className="border-b border-[var(--gridline)] px-4 py-2.5 text-sm font-medium text-[var(--text-secondary)]">Dispositivo</h2>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
+                    <th className="px-4 py-2 font-medium">Dispositivo</th>
+                    <th className="px-4 py-2 font-medium text-right">Sessões</th>
+                    <th className="px-4 py-2 font-medium text-right">% do total</th>
+                    <th className="px-4 py-2 font-medium text-right">Conversões</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {dispositivos.map((d) => (
+                    <tr key={d.dispositivo} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
+                      <td className="px-4 py-2 font-medium">{d.dispositivo}</td>
+                      <td className="px-4 py-2 text-right tabular-nums">{d.sessoes.toLocaleString("pt-BR")}</td>
+                      <td className="px-4 py-2 text-right tabular-nums text-[var(--text-secondary)]">{formatPct(d.participacaoPct)}</td>
+                      <td className="px-4 py-2 text-right tabular-nums">{d.conversoes.toLocaleString("pt-BR")}</td>
+                    </tr>
+                  ))}
+                  {dispositivos.length === 0 && (
+                    <tr><td colSpan={4} className="px-4 py-6 text-center text-[var(--text-muted)]">Sem dado no período.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+              <h2 className="border-b border-[var(--gridline)] px-4 py-2.5 text-sm font-medium text-[var(--text-secondary)]">Novo vs. Recorrente</h2>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
+                    <th className="px-4 py-2 font-medium">Visitante</th>
+                    <th className="px-4 py-2 font-medium text-right">Sessões</th>
+                    <th className="px-4 py-2 font-medium text-right">% do total</th>
+                    <th className="px-4 py-2 font-medium text-right">Conversões</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {novoVsRecorrente.map((n) => (
+                    <tr key={n.tipo} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
+                      <td className="px-4 py-2 font-medium">{n.tipo}</td>
+                      <td className="px-4 py-2 text-right tabular-nums">{n.sessoes.toLocaleString("pt-BR")}</td>
+                      <td className="px-4 py-2 text-right tabular-nums text-[var(--text-secondary)]">{formatPct(n.participacaoPct)}</td>
+                      <td className="px-4 py-2 text-right tabular-nums">{n.conversoes.toLocaleString("pt-BR")}</td>
+                    </tr>
+                  ))}
+                  {novoVsRecorrente.length === 0 && (
+                    <tr><td colSpan={4} className="px-4 py-6 text-center text-[var(--text-muted)]">Sem dado no período.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+              <h2 className="border-b border-[var(--gridline)] px-4 py-2.5 text-sm font-medium text-[var(--text-secondary)]">Campanhas</h2>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
+                    <th className="px-4 py-2 font-medium">Campanha</th>
+                    <th className="px-4 py-2 font-medium text-right">Sessões</th>
+                    <th className="px-4 py-2 font-medium text-right">Conversões</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {campanhas.map((c) => (
+                    <tr key={c.campanha} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
+                      <td className="px-4 py-2 font-medium">{c.campanha}</td>
+                      <td className="px-4 py-2 text-right tabular-nums">{c.sessoes.toLocaleString("pt-BR")}</td>
+                      <td className="px-4 py-2 text-right tabular-nums">{c.conversoes.toLocaleString("pt-BR")}</td>
+                    </tr>
+                  ))}
+                  {campanhas.length === 0 && (
+                    <tr><td colSpan={3} className="px-4 py-6 text-center text-[var(--text-muted)]">Sem dado no período.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+              <h2 className="border-b border-[var(--gridline)] px-4 py-2.5 text-sm font-medium text-[var(--text-secondary)]">Cidades</h2>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
+                    <th className="px-4 py-2 font-medium">Cidade</th>
+                    <th className="px-4 py-2 font-medium">Estado</th>
+                    <th className="px-4 py-2 font-medium text-right">Sessões</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {geografia.map((g) => (
+                    <tr key={`${g.cidade}-${g.estado}`} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
+                      <td className="px-4 py-2 font-medium">{g.cidade}</td>
+                      <td className="px-4 py-2 text-[var(--text-secondary)]">{g.estado}</td>
+                      <td className="px-4 py-2 text-right tabular-nums">{g.sessoes.toLocaleString("pt-BR")}</td>
+                    </tr>
+                  ))}
+                  {geografia.length === 0 && (
+                    <tr><td colSpan={3} className="px-4 py-6 text-center text-[var(--text-muted)]">Sem dado no período.</td></tr>
                   )}
                 </tbody>
               </table>

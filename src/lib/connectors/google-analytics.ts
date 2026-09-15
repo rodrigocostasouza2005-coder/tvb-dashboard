@@ -8,9 +8,10 @@
 // - GA4_SERVICE_ACCOUNT_KEY: o JSON inteiro da conta de serviço (numa linha só), com acesso de
 //   Leitor concedido na propriedade (Admin → Acesso à propriedade).
 //
-// AINDA NÃO TESTADO CONTRA A API REAL — escrito em cima da documentação oficial da GA4 Data API
-// (@google-analytics/data). Testar assim que a chave de serviço estiver configurada, antes de
-// confiar nos números.
+// Testado ao vivo contra a propriedade real em 2026-09-14 (sessões, conversão, origem de
+// tráfego, páginas, dispositivo, geografia, novo vs recorrente, campanhas e funil de compra —
+// confirmado que a Shopify manda os eventos de e-commerce certos: view_item, add_to_cart,
+// begin_checkout, add_payment_info, purchase).
 
 import { BetaAnalyticsDataClient } from "@google-analytics/data";
 
@@ -147,4 +148,156 @@ export async function getPaginasMaisVistas(range: Ga4DateRange, limit = 20): Pro
     titulo: r.dimensionValues?.[1].value ?? "",
     visualizacoes: Number(r.metricValues?.[0].value ?? 0),
   }));
+}
+
+const DISPOSITIVO_TRADUZIDO: Record<string, string> = {
+  mobile: "Celular",
+  desktop: "Computador",
+  tablet: "Tablet",
+  "smart tv": "Smart TV",
+};
+
+export type Ga4Dispositivo = { dispositivo: string; sessoes: number; conversoes: number; participacaoPct: number };
+
+export async function getDispositivos(range: Ga4DateRange): Promise<Ga4Dispositivo[]> {
+  const [response] = await getClient().runReport({
+    property: getPropertyPath(),
+    dateRanges: [range],
+    dimensions: [{ name: "deviceCategory" }],
+    metrics: [{ name: "sessions" }, { name: "conversions" }],
+    orderBys: [{ metric: { metricName: "sessions" }, desc: true }],
+  });
+
+  const rows = response.rows ?? [];
+  const total = rows.reduce((s, r) => s + Number(r.metricValues?.[0].value ?? 0), 0);
+  return rows.map((r) => {
+    const sessoes = Number(r.metricValues?.[0].value ?? 0);
+    const bruto = r.dimensionValues?.[0].value ?? "(não definido)";
+    return {
+      dispositivo: DISPOSITIVO_TRADUZIDO[bruto] ?? bruto,
+      sessoes,
+      conversoes: Number(r.metricValues?.[1].value ?? 0),
+      participacaoPct: total > 0 ? (sessoes / total) * 100 : 0,
+    };
+  });
+}
+
+export type Ga4Cidade = { cidade: string; estado: string; sessoes: number };
+
+export async function getGeografia(range: Ga4DateRange, limit = 15): Promise<Ga4Cidade[]> {
+  const [response] = await getClient().runReport({
+    property: getPropertyPath(),
+    dateRanges: [range],
+    dimensions: [{ name: "city" }, { name: "region" }],
+    metrics: [{ name: "sessions" }],
+    orderBys: [{ metric: { metricName: "sessions" }, desc: true }],
+    limit,
+  });
+
+  return (response.rows ?? [])
+    .map((r) => ({
+      cidade: r.dimensionValues?.[0].value ?? "(não definida)",
+      // GA4 devolve "State of Rio de Janeiro" em inglês — tira só o prefixo (não tenta
+      // traduzir o nome do estado inteiro, pra não arriscar erro nos que fogem do padrão).
+      estado: (r.dimensionValues?.[1].value ?? "").replace(/^State of /, ""),
+      sessoes: Number(r.metricValues?.[0].value ?? 0),
+    }))
+    .filter((c) => c.cidade !== "(not set)");
+}
+
+const VISITANTE_TRADUZIDO: Record<string, string> = { new: "Novo", returning: "Recorrente" };
+
+export type Ga4NovoVsRecorrente = { tipo: string; sessoes: number; conversoes: number; participacaoPct: number };
+
+export async function getNovoVsRecorrente(range: Ga4DateRange): Promise<Ga4NovoVsRecorrente[]> {
+  const [response] = await getClient().runReport({
+    property: getPropertyPath(),
+    dateRanges: [range],
+    dimensions: [{ name: "newVsReturning" }],
+    metrics: [{ name: "sessions" }, { name: "conversions" }],
+  });
+
+  // "(not set)" e string vazia são a mesma coisa aqui (sessão sem esse dado) — ambas descartadas.
+  const rows = (response.rows ?? []).filter((r) => {
+    const v = r.dimensionValues?.[0].value;
+    return v && v !== "(not set)";
+  });
+  const total = rows.reduce((s, r) => s + Number(r.metricValues?.[0].value ?? 0), 0);
+  return rows.map((r) => {
+    const sessoes = Number(r.metricValues?.[0].value ?? 0);
+    const bruto = r.dimensionValues?.[0].value ?? "";
+    return {
+      tipo: VISITANTE_TRADUZIDO[bruto] ?? bruto,
+      sessoes,
+      conversoes: Number(r.metricValues?.[1].value ?? 0),
+      participacaoPct: total > 0 ? (sessoes / total) * 100 : 0,
+    };
+  });
+}
+
+export type Ga4Campanha = { campanha: string; sessoes: number; conversoes: number };
+
+export async function getCampanhas(range: Ga4DateRange, limit = 15): Promise<Ga4Campanha[]> {
+  const [response] = await getClient().runReport({
+    property: getPropertyPath(),
+    dateRanges: [range],
+    dimensions: [{ name: "sessionCampaignName" }],
+    metrics: [{ name: "sessions" }, { name: "conversions" }],
+    orderBys: [{ metric: { metricName: "sessions" }, desc: true }],
+    limit,
+  });
+
+  return (response.rows ?? [])
+    .map((r) => ({
+      campanha: r.dimensionValues?.[0].value ?? "(não definida)",
+      sessoes: Number(r.metricValues?.[0].value ?? 0),
+      conversoes: Number(r.metricValues?.[1].value ?? 0),
+    }))
+    .filter((c) => c.campanha !== "(not set)");
+}
+
+// Funil padrão de e-commerce do GA4 — confirmado em 2026-09-14 que a Shopify manda esses 5
+// eventos pra essa propriedade (não é garantido em toda loja Shopify, depende de como o pixel
+// do GA4 foi instalado). Se um evento não existir, a contagem vem 0 (não quebra o funil, só
+// mostra 0% de conversão daquele degrau em diante).
+const ETAPAS_FUNIL = ["view_item", "add_to_cart", "begin_checkout", "add_payment_info", "purchase"] as const;
+const ETAPA_LABEL: Record<(typeof ETAPAS_FUNIL)[number], string> = {
+  view_item: "Viu o produto",
+  add_to_cart: "Add. ao carrinho",
+  begin_checkout: "Iniciou checkout",
+  add_payment_info: "Add. pagamento",
+  purchase: "Comprou",
+};
+
+export type Ga4EtapaFunil = { etapa: string; eventos: number; pctDoInicio: number | null; pctDoAnterior: number | null };
+
+export async function getFunilCompra(range: Ga4DateRange): Promise<Ga4EtapaFunil[]> {
+  const [response] = await getClient().runReport({
+    property: getPropertyPath(),
+    dateRanges: [range],
+    dimensions: [{ name: "eventName" }],
+    metrics: [{ name: "eventCount" }],
+    dimensionFilter: {
+      filter: { fieldName: "eventName", inListFilter: { values: [...ETAPAS_FUNIL] } },
+    },
+  });
+
+  const porEvento = new Map<string, number>();
+  for (const r of response.rows ?? []) {
+    porEvento.set(r.dimensionValues?.[0].value ?? "", Number(r.metricValues?.[0].value ?? 0));
+  }
+
+  const primeiraEtapa = porEvento.get(ETAPAS_FUNIL[0]) ?? 0;
+  let anterior: number | null = null;
+  return ETAPAS_FUNIL.map((etapa) => {
+    const eventos = porEvento.get(etapa) ?? 0;
+    const pctDoAnterior = anterior != null && anterior > 0 ? (eventos / anterior) * 100 : null;
+    anterior = eventos;
+    return {
+      etapa: ETAPA_LABEL[etapa],
+      eventos,
+      pctDoInicio: primeiraEtapa > 0 ? (eventos / primeiraEtapa) * 100 : null,
+      pctDoAnterior,
+    };
+  });
 }
