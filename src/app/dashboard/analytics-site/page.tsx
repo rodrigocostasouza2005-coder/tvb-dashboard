@@ -9,6 +9,8 @@ import {
   getAnuncios,
   getFunilCompra,
 } from "@/lib/connectors/google-analytics";
+import { getFotosPorNomeConjunto } from "@/lib/connectors/meta-ads";
+import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { requireTabAccess } from "@/lib/tabs";
 import { defaultRecentRangeStr, type RawSearchParams } from "@/lib/filters";
@@ -61,6 +63,16 @@ export default async function AnalyticsSitePage({
       ]);
   } catch (e) {
     erro = e instanceof Error ? e.message : "Erro desconhecido buscando dados do Google Analytics.";
+  }
+
+  // Fotos dos conjuntos de anúncio (Meta Ads) — busca separada da GA4, com try/catch próprio:
+  // se o Meta Ads falhar (token vencido, credencial faltando etc), a página continua mostrando
+  // o resto dos dados do GA4 normalmente, só sem foto (fallback silencioso pra "sem foto").
+  let fotosPorConjunto = new Map<string, string[]>();
+  try {
+    fotosPorConjunto = await getFotosPorNomeConjunto(prisma, anuncios.map((a) => a.anuncio));
+  } catch {
+    // sem foto — não quebra a página.
   }
 
   const sessoesChartData = sessoesPorDia.map((s) => ({ day: s.data, sessoes: s.sessoes }));
@@ -178,24 +190,49 @@ export default async function AnalyticsSitePage({
 
           <section className="mb-10 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
             <h3 className="border-b border-[var(--gridline)] px-4 py-2.5 text-sm font-medium text-[var(--text-secondary)]">Anúncios</h3>
+            <p className="px-4 pt-2 text-xs text-[var(--text-muted)]">
+              O rastreamento identifica o conjunto de anúncios, não o anúncio individual — as fotos
+              são dos anúncios ativos daquele conjunto agora (pode ter mais de um criativo rodando).
+            </p>
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
                   <th className="px-4 py-2 font-medium">Anúncio</th>
+                  <th className="px-4 py-2 font-medium">Fotos ativas</th>
                   <th className="px-4 py-2 font-medium text-right">Sessões</th>
                   <th className="px-4 py-2 font-medium text-right">Conversões</th>
                 </tr>
               </thead>
               <tbody>
-                {anuncios.map((a) => (
-                  <tr key={a.anuncio} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
-                    <td className="px-4 py-2 font-medium">{a.anuncio}</td>
-                    <td className="px-4 py-2 text-right tabular-nums">{a.sessoes.toLocaleString("pt-BR")}</td>
-                    <td className="px-4 py-2 text-right tabular-nums">{a.conversoes.toLocaleString("pt-BR")}</td>
-                  </tr>
-                ))}
+                {anuncios.map((a) => {
+                  const fotos = fotosPorConjunto.get(a.anuncio) ?? [];
+                  return (
+                    <tr key={a.anuncio} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
+                      <td className="px-4 py-2 font-medium">{a.anuncio}</td>
+                      <td className="px-4 py-2">
+                        {fotos.length > 0 ? (
+                          <div className="flex gap-1.5">
+                            {fotos.map((url, i) => (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                key={i}
+                                src={url}
+                                alt={`Criativo ${i + 1} de ${a.anuncio}`}
+                                className="h-10 w-10 rounded border border-[var(--border)] object-cover"
+                              />
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-[var(--text-muted)]">sem foto</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-2 text-right tabular-nums">{a.sessoes.toLocaleString("pt-BR")}</td>
+                      <td className="px-4 py-2 text-right tabular-nums">{a.conversoes.toLocaleString("pt-BR")}</td>
+                    </tr>
+                  );
+                })}
                 {anuncios.length === 0 && (
-                  <tr><td colSpan={3} className="px-4 py-6 text-center text-[var(--text-muted)]">Sem dado no período.</td></tr>
+                  <tr><td colSpan={4} className="px-4 py-6 text-center text-[var(--text-muted)]">Sem dado no período.</td></tr>
                 )}
               </tbody>
             </table>
