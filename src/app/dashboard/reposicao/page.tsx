@@ -60,7 +60,10 @@ export default async function ReposicaoPage({
   exportParams.set("to", toDateInputValue(filters.to));
   exportParams.set("modo", modo);
 
-  const chartRows = modo === "minimo" ? rowsMinimo : rowsVendas.filter((r) => r.sugerirReposicao);
+  // Modo Vendas só mostra o que realmente vai ser reposto — o resto (baixo giro, estoque
+  // suficiente, sem venda no período) fica de fora da tabela, pedido do Rodrigo em 2026-09-15.
+  const rowsVendasVisiveis = rowsVendas.filter((r) => r.sugerirReposicao);
+  const chartRows = modo === "minimo" ? rowsMinimo : rowsVendasVisiveis;
 
   return (
     <div>
@@ -194,7 +197,7 @@ export default async function ReposicaoPage({
               </tr>
             </thead>
             <tbody>
-              {rowsVendas.map((r, i) => (
+              {rowsVendasVisiveis.map((r, i) => (
                 <tr key={i} className="border-b border-[var(--gridline)] last:border-0">
                   <td className="px-4 py-2">{r.storeName}</td>
                   <td className="px-4 py-2 text-[var(--text-secondary)]">{r.colecao ?? "—"}</td>
@@ -203,11 +206,8 @@ export default async function ReposicaoPage({
                   <td className="px-4 py-2 tabular-nums">{r.quantidadeDisponivel}</td>
                   <td className="px-4 py-2 tabular-nums">{r.vendasNoPeriodo}</td>
                   <td className="px-4 py-2 tabular-nums">{r.diasCobertura ?? "—"}</td>
-                  <td
-                    className="px-4 py-2 tabular-nums font-medium"
-                    style={{ color: r.sugerirReposicao ? "var(--status-critical)" : "var(--text-muted)" }}
-                  >
-                    {r.sugerirReposicao ? r.falta : "—"}
+                  <td className="px-4 py-2 tabular-nums font-medium" style={{ color: "var(--status-critical)" }}>
+                    {r.falta}
                   </td>
                   <td className="px-4 py-2 tabular-nums">{r.estoqueMinimo}</td>
                   <td className="px-4 py-2">
@@ -225,7 +225,7 @@ export default async function ReposicaoPage({
                   <td className="px-4 py-2 tabular-nums">{r.estoqueNaOrigem}</td>
                 </tr>
               ))}
-              {rowsVendas.length === 0 && (
+              {rowsVendasVisiveis.length === 0 && (
                 <tr>
                   <td colSpan={12} className="px-4 py-6 text-center text-[var(--text-muted)]">
                     Nada com risco de ruptura pelo giro real no filtro atual.

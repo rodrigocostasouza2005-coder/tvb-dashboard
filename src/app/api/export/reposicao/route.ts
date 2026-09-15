@@ -89,12 +89,16 @@ export async function GET(request: NextRequest) {
       cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFF00" } };
     });
   } else {
-    const rows = (await getReplenishmentPorVendas(filters)).slice().sort((a, b) =>
-      a.storeName.localeCompare(b.storeName, "pt-BR") ||
-      a.grupo.localeCompare(b.grupo, "pt-BR") ||
-      a.produto.localeCompare(b.produto, "pt-BR") ||
-      compareTamanho(a.tamanho, b.tamanho)
-    );
+    // Só exporta o que realmente vai ser reposto — mesmo recorte que a tela mostra desde
+    // 2026-09-15 (Rodrigo pediu pra não listar o que não vai ser reposto).
+    const rows = (await getReplenishmentPorVendas(filters))
+      .filter((r) => r.sugerirReposicao)
+      .sort((a, b) =>
+        a.storeName.localeCompare(b.storeName, "pt-BR") ||
+        a.grupo.localeCompare(b.grupo, "pt-BR") ||
+        a.produto.localeCompare(b.produto, "pt-BR") ||
+        compareTamanho(a.tamanho, b.tamanho)
+      );
 
     const header = [
       "Loja",
@@ -128,7 +132,7 @@ export async function GET(request: NextRequest) {
         r.vendasNoPeriodo,
         r.diasCobertura ?? "",
         r.estoqueMinimo,
-        r.sugerirReposicao ? r.falta : 0,
+        r.falta,
         REPLENISHMENT_MOTIVO_LABEL[r.motivo],
         r.origemSugerida,
         r.estoqueNaOrigem,
