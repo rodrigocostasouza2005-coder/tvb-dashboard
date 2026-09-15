@@ -235,25 +235,28 @@ export async function getNovoVsRecorrente(range: Ga4DateRange): Promise<Ga4NovoV
   });
 }
 
-export type Ga4Campanha = { campanha: string; sessoes: number; conversoes: number };
+// Origem/Mídia da sessão (2026-09-15, pedido do Rodrigo — substituiu a tabela de Campanhas, que
+// ele achou menos útil). "sessionSourceMedium" já vem combinado do GA4 no formato "origem / mídia"
+// (ex: "google / cpc", "instagram / social", "(direct) / (none)") — mais granular que o canal
+// (getOrigemTrafego, que agrupa tipo "Paid Search"/"Organic Social") e não depende de UTM de
+// campanha estar preenchido.
+export type Ga4OrigemMidia = { origemMidia: string; sessoes: number; conversoes: number };
 
-export async function getCampanhas(range: Ga4DateRange, limit = 15): Promise<Ga4Campanha[]> {
+export async function getOrigemMidia(range: Ga4DateRange, limit = 15): Promise<Ga4OrigemMidia[]> {
   const [response] = await getClient().runReport({
     property: getPropertyPath(),
     dateRanges: [range],
-    dimensions: [{ name: "sessionCampaignName" }],
+    dimensions: [{ name: "sessionSourceMedium" }],
     metrics: [{ name: "sessions" }, { name: "conversions" }],
     orderBys: [{ metric: { metricName: "sessions" }, desc: true }],
     limit,
   });
 
-  return (response.rows ?? [])
-    .map((r) => ({
-      campanha: r.dimensionValues?.[0].value ?? "(não definida)",
-      sessoes: Number(r.metricValues?.[0].value ?? 0),
-      conversoes: Number(r.metricValues?.[1].value ?? 0),
-    }))
-    .filter((c) => c.campanha !== "(not set)");
+  return (response.rows ?? []).map((r) => ({
+    origemMidia: r.dimensionValues?.[0].value ?? "(não definida)",
+    sessoes: Number(r.metricValues?.[0].value ?? 0),
+    conversoes: Number(r.metricValues?.[1].value ?? 0),
+  }));
 }
 
 // Funil padrão de e-commerce do GA4 — confirmado em 2026-09-14 que a Shopify manda esses 5
