@@ -6,7 +6,7 @@ import {
   getDispositivos,
   getGeografia,
   getNovoVsRecorrente,
-  getOrigemMidia,
+  getAnuncios,
   getFunilCompra,
 } from "@/lib/connectors/google-analytics";
 import { getSessionUser } from "@/lib/auth";
@@ -42,12 +42,12 @@ export default async function AnalyticsSitePage({
   let dispositivos: Awaited<ReturnType<typeof getDispositivos>> = [];
   let geografia: Awaited<ReturnType<typeof getGeografia>> = [];
   let novoVsRecorrente: Awaited<ReturnType<typeof getNovoVsRecorrente>> = [];
-  let origemMidia: Awaited<ReturnType<typeof getOrigemMidia>> = [];
+  let anuncios: Awaited<ReturnType<typeof getAnuncios>> = [];
   let funil: Awaited<ReturnType<typeof getFunilCompra>> = [];
 
   try {
     const range = { startDate: from, endDate: to };
-    [conversao, sessoesPorDia, origemTrafego, paginasMaisVistas, dispositivos, geografia, novoVsRecorrente, origemMidia, funil] =
+    [conversao, sessoesPorDia, origemTrafego, paginasMaisVistas, dispositivos, geografia, novoVsRecorrente, anuncios, funil] =
       await Promise.all([
         getConversoes(range),
         getSessoesPorDia(range),
@@ -56,7 +56,7 @@ export default async function AnalyticsSitePage({
         getDispositivos(range),
         getGeografia(range, 15),
         getNovoVsRecorrente(range),
-        getOrigemMidia(range, 15),
+        getAnuncios(range, 15),
         getFunilCompra(range),
       ]);
   } catch (e) {
@@ -177,24 +177,49 @@ export default async function AnalyticsSitePage({
           </section>
 
           <section className="mb-10 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-            <h3 className="border-b border-[var(--gridline)] px-4 py-2.5 text-sm font-medium text-[var(--text-secondary)]">Origem/Mídia da sessão</h3>
+            <h3 className="border-b border-[var(--gridline)] px-4 py-2.5 text-sm font-medium text-[var(--text-secondary)]">Canal</h3>
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
-                  <th className="px-4 py-2 font-medium">Origem / Mídia</th>
+                  <th className="px-4 py-2 font-medium">Canal</th>
                   <th className="px-4 py-2 font-medium text-right">Sessões</th>
                   <th className="px-4 py-2 font-medium text-right">Conversões</th>
                 </tr>
               </thead>
               <tbody>
-                {origemMidia.map((o) => (
-                  <tr key={o.origemMidia} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
-                    <td className="px-4 py-2 font-medium">{o.origemMidia}</td>
+                {origemTrafego.map((o) => (
+                  <tr key={o.canal} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
+                    <td className="px-4 py-2 font-medium">{o.canal}</td>
                     <td className="px-4 py-2 text-right tabular-nums">{o.sessoes.toLocaleString("pt-BR")}</td>
                     <td className="px-4 py-2 text-right tabular-nums">{o.conversoes.toLocaleString("pt-BR")}</td>
                   </tr>
                 ))}
-                {origemMidia.length === 0 && (
+                {origemTrafego.length === 0 && (
+                  <tr><td colSpan={3} className="px-4 py-6 text-center text-[var(--text-muted)]">Sem dado no período.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </section>
+
+          <section className="mb-10 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+            <h3 className="border-b border-[var(--gridline)] px-4 py-2.5 text-sm font-medium text-[var(--text-secondary)]">Anúncios</h3>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
+                  <th className="px-4 py-2 font-medium">Anúncio</th>
+                  <th className="px-4 py-2 font-medium text-right">Sessões</th>
+                  <th className="px-4 py-2 font-medium text-right">Conversões</th>
+                </tr>
+              </thead>
+              <tbody>
+                {anuncios.map((a) => (
+                  <tr key={a.anuncio} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
+                    <td className="px-4 py-2 font-medium">{a.anuncio}</td>
+                    <td className="px-4 py-2 text-right tabular-nums">{a.sessoes.toLocaleString("pt-BR")}</td>
+                    <td className="px-4 py-2 text-right tabular-nums">{a.conversoes.toLocaleString("pt-BR")}</td>
+                  </tr>
+                ))}
+                {anuncios.length === 0 && (
                   <tr><td colSpan={3} className="px-4 py-6 text-center text-[var(--text-muted)]">Sem dado no período.</td></tr>
                 )}
               </tbody>

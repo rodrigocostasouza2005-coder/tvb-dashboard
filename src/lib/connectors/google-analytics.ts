@@ -235,28 +235,35 @@ export async function getNovoVsRecorrente(range: Ga4DateRange): Promise<Ga4NovoV
   });
 }
 
-// Origem/Mídia da sessão (2026-09-15, pedido do Rodrigo — substituiu a tabela de Campanhas, que
-// ele achou menos útil). "sessionSourceMedium" já vem combinado do GA4 no formato "origem / mídia"
-// (ex: "google / cpc", "instagram / social", "(direct) / (none)") — mais granular que o canal
-// (getOrigemTrafego, que agrupa tipo "Paid Search"/"Organic Social") e não depende de UTM de
-// campanha estar preenchido.
-export type Ga4OrigemMidia = { origemMidia: string; sessoes: number; conversoes: number };
+// Anúncios (2026-09-15, pedido do Rodrigo — ele corrigiu o pedido anterior: a tabela que tinha
+// virado "Origem/Mídia da sessão" devia virar "Anúncios"; ver getOrigemTrafego, reaproveitada
+// pra virar a tabela de "Canal"). Testado contra a propriedade real antes de escolher a
+// dimensão: "googleAdsAdGroupName" (grupo de anúncio do Google Ads linkado) cobre quase nada —
+// só ~170 sessões de busca paga do Google, o resto "(not set)" porque a maior parte do tráfego
+// pago vem do Meta/Instagram, que essa propriedade não tem linkado via Google Ads. Já
+// "sessionManualAdContent" (o parâmetro utm_content usado nos links dos anúncios) tem nome de
+// anúncio de verdade e cobre a esmagadora maioria do tráfego pago (ex: "BOHO_ADV+ Conjunto de
+// anúncios", "INT_Addtocart_Teste") — é o que o time de marketing já usa pra identificar peça
+// criativa, então é isso que vira "anúncio" aqui.
+export type Ga4Anuncio = { anuncio: string; sessoes: number; conversoes: number };
 
-export async function getOrigemMidia(range: Ga4DateRange, limit = 15): Promise<Ga4OrigemMidia[]> {
+export async function getAnuncios(range: Ga4DateRange, limit = 15): Promise<Ga4Anuncio[]> {
   const [response] = await getClient().runReport({
     property: getPropertyPath(),
     dateRanges: [range],
-    dimensions: [{ name: "sessionSourceMedium" }],
+    dimensions: [{ name: "sessionManualAdContent" }],
     metrics: [{ name: "sessions" }, { name: "conversions" }],
     orderBys: [{ metric: { metricName: "sessions" }, desc: true }],
     limit,
   });
 
-  return (response.rows ?? []).map((r) => ({
-    origemMidia: r.dimensionValues?.[0].value ?? "(não definida)",
-    sessoes: Number(r.metricValues?.[0].value ?? 0),
-    conversoes: Number(r.metricValues?.[1].value ?? 0),
-  }));
+  return (response.rows ?? [])
+    .map((r) => ({
+      anuncio: r.dimensionValues?.[0].value ?? "(não definido)",
+      sessoes: Number(r.metricValues?.[0].value ?? 0),
+      conversoes: Number(r.metricValues?.[1].value ?? 0),
+    }))
+    .filter((a) => a.anuncio !== "(not set)");
 }
 
 // Funil padrão de e-commerce do GA4 — confirmado em 2026-09-14 que a Shopify manda esses 5
