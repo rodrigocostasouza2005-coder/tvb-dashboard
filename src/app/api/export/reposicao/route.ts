@@ -107,6 +107,7 @@ export async function GET(request: NextRequest) {
       "Estoque atual",
       "Vendido na semana anterior",
       "Repor",
+      "Motivo",
       "Origem sugerida",
       "Estoque na origem",
     ];
@@ -126,6 +127,7 @@ export async function GET(request: NextRequest) {
         r.quantidadeDisponivel,
         r.vendasSemanaAnterior,
         r.falta,
+        r.zerouSemHistoricoDeVenda ? "Zerado, sem venda pra medir (usou o mínimo)" : "Vendeu mais que o estoque",
         r.origemSugerida,
         r.estoqueNaOrigem,
       ]);

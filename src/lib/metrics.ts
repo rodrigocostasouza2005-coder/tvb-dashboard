@@ -1271,12 +1271,22 @@ export async function getReplenishment(filters: Pick<DashboardFilters, "storeIds
 // Rodrigo simplificou o pedido depois de ver a 1ª versão (que usava "dias de cobertura" e o
 // mínimo cadastrado como referência extra): esquece o mínimo, olha só a venda da semana anterior
 // cruzada com o estoque atual. Vendeu mais na semana passada do que tem disponível agora? Repõe.
-// Não vendeu mais do que tem? Não repõe. Decisão binária, sem zona de atenção nem referência ao
-// mínimo — mais simples de confiar do que o cálculo por dias de cobertura da 1ª versão.
+// Não vendeu mais do que tem? Não repõe.
+//
+// Exceção (mesma sessão, Rodrigo pegou o ponto cego): se zerou E não vendeu NADA na semana — não
+// porque não tinha demanda, mas porque não tinha o que vender — a venda registrada não reflete a
+// demanda real. Sem essa exceção, o item nunca mais aparece pra repor (zerou → vendeu 0 → não
+// sugere → continua zerado → vendeu 0 de novo → ...), bola de neve. Nesse caso específico usa o
+// mínimo cadastrado como rede de segurança (única situação em que esse modo ainda olha pro
+// mínimo).
 export async function getReplenishmentPorVendas(
   filters: Pick<DashboardFilters, "storeIds" | "grupoIn"> & { colecaoIn?: string[] }
 ) {
-  const [stockAll, allStores] = await Promise.all([latestStockSnapshots(filters), prisma.store.findMany()]);
+  const [stockAll, minimumRules, allStores] = await Promise.all([
+    latestStockSnapshots(filters),
+    prisma.stockMinimumRule.findMany(),
+    prisma.store.findMany(),
+  ]);
   const stock = filters.colecaoIn?.length ? stockAll.filter((s) => s.colecao && filters.colecaoIn!.includes(s.colecao)) : stockAll;
   const storeName = new Map(allStores.map((s) => [s.id, s.name]));
 
@@ -1311,9 +1321,16 @@ export async function getReplenishmentPorVendas(
     .map((s) => {
       const estoqueNaOrigem = cdStockByCod.get(s.cod) ?? 0;
       const vendasSemanaAnterior = vendasByKey.get(`${s.storeId}::${s.cod}`) ?? 0;
-      // Precisa repor o suficiente pra cobrir se a próxima semana repetir o mesmo ritmo.
-      const necessidade = vendasSemanaAnterior - s.quantidadeDisponivel;
-      const falta = Math.min(Math.max(necessidade, 1), estoqueNaOrigem);
+      const zerouSemHistoricoDeVenda = s.quantidadeDisponivel === 0 && vendasSemanaAnterior === 0;
+      const estoqueMinimo = zerouSemHistoricoDeVenda ? matchMinimumRule(minimumRules, s) ?? s.estoqueMinimo : null;
+
+      const precisaRepor = vendasSemanaAnterior > s.quantidadeDisponivel || (zerouSemHistoricoDeVenda && !!estoqueMinimo);
+
+      // Caso normal: repõe o suficiente pra cobrir se a próxima semana repetir o mesmo ritmo.
+      // Caso "zerou sem venda pra basear a conta": não tem dado de demanda real, usa o mínimo.
+      const necessidade = zerouSemHistoricoDeVenda ? estoqueMinimo ?? 0 : vendasSemanaAnterior - s.quantidadeDisponivel;
+      const falta = precisaRepor ? Math.min(Math.max(necessidade, 1), estoqueNaOrigem) : 0;
+
       return {
         storeId: s.storeId,
         storeName: storeName.get(s.storeId) ?? s.storeId,
@@ -1323,14 +1340,14 @@ export async function getReplenishmentPorVendas(
         tamanho: s.tamanho,
         quantidadeDisponivel: s.quantidadeDisponivel,
         vendasSemanaAnterior,
+        zerouSemHistoricoDeVenda,
         falta,
+        precisaRepor,
         origemSugerida: cdStore?.name ?? "—",
         estoqueNaOrigem,
       };
     })
-    // Só entra quem vendeu mais na semana passada do que tem disponível agora — é isso que
-    // define "precisa repor" nesse modo, nada mais.
-    .filter((r) => r.vendasSemanaAnterior > r.quantidadeDisponivel)
+    .filter((r) => r.precisaRepor)
     .sort((a, b) => a.storeName.localeCompare(b.storeName) || b.falta - a.falta);
 }
 

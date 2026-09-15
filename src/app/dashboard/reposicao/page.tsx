@@ -75,7 +75,9 @@ export default async function ReposicaoPage({
           ) : (
             <>
               Cruza a venda da semana anterior com o estoque disponível agora — só aparece quem
-              vendeu mais na semana passada do que tem disponível.
+              vendeu mais na semana passada do que tem disponível. Exceção: quem zerou e não teve
+              nenhuma venda na semana (sem estoque pra vender, então a venda registrada não mede a
+              demanda real) usa o mínimo cadastrado como rede de segurança.
             </>
           )}
         </p>
@@ -170,7 +172,25 @@ export default async function ReposicaoPage({
                   <td className="px-4 py-2 font-medium">{r.produto}</td>
                   <td className="px-4 py-2">{r.tamanho ?? "—"}</td>
                   <td className="px-4 py-2 tabular-nums">{r.quantidadeDisponivel}</td>
-                  <td className="px-4 py-2 tabular-nums">{r.vendasSemanaAnterior}</td>
+                  <td className="px-4 py-2 tabular-nums">
+                    {r.zerouSemHistoricoDeVenda ? (
+                      <span className="inline-flex items-center gap-1.5">
+                        0
+                        <span
+                          className="rounded-full px-1.5 py-0.5 text-[10px] font-medium"
+                          style={{
+                            backgroundColor: "color-mix(in srgb, var(--status-warning) 15%, transparent)",
+                            color: "var(--status-warning)",
+                          }}
+                          title="Zerou e não teve venda registrada na semana — não dá pra medir demanda real sem estoque pra vender. Repor aqui usa o mínimo cadastrado."
+                        >
+                          zerado, sem venda pra medir
+                        </span>
+                      </span>
+                    ) : (
+                      r.vendasSemanaAnterior
+                    )}
+                  </td>
                   <td className="px-4 py-2 tabular-nums font-medium" style={{ color: "var(--status-critical)" }}>
                     {r.falta}
                   </td>
