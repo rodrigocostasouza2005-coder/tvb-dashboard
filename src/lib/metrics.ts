@@ -1331,7 +1331,12 @@ export async function getReplenishmentPorVendas(
       const estoqueNaOrigem = cdStockByCod.get(s.cod) ?? 0;
       const vendasNoPeriodo = vendasByKey.get(`${s.storeId}::${s.cod}`) ?? 0;
       const mediaVendaSemanal = vendasNoPeriodo / JANELA_GIRO_SEMANAS;
-      const semGiroNoPeriodo = vendasNoPeriodo === 0;
+      // Só é "sem dado confiável pra medir demanda" quando também está zerado — item com 5
+      // unidades em estoque que não vendeu em 8 semanas não é falta de estoque pra vender, é
+      // falta de demanda mesmo, não deveria repor (bug introduzido na reescrita de 2026-09-16,
+      // achado pelo Rodrigo: "Boné Atlantico" na Barra tinha 5 em estoque, vendeu 0, e mesmo
+      // assim pedia repor 5 só porque o mínimo era maior).
+      const semGiroNoPeriodo = vendasNoPeriodo === 0 && s.quantidadeDisponivel === 0;
       const precisaReporPelaVenda = mediaVendaSemanal > s.quantidadeDisponivel;
 
       const estoqueMinimo = matchMinimumRule(minimumRules, s) ?? s.estoqueMinimo;
