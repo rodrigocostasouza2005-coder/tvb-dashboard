@@ -39,10 +39,12 @@ const MOTIVO_TO_TEMPLATE_KEY: Record<string, TemplateKey> = {
 
 // Gancho de estoque (pedido do Rodrigo em 2026-09-08): quando o tamanho que o cliente mais
 // compra do produto favorito dele ainda está disponível na loja principal, entra uma linha a
-// mais — só nesse caso (nunca inventa disponibilidade, ver getTamanhoEstoqueParaClientes). Só
-// nos 2 motivos "esfriando" — os motivos com cupom (pedido dele em 2026-09-09) não ganham esse
-// gancho. Não é texto editável na tela de templates, é sempre acrescentado pelo código.
-const MOTIVOS_COM_GANCHO_ESTOQUE = new Set<TemplateKey>(["vip_esfriando", "recorrente_esfriando"]);
+// mais — só nesse caso (nunca inventa disponibilidade, ver getTamanhoEstoqueParaClientes). Não é
+// texto editável na tela de templates, é sempre acrescentado pelo código.
+// "vip_esfriando" saiu dessa lista em 2026-09-16: o texto desse template virou uma mensagem de
+// acesso antecipado a lançamento, não mais "você sumiu, volta aqui" — o gancho de "ainda temos
+// seu tamanho" não combina com esse tom novo. Continua só em "recorrente_esfriando".
+const MOTIVOS_COM_GANCHO_ESTOQUE = new Set<TemplateKey>(["recorrente_esfriando"]);
 
 // Mensagem pronta por motivo, pré-preenchida no WhatsApp — o texto em si vem de
 // MensagemTemplate (editável em /dashboard/marketing-templates, pedido do Rodrigo em
