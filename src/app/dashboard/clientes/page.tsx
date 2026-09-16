@@ -64,11 +64,11 @@ export default async function ClientesPage({
     getTabelasPreco(allowedTabelasPreco),
     getDistinctColecoes(),
     getVendedores(allowedStores),
-    getClienteRetencaoVarejo(filters),
+    getClienteRetencaoVarejo(filters, vendedor),
     getAniversariantesDoMes(filters, vendedor, aniversarioMes),
-    getClientesCrmOverview(filters, canal),
+    getClientesCrmOverview(filters, canal, vendedor),
     getReceitaHistoricaExterna(),
-    getDistribuicaoPedidos(filters, canal),
+    getDistribuicaoPedidos(filters, canal, vendedor),
   ]);
   const showFinancials = canSeeFinancials(user);
 

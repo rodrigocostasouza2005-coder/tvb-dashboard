@@ -1799,10 +1799,19 @@ export type ClientesCrmOverview = {
   receitaMediaPorCliente: number;
 };
 
-export async function getClientesCrmOverview(filters: DashboardFilters, canal: Canal = "todos"): Promise<ClientesCrmOverview> {
+// vendedor opcional (2026-09-16, achado do Rodrigo): a aba Clientes tem um filtro de vendedor
+// que só afetava a tabela "Top clientes" e os Aniversariantes — os KPIs do topo (Clientes
+// ativos/Novos/Recorrentes/Ticket médio) ficavam sempre iguais independente do vendedor
+// escolhido, parecendo que o filtro "não funcionava".
+export async function getClientesCrmOverview(
+  filters: DashboardFilters,
+  canal: Canal = "todos",
+  vendedor?: string | null
+): Promise<ClientesCrmOverview> {
   const where: Prisma.SaleWhereInput = {
     ...saleWhere(filters),
     clienteNome: { not: null },
+    ...(vendedor ? { vendedor } : {}),
     ...(canal !== "todos" ? { AND: [await canalWhere(canal)] } : {}),
   };
 
@@ -4633,13 +4642,16 @@ export async function getClienteRetencaoPorMes(filters: DashboardFilters) {
 // Estoque×Vendas, que continuam só com dado do DAPIC. Chaves normalizadas (trim+upper) em tudo
 // agora — precisa pra casar nome do vnda com nome do DAPIC (que também tem variação de
 // capitalização entre si).
-export async function getClienteRetencaoVarejo(filters: DashboardFilters) {
+// vendedor opcional (2026-09-16) — mesmo motivo de getClientesCrmOverview. Não filtra o site
+// antigo (vendaHistoricaExterna) por vendedor, mesma exceção já existente pra loja/marca/tabela/
+// grupo — esse dado não tem vendedor atribuído.
+export async function getClienteRetencaoVarejo(filters: DashboardFilters, vendedor?: string | null) {
   const baseWhere = saleWhere(filters);
   const norm = (n: string) => n.trim().toUpperCase();
 
   const [salesInPeriod, allTimeFirstSale, historicoInPeriod, historicoAllTimeFirst] = await Promise.all([
     prisma.sale.findMany({
-      where: { ...baseWhere, clienteNome: { not: null } },
+      where: { ...baseWhere, clienteNome: { not: null }, ...(vendedor ? { vendedor } : {}) },
       select: { clienteNome: true, saleDate: true, dapicVendaId: true },
     }),
     prisma.sale.groupBy({
@@ -4651,6 +4663,7 @@ export async function getClienteRetencaoVarejo(filters: DashboardFilters) {
         ...(filters.marcas !== undefined ? { marca: { in: filters.marcas } } : {}),
         ...(filters.tabelasPreco !== undefined ? { tabelaPreco: { in: filters.tabelasPreco } } : {}),
         ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
+        ...(vendedor ? { vendedor } : {}),
       },
       _min: { saleDate: true },
     }),
@@ -4744,11 +4757,18 @@ export type DistribuicaoPedidosItem = { pedidos: string; clientes: number; pct: 
 // cima). Pedido do Rodrigo em 2026-08-31. Bucket final "11+" pra não esticar a tabela pela cauda
 // longa (tem cliente com 1778 pedidos — revenda/atacadista).
 const DISTRIBUICAO_PEDIDOS_CAP = 10;
-export async function getDistribuicaoPedidos(filters: DashboardFilters, canal: Canal = "todos"): Promise<DistribuicaoPedidosItem[]> {
+// vendedor opcional (2026-09-16) — mesmo motivo de getClientesCrmOverview. O histórico do site
+// antigo (abaixo) continua sem esse filtro, mesma exceção já existente pra loja/marca/tabela/grupo.
+export async function getDistribuicaoPedidos(
+  filters: DashboardFilters,
+  canal: Canal = "todos",
+  vendedor?: string | null
+): Promise<DistribuicaoPedidosItem[]> {
   const allTime: DashboardFilters = { ...filters, from: new Date(0), to: new Date() };
   const where: Prisma.SaleWhereInput = {
     ...saleWhere(allTime),
     clienteNome: { not: null },
+    ...(vendedor ? { vendedor } : {}),
     ...(canal !== "todos" ? { AND: [await canalWhere(canal)] } : {}),
   };
   const rows = await prisma.sale.findMany({ where, select: { clienteNome: true, storeId: true, dapicVendaId: true } });
