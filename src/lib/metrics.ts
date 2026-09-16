@@ -1274,23 +1274,19 @@ export async function getReplenishment(filters: Pick<DashboardFilters, "storeIds
 
 // Modo "Vendas" da tela de Reposição (2026-09-15, pedido do Rodrigo) — NÃO mexe em
 // getReplenishment acima, que continua sendo o modo "Estoque Mínimo" de sempre, inalterado.
-// Rodrigo simplificou o pedido depois de ver a 1ª versão (que usava "dias de cobertura" e o
-// mínimo cadastrado como referência extra): esquece o mínimo, olha só a venda da semana anterior
-// cruzada com o estoque atual. Vendeu mais na semana passada do que tem disponível agora? Repõe.
-// Não vendeu mais do que tem? Não repõe.
-//
-// Duas correções em cima disso, mesma sessão de 2026-09-15:
-// 1) Se zerou E não vendeu NADA na semana — não porque não tinha demanda, mas porque não tinha o
-//    que vender — a venda registrada não reflete a demanda real. Sem isso o item nunca mais
-//    aparece pra repor (zerou → vendeu 0 → não sugere → continua zerado → ...), bola de neve.
-// 2) Rodrigo achou baixo demais a sugestão de "Ultra Light Treko Reverso" tam. 40 na Barra: só
-//    vendeu 1 na semana, estoque 0, sugeria repor 1 — sem folga nenhuma, mesmo o CD tendo de
-//    sobra (29 un.) e existindo um mínimo cadastrado de 4 pra esse grupo/tamanho. Regra dele:
-//    "se tiver muito em estoque [no CD], vale a pena colocar o mínimo". Então quando o CD tem
-//    folga suficiente pra cobrir o mínimo cadastrado sem chegar perto do próprio piso, a
-//    sugestão vira o MAIOR entre "cobrir a venda da semana" e "chegar no mínimo" — não só a
-//    conta seca da venda. Quando o CD não tem folga (ou não existe mínimo cadastrado), continua
-//    só pela venda, como antes.
+// Histórico de ajustes nessa mesma sessão, cada um corrigindo um ponto cego real que o Rodrigo
+// achou testando:
+// 1) Versão original: "dias de cobertura" com o mínimo como referência extra.
+// 2) Simplificado pra: só venda da semana anterior (7 dias) × estoque atual.
+// 3) Exceção pro item zerado sem venda na semana (usa o mínimo, senão nunca mais reaparece).
+// 4) Mínimo vira piso quando o CD tem folga ("Treko Reverso" sugerindo só 1, achou pouco).
+// 5) **2026-09-16**: Rodrigo revisou o resultado depois de rodar um tempo e achou que 71% das
+//    sugestões vinham da exceção do mínimo (item zerado), não de giro real — a janela de 7 dias
+//    corridos é amostra pequena demais pra produto que vende devagar mas de forma constante (só
+//    não vendeu NAQUELA semana específica por acaso). Trocado pra **média semanal calculada
+//    sobre as últimas 8 semanas (56 dias)** em vez do literal "última semana" — suaviza semana
+//    atípica sem diluir uma mudança real de ritmo, e faz a exceção do mínimo disparar só pra
+//    quem realmente não vende há ~2 meses, não por azar de 1 semana.
 export async function getReplenishmentPorVendas(
   filters: Pick<DashboardFilters, "storeIds" | "grupoIn"> & { colecaoIn?: string[] }
 ) {
@@ -1317,10 +1313,11 @@ export async function getReplenishmentPorVendas(
   const storeIds = [...new Set(candidatos.map((s) => s.storeId))];
   const cods = [...new Set(candidatos.map((s) => s.cod))];
 
-  // Semana anterior = últimos 7 dias corridos até agora. Não usa o filtro de Data da tela (esse
-  // modo não expõe mais esse filtro) — o período é sempre "semana anterior", ponto.
+  // Janela de giro = últimas 8 semanas (56 dias) corridas até agora — não usa o filtro de Data da
+  // tela (esse modo não expõe mais esse filtro).
+  const JANELA_GIRO_SEMANAS = 8;
   const to = new Date();
-  const from = new Date(to.getTime() - 7 * 86400000);
+  const from = new Date(to.getTime() - JANELA_GIRO_SEMANAS * 7 * 86400000);
 
   const saleAgg = await prisma.sale.groupBy({
     by: ["storeId", "cod"],
@@ -1332,9 +1329,10 @@ export async function getReplenishmentPorVendas(
   return candidatos
     .map((s) => {
       const estoqueNaOrigem = cdStockByCod.get(s.cod) ?? 0;
-      const vendasSemanaAnterior = vendasByKey.get(`${s.storeId}::${s.cod}`) ?? 0;
-      const zerouSemHistoricoDeVenda = s.quantidadeDisponivel === 0 && vendasSemanaAnterior === 0;
-      const precisaReporPelaVenda = vendasSemanaAnterior > s.quantidadeDisponivel;
+      const vendasNoPeriodo = vendasByKey.get(`${s.storeId}::${s.cod}`) ?? 0;
+      const mediaVendaSemanal = vendasNoPeriodo / JANELA_GIRO_SEMANAS;
+      const semGiroNoPeriodo = vendasNoPeriodo === 0;
+      const precisaReporPelaVenda = mediaVendaSemanal > s.quantidadeDisponivel;
 
       const estoqueMinimo = matchMinimumRule(minimumRules, s) ?? s.estoqueMinimo;
       const necessidadeMinimo = estoqueMinimo != null ? estoqueMinimo - s.quantidadeDisponivel : null;
@@ -1346,25 +1344,25 @@ export async function getReplenishmentPorVendas(
 
       let precisaRepor: boolean;
       let necessidade: number;
-      if (zerouSemHistoricoDeVenda) {
-        // Sem dado de venda confiável pra basear a conta — só repõe se existir mínimo cadastrado
-        // e o CD aguentar cobrir ele inteiro.
+      if (semGiroNoPeriodo) {
+        // Não vendeu NADA em 8 semanas — sem dado de venda confiável pra basear a conta. Só
+        // repõe se existir mínimo cadastrado e o CD aguentar cobrir ele inteiro.
         precisaRepor = cdTemDeSobra;
         necessidade = necessidadeMinimo ?? 0;
       } else if (precisaReporPelaVenda) {
         precisaRepor = true;
-        // CD com folga e mínimo pedindo mais que a venda da semana? Usa o mínimo (pedido do
+        // CD com folga e mínimo pedindo mais que o ritmo médio de venda? Usa o mínimo (pedido do
         // Rodrigo: "se tiver muito em estoque, vale a pena colocar o mínimo"). Senão, só a venda.
         necessidade =
           cdTemDeSobra && necessidadeMinimo !== null
-            ? Math.max(vendasSemanaAnterior - s.quantidadeDisponivel, necessidadeMinimo)
-            : vendasSemanaAnterior - s.quantidadeDisponivel;
+            ? Math.max(mediaVendaSemanal - s.quantidadeDisponivel, necessidadeMinimo)
+            : mediaVendaSemanal - s.quantidadeDisponivel;
       } else {
         precisaRepor = false;
         necessidade = 0;
       }
 
-      const falta = precisaRepor ? Math.min(Math.max(necessidade, 1), tetoSemZerarCD) : 0;
+      const falta = precisaRepor ? Math.min(Math.max(Math.ceil(necessidade), 1), tetoSemZerarCD) : 0;
 
       return {
         storeId: s.storeId,
@@ -1374,8 +1372,9 @@ export async function getReplenishmentPorVendas(
         colecao: s.colecao,
         tamanho: s.tamanho,
         quantidadeDisponivel: s.quantidadeDisponivel,
-        vendasSemanaAnterior,
-        zerouSemHistoricoDeVenda,
+        vendasNoPeriodo,
+        mediaVendaSemanal: Math.round(mediaVendaSemanal * 10) / 10,
+        semGiroNoPeriodo,
         falta,
         precisaRepor,
         origemSugerida: cdStore?.name ?? "—",

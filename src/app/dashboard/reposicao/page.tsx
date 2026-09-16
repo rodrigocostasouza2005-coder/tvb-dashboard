@@ -74,10 +74,10 @@ export default async function ReposicaoPage({
             </>
           ) : (
             <>
-              Cruza a venda da semana anterior com o estoque disponível agora — só aparece quem
-              vendeu mais na semana passada do que tem disponível. Exceção: quem zerou e não teve
-              nenhuma venda na semana (sem estoque pra vender, então a venda registrada não mede a
-              demanda real) usa o mínimo cadastrado como rede de segurança.
+              Cruza a média de venda das últimas 8 semanas com o estoque disponível agora — só
+              aparece quem, nesse ritmo, vende mais do que tem disponível. Exceção: quem não vendeu
+              nada nas últimas 8 semanas (sem estoque pra vender não dá pra medir demanda real)
+              usa o mínimo cadastrado como rede de segurança.
             </>
           )}
         </p>
@@ -158,7 +158,7 @@ export default async function ReposicaoPage({
                 <th className="px-4 py-2 font-medium">Produto</th>
                 <th className="px-4 py-2 font-medium">Tamanho</th>
                 <th className="px-4 py-2 font-medium">Estoque</th>
-                <th className="px-4 py-2 font-medium">Vendido na semana anterior</th>
+                <th className="px-4 py-2 font-medium">Média semanal (8 sem.)</th>
                 <th className="px-4 py-2 font-medium">Repor</th>
                 <th className="px-4 py-2 font-medium">Repor de</th>
                 <th className="px-4 py-2 font-medium">Disponível na origem</th>
@@ -173,7 +173,7 @@ export default async function ReposicaoPage({
                   <td className="px-4 py-2">{r.tamanho ?? "—"}</td>
                   <td className="px-4 py-2 tabular-nums">{r.quantidadeDisponivel}</td>
                   <td className="px-4 py-2 tabular-nums">
-                    {r.zerouSemHistoricoDeVenda ? (
+                    {r.semGiroNoPeriodo ? (
                       <span className="inline-flex items-center gap-1.5">
                         0
                         <span
@@ -182,13 +182,13 @@ export default async function ReposicaoPage({
                             backgroundColor: "color-mix(in srgb, var(--status-warning) 15%, transparent)",
                             color: "var(--status-warning)",
                           }}
-                          title="Zerou e não teve venda registrada na semana — não dá pra medir demanda real sem estoque pra vender. Repor aqui usa o mínimo cadastrado."
+                          title="Não vendeu nada nas últimas 8 semanas — não dá pra medir demanda real sem estoque pra vender. Repor aqui usa o mínimo cadastrado."
                         >
-                          zerado, sem venda pra medir
+                          sem venda em 8 semanas
                         </span>
                       </span>
                     ) : (
-                      r.vendasSemanaAnterior
+                      r.mediaVendaSemanal
                     )}
                   </td>
                   <td className="px-4 py-2 tabular-nums font-medium" style={{ color: "var(--status-critical)" }}>
@@ -201,7 +201,7 @@ export default async function ReposicaoPage({
               {rowsVendas.length === 0 && (
                 <tr>
                   <td colSpan={9} className="px-4 py-6 text-center text-[var(--text-muted)]">
-                    Nada vendeu mais que o estoque disponível na semana anterior.
+                    Nada vende, no ritmo médio das últimas 8 semanas, mais do que tem disponível.
                   </td>
                 </tr>
               )}

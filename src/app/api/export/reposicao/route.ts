@@ -89,8 +89,8 @@ export async function GET(request: NextRequest) {
       cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFF00" } };
     });
   } else {
-    // getReplenishmentPorVendas já devolve só quem vendeu mais na semana anterior do que tem
-    // disponível agora — mesmo recorte que a tela mostra.
+    // getReplenishmentPorVendas já devolve só quem, no ritmo médio das últimas 8 semanas, vende
+    // mais do que tem disponível agora — mesmo recorte que a tela mostra.
     const rows = (await getReplenishmentPorVendas(filters)).slice().sort((a, b) =>
       a.storeName.localeCompare(b.storeName, "pt-BR") ||
       a.grupo.localeCompare(b.grupo, "pt-BR") ||
@@ -105,7 +105,7 @@ export async function GET(request: NextRequest) {
       "Produto",
       "Tamanho",
       "Estoque atual",
-      "Vendido na semana anterior",
+      "Média semanal (8 sem.)",
       "Repor",
       "Motivo",
       "Origem sugerida",
@@ -125,9 +125,9 @@ export async function GET(request: NextRequest) {
         r.produto,
         r.tamanho ?? "",
         r.quantidadeDisponivel,
-        r.vendasSemanaAnterior,
+        r.mediaVendaSemanal,
         r.falta,
-        r.zerouSemHistoricoDeVenda ? "Zerado, sem venda pra medir (usou o mínimo)" : "Vendeu mais que o estoque",
+        r.semGiroNoPeriodo ? "Sem venda em 8 semanas (usou o mínimo)" : "Vende mais que o estoque, no ritmo médio",
         r.origemSugerida,
         r.estoqueNaOrigem,
       ]);
