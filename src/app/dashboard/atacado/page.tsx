@@ -109,20 +109,22 @@ export default async function AtacadoPage({
       {clienteSelecionado ? (
         evolucao ? (
           <div>
-            <p className="mb-4 text-sm text-[var(--text-secondary)]">
-              Evolução de <strong className="text-[var(--text-primary)]">{evolucao.cliente}</strong> — {evolucao.anoAnterior} vs {evolucao.anoAtual}, ambos {evolucao.cortePeriodo} (mesmo período nos dois anos, pra não comparar ano parcial com ano inteiro).
-              O histórico real de vendas do Radar começa em setembro/2025 — meses antes disso aparecem zerados por falta de sincronização, não por falta de venda.
+            <p className="mb-1 text-sm text-[var(--text-secondary)]">
+              Evolução de <strong className="text-[var(--text-primary)]">{evolucao.cliente}</strong> — {evolucao.anoAnterior} (ano completo) vs {evolucao.anoAtual} (até {evolucao.atualAte}, ano em curso).
+            </p>
+            <p className="mb-4 text-xs text-[var(--text-muted)]">
+              O histórico real de vendas do Radar só começa em setembro/2025 — {evolucao.anoAnterior} tem só ~3 meses de dado real (out-dez), então a variação % abaixo fica enviesada a favor de {evolucao.anoAtual} por enquanto (mais meses de venda contados). Isso se resolve sozinho conforme {evolucao.anoAnterior} for saindo do gráfico com o tempo.
             </p>
 
             {showFinancials && (
               <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
                 <StatTile
-                  label={`Vendas em ${evolucao.anoAtual}`}
+                  label={`Vendas em ${evolucao.anoAtual} (até ${evolucao.atualAte})`}
                   value={formatBRL(evolucao.totalAtual.receita)}
                   subValue={`${evolucao.totalAtual.pedidos} pedidos`}
                 />
                 <StatTile
-                  label={`Vendas em ${evolucao.anoAnterior}`}
+                  label={`Vendas em ${evolucao.anoAnterior} (ano completo)`}
                   value={formatBRL(evolucao.totalAnterior.receita)}
                   subValue={`${evolucao.totalAnterior.pedidos} pedidos`}
                 />

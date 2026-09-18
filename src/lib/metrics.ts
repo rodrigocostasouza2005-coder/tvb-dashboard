@@ -4592,9 +4592,9 @@ export type AtacadoClienteEvolucao = {
   cliente: string;
   anoAtual: number;
   anoAnterior: number;
-  // "Até 18/09" — pro rótulo da comparação, deixa explícito que os dois anos usam o mesmo corte
-  // (pedido do Rodrigo: nunca comparar ano parcial contra ano inteiro).
-  cortePeriodo: string;
+  // "18/09" — até quando o ano ATUAL foi contado (ano em curso, sempre parcial). O ano anterior
+  // conta o ano INTEIRO (ver comentário na função sobre por quê).
+  atualAte: string;
   totalAtual: { receita: number; unidades: number; pedidos: number };
   totalAnterior: { receita: number; unidades: number; pedidos: number };
   variacaoReais: number;
@@ -4605,30 +4605,21 @@ export type AtacadoClienteEvolucao = {
   produtos: AtacadoClienteEvolucaoProduto[];
 };
 
-// Último dia válido de mesDia ("MM-DD") no ano informado — só existe pra tratar 29/02 caindo
-// num ano não bissexto (comparação ano-a-ano cruzando um 29/02 é rara, mas sem isso a query
-// quebraria 1 vez a cada 4 anos). Nunca inventa dado, só ajusta o corte do período.
-function ultimoDiaValido(ano: number, mesDia: string): string {
-  const [mes, dia] = mesDia.split("-").map(Number);
-  if (mes === 2 && dia === 29) {
-    const bissexto = (ano % 4 === 0 && ano % 100 !== 0) || ano % 400 === 0;
-    if (!bissexto) return `${ano}-02-28`;
-  }
-  return `${ano}-${mesDia}`;
-}
-
 // Evolução ano-a-ano de UM cliente de atacado — pedido do Rodrigo em 2026-09-18: "esse cliente
 // comprou quanto no ano passado vs esse ano?". Reusa exatamente o mesmo padrão de
 // getClienteFicha (1 fetch de todas as vendas do cliente no período, agrega em JS) — eficiente
 // porque é por cliente (linhas limitadas), não a base inteira.
 //
-// Período: SEMPRE janeiro até a data de referência (default hoje), nos dois anos — nunca ano
-// atual parcial contra ano anterior inteiro (pedido explícito do Rodrigo). A query em si busca
-// desde 1º/jan do ano ANTERIOR até a data de referência do ano ATUAL (1 intervalo só, já cobre
-// o ano anterior inteiro de quebra — hoje sempre é cronologicamente depois de 31/12 do ano
-// anterior) — o corte "equivalente" pros TOTAIS (cards) é aplicado depois, filtrando em JS; o
-// GRÁFICO mensal usa o ano anterior completo (jan-dez) de propósito, pra dar contexto visual de
-// sazonalidade, só o ano atual mesmo é que para no mês corrente (sem dado ainda = null, não 0).
+// Período: ano ANTERIOR sempre conta INTEIRO (jan-dez); ano ATUAL conta até a data de
+// referência (default hoje), sempre parcial. Isso NÃO é "ano parcial vs ano inteiro" da forma
+// problemática que dá pra imaginar — é o contrário do que causava confusão: a 1ª versão disso
+// comparava período EQUIVALENTE (jan-18/09 nos dois anos), mas o histórico real de vendas do
+// Radar só começa em 20/09/2025 — então o corte equivalente pra 2025 caía 2 dias ANTES do
+// início da sincronização, e todo cliente aparecia com "2025: R$0,00" mesmo tendo vendido bem
+// em out/nov/dez/2025 (achado pelo Rodrigo testando, 2026-09-18). Mostrar o ano anterior
+// INTEIRO é o que reflete a venda real que existe. A comparação % fica enviesada a favor do ano
+// atual enquanto o histórico de 2025 for parcial (só ~3 meses reais) — a tela avisa isso
+// explicitamente, não esconde.
 //
 // Devolução: NÃO entra aqui de propósito. Devolução no Radar é sempre tratada como B2C (Return
 // nem tem campo clienteNome — não dá pra atribuir a um cliente de atacado específico), então
@@ -4649,7 +4640,6 @@ export async function getAtacadoClienteEvolucao(
   const fromAtual = brasiliaDayStart(`${anoAtual}-01-01`);
   const toAtual = brasiliaDayEnd(hojeStr);
   const fromAnterior = brasiliaDayStart(`${anoAnterior}-01-01`);
-  const toAnteriorEquivalente = brasiliaDayEnd(ultimoDiaValido(anoAnterior, mmdd));
 
   // Mesma robustez de nome de getClienteFicha — o cadastro tem variação de capitalização entre
   // vendas do mesmo cliente (ex: "Loja X" vs "LOJA X"), então casa por nome normalizado e usa
@@ -4690,7 +4680,6 @@ export async function getAtacadoClienteEvolucao(
     const pedidoKey = String(s.dapicVendaId);
     const noAno = ano === String(anoAtual);
     const noAnoAnterior = ano === String(anoAnterior);
-    const dentroEquivalenteAnterior = noAnoAnterior && s.saleDate <= toAnteriorEquivalente;
 
     if (noAno) {
       mesesAtualMap.set(mes, (mesesAtualMap.get(mes) ?? 0) + s.valorTotalLiquido);
@@ -4699,14 +4688,11 @@ export async function getAtacadoClienteEvolucao(
       pedidosAtual.add(pedidoKey);
     }
     if (noAnoAnterior) {
-      // Ano anterior completo (jan-dez) só entra no gráfico mensal — os totais/cards usam o
-      // corte equivalente (dentroEquivalenteAnterior), aplicado separado abaixo.
+      // Ano anterior INTEIRO (jan-dez) — tanto pro gráfico mensal quanto pros totais/cards.
       mesesAnteriorMap.set(mes, (mesesAnteriorMap.get(mes) ?? 0) + s.valorTotalLiquido);
-      if (dentroEquivalenteAnterior) {
-        totalAnteriorReceita += s.valorTotalLiquido;
-        totalAnteriorUnidades += s.quantidade;
-        pedidosAnterior.add(pedidoKey);
-      }
+      totalAnteriorReceita += s.valorTotalLiquido;
+      totalAnteriorUnidades += s.quantidade;
+      pedidosAnterior.add(pedidoKey);
     }
 
     const p = produtoMap.get(s.produto) ?? {
@@ -4717,7 +4703,7 @@ export async function getAtacadoClienteEvolucao(
     p.pedidosSet.add(pedidoKey);
     if (s.saleDate > p.ultimaCompra) p.ultimaCompra = s.saleDate;
     if (noAno) { p.unidadesAtual += s.quantidade; p.receitaAtual += s.valorTotalLiquido; }
-    if (dentroEquivalenteAnterior) { p.unidadesAnterior += s.quantidade; p.receitaAnterior += s.valorTotalLiquido; }
+    if (noAnoAnterior) { p.unidadesAnterior += s.quantidade; p.receitaAnterior += s.valorTotalLiquido; }
     produtoMap.set(s.produto, p);
   }
 
@@ -4750,7 +4736,7 @@ export async function getAtacadoClienteEvolucao(
   return {
     cliente: variantes[0],
     anoAtual, anoAnterior,
-    cortePeriodo: `até ${mmdd.split("-").reverse().join("/")}`,
+    atualAte: mmdd.split("-").reverse().join("/"),
     totalAtual: { receita: totalAtualReceita, unidades: totalAtualUnidades, pedidos: pedidosAtual.size },
     totalAnterior: { receita: totalAnteriorReceita, unidades: totalAnteriorUnidades, pedidos: pedidosAnterior.size },
     variacaoReais, variacaoPercent,
