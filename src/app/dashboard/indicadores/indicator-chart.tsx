@@ -14,6 +14,13 @@ function formatDayShort(dayStr: string) {
   return `${d}/${m}`;
 }
 
+// "01".."12" → "Jan".."Dez", sem ano — pra comparar o mesmo mês entre anos diferentes lado a
+// lado no eixo X (ver granularity "monthOfYear" abaixo), diferente de formatMonthShort que
+// sempre amarra o rótulo a um "YYYY-MM" específico de um único ano.
+function formatMonthOfYear(mesStr: string) {
+  return MONTH_NAMES[parseInt(mesStr, 10) - 1] ?? mesStr;
+}
+
 function formatValue(value: number, format: "currency" | "number" | "percent") {
   if (format === "currency") return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
   if (format === "percent") return `${value.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
@@ -28,13 +35,16 @@ export function IndicatorChart({
   format,
   granularity = "month",
 }: {
-  data: Record<string, string | number>[];
+  // null é aceito de propósito (2026-09-18, comparação ano-a-ano do cliente de Atacado) — mês
+  // que o ano atual ainda não alcançou vira null, não 0, pra recharts cortar a linha em vez de
+  // mostrar uma queda enganosa até zero (connectNulls fica false, o padrão).
+  data: Record<string, string | number | null>[];
   series: Series[];
   format: "currency" | "number" | "percent";
-  granularity?: "month" | "day";
+  granularity?: "month" | "day" | "monthOfYear";
 }) {
-  const xKey = granularity === "day" ? "day" : "month";
-  const tickFormatter = granularity === "day" ? formatDayShort : formatMonthShort;
+  const xKey = granularity === "day" ? "day" : granularity === "monthOfYear" ? "mes" : "month";
+  const tickFormatter = granularity === "day" ? formatDayShort : granularity === "monthOfYear" ? formatMonthOfYear : formatMonthShort;
 
   if (data.length < 2) {
     return (
@@ -71,7 +81,7 @@ export function IndicatorChart({
             fontSize: 12,
           }}
           labelFormatter={(m) => tickFormatter(String(m))}
-          formatter={(value, name) => [formatValue(Number(value ?? 0), format), name]}
+          formatter={(value, name) => [value === null || value === undefined ? "—" : formatValue(Number(value), format), name]}
         />
         {series.length > 1 && <Legend wrapperStyle={{ fontSize: 12 }} />}
         {series.map((s) => (

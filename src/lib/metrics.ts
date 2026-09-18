@@ -4566,6 +4566,198 @@ export async function getAtacadoClientes(filters: DashboardFilters) {
   return { rows: mapped, totalClientes: mapped.length, novosNoPeriodo };
 }
 
+// Lista de clientes de atacado (mesmo conjunto que canalWhere("b2b") usa por baixo — cliente
+// que já teve QUALQUER venda em "Tabela atacado", classificação por cliente inteiro, não por
+// linha) — pedido do Rodrigo em 2026-09-18, pro dropdown "Cliente" em Atacado → Vendas. Reusa o
+// cache de 5min de getB2BClienteNomes, não faz query nova.
+export async function getAtacadoClienteNomes(): Promise<string[]> {
+  return [...(await getB2BClienteNomes())].sort();
+}
+
+export type AtacadoClienteEvolucaoMes = { mes: number; receitaAtual: number | null; receitaAnterior: number };
+
+export type AtacadoClienteEvolucaoProduto = {
+  produto: string;
+  grupo: string;
+  unidadesAtual: number;
+  receitaAtual: number;
+  unidadesAnterior: number;
+  receitaAnterior: number;
+  pedidos: number;
+  ultimaCompra: Date;
+  status: "novo" | "perdido" | "normal";
+};
+
+export type AtacadoClienteEvolucao = {
+  cliente: string;
+  anoAtual: number;
+  anoAnterior: number;
+  // "Até 18/09" — pro rótulo da comparação, deixa explícito que os dois anos usam o mesmo corte
+  // (pedido do Rodrigo: nunca comparar ano parcial contra ano inteiro).
+  cortePeriodo: string;
+  totalAtual: { receita: number; unidades: number; pedidos: number };
+  totalAnterior: { receita: number; unidades: number; pedidos: number };
+  variacaoReais: number;
+  // null = sem base de comparação (0 nos dois anos) ou cliente novo (0 no ano anterior, > 0
+  // agora) — nesse 2º caso não faz sentido um "%", vira um selo "Novo" na tela.
+  variacaoPercent: number | null;
+  meses: AtacadoClienteEvolucaoMes[];
+  produtos: AtacadoClienteEvolucaoProduto[];
+};
+
+// Último dia válido de mesDia ("MM-DD") no ano informado — só existe pra tratar 29/02 caindo
+// num ano não bissexto (comparação ano-a-ano cruzando um 29/02 é rara, mas sem isso a query
+// quebraria 1 vez a cada 4 anos). Nunca inventa dado, só ajusta o corte do período.
+function ultimoDiaValido(ano: number, mesDia: string): string {
+  const [mes, dia] = mesDia.split("-").map(Number);
+  if (mes === 2 && dia === 29) {
+    const bissexto = (ano % 4 === 0 && ano % 100 !== 0) || ano % 400 === 0;
+    if (!bissexto) return `${ano}-02-28`;
+  }
+  return `${ano}-${mesDia}`;
+}
+
+// Evolução ano-a-ano de UM cliente de atacado — pedido do Rodrigo em 2026-09-18: "esse cliente
+// comprou quanto no ano passado vs esse ano?". Reusa exatamente o mesmo padrão de
+// getClienteFicha (1 fetch de todas as vendas do cliente no período, agrega em JS) — eficiente
+// porque é por cliente (linhas limitadas), não a base inteira.
+//
+// Período: SEMPRE janeiro até a data de referência (default hoje), nos dois anos — nunca ano
+// atual parcial contra ano anterior inteiro (pedido explícito do Rodrigo). A query em si busca
+// desde 1º/jan do ano ANTERIOR até a data de referência do ano ATUAL (1 intervalo só, já cobre
+// o ano anterior inteiro de quebra — hoje sempre é cronologicamente depois de 31/12 do ano
+// anterior) — o corte "equivalente" pros TOTAIS (cards) é aplicado depois, filtrando em JS; o
+// GRÁFICO mensal usa o ano anterior completo (jan-dez) de propósito, pra dar contexto visual de
+// sazonalidade, só o ano atual mesmo é que para no mês corrente (sem dado ainda = null, não 0).
+//
+// Devolução: NÃO entra aqui de propósito. Devolução no Radar é sempre tratada como B2C (Return
+// nem tem campo clienteNome — não dá pra atribuir a um cliente de atacado específico), então
+// pra atacado bruta = líquida, mesma regra já usada em getMonthlySnapshotKpi/getAtacadoVendas.
+export async function getAtacadoClienteEvolucao(
+  clienteNome: string,
+  filters: Pick<DashboardFilters, "marcas" | "tabelasPreco" | "grupoIn">,
+  referenceDate: Date = new Date()
+): Promise<AtacadoClienteEvolucao | null> {
+  const cdStore = await prisma.store.findFirst({ where: { code: "CD" } });
+  if (!cdStore) return null;
+
+  const hojeStr = todayBrasiliaStr(referenceDate);
+  const anoAtual = Number(hojeStr.slice(0, 4));
+  const anoAnterior = anoAtual - 1;
+  const mmdd = hojeStr.slice(5);
+
+  const fromAtual = brasiliaDayStart(`${anoAtual}-01-01`);
+  const toAtual = brasiliaDayEnd(hojeStr);
+  const fromAnterior = brasiliaDayStart(`${anoAnterior}-01-01`);
+  const toAnteriorEquivalente = brasiliaDayEnd(ultimoDiaValido(anoAnterior, mmdd));
+
+  // Mesma robustez de nome de getClienteFicha — o cadastro tem variação de capitalização entre
+  // vendas do mesmo cliente (ex: "Loja X" vs "LOJA X"), então casa por nome normalizado e usa
+  // todas as variantes reais encontradas.
+  const norm = clienteNome.trim().toUpperCase();
+  const variantRows = await prisma.$queryRaw<{ nome: string }[]>`
+    SELECT DISTINCT "clienteNome" AS nome FROM "Sale"
+    WHERE "storeId" = ${cdStore.id} AND UPPER(TRIM("clienteNome")) = ${norm}
+  `;
+  if (variantRows.length === 0) return null;
+  const variantes = variantRows.map((r) => r.nome);
+
+  const rangeFilters: DashboardFilters = { ...filters, from: fromAnterior, to: toAtual };
+  const where: Prisma.SaleWhereInput = {
+    ...saleWhere(rangeFilters),
+    storeId: cdStore.id,
+    clienteNome: { in: variantes },
+  };
+  const sales = await prisma.sale.findMany({
+    where,
+    select: { saleDate: true, dapicVendaId: true, grupo: true, produto: true, quantidade: true, valorTotalLiquido: true },
+  });
+  if (sales.length === 0) return null;
+
+  const mesAtualNum = Number(mmdd.slice(0, 2));
+  const mesesAtualMap = new Map<number, number>();
+  const mesesAnteriorMap = new Map<number, number>();
+  let totalAtualReceita = 0, totalAtualUnidades = 0;
+  const pedidosAtual = new Set<string>();
+  let totalAnteriorReceita = 0, totalAnteriorUnidades = 0;
+  const pedidosAnterior = new Set<string>();
+  const produtoMap = new Map<string, AtacadoClienteEvolucaoProduto & { pedidosSet: Set<string> }>();
+
+  for (const s of sales) {
+    const dStr = todayBrasiliaStr(s.saleDate);
+    const ano = dStr.slice(0, 4);
+    const mes = Number(dStr.slice(5, 7));
+    const pedidoKey = String(s.dapicVendaId);
+    const noAno = ano === String(anoAtual);
+    const noAnoAnterior = ano === String(anoAnterior);
+    const dentroEquivalenteAnterior = noAnoAnterior && s.saleDate <= toAnteriorEquivalente;
+
+    if (noAno) {
+      mesesAtualMap.set(mes, (mesesAtualMap.get(mes) ?? 0) + s.valorTotalLiquido);
+      totalAtualReceita += s.valorTotalLiquido;
+      totalAtualUnidades += s.quantidade;
+      pedidosAtual.add(pedidoKey);
+    }
+    if (noAnoAnterior) {
+      // Ano anterior completo (jan-dez) só entra no gráfico mensal — os totais/cards usam o
+      // corte equivalente (dentroEquivalenteAnterior), aplicado separado abaixo.
+      mesesAnteriorMap.set(mes, (mesesAnteriorMap.get(mes) ?? 0) + s.valorTotalLiquido);
+      if (dentroEquivalenteAnterior) {
+        totalAnteriorReceita += s.valorTotalLiquido;
+        totalAnteriorUnidades += s.quantidade;
+        pedidosAnterior.add(pedidoKey);
+      }
+    }
+
+    const p = produtoMap.get(s.produto) ?? {
+      produto: s.produto, grupo: s.grupo,
+      unidadesAtual: 0, receitaAtual: 0, unidadesAnterior: 0, receitaAnterior: 0,
+      pedidos: 0, ultimaCompra: s.saleDate, status: "normal" as const, pedidosSet: new Set<string>(),
+    };
+    p.pedidosSet.add(pedidoKey);
+    if (s.saleDate > p.ultimaCompra) p.ultimaCompra = s.saleDate;
+    if (noAno) { p.unidadesAtual += s.quantidade; p.receitaAtual += s.valorTotalLiquido; }
+    if (dentroEquivalenteAnterior) { p.unidadesAnterior += s.quantidade; p.receitaAnterior += s.valorTotalLiquido; }
+    produtoMap.set(s.produto, p);
+  }
+
+  const meses: AtacadoClienteEvolucaoMes[] = Array.from({ length: 12 }, (_, i) => {
+    const mes = i + 1;
+    return {
+      mes,
+      receitaAtual: mes <= mesAtualNum ? (mesesAtualMap.get(mes) ?? 0) : null,
+      receitaAnterior: mesesAnteriorMap.get(mes) ?? 0,
+    };
+  });
+
+  const produtos: AtacadoClienteEvolucaoProduto[] = [...produtoMap.values()]
+    .map((p) => ({
+      produto: p.produto, grupo: p.grupo,
+      unidadesAtual: p.unidadesAtual, receitaAtual: p.receitaAtual,
+      unidadesAnterior: p.unidadesAnterior, receitaAnterior: p.receitaAnterior,
+      pedidos: p.pedidosSet.size, ultimaCompra: p.ultimaCompra,
+      status: (p.receitaAnterior === 0 && p.receitaAtual > 0 ? "novo"
+        : p.receitaAtual === 0 && p.receitaAnterior > 0 ? "perdido"
+        : "normal") as "novo" | "perdido" | "normal",
+    }))
+    .sort((a, b) => (b.receitaAtual || b.receitaAnterior) - (a.receitaAtual || a.receitaAnterior));
+
+  const variacaoReais = totalAtualReceita - totalAnteriorReceita;
+  const variacaoPercent = totalAnteriorReceita > 0
+    ? (variacaoReais / totalAnteriorReceita) * 100
+    : totalAtualReceita > 0 ? null : 0;
+
+  return {
+    cliente: variantes[0],
+    anoAtual, anoAnterior,
+    cortePeriodo: `até ${mmdd.split("-").reverse().join("/")}`,
+    totalAtual: { receita: totalAtualReceita, unidades: totalAtualUnidades, pedidos: pedidosAtual.size },
+    totalAnterior: { receita: totalAnteriorReceita, unidades: totalAnteriorUnidades, pedidos: pedidosAnterior.size },
+    variacaoReais, variacaoPercent,
+    meses, produtos,
+  };
+}
+
 export async function getClienteRetencaoPorMes(filters: DashboardFilters) {
   const cdStore = await prisma.store.findFirst({ where: { code: "CD" } });
   if (!cdStore) return { months: [], compraram1x: 0, compraramMaisde1x: 0 };
