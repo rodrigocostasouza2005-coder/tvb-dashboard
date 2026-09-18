@@ -3,13 +3,14 @@
 import { useState, useTransition } from "react";
 import { marcarContatadoAction, desmarcarContatadoAction, type ContatoTipo } from "./actions";
 import { formatTelefoneDisplay, telefoneParaTel } from "@/lib/phone";
+import { waHref, waAppHref } from "@/lib/whatsapp";
 import { usePhoneMode } from "../phone-mode";
 
 type Contato = { contatadoPor: string; contatadoEm: string };
 
 export function ContatoWhatsappLink({
   telefone,
-  href,
+  mensagem,
   tipo,
   cliente,
   chave,
@@ -17,7 +18,7 @@ export function ContatoWhatsappLink({
   podeVerCheck,
 }: {
   telefone: string;
-  href: string;
+  mensagem: string;
   tipo: ContatoTipo;
   cliente: string;
   chave: string;
@@ -53,7 +54,7 @@ export function ContatoWhatsappLink({
   return (
     <span className="inline-flex items-center gap-1.5">
       <a
-        href={href}
+        href={mode === "mobile" ? waAppHref(telefone, mensagem) : waHref(telefone, mensagem)}
         target="_blank"
         rel="noopener noreferrer"
         onClick={handleClick}

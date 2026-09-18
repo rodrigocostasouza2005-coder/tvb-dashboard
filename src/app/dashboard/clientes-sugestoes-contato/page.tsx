@@ -3,7 +3,6 @@ import { getStores, getMarcas, getTabelasPreco, getDistinctColecoes, getSugestoe
 import { getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
-import { waHref } from "@/lib/whatsapp";
 import { getNumeroNotaFiscal } from "@/lib/connectors/nota-fiscal";
 import { prisma } from "@/lib/prisma";
 import { getMensagemTemplates, renderTemplate, type TemplateKey } from "@/lib/message-templates";
@@ -147,7 +146,7 @@ function TabelaSugestoes({
                 {s.telefone ? (
                   <ContatoWhatsappLink
                     telefone={s.telefone}
-                    href={waHref(s.telefone, mensagemSugestao(s, templates))}
+                    mensagem={mensagemSugestao(s, templates)}
                     tipo="sugestao"
                     cliente={s.cliente}
                     chave={s.motivo}
@@ -212,7 +211,7 @@ function TabelaFollowUp({
                 {f.telefone ? (
                   <ContatoWhatsappLink
                     telefone={f.telefone}
-                    href={waHref(f.telefone, mensagemFollowUp(f, templates))}
+                    mensagem={mensagemFollowUp(f, templates)}
                     tipo="followup"
                     cliente={f.cliente}
                     chave={String(f.dapicVendaId)}

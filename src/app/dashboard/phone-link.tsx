@@ -2,15 +2,18 @@
 
 import { useState } from "react";
 import { formatTelefoneDisplay, telefoneParaTel } from "@/lib/phone";
-import { waHref } from "@/lib/whatsapp";
+import { waHref, waAppHref } from "@/lib/whatsapp";
 import { usePhoneMode } from "./phone-mode";
 
 // Substituto padrão de "<a href={waHref(tel)}>{tel}</a>" usado em várias abas (Clientes, Ficha
 // do Cliente, Segmentação, Produto → Cliente, Pesquisa, Atacado → Clientes) — telefone formatado
 // + ação extra conforme o modo Celular/Computador (ver phone-mode.tsx, escolha global do
-// usuário). O link do WhatsApp em si (waHref) é sempre o mesmo, independente do modo — só a
-// apresentação e o botão extra mudam. Pedido do Rodrigo em 2026-09-18: estender a mesma
-// experiência de telefone da aba Sugestão de Contato pro TVB Radar inteiro.
+// usuário). Pedido do Rodrigo em 2026-09-18: estender a mesma experiência de telefone da aba
+// Sugestão de Contato pro TVB Radar inteiro.
+//
+// O link principal (tocar/clicar no número) muda de propósito conforme o modo, pedido do Rodrigo
+// no mesmo dia: Celular → abre o APP do WhatsApp direto (waAppHref); Computador → mantém o
+// WhatsApp Web de sempre (waHref), sem mudança nenhuma nesse modo.
 export function PhoneLink({ telefone, mensagem, className }: { telefone: string; mensagem?: string; className?: string }) {
   const { mode } = usePhoneMode();
   const [copiado, setCopiado] = useState(false);
@@ -18,7 +21,7 @@ export function PhoneLink({ telefone, mensagem, className }: { telefone: string;
   return (
     <span className="inline-flex items-center gap-1.5">
       <a
-        href={waHref(telefone, mensagem)}
+        href={mode === "mobile" ? waAppHref(telefone, mensagem) : waHref(telefone, mensagem)}
         target="_blank"
         rel="noopener noreferrer"
         className={className ?? "text-[var(--series-1)] hover:underline tabular-nums"}
