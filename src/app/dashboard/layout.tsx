@@ -27,21 +27,24 @@ export default async function DashboardLayout({ children }: { children: React.Re
     <PhoneModeProvider>
       <div className="min-h-screen bg-[var(--page-plane)] text-[var(--text-primary)]">
         <header className="sticky top-0 z-30 border-b border-[var(--border)] bg-[var(--surface-1)]">
-          <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-3">
+          <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-y-2 px-4 py-3 sm:px-6">
             <div className="flex items-center gap-3">
               <div className="rounded-md bg-white p-0.5 leading-[0]">
                 <Image src="/tvb-logo.png" alt="TVB Shorts" width={28} height={22} className="rounded-sm" />
               </div>
               <div>
                 <div className="text-sm font-semibold">TVB Radar</div>
-                <div className="text-xs text-[var(--text-muted)]">TVB Shorts · Painel TVB Radar</div>
+                {/* Subtítulo só do tablet pra cima — em celular estreito ele e o resto do
+                    cabeçalho (toggle + nome + Sair) não cabiam numa linha só e ficavam
+                    espremidos/cortados (achado pelo Rodrigo em 2026-09-18). */}
+                <div className="hidden text-xs text-[var(--text-muted)] sm:block">TVB Shorts · Painel TVB Radar</div>
               </div>
             </div>
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2 sm:gap-4">
               {/* Formato de exibição de telefone (Celular/Computador) — global, vale pra
                   qualquer aba que mostre contato de cliente. Ver phone-mode.tsx. */}
               <PhoneModeToggle compact />
-              <span className="text-xs text-[var(--text-secondary)]">
+              <span className="hidden text-xs text-[var(--text-secondary)] sm:inline">
                 {user.name} · {user.role}
               </span>
               <form action={logoutAction}>
@@ -54,11 +57,11 @@ export default async function DashboardLayout({ children }: { children: React.Re
               </form>
             </div>
           </div>
-          <Suspense fallback={<nav className="mx-auto flex max-w-7xl flex-wrap gap-1 px-6" />}>
+          <Suspense fallback={<nav className="mx-auto flex max-w-7xl flex-wrap gap-1 px-4 sm:px-6" />}>
             <TabNav visibleKeys={visibleKeys} isAdmin={user.role === "ADMIN"} />
           </Suspense>
         </header>
-        <main className="mx-auto max-w-7xl px-6 py-6">{children}</main>
+        <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6">{children}</main>
       </div>
     </PhoneModeProvider>
   );

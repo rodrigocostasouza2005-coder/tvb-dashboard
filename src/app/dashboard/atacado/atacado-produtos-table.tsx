@@ -38,7 +38,7 @@ export function AtacadoProdutosTable({ rows, showReceita = true }: { rows: Produ
   const grupoList = [...gruposMap.entries()].sort(([, a], [, b]) => b.receita - a.receita);
 
   return (
-    <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+    <div className="overflow-x-auto overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">

@@ -88,7 +88,7 @@ export default async function ClientesProdutosEntradaPage({
       </p>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+        <div className="overflow-x-auto overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
           <div className="border-b border-[var(--gridline)] px-4 py-2.5">
             <h2 className="text-sm font-medium text-[var(--text-primary)]">Produto da 1ª compra</h2>
             <p className="text-xs text-[var(--text-muted)]">Ranqueado por quantos clientes trouxe (independente de terem voltado a comprar depois).</p>
@@ -122,7 +122,7 @@ export default async function ClientesProdutosEntradaPage({
           </table>
         </div>
 
-        <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+        <div className="overflow-x-auto overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
           <div className="border-b border-[var(--gridline)] px-4 py-2.5">
             <h2 className="text-sm font-medium text-[var(--text-primary)]">Produto de clientes que só compraram 1 vez</h2>
             <p className="text-xs text-[var(--text-muted)]">Recorte de clientes com 1 pedido na vida toda (nunca voltaram) — a 1ª compra deles é também a única.</p>

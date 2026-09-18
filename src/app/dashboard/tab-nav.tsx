@@ -64,7 +64,7 @@ export function TabNav({ visibleKeys, isAdmin }: { visibleKeys: TabKey[]; isAdmi
   }
 
   return (
-    <nav ref={navRef} className="mx-auto flex max-w-7xl flex-wrap items-center gap-1 px-6">
+    <nav ref={navRef} className="mx-auto flex max-w-7xl flex-wrap items-center gap-1 px-4 sm:px-6">
       {GROUPS.map((group) => {
         if (group.single) {
           // "Visão Geral" — direct link, no dropdown

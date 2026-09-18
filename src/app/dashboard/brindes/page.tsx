@@ -68,7 +68,7 @@ export default async function BrindesPage({
       </section>
 
       {/* Foco principal: quem retirou */}
-      <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] mb-6">
+      <div className="overflow-x-auto overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] mb-6">
         <div className="px-4 py-3 border-b border-[var(--gridline)]">
           <h2 className="text-sm font-medium text-[var(--text-secondary)]">Quem retirou brindes</h2>
         </div>
@@ -124,7 +124,7 @@ export default async function BrindesPage({
           emptyMessage="Sem brinde no período/filtro selecionado."
         />
       ) : (
-        <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+        <div className="overflow-x-auto overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">

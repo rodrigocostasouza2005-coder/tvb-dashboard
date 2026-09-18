@@ -240,7 +240,7 @@ export default async function ClientesPage({
       <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
         <h2 className="mb-1 text-sm font-medium text-[var(--text-secondary)]">Distribuição de pedidos por cliente</h2>
         <p className="mb-3 text-xs text-[var(--text-muted)]">Quantos clientes fizeram cada quantidade de pedidos (histórico completo, DAPIC + site antigo somados).</p>
-        <div className="overflow-hidden rounded-lg border border-[var(--border)]">
+        <div className="overflow-x-auto overflow-hidden rounded-lg border border-[var(--border)]">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
