@@ -75,20 +75,35 @@ export default async function AtacadoPage({
         <input type="hidden" name="to" value={toDateInputValue(filters.to)} />
         {filters.colecaoIn?.map((c) => <input key={c} type="hidden" name="colecao" value={c} />)}
         <label className="text-xs text-[var(--text-muted)]">Cliente:</label>
-        <select
+        {/* Campo de busca com datalist nativo (digita pra filtrar) — mesmo padrão já usado no
+            seletor de produto de Indicadores no Tempo, pedido do Rodrigo em 2026-09-18: já são
+            31+ clientes de atacado, um <select> comum ficou ruim de navegar. */}
+        <input
+          type="text"
           name="cliente"
+          list="atacado-clientes-datalist"
           defaultValue={clienteSelecionado ?? ""}
-          className="min-w-[220px] rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--series-1)] focus:ring-1 focus:ring-[var(--series-1)]"
+          placeholder="Buscar cliente... (digite pra buscar)"
+          autoComplete="off"
+          className="w-full max-w-xs rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--series-1)] focus:ring-1 focus:ring-[var(--series-1)]"
           style={{ colorScheme: "light dark" }}
-        >
-          <option value="">Todos os clientes</option>
+        />
+        <datalist id="atacado-clientes-datalist">
           {clientesAtacado.map((c) => (
-            <option key={c} value={c}>{c}</option>
+            <option key={c} value={c} />
           ))}
-        </select>
+        </datalist>
         <button type="submit" className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-3 py-1.5 text-sm hover:bg-[var(--page-plane)]">
           Filtrar
         </button>
+        {clienteSelecionado && (
+          <a
+            href={`/dashboard/atacado?from=${toDateInputValue(filters.from)}&to=${toDateInputValue(filters.to)}${(filters.colecaoIn ?? []).map((c) => `&colecao=${encodeURIComponent(c)}`).join("")}`}
+            className="rounded-md border border-[var(--border)] px-3 py-1.5 text-sm text-[var(--text-secondary)] hover:bg-[var(--page-plane)]"
+          >
+            Ver todos os clientes
+          </a>
+        )}
       </form>
 
       {clienteSelecionado ? (
@@ -158,7 +173,9 @@ export default async function AtacadoPage({
             </section>
           </div>
         ) : (
-          <p className="text-sm text-[var(--text-muted)]">Nenhuma venda encontrada pra esse cliente no período disponível.</p>
+          <p className="text-sm text-[var(--text-muted)]">
+            Nenhuma venda encontrada pra "{clienteSelecionado}" — confira se o nome está digitado exatamente como aparece na lista (use o campo de busca pra escolher da lista, em vez de digitar de cabeça).
+          </p>
         )
       ) : (
         <AtacadoVisaoGeral filters={filters} showFinancials={showFinancials} />
