@@ -2,6 +2,7 @@ import { getSessionUser } from "@/lib/auth";
 import { getContatosPorVendedor } from "@/lib/metrics";
 import { brasiliaDayStart, brasiliaDayEnd, todayBrasiliaStr, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
+import { deletarContatoAction } from "./actions";
 
 const TIPO_LABEL: Record<string, string> = { sugestao: "Sugestão de contato", followup: "Follow-up pós-compra" };
 
@@ -26,6 +27,8 @@ export default async function ContatosVendedoresPage({
   const to = brasiliaDayEnd(toStr);
 
   const { ranking, itens } = await getContatosPorVendedor(from, to);
+  // Excluir contato marcado — pedido do Rodrigo em 2026-09-18, só ADMIN (nem Gestão).
+  const podeExcluir = user.role === "ADMIN";
 
   return (
     <div>
@@ -84,6 +87,7 @@ export default async function ContatosVendedoresPage({
               <th className="px-4 py-2 font-medium">Vendedor</th>
               <th className="px-4 py-2 font-medium">Cliente</th>
               <th className="px-4 py-2 font-medium">Tipo</th>
+              {podeExcluir && <th className="px-4 py-2 font-medium"></th>}
             </tr>
           </thead>
           <tbody>
@@ -95,11 +99,27 @@ export default async function ContatosVendedoresPage({
                 <td className="px-4 py-2">{it.contatadoPor}</td>
                 <td className="px-4 py-2 font-medium">{it.cliente}</td>
                 <td className="px-4 py-2 text-[var(--text-secondary)]">{TIPO_LABEL[it.tipo] ?? it.tipo}</td>
+                {podeExcluir && (
+                  <td className="px-4 py-2 text-right">
+                    <form action={deletarContatoAction}>
+                      <input type="hidden" name="tipo" value={it.tipo} />
+                      <input type="hidden" name="cliente" value={it.cliente} />
+                      <input type="hidden" name="chave" value={it.chave} />
+                      <button
+                        type="submit"
+                        className="rounded-md border border-[var(--border)] px-2 py-1 text-xs"
+                        style={{ color: "var(--status-critical)" }}
+                      >
+                        Excluir
+                      </button>
+                    </form>
+                  </td>
+                )}
               </tr>
             ))}
             {itens.length === 0 && (
               <tr>
-                <td colSpan={4} className="px-4 py-3 text-[var(--text-muted)]">Nenhum contato marcado nesse período.</td>
+                <td colSpan={podeExcluir ? 5 : 4} className="px-4 py-3 text-[var(--text-muted)]">Nenhum contato marcado nesse período.</td>
               </tr>
             )}
           </tbody>
