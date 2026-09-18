@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
-import { SESSION_COOKIE_NAME } from "@/lib/constants";
+import { SESSION_COOKIE_NAME, VENDEDOR_COOKIE_NAME } from "@/lib/constants";
 import type { Role } from "@prisma/client";
 
 const SESSION_COOKIE = SESSION_COOKIE_NAME;
@@ -40,6 +40,9 @@ export async function destroySession() {
     await prisma.session.delete({ where: { id: sessionId } }).catch(() => {});
   }
   cookieStore.delete(SESSION_COOKIE);
+  // Some junto do logout — evita que o próximo login nesse computador (loja diferente, ou
+  // mesma loja outro turno) herde o vendedor selecionado por engano.
+  cookieStore.delete(VENDEDOR_COOKIE_NAME);
 }
 
 export type SessionUser = {
@@ -77,4 +80,31 @@ export async function getSessionUser(): Promise<SessionUser | null> {
     allowedTabelasPreco: session.user.allowedTabelasPreco,
     canSeeFinancials: session.user.canSeeFinancials,
   };
+}
+
+// Vendedor selecionado na aba Sugestões de Contato (identificação simples, sem senha/login
+// próprio — ver VENDEDOR_COOKIE_NAME). O valor lido aqui é só o que está salvo no cookie; quem
+// chama DEVE cruzar contra a lista de vendedores permitidos pro login atual (getVendedores com
+// os allowedStores do usuário) antes de usar — nunca confiar nesse valor sozinho, pedido do
+// Rodrigo em 2026-09-18 ("essa validação não deve existir somente no frontend").
+export async function getVendedorAtualCookie(): Promise<string | null> {
+  const cookieStore = await cookies();
+  return cookieStore.get(VENDEDOR_COOKIE_NAME)?.value ?? null;
+}
+
+export async function setVendedorAtualCookie(nome: string) {
+  const cookieStore = await cookies();
+  cookieStore.set(VENDEDOR_COOKIE_NAME, nome, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: "/",
+    // Sem "expires" — cookie de sessão do navegador, some ao fechar (computador da loja é
+    // compartilhado entre vendedores; não faz sentido persistir por dias).
+  });
+}
+
+export async function clearVendedorAtualCookie() {
+  const cookieStore = await cookies();
+  cookieStore.delete(VENDEDOR_COOKIE_NAME);
 }

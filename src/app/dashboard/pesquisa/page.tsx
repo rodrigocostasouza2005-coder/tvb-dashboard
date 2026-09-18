@@ -3,10 +3,10 @@ import { searchStockVsSalesComTamanhos, getTopClientes, getDailySalesByProduto, 
 import { canSeeFinancials, getGrupoRestriction, getMarcaRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
 import { parseFilters, brasiliaDayStart, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
-import { waHref } from "@/lib/whatsapp";
 import { FilterBar } from "../filter-bar";
 import { CollapsibleFilters } from "../collapsible-filters";
 import { IndicatorChart } from "../indicadores/indicator-chart";
+import { PhoneLink } from "../phone-link";
 import { PesquisaTable } from "./pesquisa-table";
 
 const DATA_START_MONTH = "2025-09";
@@ -167,9 +167,7 @@ export default async function PesquisaPage({
                   </td>
                   <td className="px-4 py-2">
                     {c.telefone ? (
-                      <a href={waHref(c.telefone)} target="_blank" rel="noopener noreferrer" className="text-[var(--series-1)] hover:underline tabular-nums">
-                        {c.telefone}
-                      </a>
+                      <PhoneLink telefone={c.telefone} />
                     ) : (
                       <span className="text-[var(--text-muted)]">—</span>
                     )}

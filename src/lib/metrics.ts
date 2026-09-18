@@ -1911,26 +1911,33 @@ export type ClienteSegmentado = {
 // especificamente naquele mês sumiria ou virataria "novo" por engano (exemplo do Rodrigo). O
 // histórico anterior ao mês continua 100% visível pro cálculo, só o futuro (depois do mês) que
 // fica de fora.
+// vendedor opcional (2026-09-18, aba Sugestões de Contato): mesmo padrão já usado em
+// getClientesCrmOverview/getClienteRetencaoVarejo/getDistribuicaoPedidos/getAniversariantesDoMes
+// — filtra a origem (Sale.vendedor) antes de agregar, então recência/segmento/loja principal
+// já saem calculados só sobre as vendas daquele vendedor.
 export async function getClienteSegmentacao(
   filters: DashboardFilters,
   canal: Canal = "todos",
-  referenceDate: Date = new Date()
+  referenceDate: Date = new Date(),
+  vendedor?: string | null
 ): Promise<ClienteSegmentado[]> {
-  const key = `segmentacao:${canal}:${referenceDate.toISOString().slice(0, 10)}:${JSON.stringify({
+  const key = `segmentacao:${canal}:${referenceDate.toISOString().slice(0, 10)}:${vendedor ?? ""}:${JSON.stringify({
     storeIds: filters.storeIds, marcas: filters.marcas, tabelasPreco: filters.tabelasPreco,
   })}`;
-  return cacheAsync(key, HEAVY_QUERY_CACHE_MS, () => computeClienteSegmentacao(filters, canal, referenceDate));
+  return cacheAsync(key, HEAVY_QUERY_CACHE_MS, () => computeClienteSegmentacao(filters, canal, referenceDate, vendedor));
 }
 
 async function computeClienteSegmentacao(
   filters: DashboardFilters,
   canal: Canal,
-  referenceDate: Date
+  referenceDate: Date,
+  vendedor?: string | null
 ): Promise<ClienteSegmentado[]> {
   const allTime: DashboardFilters = { ...filters, from: new Date(0), to: referenceDate };
   const where: Prisma.SaleWhereInput = {
     ...saleWhere(allTime),
     clienteNome: { not: null },
+    ...(vendedor ? { vendedor } : {}),
     ...(canal !== "todos" ? { AND: [await canalWhere(canal)] } : {}),
   };
   const rows = await prisma.sale.findMany({
@@ -2986,11 +2993,15 @@ function fatiaDoDia<T>(pool: T[], porDia: number, seed: number): T[] {
 const ESFRIANDO_DIAS_MIN = 70;
 const ESFRIANDO_DIAS_MAX = 90;
 
-export async function getSugestoesDeContato(filters: DashboardFilters): Promise<SugestaoContato[]> {
+// vendedor opcional (2026-09-18): quando informado, restringe os 6 pools (VIP/Recorrente/Em
+// risco/Ocasional/Inativo/Aniversário) só aos clientes cujas vendas foram atribuídas a esse
+// vendedor — mesmo padrão de getClienteSegmentacao/getAniversariantesDoMes, nenhuma regra de
+// negócio nova, só um filtro a mais na origem.
+export async function getSugestoesDeContato(filters: DashboardFilters, vendedor?: string | null): Promise<SugestaoContato[]> {
   const mesAtual = new Date().getUTCMonth() + 1;
   const [segmentacao, aniversariantes] = await Promise.all([
-    getClienteSegmentacao(filters, "b2c"),
-    getAniversariantesDoMes(filters, null, mesAtual, "b2c"),
+    getClienteSegmentacao(filters, "b2c", new Date(), vendedor),
+    getAniversariantesDoMes(filters, vendedor, mesAtual, "b2c"),
   ]);
 
   // Só quem tem telefone no cadastro — sem isso não dá pra chamar no WhatsApp, não faz sentido
@@ -3094,13 +3105,15 @@ export type FollowUpPosCompra = {
 const FOLLOWUP_DIAS_MIN = 7;
 const FOLLOWUP_DIAS_MAX = 10;
 
-export async function getFollowUpPosCompra(filters: DashboardFilters): Promise<FollowUpPosCompra[]> {
+// vendedor opcional (2026-09-18) — mesmo motivo/padrão de getClienteSegmentacao acima.
+export async function getFollowUpPosCompra(filters: DashboardFilters, vendedor?: string | null): Promise<FollowUpPosCompra[]> {
   const hoje = new Date();
   const inicio = new Date(hoje.getTime() - FOLLOWUP_DIAS_MAX * 86400000);
   const fim = new Date(hoje.getTime() - FOLLOWUP_DIAS_MIN * 86400000);
   const where: Prisma.SaleWhereInput = {
     ...saleWhere({ ...filters, from: inicio, to: fim }),
     clienteNome: { not: null },
+    ...(vendedor ? { vendedor } : {}),
     AND: [await canalWhere("b2c")],
   };
   const rows = await prisma.sale.findMany({

@@ -1,5 +1,5 @@
-import { getSessionUser } from "@/lib/auth";
-import { getStores, getMarcas, getTabelasPreco, getDistinctColecoes, getSugestoesDeContato, getFollowUpPosCompra, type SugestaoContato, type FollowUpPosCompra } from "@/lib/metrics";
+import { getSessionUser, getVendedorAtualCookie } from "@/lib/auth";
+import { getStores, getMarcas, getTabelasPreco, getDistinctColecoes, getSugestoesDeContato, getFollowUpPosCompra, getVendedores, type SugestaoContato, type FollowUpPosCompra } from "@/lib/metrics";
 import { getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
@@ -10,6 +10,7 @@ import { getMensagemTemplates, renderTemplate, type TemplateKey } from "@/lib/me
 import { FilterBar } from "../filter-bar";
 import { CollapsibleFilters } from "../collapsible-filters";
 import { ContatoWhatsappLink } from "./contato-whatsapp-link";
+import { VendedorGate, VendedorAtualSelect } from "./vendedor-select";
 
 type ContatoInfo = { contatadoPor: string; contatadoEm: string };
 
@@ -257,13 +258,33 @@ export default async function ClientesSugestoesContatoPage({
     allowedTabelasPreco,
   });
 
+  // Identificação do vendedor dentro do login da loja (não é autenticação — sem senha/e-mail
+  // próprio). Só existe quando o login está restrito a EXATAMENTE 1 loja — é esse o sinal real
+  // de "computador físico da loja" (leblon@/barra@/riosul@, cada um com allowedStores de 1 item),
+  // não o role: existem contas VENDEDOR (logistica@, atendimento@) com acesso às 4 lojas, que não
+  // fazem sentido forçar a escolher 1 vendedor. Rodrigo confirmou em 2026-09-18: pra ADMIN/GESTÃO
+  // (e qualquer login de mais de 1 loja) a tela continua EXATAMENTE como era antes — nada de
+  // seletor de vendedor, nem opcional.
+  const loginDeLojaUnica = allowedStores.length === 1;
+  const vendedoresDaLoja = loginDeLojaUnica ? await getVendedores(allowedStores) : [];
+  const vendedorCookie = loginDeLojaUnica ? await getVendedorAtualCookie() : null;
+  const vendedorAtual = vendedorCookie && vendedoresDaLoja.includes(vendedorCookie) ? vendedorCookie : null;
+
+  if (loginDeLojaUnica && !vendedorAtual) {
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center">
+        <VendedorGate vendedores={vendedoresDaLoja} obrigatorio />
+      </div>
+    );
+  }
+
   const [stores, marcas, tabelasPreco, colecoes, sugestoes, followUp, templates] = await Promise.all([
     getStores(allowedStores),
     getMarcas(allowedMarcas),
     getTabelasPreco(allowedTabelasPreco),
     getDistinctColecoes(),
-    getSugestoesDeContato(filters),
-    getFollowUpPosCompra(filters),
+    getSugestoesDeContato(filters, vendedorAtual),
+    getFollowUpPosCompra(filters, vendedorAtual),
     getMensagemTemplates(),
   ]);
 
@@ -311,8 +332,15 @@ export default async function ClientesSugestoesContatoPage({
         />
       </CollapsibleFilters>
 
+      {loginDeLojaUnica && vendedorAtual && (
+        <div className="mb-4">
+          <VendedorAtualSelect vendedores={vendedoresDaLoja} vendedorAtual={vendedorAtual} />
+        </div>
+      )}
+
       <p className="mb-4 text-sm text-[var(--text-secondary)]">
         Lista muda todo dia — só clientes B2C (varejo), com um pouco de cada grupo (VIP esfriando, Recorrente esfriando, Em risco, Comprou só 1x, Inativo, Aniversário), separada pela loja principal de cada cliente.
+        {vendedorAtual && " Mostrando só os clientes atendidos por este vendedor."}
       </p>
 
       <div className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-2">

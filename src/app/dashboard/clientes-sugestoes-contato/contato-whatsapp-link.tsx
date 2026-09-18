@@ -2,6 +2,8 @@
 
 import { useState, useTransition } from "react";
 import { marcarContatadoAction, desmarcarContatadoAction, type ContatoTipo } from "./actions";
+import { formatTelefoneDisplay, telefoneParaTel } from "@/lib/phone";
+import { usePhoneMode } from "../phone-mode";
 
 type Contato = { contatadoPor: string; contatadoEm: string };
 
@@ -26,6 +28,8 @@ export function ContatoWhatsappLink({
 }) {
   const [contato, setContato] = useState<Contato | null>(contatadoInicial);
   const [, startTransition] = useTransition();
+  const { mode } = usePhoneMode();
+  const [copiado, setCopiado] = useState(false);
 
   // Marca sozinho no clique do link — não é confirmação de envio de verdade (fora do alcance sem
   // WhatsApp Business API), é só "clicou = considerou contatado". Ver comentário no schema.
@@ -53,10 +57,33 @@ export function ContatoWhatsappLink({
         target="_blank"
         rel="noopener noreferrer"
         onClick={handleClick}
-        className="text-[var(--series-1)] hover:underline tabular-nums"
+        className={`text-[var(--series-1)] hover:underline tabular-nums ${mode === "mobile" ? "text-base py-1" : ""}`}
       >
-        {telefone}
+        {formatTelefoneDisplay(telefone)}
       </a>
+      {mode === "mobile" ? (
+        <a
+          href={`tel:+${telefoneParaTel(telefone)}`}
+          title="Ligar"
+          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-sm hover:bg-[var(--page-plane)]"
+        >
+          📞
+        </a>
+      ) : (
+        <button
+          type="button"
+          title="Copiar número"
+          onClick={() => {
+            navigator.clipboard.writeText(formatTelefoneDisplay(telefone)).then(() => {
+              setCopiado(true);
+              setTimeout(() => setCopiado(false), 1500);
+            });
+          }}
+          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-sm hover:bg-[var(--page-plane)]"
+        >
+          {copiado ? "✅" : "📋"}
+        </button>
+      )}
       {podeVerCheck && contato && (
         <button
           type="button"

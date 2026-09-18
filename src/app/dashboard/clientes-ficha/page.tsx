@@ -3,10 +3,10 @@ import { getStores, getMarcas, getTabelasPreco, getDistinctColecoes, getClienteF
 import { canSeeFinancials, getMarcaRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
-import { waHref } from "@/lib/whatsapp";
 import { FilterBar } from "../filter-bar";
 import { CollapsibleFilters } from "../collapsible-filters";
 import { StatTile } from "../stat-tile";
+import { PhoneLink } from "../phone-link";
 
 const PRECO_LABEL: Record<string, string> = {
   full_price: "Preço cheio",
@@ -123,7 +123,7 @@ export default async function ClientesFichaPage({
               </div>
               <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm text-[var(--text-secondary)]">
                 {ficha.telefone && (
-                  <a href={waHref(ficha.telefone)} target="_blank" rel="noopener noreferrer" className="text-[var(--series-1)] hover:underline tabular-nums">{ficha.telefone}</a>
+                  <PhoneLink telefone={ficha.telefone} />
                 )}
                 {ficha.email && <span>{ficha.email}</span>}
                 {ficha.dataNascimento && <span>Nasc. {formatDataNascimento(ficha.dataNascimento)}</span>}

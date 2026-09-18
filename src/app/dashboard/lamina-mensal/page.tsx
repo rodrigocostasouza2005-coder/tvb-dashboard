@@ -5,6 +5,7 @@ import { canSeeFinancials, getStoreRestriction, getMarcaRestriction, getTabelaPr
 import { parseFilters, brasiliaDayStart, brasiliaDayEnd, todayBrasiliaStr, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { waHref } from "@/lib/whatsapp";
+import { formatTelefoneDisplay } from "@/lib/phone";
 import { StatTile } from "../stat-tile";
 import { TrendChart } from "./trend-chart";
 import { CollapsibleFilters } from "../collapsible-filters";
@@ -476,7 +477,7 @@ export default async function LaminaMensalPage({
                               rel="noopener noreferrer"
                               className="shrink-0 text-xs tabular-nums text-[var(--series-1)] hover:underline"
                             >
-                              {telefone}
+                              {formatTelefoneDisplay(telefone)}
                             </a>
                           )}
                         </span>
