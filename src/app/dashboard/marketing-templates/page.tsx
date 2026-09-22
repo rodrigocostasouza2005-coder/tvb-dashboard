@@ -1,7 +1,7 @@
 import { getSessionUser } from "@/lib/auth";
 import { requireTabAccess } from "@/lib/tabs";
 import { getMensagemTemplates, TEMPLATE_KEYS } from "@/lib/message-templates";
-import { salvarTemplateAction, restaurarPadraoAction } from "./actions";
+import { salvarTemplateAction, restaurarPadraoAction, limparTemplateAction } from "./actions";
 import { SuccessBanner } from "../admin/success-banner";
 
 export default async function MarketingTemplatesPage({
@@ -62,6 +62,14 @@ export default async function MarketingTemplatesPage({
                     className="w-fit rounded-md border border-[var(--border)] px-3 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--page-plane)]"
                   >
                     Restaurar padrão
+                  </button>
+                  <button
+                    type="submit"
+                    formAction={limparTemplateAction}
+                    title="O link do WhatsApp abre sem mensagem pré-pronta pra esse motivo"
+                    className="w-fit rounded-md border border-[var(--border)] px-3 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--page-plane)]"
+                  >
+                    Deixar em branco
                   </button>
                 </div>
               </form>

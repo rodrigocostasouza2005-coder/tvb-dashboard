@@ -46,3 +46,23 @@ export async function restaurarPadraoAction(formData: FormData) {
   revalidatePath("/dashboard/clientes-sugestoes-contato");
   redirect("/dashboard/marketing-templates?ok=1");
 }
+
+// "Deixar em branco" — pedido do Rodrigo em 2026-09-22: diferente de salvarTemplateAction (que
+// bloqueia texto vazio, pra não zerar sem querer digitando errado), esse botão é a forma
+// deliberada de zerar de propósito. Template em branco = link do WhatsApp abre sem mensagem
+// pré-pronta pra esse motivo (renderTemplate("", ...) vira "", e waHref não manda &text= quando
+// a mensagem é vazia) — não quebra nada, só some o texto sugerido.
+export async function limparTemplateAction(formData: FormData) {
+  await requireGestao();
+
+  const key = String(formData.get("key") ?? "");
+  if (!VALID_KEYS.has(key as TemplateKey)) throw new Error("Template inválido.");
+
+  await prisma.mensagemTemplate.upsert({
+    where: { id: key },
+    create: { id: key, texto: "" },
+    update: { texto: "" },
+  });
+  revalidatePath("/dashboard/clientes-sugestoes-contato");
+  redirect("/dashboard/marketing-templates?ok=1");
+}
