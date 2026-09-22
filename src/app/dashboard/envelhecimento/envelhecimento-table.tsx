@@ -17,7 +17,6 @@ type Row = {
 };
 
 type AggRow = {
-  storeName: string;
   produto: string;
   colecao: string | null;
   estoque: number;
@@ -43,23 +42,23 @@ function ageStatus(dias: number): { label: string; color: string } {
 }
 
 export function EnvelhecimentoTable({ rows }: { rows: Row[] }) {
-  const [loja, setLoja] = useState("");
   const [produto, setProduto] = useState("");
   const [status, setStatus] = useState("");
   const [colecoesSel, setColecoesSel] = useState<Set<string>>(new Set());
 
-  const lojas = useMemo(() => [...new Set(rows.map((r) => r.storeName))].sort(), [rows]);
   const colecoes = useMemo(() => [...new Set(rows.map((r) => r.colecao ?? "—"))].sort(), [rows]);
 
-  // Agrega por loja + produto
+  // Agrega só por produto — todas as lojas/canais somados numa linha só (pedido do Rodrigo em
+  // 2026-09-22: antes tinha 1 linha por loja pro mesmo produto, ele quer visão combinada). Pra
+  // ver 1 loja isolada, já dá pra usar o filtro de loja da barra de filtros no topo da página
+  // (server-side, em "rows" antes de chegar aqui).
   const aggRows = useMemo<AggRow[]>(() => {
     const map = new Map<string, AggRow>();
     for (const r of rows) {
-      const key = `${r.storeName}\x00${r.produto}`;
+      const key = r.produto;
       const cur = map.get(key);
       if (!cur) {
         map.set(key, {
-          storeName: r.storeName,
           produto: r.produto,
           colecao: r.colecao,
           estoque: r.quantidadeDisponivel,
@@ -107,7 +106,6 @@ export function EnvelhecimentoTable({ rows }: { rows: Row[] }) {
 
   const filtered = aggRows.filter(
     (r) =>
-      (loja === "" || r.storeName === loja) &&
       (produto === "" || r.produto === produto) &&
       (status === "" || r.status.label === status) &&
       (colecoesSel.size === 0 || colecoesSel.has(r.colecao ?? "—"))
@@ -150,7 +148,6 @@ export function EnvelhecimentoTable({ rows }: { rows: Row[] }) {
         <table className="w-full min-w-[800px] text-sm">
           <thead>
             <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
-              <th className="px-4 py-2 font-medium">Loja</th>
               <th className="px-4 py-2 font-medium">Produto</th>
               <th className="px-4 py-2 font-medium">Estoque</th>
               <th className="px-4 py-2 font-medium">1ª venda</th>
@@ -160,12 +157,6 @@ export function EnvelhecimentoTable({ rows }: { rows: Row[] }) {
               <th className="px-4 py-2 font-medium">Status</th>
             </tr>
             <tr className="border-b border-[var(--gridline)] bg-[var(--surface-1)]">
-              <th className="px-4 py-1.5">
-                <select className={selectClass} value={loja} onChange={(e) => setLoja(e.target.value)}>
-                  <option value="">Todas</option>
-                  {lojas.map((l) => <option key={l} value={l}>{l}</option>)}
-                </select>
-              </th>
               <th className="px-4 py-1.5">
                 <select className={selectClass} value={produto} onChange={(e) => setProduto(e.target.value)}>
                   <option value="">Todos</option>
@@ -185,7 +176,6 @@ export function EnvelhecimentoTable({ rows }: { rows: Row[] }) {
           <tbody>
             {visible.map((r, i) => (
               <tr key={i} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
-                <td className="px-4 py-2">{r.storeName}</td>
                 <td className="px-4 py-2 font-medium">{r.produto}</td>
                 <td className="px-4 py-2 tabular-nums">{r.estoque}</td>
                 <td className="px-4 py-2">{formatDate(r.primeiraVenda)}</td>
@@ -204,7 +194,7 @@ export function EnvelhecimentoTable({ rows }: { rows: Row[] }) {
             ))}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={8} className="px-4 py-6 text-center text-[var(--text-muted)]">
+                <td colSpan={7} className="px-4 py-6 text-center text-[var(--text-muted)]">
                   Nenhum item bate com esse filtro.
                 </td>
               </tr>
