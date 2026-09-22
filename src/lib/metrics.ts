@@ -2928,9 +2928,17 @@ export async function getAniversariantesDoMes(filters: DashboardFilters, vendedo
   return cacheAsync(key, HEAVY_QUERY_CACHE_MS, () => computeAniversariantesDoMes(filters, vendedor, month, canal));
 }
 
+// Usa o HISTÓRICO COMPLETO (ignora from/to do filtro) pra decidir QUEM entra na lista — mesmo
+// motivo já documentado em getClienteSegmentacao: o período da tela (ex: últimos 30 dias) é
+// current-period", não "cliente existe". Achado pelo Rodrigo em 2026-09-22: só 95 dos 500
+// aniversariantes reais de setembro apareciam, porque o filtro padrão da tela (30 dias) exigia
+// venda DENTRO desse período — os outros 405 são clientes reais do DAPIC que só não compraram
+// recentemente, não "dado do site antigo" (esse aqui nunca usou VendaHistoricaExterna). Loja/
+// marca/tabela/vendedor/canal continuam sendo respeitados normalmente, só data que vira all-time.
 async function computeAniversariantesDoMes(filters: DashboardFilters, vendedor: string | null | undefined, month: number, canal: Canal) {
+  const allTime: DashboardFilters = { ...filters, from: new Date(0), to: new Date() };
   const where: Prisma.SaleWhereInput = {
-    ...saleWhere(filters),
+    ...saleWhere(allTime),
     clienteNome: { not: null },
     ...(vendedor ? { vendedor } : {}),
     ...(canal !== "todos" ? { AND: [await canalWhere(canal)] } : {}),
