@@ -12,6 +12,11 @@ import { CollapsibleFilters } from "../collapsible-filters";
 import { MetricBarChart } from "../metric-bar-chart";
 import { StatTile } from "../stat-tile";
 import { ClienteRetencaoChart } from "./cliente-retencao-chart";
+import { getMensagemTemplates, renderTemplate } from "@/lib/message-templates";
+
+function primeiroNome(nomeCompleto: string): string {
+  return nomeCompleto.trim().split(/\s+/)[0];
+}
 
 const MONTH_NAMES = [
   "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
@@ -57,7 +62,7 @@ export default async function ClientesPage({
     ? aniversarioMesParsed
     : parseInt(todayBrasiliaStr(new Date()).slice(5, 7), 10);
 
-  const [rows, stores, marcas, tabelasPreco, colecoes, vendedores, retencao, aniversariantes, overview, historicoExterno, distribuicaoPedidos] = await Promise.all([
+  const [rows, stores, marcas, tabelasPreco, colecoes, vendedores, retencao, aniversariantes, overview, historicoExterno, distribuicaoPedidos, templates] = await Promise.all([
     getTopClientes(filters, vendedor, 30, canal, true),
     getStores(allowedStores),
     getMarcas(allowedMarcas),
@@ -69,6 +74,7 @@ export default async function ClientesPage({
     getClientesCrmOverview(filters, canal, vendedor),
     getReceitaHistoricaExterna(),
     getDistribuicaoPedidos(filters, canal, vendedor),
+    getMensagemTemplates(),
   ]);
   const showFinancials = canSeeFinancials(user);
 
@@ -320,7 +326,10 @@ export default async function ClientesPage({
                     </td>
                     <td className="px-4 py-2">
                       {c.telefone || c.celular ? (
-                        <PhoneLink telefone={c.telefone ?? c.celular ?? ""} />
+                        <PhoneLink
+                          telefone={c.telefone ?? c.celular ?? ""}
+                          mensagem={renderTemplate(templates.aniversario, { nome: primeiroNome(c.nome) })}
+                        />
                       ) : (
                         <span className="text-[var(--text-muted)]">—</span>
                       )}
