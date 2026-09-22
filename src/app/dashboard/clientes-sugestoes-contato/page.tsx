@@ -1,5 +1,5 @@
 import { getSessionUser, getVendedorAtualCookie } from "@/lib/auth";
-import { getStores, getMarcas, getTabelasPreco, getDistinctColecoes, getSugestoesDeContato, getFollowUpPosCompra, getVendedores, type SugestaoContato, type FollowUpPosCompra } from "@/lib/metrics";
+import { getStores, getMarcas, getTabelasPreco, getDistinctColecoes, getSugestoesDeContato, getFollowUpPosCompra, getVendedoresAtivos, type SugestaoContato, type FollowUpPosCompra } from "@/lib/metrics";
 import { getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
@@ -28,6 +28,16 @@ function primeiroNome(nomeCompleto: string): string {
   return nomeCompleto.trim().split(/\s+/)[0];
 }
 
+// Shopping de cada loja física — pedido do Rodrigo em 2026-09-21, pro placeholder {shopping}
+// do template "esfriando/em risco/1 compra". `loja` aqui é o mesmo texto de s.lojaPrincipal
+// (displayGroup ?? nome da Store, ex: "TVB Leblon") — sem entrada = placeholder fica vazio
+// (nunca inventa um shopping, ex: pro Site e Atacado, que não fica num shopping físico).
+const SHOPPING_POR_LOJA: Record<string, string> = {
+  "TVB Leblon": "Shopping Leblon",
+  "TVB Barra": "Barra Shopping",
+  "TVB Rio Sul": "Shopping Rio Sul",
+};
+
 const MOTIVO_TO_TEMPLATE_KEY: Record<string, TemplateKey> = {
   "VIP esfriando": "vip_esfriando",
   "Recorrente esfriando": "recorrente_esfriando",
@@ -54,7 +64,8 @@ function mensagemSugestao(s: SugestaoContato, templates: Record<TemplateKey, str
   const nome = primeiroNome(s.cliente);
   const key = MOTIVO_TO_TEMPLATE_KEY[s.motivo];
   const texto = key ? templates[key] : "Oi {nome}, tudo bem? Aqui é da TVB Shorts!";
-  const base = renderTemplate(texto, { nome, detalhe: s.detalhe });
+  const shopping = (s.loja && SHOPPING_POR_LOJA[s.loja]) || "";
+  const base = renderTemplate(texto, { nome, detalhe: s.detalhe, shopping });
 
   if (key && MOTIVOS_COM_GANCHO_ESTOQUE.has(key) && s.tamanhoDisponivel && s.produtoFavorito) {
     return `${base} Inclusive ainda temos o ${s.produtoFavorito} no seu tamanho (${s.tamanhoDisponivel}) aqui na loja!`;
@@ -74,9 +85,9 @@ function mensagemFollowUp(f: FollowUpComNota, templates: Record<TemplateKey, str
     f.produtos.length === 1
       ? f.produtos[0]
       : `${f.produtos.slice(0, -1).join(", ")} e ${f.produtos[f.produtos.length - 1]}`;
-  const base = renderTemplate(templates.follow_up, { nome, produtos });
+  const base = renderTemplate(templates.follow_up, { nome, produtos, codigo: f.codigo ?? "" });
   if (f.numeroNota) {
-    return `${base} E se precisar trocar alguma coisa, já separa o número da nota aqui: ${f.numeroNota}.`;
+    return `${base}\n\nE se precisar trocar alguma coisa, já separa o número da nota aqui: ${f.numeroNota}.`;
   }
   return base;
 }
@@ -141,6 +152,11 @@ function TabelaSugestoes({
             <tr key={`${s.cliente}-${i}`} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
               <td className="px-4 py-2 font-medium">
                 <a href={clienteHref(s.cliente)} className="hover:underline">{s.cliente}</a>
+                {s.vendedorOriginal && (
+                  <div className="text-xs font-normal text-[var(--text-muted)]">
+                    Ex-cliente de {primeiroNome(s.vendedorOriginal)}
+                  </div>
+                )}
               </td>
               <td className="px-4 py-2">
                 {s.telefone ? (
@@ -206,6 +222,11 @@ function TabelaFollowUp({
             <tr key={f.cliente} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
               <td className="px-4 py-2 font-medium">
                 <a href={clienteHref(f.cliente)} className="hover:underline">{f.cliente}</a>
+                {f.vendedorOriginal && (
+                  <div className="text-xs font-normal text-[var(--text-muted)]">
+                    Ex-cliente de {primeiroNome(f.vendedorOriginal)}
+                  </div>
+                )}
               </td>
               <td className="px-4 py-2">
                 {f.telefone ? (
@@ -265,7 +286,7 @@ export default async function ClientesSugestoesContatoPage({
   // (e qualquer login de mais de 1 loja) a tela continua EXATAMENTE como era antes — nada de
   // seletor de vendedor, nem opcional.
   const loginDeLojaUnica = allowedStores.length === 1;
-  const vendedoresDaLoja = loginDeLojaUnica ? await getVendedores(allowedStores) : [];
+  const vendedoresDaLoja = loginDeLojaUnica ? await getVendedoresAtivos(allowedStores[0]) : [];
   const vendedorCookie = loginDeLojaUnica ? await getVendedorAtualCookie() : null;
   const vendedorAtual = vendedorCookie && vendedoresDaLoja.includes(vendedorCookie) ? vendedorCookie : null;
 

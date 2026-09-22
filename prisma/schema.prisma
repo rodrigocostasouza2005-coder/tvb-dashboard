@@ -14,25 +14,25 @@ enum Role {
 }
 
 model User {
-  id           String   @id @default(cuid())
-  name         String
-  email        String   @unique
-  passwordHash String
-  role         Role     @default(VENDEDOR)
+  id                  String   @id @default(cuid())
+  name                String
+  email               String   @unique
+  passwordHash        String
+  role                Role     @default(VENDEDOR)
   // Lista de chaves de aba liberadas pra esse usuário (ver src/lib/tabs.ts).
   // Vazio = usa o padrão do role (comportamento de antes, continua funcionando sozinho).
-  allowedTabs  String[] @default([])
+  allowedTabs         String[] @default([])
   // Ids de Store que esse usuário pode ver (ver getStoreRestriction em lib/permissions.ts).
   // Vazio = sem restrição, vê todas as lojas.
-  allowedStores String[] @default([])
+  allowedStores       String[] @default([])
   // Mesmo padrão de allowedStores, mas pra Marca e Tabela de Preço (ver getMarcaRestriction/
   // getTabelaPrecoRestriction em lib/permissions.ts). Vazio = sem restrição.
-  allowedMarcas String[] @default([])
+  allowedMarcas       String[] @default([])
   allowedTabelasPreco String[] @default([])
   // Controla se o usuário vê colunas/KPIs financeiros (receita, custo, margem).
   // true por padrão — só desmarcar no Admin pra quem não deve ver.
-  canSeeFinancials Boolean @default(true)
-  createdAt    DateTime @default(now())
+  canSeeFinancials    Boolean  @default(true)
+  createdAt           DateTime @default(now())
 
   sessions Session[]
 }
@@ -67,6 +67,53 @@ model Store {
   syncLogs            SyncLog[]
   stockMinimumRules   StockMinimumRule[]
   contentPerformances ContentPerformance[]
+  vendedores          Vendedor[]
+  clienteAtribuicoes  ClienteVendedorAtribuicao[]
+}
+
+// Vendedor como entidade de verdade (2026-09-21) — até aqui "vendedor" só existia como texto
+// livre em Sale.vendedor, sem lugar pra guardar "essa pessoa saiu da empresa". Populado por
+// backfill (1 linha por nome distinto de Sale.vendedor em cada loja, ativo=true por padrão) e
+// dali em diante gerenciado no Painel Admin (só ADMIN liga/desliga). Desativar um vendedor NÃO
+// apaga nada — só dispara a redistribuição da carteira dele (ver ClienteVendedorAtribuicao).
+model Vendedor {
+  id        String   @id @default(cuid())
+  storeId   String
+  nome      String
+  ativo     Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  store             Store                       @relation(fields: [storeId], references: [id])
+  clientesAtuais    ClienteVendedorAtribuicao[] @relation("VendedorAtual")
+  clientesOriginais ClienteVendedorAtribuicao[] @relation("VendedorOriginal")
+
+  @@unique([storeId, nome])
+}
+
+// "Dona" persistente de um cliente dentro de uma loja — pedido do Rodrigo em 2026-09-21: sem
+// isso, a lista de clientes de um vendedor teria que ser recalculada toda vez a partir do
+// histórico de vendas (Sale.vendedor), e o mesmo cliente podia pular de vendedor a cada sync.
+// clienteNorm = nome do cliente já normalizado (trim+upper), mesmo padrão usado em
+// getClienteSegmentacao/getClienteFicha pra casar variação de capitalização entre vendas.
+// vendedorOriginalId só é preenchido quando o cliente foi redistribuído (o vendedor que ele
+// tinha antes ficou inativo) — cada nova redistribuição sobrescreve pra quem estava saindo
+// naquele momento (é sempre "de quem esse cliente era antes desta troca", não o 1º da história).
+model ClienteVendedorAtribuicao {
+  id                 String   @id @default(cuid())
+  storeId            String
+  clienteNorm        String
+  vendedorAtualId    String
+  vendedorOriginalId String?
+  criadoEm           DateTime @default(now())
+  atualizadoEm       DateTime @updatedAt
+
+  store            Store     @relation(fields: [storeId], references: [id])
+  vendedorAtual    Vendedor  @relation("VendedorAtual", fields: [vendedorAtualId], references: [id])
+  vendedorOriginal Vendedor? @relation("VendedorOriginal", fields: [vendedorOriginalId], references: [id])
+
+  @@unique([storeId, clienteNorm])
+  @@index([vendedorAtualId])
 }
 
 // Estoque mínimo definido manualmente pelo Rodrigo (o valor que vem do DAPIC nem sempre é
@@ -92,10 +139,10 @@ model StockMinimumRule {
 // empresa toda, não por ponto de venda) — pedido do Rodrigo em 2026-09-02, baseado numa planilha
 // de planejamento de compra que ele já usa.
 model CoberturaMeta {
-  id              String   @id @default(cuid())
-  grupo           String   @unique
-  mesesCobertura  Float
-  updatedAt       DateTime @updatedAt
+  id             String   @id @default(cuid())
+  grupo          String   @unique
+  mesesCobertura Float
+  updatedAt      DateTime @updatedAt
 }
 
 // Mapa de Compras — % de crescimento de receita esperado que o Rodrigo escolhe (ele mesmo, não
@@ -129,7 +176,7 @@ model Sale {
   produto           String
   grupo             String
   cor               String?
-  tamanho            String?
+  tamanho           String?
   colecao           String?
   marca             String?
   clienteNome       String?
@@ -147,6 +194,12 @@ model Sale {
   // sempre olhando "últimos N dias", então sem isso toda venda recente era reinserida a cada sync).
   dapicVendaId      Int
   itemIndex         Int
+  // Código HUMANO da venda (campo "Codigo" de /vendaspdv e /faturas) — diferente de
+  // dapicVendaId (Id interno usado só pra idempotência). Pedido do Rodrigo em 2026-09-21: pro
+  // template de Follow-up pós-compra mostrar o código real da venda. Nullable: vendas
+  // sincronizadas antes desse campo existir ficam null pra sempre (histórico não é
+  // reprocessado à toa).
+  codigo            String?
 
   store Store @relation(fields: [storeId], references: [id])
 
@@ -157,18 +210,18 @@ model Sale {
 }
 
 model StockSnapshot {
-  id                    String   @id @default(cuid())
-  storeId               String
-  cod                   String
-  produto               String
-  grupo                 String
-  cor                   String?
-  tamanho               String?
-  colecao               String?
-  quantidadeDisponivel  Int
-  estoqueMinimo         Int?
-  valorCusto            Float?
-  syncedAt              DateTime @default(now())
+  id                   String   @id @default(cuid())
+  storeId              String
+  cod                  String
+  produto              String
+  grupo                String
+  cor                  String?
+  tamanho              String?
+  colecao              String?
+  quantidadeDisponivel Int
+  estoqueMinimo        Int?
+  valorCusto           Float?
+  syncedAt             DateTime @default(now())
 
   store Store @relation(fields: [storeId], references: [id])
 
@@ -285,7 +338,7 @@ model Parcela {
   valorMulta        Float
   valorJuros        Float
   nossoNumeroBoleto String?
-  planoConta        String?   // "4.1.4" = atacado B2B, "4.1.3" = site varejo
+  planoConta        String? // "4.1.4" = atacado B2B, "4.1.3" = site varejo
 
   @@index([dataVencimento])
   @@index([formaPagamento])

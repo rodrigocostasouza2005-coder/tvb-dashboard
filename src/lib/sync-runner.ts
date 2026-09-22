@@ -22,7 +22,7 @@ function toDateStr(d: Date) {
   return d.toISOString().slice(0, 10);
 }
 
-async function syncArmazenadores(client: DapicClient) {
+export async function syncArmazenadores(client: DapicClient) {
   const armazenadores = await client.fetchArmazenadores();
   const storeByDapicId = new Map<number, string>();
   let primaryStoreId: string | null = null;
@@ -119,6 +119,7 @@ async function syncVendas(client: DapicClient, storeId: string | null, dias: num
           quantidade: item.Quantidade,
           valorTotalLiquido: item.ValorLiquido,
           tabelaPreco: inferTabelaPreco(cod, item.ValorUnitario, priceCatalog),
+          codigo: venda.Codigo ?? null,
           saleDate,
         });
       } else if (item.Tipo === "Devolução") {
@@ -289,6 +290,7 @@ async function syncFaturas(client: DapicClient, storeId: string | null, dias: nu
         quantidade: item.Quantidade,
         valorTotalLiquido: item.Valores.ValorTotal,
         tabelaPreco: inferTabelaPreco(String(item.IdGradeProduto), item.Valores.ValorUnitario, priceCatalog),
+        codigo: fatura.Codigo ?? null,
         saleDate,
       });
     });

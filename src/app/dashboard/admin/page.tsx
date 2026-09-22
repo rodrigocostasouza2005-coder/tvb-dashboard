@@ -7,6 +7,7 @@ import { createUserAction, updateUserAction, resetPasswordAction, deleteUserActi
 import { ForceSyncButton } from "./force-sync-button";
 import { SuccessBanner } from "./success-banner";
 import { ApiTokenSection } from "./api-token-section";
+import { VendedorToggle } from "./vendedor-toggle";
 import { getApiTokenStatus } from "@/lib/api-token";
 
 // A sincronização manual (ForceSyncButton) chama runSync() direto, que pode levar minutos
@@ -93,13 +94,20 @@ export default async function AdminPage({
   if (user.role !== "ADMIN") redirect("/dashboard");
   const { ok } = await searchParams;
 
-  const [users, stores, marcas, tabelasPreco, apiTokenStatus] = await Promise.all([
+  const [users, stores, marcas, tabelasPreco, apiTokenStatus, vendedores] = await Promise.all([
     prisma.user.findMany({ orderBy: { createdAt: "asc" } }),
     getRawStores(),
     getMarcas(),
     getTabelasPreco(),
     getApiTokenStatus(),
+    prisma.vendedor.findMany({ include: { store: true }, orderBy: [{ store: { name: "asc" } }, { nome: "asc" }] }),
   ]);
+  const vendedoresPorLoja = new Map<string, typeof vendedores>();
+  for (const v of vendedores) {
+    const list = vendedoresPorLoja.get(v.store.name) ?? [];
+    list.push(v);
+    vendedoresPorLoja.set(v.store.name, list);
+  }
 
   return (
     <div>
@@ -130,6 +138,30 @@ export default async function AdminPage({
             : null
         }
       />
+
+      <section className="mb-8 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
+        <h2 className="mb-1 text-sm font-medium text-[var(--text-secondary)]">Vendedores por loja</h2>
+        <p className="mb-3 text-xs text-[var(--text-muted)]">
+          Controla quem aparece pra seleção em "Sugestão de Contato" e quem pode virar dono de cliente. Desativar
+          alguém redistribui a carteira dele, na hora, entre os vendedores ativos restantes da mesma loja — a
+          carteira antiga fica marcada como "Ex-cliente de {"{"}nome{"}"}" pros clientes redistribuídos.
+        </p>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {[...vendedoresPorLoja.entries()].map(([lojaNome, lista]) => (
+            <div key={lojaNome} className="rounded-lg border border-[var(--border)] p-3">
+              <h3 className="mb-2 text-xs font-medium text-[var(--text-muted)]">{lojaNome}</h3>
+              <div className="flex flex-col gap-2">
+                {lista.map((v) => (
+                  <VendedorToggle key={v.id} vendedorId={v.id} nome={v.nome} ativo={v.ativo} />
+                ))}
+              </div>
+            </div>
+          ))}
+          {vendedores.length === 0 && (
+            <p className="text-sm text-[var(--text-muted)]">Nenhum vendedor cadastrado ainda.</p>
+          )}
+        </div>
+      </section>
 
       <section className="mb-8 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
         <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Novo usuário</h2>

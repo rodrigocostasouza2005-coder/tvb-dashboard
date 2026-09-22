@@ -175,3 +175,72 @@ export async function revealApiTokenAction(): Promise<{ ok: boolean; message: st
   if (!token) return { ok: false, message: "Nenhum token gerado ainda." };
   return { ok: true, message: "", token };
 }
+
+// Reativa um vendedor — pedido do Rodrigo em 2026-09-21. Não tenta "reconquistar" de volta
+// clientes que já foram redistribuídos enquanto ele estava inativo (fica como está — decisão
+// deliberada, não foi pedido reverter automaticamente); ele só volta a poder ser selecionado e
+// receber novos clientes/contatos dali pra frente.
+export async function ativarVendedorAction(formData: FormData) {
+  await requireAdmin();
+  const vendedorId = String(formData.get("vendedorId") ?? "");
+  if (!vendedorId) return;
+  await prisma.vendedor.update({ where: { id: vendedorId }, data: { ativo: true } });
+  revalidatePath("/dashboard/admin");
+}
+
+// Desativa um vendedor e redistribui a carteira dele — pedido do Rodrigo em 2026-09-21 (ex:
+// vendedor que saiu da empresa). Só ADMIN (mesmo padrão de deleteUserAction/deletarContatoAction
+// — ação de alto impacto). Redistribuição é round-robin equilibrado ENTRE OS VENDEDORES ATIVOS
+// RESTANTES DA MESMA LOJA (nunca entre lojas diferentes), e é persistida na hora — não é
+// recalculada toda vez que alguém abre a tela (ver ClienteVendedorAtribuicao). Bloqueia se essa
+// desativação zerasse os vendedores ativos da loja (não teria pra quem redistribuir).
+export async function desativarVendedorAction(formData: FormData): Promise<{ ok: boolean; message: string }> {
+  await requireAdmin();
+  const vendedorId = String(formData.get("vendedorId") ?? "");
+  if (!vendedorId) return { ok: false, message: "Vendedor não informado." };
+
+  const vendedor = await prisma.vendedor.findUnique({ where: { id: vendedorId } });
+  if (!vendedor) return { ok: false, message: "Vendedor não encontrado." };
+  if (!vendedor.ativo) return { ok: true, message: "Já estava inativo." };
+
+  const restantes = await prisma.vendedor.findMany({
+    where: { storeId: vendedor.storeId, ativo: true, id: { not: vendedorId } },
+    orderBy: { nome: "asc" },
+  });
+  if (restantes.length === 0) {
+    return { ok: false, message: "Não dá pra desativar: seria o último vendedor ativo dessa loja, e não sobraria ninguém pra redistribuir a carteira dele." };
+  }
+
+  const clientesDoVendedor = await prisma.clienteVendedorAtribuicao.findMany({
+    where: { storeId: vendedor.storeId, vendedorAtualId: vendedorId },
+  });
+
+  // Agrupa por vendedor de destino e faz 1 updateMany por destino (não 1 update por cliente) —
+  // achado testando com a Juliana (481 clientes): 1 update por linha numa transação interativa
+  // estourava o timeout padrão do Prisma antes de terminar. Agrupado, viram só
+  // restantes.length+1 idas ao banco (ex: 6 pra Leblon), não importa quantos clientes tenha.
+  const idsPorNovoVendedor = new Map<string, string[]>();
+  for (let i = 0; i < clientesDoVendedor.length; i++) {
+    const novoVendedorId = restantes[i % restantes.length].id;
+    const ids = idsPorNovoVendedor.get(novoVendedorId) ?? [];
+    ids.push(clientesDoVendedor[i].id);
+    idsPorNovoVendedor.set(novoVendedorId, ids);
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.vendedor.update({ where: { id: vendedorId }, data: { ativo: false } });
+    for (const [novoVendedorId, atribuicaoIds] of idsPorNovoVendedor) {
+      await tx.clienteVendedorAtribuicao.updateMany({
+        where: { id: { in: atribuicaoIds } },
+        data: { vendedorAtualId: novoVendedorId, vendedorOriginalId: vendedorId },
+      });
+    }
+  });
+
+  revalidatePath("/dashboard/admin");
+  revalidatePath("/dashboard/clientes-sugestoes-contato");
+  return {
+    ok: true,
+    message: `${vendedor.nome} desativado. ${clientesDoVendedor.length} cliente(s) redistribuído(s) entre ${restantes.length} vendedor(es) ativo(s).`,
+  };
+}

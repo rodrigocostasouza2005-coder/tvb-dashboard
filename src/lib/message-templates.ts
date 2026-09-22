@@ -17,6 +17,20 @@ export type TemplateInfo = {
   extra?: string;
 };
 
+// Texto único pros 4 motivos "esfriando"/"em risco"/"1 compra" — pedido do Rodrigo em
+// 2026-09-21: consolidar num só, em vez de 1 texto diferente por motivo como era antes.
+const TEXTO_ESFRIANDO_UNIFICADO = `Falaa, {nome}! Tudo beleza?
+
+Lembramos da sua primeira compra na TVB e bateu aquela saudade de te ver por aqui de novo!
+
+De lá pra cá, muita coisa aconteceu e temos novidades te esperando.
+
+A Coleção Verão Épico 27 já está no ar na TVBSHORTS com peças absurdas, novidades e aquele estilo que você já conhece.
+
+Se curtiu a primeira, espera só pra ver o que chegou agora!
+
+Vem conferir a nova coleção e escolher seu próximo TVB no {shopping}`;
+
 // Textos originais (ver histórico de clientes-sugestoes-contato/page.tsx) — usados como valor
 // inicial na 1ª vez que a tela de edição carrega (ainda sem linha no banco pra aquela chave) e
 // como "restaurar padrão". Placeholders viram o dado real na hora de montar a mensagem — ver
@@ -25,34 +39,23 @@ export const TEMPLATE_KEYS: TemplateInfo[] = [
   {
     key: "vip_esfriando",
     label: "VIP esfriando",
-    placeholders: ["nome", "detalhe"],
-    defaultTexto: "E aí {nome}, sumiu! 😄 Faz um tempinho que você não passa aqui na TVB ({detalhe}) — bora dar uma olhada no que chegou de novo?",
-    extra: "{detalhe} = há quanto tempo o cliente não compra, calculado automaticamente (ex: \"84 dias sem comprar\"). Se o tamanho do produto favorito dele ainda estiver em estoque, uma linha extra é adicionada automaticamente no final.",
+    placeholders: ["nome", "shopping"],
+    defaultTexto: TEXTO_ESFRIANDO_UNIFICADO,
+    extra: "{shopping} = shopping da loja principal do cliente, preenchido automaticamente (Shopping Leblon / Barra Shopping / Shopping Rio Sul). Pedido do Rodrigo em 2026-09-21: mesmo texto usado nos 4 motivos \"esfriando\"/\"em risco\"/\"1 compra\".",
   },
   {
     key: "recorrente_esfriando",
     label: "Recorrente esfriando",
-    placeholders: ["nome", "detalhe"],
-    defaultTexto: "Oi {nome}, tudo bem? Notei que você não aparece por aqui há um tempo ({detalhe}). Só passando pra saber se tá tudo certo e se posso te ajudar a achar alguma coisa!",
-    extra: "{detalhe} = há quanto tempo o cliente não compra, calculado automaticamente (ex: \"84 dias sem comprar\"). Se o tamanho do produto favorito dele ainda estiver em estoque, uma linha extra é adicionada automaticamente no final.",
+    placeholders: ["nome", "shopping"],
+    defaultTexto: TEXTO_ESFRIANDO_UNIFICADO,
+    extra: "{shopping} = shopping da loja principal do cliente, preenchido automaticamente. Se o tamanho do produto favorito dele ainda estiver em estoque, uma linha extra é adicionada automaticamente no final.",
   },
   {
     key: "em_risco",
     label: "Em risco",
-    placeholders: ["nome"],
-    defaultTexto: `Falaaa, {nome}! 🌊
-
-Quanto tempo, hein? 😎 A gente percebeu que faz um tempinho que você não aparece por aqui e, vou te falar… *sentimos sua falta na família TVB!* 👊
-
-Nesse tempo, rolou novidade, chegaram coisas novas e a TVB continua naquela vibe que você já conhece. 🏄‍♂️🔥
-
-E como a gente quer te ver de volta por aqui, resolvemos liberar um *benefício exclusivo só pra você.* 👀
-
-*Use o cupom VOLTA10 e ganhe 10% OFF na sua próxima compra.* 🔥
-
-Então aproveita pra dar aquela passada, conferir as novidades e ver o que chegou por aqui. 😎
-
-*Porque a TVB tá sempre na mesma vibe… só tava faltando você por aqui. 🌊🤙*`,
+    placeholders: ["nome", "shopping"],
+    defaultTexto: TEXTO_ESFRIANDO_UNIFICADO,
+    extra: "{shopping} = shopping da loja principal do cliente, preenchido automaticamente.",
   },
   {
     key: "inativo",
@@ -75,47 +78,37 @@ Então aproveita pra dar aquela passada, conferir as novidades e ver o que chego
   {
     key: "comprou_1_vez",
     label: "Comprou só 1 vez",
-    placeholders: ["nome"],
-    defaultTexto: `Falaaa, {nome}! 🌊
-
-Você já passou pela TVB uma vez e a gente queria te ver por aqui de novo! 😎👊
-
-Tem novidade chegando, coisas novas rolando e aquela vibe que você já conhece. 🏄‍♂️🔥
-
-E pra te dar um motivo a mais pra voltar, *separamos um benefício exclusivo pra você.* 👀
-
-*Use o cupom VOLTA10 e ganhe 10% OFF na sua próxima compra.* 🔥
-
-Então já sabe: aproveita o desconto, dá uma olhada no site e vem conferir o que tá rolando por aqui! 🤙
-
-*Porque a TVB tá sempre na mesma vibe… só tava faltando você por aqui. 🌊🤙*`,
+    placeholders: ["nome", "shopping"],
+    defaultTexto: TEXTO_ESFRIANDO_UNIFICADO,
+    extra: "{shopping} = shopping da loja principal do cliente, preenchido automaticamente.",
   },
   {
     key: "aniversario",
     label: "Aniversário",
     placeholders: ["nome"],
-    defaultTexto: `Falaaa, {nome}! 🎉🌊
+    defaultTexto: `Feliz aniversário, {nome}! 🎉❤️
 
-Hoje é seu dia e a gente não podia deixar passar em branco! 😎🎂
+Hoje é um dia especial e não poderíamos deixar de passar por aqui para te desejar um novo ciclo cheio de coisas boas, momentos felizes e muitas conquistas! Izaaa
 
-Você já faz parte da família TVB e está sempre colando com a gente. Então, nada mais justo do que comemorar seu aniversário com um *presente especial nosso pra você!* 👊🔥
+É um prazer ter você na nossa família TVB. 🌊
 
-Preparamos um *cupom exclusivo de aniversário*:
-
-🎁 *Use o cupom ANIVER15 e ganhe 15% OFF na sua próxima compra!*
-
-É o nosso jeito de agradecer por estar sempre com a gente e fazer parte da família TVB. 💙
-
-Então aproveita seu dia, comemora muito e já sabe: quando quiser dar aquela renovada na vibe, a TVB tá te esperando! 🏄‍♂️🔥
-
-*Que esse novo ciclo venha cheio de coisa boa, boas energias e, claro, muita vibe boa! 🌊🏄‍♂️*`,
+Com carinho, TVB SHORTS.`,
   },
   {
     key: "follow_up",
     label: "Follow-up pós-compra",
-    placeholders: ["nome", "produtos"],
-    defaultTexto: "Oi {nome}! Aqui é da TVB Shorts. Passando pra saber se você curtiu o(a) {produtos} — chegou tudo certinho, serviu bem? Qualquer coisa é só chamar!",
-    extra: "Se a nota/cupom fiscal da compra for encontrada, uma linha extra com o número é adicionada automaticamente no final.",
+    placeholders: ["nome", "produtos", "codigo"],
+    defaultTexto: `Oi, {nome}! Tudo beleza?
+
+Aqui é da TVB SHORTS! Passando pra saber se você curtiu o {produtos}.
+E se tem algum feedback pra gente!
+
+Se precisar de qualquer coisa, é só chamar a gente por aqui!
+
+Obrigado pela compra e por escolher a TVB.
+
+Código da venda: {codigo}`,
+    extra: "{codigo} = código real da venda que gerou esse follow-up (não é o mesmo id interno do sistema). Se a nota/cupom fiscal da compra também for encontrada, uma linha extra com o número é adicionada automaticamente no final.",
   },
 ];
 

@@ -160,7 +160,7 @@ async function getB2BClienteNomes(): Promise<Set<string>> {
   return set;
 }
 
-async function canalWhere(canal: Canal): Promise<Prisma.SaleWhereInput> {
+export async function canalWhere(canal: Canal): Promise<Prisma.SaleWhereInput> {
   if (canal === "todos") return {};
   const b2bClientes = [...(await getB2BClienteNomes())];
   if (canal === "b2b") {
@@ -2957,7 +2957,71 @@ export type SugestaoContato = {
   // Tamanho que o cliente mais compra do produtoFavorito, só preenchido quando ainda tem
   // disponível na loja principal dele agora — ver getTamanhoEstoqueParaClientes.
   tamanhoDisponivel: string | null;
+  // Dono persistente do cliente (ver ClienteVendedorAtribuicao) — só preenchido quando dá pra
+  // saber a loja exata (filtro de 1 loja só). vendedorOriginal só vem preenchido quando o
+  // cliente foi redistribuído (o vendedor que tinha antes ficou inativo) — vira o selo
+  // "Ex-cliente de X" na tela.
+  vendedorAtual: string | null;
+  vendedorOriginal: string | null;
 };
+
+// Vendedores ATIVOS de uma loja — pro dropdown de seleção em Sugestão de Contato (só quem ainda
+// trabalha lá) e pra validar no backend que o vendedor escolhido pertence àquela loja E está
+// ativo. Vendedor é entidade de verdade agora (ver model Vendedor, 2026-09-21) — antes disso
+// só existia getVendedores(), que lê direto de Sale.vendedor sem noção de ativo/inativo.
+export async function getVendedoresAtivos(storeId: string): Promise<string[]> {
+  const rows = await prisma.vendedor.findMany({ where: { storeId, ativo: true }, orderBy: { nome: "asc" } });
+  return rows.map((v) => v.nome);
+}
+
+// Garante que todo cliente da lista já tenha uma linha em ClienteVendedorAtribuicao — fallback
+// de segurança (round-robin simples entre os vendedores ativos da loja) pro cliente que surgiu
+// DEPOIS do backfill (scripts/backfill-vendedor-atribuicao.ts, que usa um critério melhor:
+// ClienteCadastro.vendedorResponsavel, senão a venda mais recente do cliente). Não repete
+// trabalho: só cria pra quem realmente ainda não tem.
+async function garantirAtribuicoes(storeId: string, clientesNomes: string[]): Promise<void> {
+  const norms = [...new Set(clientesNomes.map((n) => n.trim().toUpperCase()))];
+  if (norms.length === 0) return;
+  const existentes = await prisma.clienteVendedorAtribuicao.findMany({
+    where: { storeId, clienteNorm: { in: norms } },
+    select: { clienteNorm: true },
+  });
+  const jaTem = new Set(existentes.map((e) => e.clienteNorm));
+  const faltando = norms.filter((n) => !jaTem.has(n));
+  if (faltando.length === 0) return;
+
+  const vendedoresAtivos = await prisma.vendedor.findMany({ where: { storeId, ativo: true }, orderBy: { nome: "asc" }, select: { id: true } });
+  if (vendedoresAtivos.length === 0) return; // loja sem nenhum vendedor ativo — não dá pra atribuir
+
+  const data = faltando.map((clienteNorm, i) => ({
+    storeId,
+    clienteNorm,
+    vendedorAtualId: vendedoresAtivos[i % vendedoresAtivos.length].id,
+  }));
+  await prisma.clienteVendedorAtribuicao.createMany({ data, skipDuplicates: true });
+}
+
+export type AtribuicaoInfo = { vendedorAtual: string; vendedorOriginal: string | null };
+
+// Cruza uma lista de clientes com quem é o "dono" atual deles numa loja específica — cria
+// atribuição pra quem ainda não tinha (garantirAtribuicoes) antes de ler, pra nunca devolver
+// vazio à toa. Batch (1 findMany, sem N+1) — chamado com a lista inteira de candidatos do dia,
+// nunca 1 por cliente.
+async function getAtribuicoesPorCliente(storeId: string, clientesNomes: string[]): Promise<Map<string, AtribuicaoInfo>> {
+  await garantirAtribuicoes(storeId, clientesNomes);
+  const norms = [...new Set(clientesNomes.map((n) => n.trim().toUpperCase()))];
+  if (norms.length === 0) return new Map();
+  const rows = await prisma.clienteVendedorAtribuicao.findMany({
+    where: { storeId, clienteNorm: { in: norms } },
+    include: { vendedorAtual: true, vendedorOriginal: true },
+  });
+  return new Map(
+    rows.map((r) => [
+      r.clienteNorm,
+      { vendedorAtual: r.vendedorAtual.nome, vendedorOriginal: r.vendedorOriginal?.nome ?? null },
+    ])
+  );
+}
 
 // "Sugestões de Contato" — reformulado pelo Rodrigo em 2026-08-31 depois da 1ª versão: só B2C
 // (isso aqui é atendimento de varejo, não relação com atacadista), mistura uma parte de CADA
@@ -2993,15 +3057,20 @@ function fatiaDoDia<T>(pool: T[], porDia: number, seed: number): T[] {
 const ESFRIANDO_DIAS_MIN = 70;
 const ESFRIANDO_DIAS_MAX = 90;
 
-// vendedor opcional (2026-09-18): quando informado, restringe os 6 pools (VIP/Recorrente/Em
-// risco/Ocasional/Inativo/Aniversário) só aos clientes cujas vendas foram atribuídas a esse
-// vendedor — mesmo padrão de getClienteSegmentacao/getAniversariantesDoMes, nenhuma regra de
-// negócio nova, só um filtro a mais na origem.
+// vendedor opcional (2026-09-21, reescrito): NÃO filtra mais direto em Sale.vendedor (isso
+// prendia o cliente pra sempre a quem baixou a última venda, sem jeito de redistribuir quando
+// alguém sai da empresa). A geração dos 6 pools continua idêntica (segmentação/aniversariantes
+// SEM filtro de vendedor, mesma lógica de sempre) — o filtro por vendedor agora é uma camada
+// por cima, cruzando o resultado final com ClienteVendedorAtribuicao (dono persistente,
+// redistribuível). Só é possível quando dá pra saber a loja exata (filters.storeIds com 1 loja
+// só — é sempre o caso quando vem de um login de loja única, que é o único jeito de chegar
+// nessa tela com um vendedor selecionado).
 export async function getSugestoesDeContato(filters: DashboardFilters, vendedor?: string | null): Promise<SugestaoContato[]> {
+  const storeIdUnico = filters.storeIds?.length === 1 ? filters.storeIds[0] : null;
   const mesAtual = new Date().getUTCMonth() + 1;
   const [segmentacao, aniversariantes] = await Promise.all([
-    getClienteSegmentacao(filters, "b2c", new Date(), vendedor),
-    getAniversariantesDoMes(filters, vendedor, mesAtual, "b2c"),
+    getClienteSegmentacao(filters, "b2c"),
+    getAniversariantesDoMes(filters, null, mesAtual, "b2c"),
   ]);
 
   // Só quem tem telefone no cadastro — sem isso não dá pra chamar no WhatsApp, não faz sentido
@@ -3038,7 +3107,7 @@ export async function getSugestoesDeContato(filters: DashboardFilters, vendedor?
   const lojaPorNorm = new Map(segmentacao.map((s) => [s.cliente.trim().toUpperCase(), s.lojaPrincipal]));
 
   const seed = diaDoAno(new Date());
-  const selecionados: Omit<SugestaoContato, "produtoFavorito" | "tamanhoDisponivel">[] = [];
+  const selecionados: Omit<SugestaoContato, "produtoFavorito" | "tamanhoDisponivel" | "vendedorAtual" | "vendedorOriginal">[] = [];
   for (const s of fatiaDoDia(vipPool, POR_GRUPO_POR_DIA, seed)) {
     selecionados.push({ cliente: s.cliente, telefone: s.telefone, motivo: "VIP esfriando", detalhe: `${s.recenciaDias} dias sem comprar`, loja: s.lojaPrincipal });
   }
@@ -3079,10 +3148,23 @@ export async function getSugestoesDeContato(filters: DashboardFilters, vendedor?
       .map((s) => ({ cliente: s.cliente, produto: s.produtoFavorito, loja: s.loja }))
   );
 
-  return comProdutoFavorito.map((s) => {
+  const comTamanho = comProdutoFavorito.map((s) => {
     const info = tamanhoEstoquePorCliente.get(s.cliente.trim().toUpperCase());
     return { ...s, tamanhoDisponivel: info?.disponivel ? info.tamanho : null };
   });
+
+  // Sem loja única definida (visão de admin/gestão com mais de 1 loja, ou nenhuma), não dá pra
+  // saber em qual loja procurar a atribuição — comportamento igual a antes do vendedor existir.
+  if (!storeIdUnico) {
+    return comTamanho.map((s) => ({ ...s, vendedorAtual: null, vendedorOriginal: null }));
+  }
+
+  const atribuicoes = await getAtribuicoesPorCliente(storeIdUnico, comTamanho.map((s) => s.cliente));
+  const comVendedor = comTamanho.map((s) => {
+    const info = atribuicoes.get(s.cliente.trim().toUpperCase());
+    return { ...s, vendedorAtual: info?.vendedorAtual ?? null, vendedorOriginal: info?.vendedorOriginal ?? null };
+  });
+  return vendedor ? comVendedor.filter((s) => s.vendedorAtual === vendedor) : comVendedor;
 }
 
 export type FollowUpPosCompra = {
@@ -3096,6 +3178,12 @@ export type FollowUpPosCompra = {
   // gravado no banco.
   storeId: string;
   dapicVendaId: number;
+  // Código HUMANO dessa venda específica (Sale.codigo) — pedido do Rodrigo em 2026-09-21, pro
+  // template de follow-up mostrar o código real da venda que gerou aquele follow-up (nunca a
+  // última venda do cliente em geral). Null pra vendas sincronizadas antes desse campo existir.
+  codigo: string | null;
+  vendedorAtual: string | null;
+  vendedorOriginal: string | null;
 };
 
 // Follow-up pós-compra — pedido do Rodrigo em 2026-08-31: clientes que compraram há 7-10 dias,
@@ -3105,15 +3193,16 @@ export type FollowUpPosCompra = {
 const FOLLOWUP_DIAS_MIN = 7;
 const FOLLOWUP_DIAS_MAX = 10;
 
-// vendedor opcional (2026-09-18) — mesmo motivo/padrão de getClienteSegmentacao acima.
+// vendedor opcional (2026-09-21, reescrito) — mesmo motivo/padrão de getSugestoesDeContato: não
+// filtra mais direto em Sale.vendedor, cruza com ClienteVendedorAtribuicao depois.
 export async function getFollowUpPosCompra(filters: DashboardFilters, vendedor?: string | null): Promise<FollowUpPosCompra[]> {
+  const storeIdUnico = filters.storeIds?.length === 1 ? filters.storeIds[0] : null;
   const hoje = new Date();
   const inicio = new Date(hoje.getTime() - FOLLOWUP_DIAS_MAX * 86400000);
   const fim = new Date(hoje.getTime() - FOLLOWUP_DIAS_MIN * 86400000);
   const where: Prisma.SaleWhereInput = {
     ...saleWhere({ ...filters, from: inicio, to: fim }),
     clienteNome: { not: null },
-    ...(vendedor ? { vendedor } : {}),
     AND: [await canalWhere("b2c")],
   };
   const rows = await prisma.sale.findMany({
@@ -3124,6 +3213,7 @@ export async function getFollowUpPosCompra(filters: DashboardFilters, vendedor?:
       produto: true,
       storeId: true,
       dapicVendaId: true,
+      codigo: true,
       store: { select: { name: true, displayGroup: true } },
     },
   });
@@ -3131,7 +3221,7 @@ export async function getFollowUpPosCompra(filters: DashboardFilters, vendedor?:
 
   const porCliente = new Map<
     string,
-    { nome: string; produtos: Set<string>; data: Date; loja: string; storeId: string; dapicVendaId: number }
+    { nome: string; produtos: Set<string>; data: Date; loja: string; storeId: string; dapicVendaId: number; codigo: string | null }
   >();
   for (const r of rows) {
     const nome = r.clienteNome as string;
@@ -3139,11 +3229,12 @@ export async function getFollowUpPosCompra(filters: DashboardFilters, vendedor?:
     const loja = r.store.displayGroup ?? r.store.name;
     const cur =
       porCliente.get(norm) ??
-      { nome, produtos: new Set<string>(), data: r.saleDate, loja, storeId: r.storeId, dapicVendaId: r.dapicVendaId };
+      { nome, produtos: new Set<string>(), data: r.saleDate, loja, storeId: r.storeId, dapicVendaId: r.dapicVendaId, codigo: r.codigo };
     cur.produtos.add(r.produto);
     // Loja/venda da compra mais recente dentro da janela — se comprou em 2 lojas na mesma
-    // janela (raro), fica a da compra mais nova (é dessa venda que sai o número da nota).
-    if (r.saleDate > cur.data) { cur.data = r.saleDate; cur.loja = loja; cur.storeId = r.storeId; cur.dapicVendaId = r.dapicVendaId; }
+    // janela (raro), fica a da compra mais nova (é dessa venda que sai o número da nota e o
+    // código exibido — sempre da venda específica que originou o follow-up, nunca de outra).
+    if (r.saleDate > cur.data) { cur.data = r.saleDate; cur.loja = loja; cur.storeId = r.storeId; cur.dapicVendaId = r.dapicVendaId; cur.codigo = r.codigo; }
     porCliente.set(norm, cur);
   }
 
@@ -3152,7 +3243,7 @@ export async function getFollowUpPosCompra(filters: DashboardFilters, vendedor?:
   const cadastroByNome = new Map(cadastros.map((c) => [c.nome, c]));
 
   const now = new Date();
-  return [...porCliente.values()]
+  const base = [...porCliente.values()]
     .map((c) => {
       const cad = cadastroByNome.get(c.nome);
       return {
@@ -3163,11 +3254,22 @@ export async function getFollowUpPosCompra(filters: DashboardFilters, vendedor?:
         loja: c.loja,
         storeId: c.storeId,
         dapicVendaId: c.dapicVendaId,
+        codigo: c.codigo,
       };
     })
     // Sem telefone não dá pra chamar no WhatsApp — mesmo critério de getSugestoesDeContato.
     .filter((f) => f.telefone !== null)
     .sort((a, b) => a.diasAtras - b.diasAtras);
+
+  if (!storeIdUnico) {
+    return base.map((f) => ({ ...f, vendedorAtual: null, vendedorOriginal: null }));
+  }
+  const atribuicoes = await getAtribuicoesPorCliente(storeIdUnico, base.map((f) => f.cliente));
+  const comVendedor = base.map((f) => {
+    const info = atribuicoes.get(f.cliente.trim().toUpperCase());
+    return { ...f, vendedorAtual: info?.vendedorAtual ?? null, vendedorOriginal: info?.vendedorOriginal ?? null };
+  });
+  return vendedor ? comVendedor.filter((f) => f.vendedorAtual === vendedor) : comVendedor;
 }
 
 export type ContatoRealizado = {
