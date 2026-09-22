@@ -21,6 +21,12 @@ function formatMonthOfYear(mesStr: string) {
   return MONTH_NAMES[parseInt(mesStr, 10) - 1] ?? mesStr;
 }
 
+// "0", "1", "2"... → "d0", "d1", "d2" — usado na curva de vida da coleção (dias desde a 1ª
+// venda), onde o eixo X é um número puro, não uma data de calendário.
+function formatDiasDesde(diasStr: string) {
+  return `d${diasStr}`;
+}
+
 function formatValue(value: number, format: "currency" | "number" | "percent") {
   if (format === "currency") return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
   if (format === "percent") return `${value.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
@@ -41,15 +47,19 @@ export function IndicatorChart({
   data: Record<string, string | number | null>[];
   series: Series[];
   format: "currency" | "number" | "percent";
-  granularity?: "month" | "day" | "monthOfYear";
+  granularity?: "month" | "day" | "monthOfYear" | "dias";
 }) {
-  const xKey = granularity === "day" ? "day" : granularity === "monthOfYear" ? "mes" : "month";
-  const tickFormatter = granularity === "day" ? formatDayShort : granularity === "monthOfYear" ? formatMonthOfYear : formatMonthShort;
+  const xKey = granularity === "day" ? "day" : granularity === "monthOfYear" ? "mes" : granularity === "dias" ? "dias" : "month";
+  const tickFormatter =
+    granularity === "day" ? formatDayShort
+    : granularity === "monthOfYear" ? formatMonthOfYear
+    : granularity === "dias" ? formatDiasDesde
+    : formatMonthShort;
 
   if (data.length < 2) {
     return (
       <div className="flex h-56 items-center justify-center text-sm text-[var(--text-muted)]">
-        {granularity === "day" ? "Poucos dias no período pra montar o gráfico." : "Poucos meses no período pra montar o gráfico."}
+        {granularity === "day" || granularity === "dias" ? "Poucos dias no período pra montar o gráfico." : "Poucos meses no período pra montar o gráfico."}
       </div>
     );
   }

@@ -1092,6 +1092,79 @@ export async function getColecoes(filters: Pick<DashboardFilters, "marcas" | "gr
   return rows.map((r) => r.colecao).filter(Boolean) as string[];
 }
 
+export type CurvaVidaColecao = {
+  colecao: string;
+  primeiraVenda: string; // ISO date da 1ª venda registrada — proxy de "data de lançamento"
+  pontos: { dias: number; percCumulativo: number }[];
+};
+
+// "Curva de vida da coleção" — sell-through acumulado por dias desde o lançamento, pra comparar
+// coleções na mesma régua de tempo em vez de calendário fixo (ex: "com quantos dias a Coleção X
+// bateu 50%/80%?"). StockSnapshot só guarda o estoque ATUAL (não tem histórico diário, ver
+// schema.prisma), então não dá pra recalcular o sell-through de cada dia do passado — em vez
+// disso, soma-se o vendido dia a dia (cumulativo) contra o MESMO denominador (estoque atual +
+// saída) já calculado em getSellthroughByColecao, recebido via `colecoesComDenominador`. Última
+// posição da curva fica perto do sell-through da tabela "por coleção" (não idêntica: aqui não
+// desconta devolução/soma brinde dia a dia, só no total — diferença normalmente pequena).
+// "Dia 0" = data da 1ª venda da coleção (o DAPIC não expõe data de lançamento formal). Limita aos
+// primeiros `janelaDias` de vida pra uma coleção esgotada há 1 ano não ficar numa régua diferente
+// de uma coleção lançada semana passada.
+export async function getColecaoCurvaVida(
+  filters: Pick<DashboardFilters, "marcas" | "grupoIn">,
+  colecoesComDenominador: { colecao: string; produzido: number }[],
+  janelaDias = 90
+): Promise<CurvaVidaColecao[]> {
+  const alvo = colecoesComDenominador.filter((c) => c.produzido > 0);
+  if (alvo.length === 0) return [];
+  const colecoes = alvo.map((c) => c.colecao);
+
+  const rows = await prisma.$queryRaw<{ colecao: string; dia: Date; unidades: bigint }[]>`
+    SELECT "colecao",
+      DATE_TRUNC('day', ("saleDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo') AS dia,
+      SUM("quantidade") AS unidades
+    FROM "Sale"
+    WHERE "colecao" = ANY(${colecoes})
+      ${filters.marcas !== undefined ? Prisma.sql`AND "marca" = ANY(${filters.marcas})` : Prisma.empty}
+      ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
+    GROUP BY "colecao", dia
+    ORDER BY "colecao", dia ASC
+  `;
+
+  const porColecao = new Map<string, { dia: Date; unidades: number }[]>();
+  for (const r of rows) {
+    const list = porColecao.get(r.colecao) ?? [];
+    list.push({ dia: r.dia, unidades: Number(r.unidades) });
+    porColecao.set(r.colecao, list);
+  }
+
+  const resultado: CurvaVidaColecao[] = [];
+  for (const { colecao, produzido } of alvo) {
+    const dias = porColecao.get(colecao);
+    if (!dias || dias.length === 0) continue;
+
+    const primeiraVenda = dias[0].dia;
+    const porDiaOffset = new Map<number, number>();
+    for (const d of dias) {
+      const offset = Math.round((d.dia.getTime() - primeiraVenda.getTime()) / 86_400_000);
+      porDiaOffset.set(offset, (porDiaOffset.get(offset) ?? 0) + d.unidades);
+    }
+
+    const hojeOffset = Math.round((Date.now() - primeiraVenda.getTime()) / 86_400_000);
+    const limiteOffset = Math.min(janelaDias, hojeOffset);
+
+    let acumulado = 0;
+    const pontos: { dias: number; percCumulativo: number }[] = [];
+    for (let offset = 0; offset <= limiteOffset; offset++) {
+      acumulado += porDiaOffset.get(offset) ?? 0;
+      pontos.push({ dias: offset, percCumulativo: (acumulado / produzido) * 100 });
+    }
+
+    resultado.push({ colecao, primeiraVenda: primeiraVenda.toISOString().slice(0, 10), pontos });
+  }
+
+  return resultado;
+}
+
 export async function searchStockVsSales(
   filters: DashboardFilters,
   dimension: Dimension,
