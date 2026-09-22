@@ -3294,9 +3294,21 @@ export type ContatoPorVendedor = { vendedor: string; sugestoes: number; followUp
 // (ver ContatoMarcado no schema e contato-whatsapp-link.tsx), pedido do Rodrigo em 2026-09-09
 // logo depois de pedir o check em si ("como cada login tá se saindo nas mensagens"). Marcação é
 // só "clicou no link do WhatsApp", não confirmação de entrega de verdade.
-export async function getContatosPorVendedor(from: Date, to: Date): Promise<{ ranking: ContatoPorVendedor[]; itens: ContatoRealizado[] }> {
+//
+// allowedStoreIds = getStoreRestriction(user) de quem tá vendo essa tela. Achado pelo Rodrigo em
+// 2026-09-22: login de loja única (ex: Leblon) via contato de TODAS as lojas aqui, porque essa
+// função nunca filtrava por loja. Só filtra quando é loja única de verdade (allowedStoreIds.length
+// === 1, mesmo sinal usado em resolverContatadoPor/getVendedoresAtivos) — login multi-loja
+// (admin/gestão/atendimento) continua vendo tudo, igual sempre viu. Registro sem storeId
+// (contato marcado por login multi-loja, ou registro antigo de antes dessa coluna existir) não
+// aparece pra visão de loja única, já que não dá pra confirmar de qual loja é.
+export async function getContatosPorVendedor(from: Date, to: Date, allowedStoreIds?: string[]): Promise<{ ranking: ContatoPorVendedor[]; itens: ContatoRealizado[] }> {
+  const storeIdLojaUnica = allowedStoreIds?.length === 1 ? allowedStoreIds[0] : null;
   const rows = await prisma.contatoMarcado.findMany({
-    where: { contatadoEm: { gte: from, lte: to } },
+    where: {
+      contatadoEm: { gte: from, lte: to },
+      ...(storeIdLojaUnica ? { storeId: storeIdLojaUnica } : {}),
+    },
     orderBy: { contatadoEm: "desc" },
   });
 

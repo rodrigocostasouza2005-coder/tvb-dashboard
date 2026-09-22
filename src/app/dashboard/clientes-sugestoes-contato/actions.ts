@@ -12,25 +12,32 @@ export type ContatoTipo = "sugestao" | "followup";
 // vendedores ATIVOS da loja do login — nunca confia no cookie sozinho, ver
 // getVendedorAtualCookie; vendedor inativo não pode mais virar contatadoPor, pedido do Rodrigo
 // em 2026-09-21), ou o nome do login da loja como fallback pra quem não passa por essa seleção
-// (ADMIN/GESTÃO, que continuam vendo/contatando normalmente sem escolher vendedor).
-async function resolverContatadoPor(user: NonNullable<Awaited<ReturnType<typeof getSessionUser>>>): Promise<string> {
-  const cookieVendedor = await getVendedorAtualCookie();
-  if (!cookieVendedor) return user.name;
+// (ADMIN/GESTÃO, que continuam vendo/contatando normalmente sem escolher vendedor). storeId só
+// sai preenchido em login de loja única — em fallback multi-loja não dá pra atribuir a 1 loja só,
+// fica null (ver getContatosPorVendedor, que exclui null quando quem vê é de loja única).
+async function resolverContatadoPor(
+  user: NonNullable<Awaited<ReturnType<typeof getSessionUser>>>
+): Promise<{ contatadoPor: string; storeId: string | null }> {
   const allowedStores = getStoreRestriction(user);
-  if (allowedStores.length !== 1) return user.name;
-  const permitidos = await getVendedoresAtivos(allowedStores[0]);
-  return permitidos.includes(cookieVendedor) ? cookieVendedor : user.name;
+  const storeIdLojaUnica = allowedStores.length === 1 ? allowedStores[0] : null;
+
+  const cookieVendedor = await getVendedorAtualCookie();
+  if (!cookieVendedor || !storeIdLojaUnica) return { contatadoPor: user.name, storeId: storeIdLojaUnica };
+  const permitidos = await getVendedoresAtivos(storeIdLojaUnica);
+  return permitidos.includes(cookieVendedor)
+    ? { contatadoPor: cookieVendedor, storeId: storeIdLojaUnica }
+    : { contatadoPor: user.name, storeId: storeIdLojaUnica };
 }
 
 export async function marcarContatadoAction(tipo: ContatoTipo, cliente: string, chave: string) {
   const user = await getSessionUser();
   if (!user) throw new Error("Não autenticado.");
-  const contatadoPor = await resolverContatadoPor(user);
+  const { contatadoPor, storeId } = await resolverContatadoPor(user);
 
   const rec = await prisma.contatoMarcado.upsert({
     where: { tipo_cliente_chave: { tipo, cliente, chave } },
-    create: { tipo, cliente, chave, contatadoPor },
-    update: { contatadoPor, contatadoEm: new Date() },
+    create: { tipo, cliente, chave, contatadoPor, storeId },
+    update: { contatadoPor, storeId, contatadoEm: new Date() },
   });
   revalidatePath("/dashboard/clientes-sugestoes-contato");
   return { contatadoPor: rec.contatadoPor, contatadoEm: rec.contatadoEm.toISOString() };

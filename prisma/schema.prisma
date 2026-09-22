@@ -449,6 +449,12 @@ model ContatoMarcado {
   cliente      String
   chave        String
   contatadoPor String
+  // Loja do login que marcou o contato (getStoreRestriction, só quando é login de loja única —
+  // ver resolverContatadoPor em actions.ts). Null = marcado por login multi-loja (admin/gestão/
+  // atendimento) ou registro antigo sem essa info, e nesse caso não aparece pra quem só vê 1
+  // loja (não dá pra confirmar de qual loja é). Achado pelo Rodrigo em 2026-09-22: login de loja
+  // única via contato de TODAS as lojas em "Contatos por Vendedor", que nunca filtrava por loja.
+  storeId      String?
   contatadoEm  DateTime @default(now())
 
   @@unique([tipo, cliente, chave])

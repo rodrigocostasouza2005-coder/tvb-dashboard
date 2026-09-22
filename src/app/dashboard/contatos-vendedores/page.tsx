@@ -1,5 +1,6 @@
 import { getSessionUser } from "@/lib/auth";
 import { getContatosPorVendedor } from "@/lib/metrics";
+import { getStoreRestriction } from "@/lib/permissions";
 import { brasiliaDayStart, brasiliaDayEnd, todayBrasiliaStr, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { deletarContatoAction } from "./actions";
@@ -26,7 +27,7 @@ export default async function ContatosVendedoresPage({
   const from = brasiliaDayStart(fromStr);
   const to = brasiliaDayEnd(toStr);
 
-  const { ranking, itens } = await getContatosPorVendedor(from, to);
+  const { ranking, itens } = await getContatosPorVendedor(from, to, getStoreRestriction(user));
   // Excluir contato marcado — pedido do Rodrigo em 2026-09-18, só ADMIN (nem Gestão).
   const podeExcluir = user.role === "ADMIN";
 
