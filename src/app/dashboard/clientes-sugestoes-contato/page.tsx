@@ -18,7 +18,6 @@ const MOTIVO_COR: Record<string, string> = {
   "Recorrente esfriando": "var(--status-warning)",
   "Em risco": "var(--status-serious)",
   "Comprou só 1 vez": "var(--cat-3)",
-  "Inativo": "var(--status-critical)",
   "Aniversário": "var(--status-good)",
 };
 
@@ -42,7 +41,6 @@ const MOTIVO_TO_TEMPLATE_KEY: Record<string, TemplateKey> = {
   "VIP esfriando": "vip_esfriando",
   "Recorrente esfriando": "recorrente_esfriando",
   "Em risco": "em_risco",
-  "Inativo": "inativo",
   "Comprou só 1 vez": "comprou_1_vez",
   "Aniversário": "aniversario",
 };
@@ -359,7 +357,7 @@ export default async function ClientesSugestoesContatoPage({
       )}
 
       <p className="mb-4 text-sm text-[var(--text-secondary)]">
-        Lista muda todo dia — só clientes B2C (varejo), com um pouco de cada grupo (VIP esfriando, Recorrente esfriando, Em risco, Comprou só 1x, Inativo, Aniversário), separada pela loja principal de cada cliente.
+        Lista muda todo dia — só clientes B2C (varejo), com um pouco de cada grupo (VIP esfriando, Recorrente esfriando, Em risco, Comprou só 1x, Aniversário), separada pela loja principal de cada cliente.
         {vendedorAtual && " Mostrando só os clientes atendidos por este vendedor."}
       </p>
 

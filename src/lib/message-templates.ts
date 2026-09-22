@@ -4,7 +4,6 @@ export type TemplateKey =
   | "vip_esfriando"
   | "recorrente_esfriando"
   | "em_risco"
-  | "inativo"
   | "comprou_1_vez"
   | "aniversario"
   | "follow_up";
@@ -56,24 +55,6 @@ export const TEMPLATE_KEYS: TemplateInfo[] = [
     placeholders: ["nome", "shopping"],
     defaultTexto: TEXTO_ESFRIANDO_UNIFICADO,
     extra: "{shopping} = shopping da loja principal do cliente, preenchido automaticamente.",
-  },
-  {
-    key: "inativo",
-    label: "Inativo",
-    placeholders: ["nome"],
-    defaultTexto: `Falaaa, {nome}! 🌊
-
-Quanto tempo, hein? 😎 A gente percebeu que faz um tempinho que você não aparece por aqui e, vou te falar… *sentimos sua falta na família TVB!* 👊
-
-Nesse tempo, rolou novidade, chegaram coisas novas e a TVB continua naquela vibe que você já conhece. 🏄‍♂️🔥
-
-E como a gente quer te ver de volta por aqui, resolvemos liberar um *benefício exclusivo só pra você.* 👀
-
-*Use o cupom VOLTA10 e ganhe 10% OFF na sua próxima compra.* 🔥
-
-Então aproveita pra dar aquela passada, conferir as novidades e ver o que chegou por aqui. 😎
-
-*Porque a TVB tá sempre na mesma vibe… só tava faltando você por aqui. 🌊🤙*`,
   },
   {
     key: "comprou_1_vez",

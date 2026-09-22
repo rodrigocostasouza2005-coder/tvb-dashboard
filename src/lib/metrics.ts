@@ -3037,7 +3037,8 @@ async function getAtribuicoesPorCliente(storeId: string, clientesNomes: string[]
 // cliente, muda todo dia (rotação, não sempre os mesmos), e separa por LOJA principal do cliente
 // (não por pessoa — "cada loja tem seu próprio CRM", cada uma cuida dos seus próprios clientes).
 //
-// 6 grupos, cada um contribuindo até POR_GRUPO_POR_DIA:
+// 5 grupos (VIP/Recorrente/Em risco/Ocasional/Aniversário — "Inativo" removido em 2026-09-22),
+// cada um contribuindo até POR_GRUPO_POR_DIA:
 // 1) VIP esfriando (70-90 dias sem comprar — ainda dá tempo de reter antes de "em risco" de
 //    verdade, limiar já usado em getClienteSegmentacao).
 // 2) Recorrente esfriando (mesmo critério).
@@ -3098,9 +3099,10 @@ export async function getSugestoesDeContato(filters: DashboardFilters, vendedor?
   const ocasionalPool = segmentacao
     .filter((s) => s.segmento === "ocasional" && s.telefone)
     .sort((a, b) => a.cliente.localeCompare(b.cliente));
-  const inativoPool = segmentacao
-    .filter((s) => s.segmento === "inativo" && s.telefone)
-    .sort((a, b) => a.cliente.localeCompare(b.cliente));
+  // "Inativo" removido da Sugestão de Contato em 2026-09-22 (pedido do Rodrigo — apagar esse
+  // template). Só tira ESSE motivo específico daqui; o segmento "inativo" em si continua
+  // existindo normal em getClienteSegmentacao/Segmentação de Clientes, só não gera mais
+  // sugestão de contato pra esse grupo.
   // Só o dia exato do aniversário — pedido do Rodrigo em 2026-08-31 (diferente da Visão Geral,
   // que mostra o mês inteiro de propósito, pra planejamento; aqui é "ligar hoje", só faz sentido
   // no dia certo).
@@ -3127,9 +3129,6 @@ export async function getSugestoesDeContato(filters: DashboardFilters, vendedor?
   }
   for (const s of fatiaDoDia(ocasionalPool, POR_GRUPO_POR_DIA, seed)) {
     selecionados.push({ cliente: s.cliente, telefone: s.telefone, motivo: "Comprou só 1 vez", detalhe: `há ${s.recenciaDias} dias`, loja: s.lojaPrincipal });
-  }
-  for (const s of fatiaDoDia(inativoPool, POR_GRUPO_POR_DIA, seed)) {
-    selecionados.push({ cliente: s.cliente, telefone: s.telefone, motivo: "Inativo", detalhe: `${s.recenciaDias} dias sem comprar`, loja: s.lojaPrincipal });
   }
   for (const a of fatiaDoDia(aniversarioPool, POR_GRUPO_POR_DIA, seed)) {
     selecionados.push({
