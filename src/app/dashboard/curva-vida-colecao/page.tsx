@@ -5,15 +5,27 @@ import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
 import { CollapsibleFilters } from "../collapsible-filters";
-import { IndicatorChart } from "../indicadores/indicator-chart";
 
-const CORES_CURVA = ["var(--cat-1)", "var(--cat-2)", "var(--cat-3)", "var(--cat-4)", "var(--cat-5)", "var(--cat-6)", "var(--cat-7)", "var(--cat-8)"];
-const JANELA_DIA = 90;
-const JANELA_MES = 360; // 12 meses de 30 dias
+const JANELA_DIA = 30; // cohort dia a dia: 1 mês de vida, célula a célula já fica bem larga
+const JANELA_MES = 360; // cohort mês a mês: 12 meses de 30 dias
 
 function formatDataBR(iso: string) {
   const [y, m, d] = iso.split("-");
   return `${d}/${m}/${y}`;
+}
+
+// Intensidade relativa ao maior valor visível na tabela agora (não um limiar fixo) — assim a
+// mesma escala de cor funciona tanto pra visão dia (valores pequenos, tipo 2-4%) quanto mês
+// (valores maiores, tipo 15-25%), sem precisar de 2 paletas diferentes.
+function corCelula(valor: number | null, max: number): { bg: string; fg: string } {
+  if (valor === null) return { bg: "transparent", fg: "var(--text-muted)" };
+  if (valor <= 0 || max <= 0) return { bg: "var(--map-empty)", fg: "var(--text-muted)" };
+  const frac = valor / max;
+  if (frac < 0.2) return { bg: "var(--seq-1)", fg: "var(--text-primary)" };
+  if (frac < 0.4) return { bg: "var(--seq-2)", fg: "var(--text-primary)" };
+  if (frac < 0.6) return { bg: "var(--seq-3)", fg: "var(--text-primary)" };
+  if (frac < 0.8) return { bg: "var(--seq-4)", fg: "#ffffff" };
+  return { bg: "var(--seq-5)", fg: "#ffffff" };
 }
 
 export default async function CurvaVidaColecaoPage({
@@ -67,35 +79,39 @@ export default async function CurvaVidaColecaoPage({
 
   const janela = visao === "mes" ? JANELA_MES : JANELA_DIA;
   const curvaVida = await getColecaoCurvaVida(filters, curvaAlvo, janela);
-  const curvaSeries = curvaVida.map((c, i) => ({ key: c.colecao, name: c.colecao, color: CORES_CURVA[i % CORES_CURVA.length] }));
 
-  // % vendido NAQUELE período específico (não acumulado) — pedido do Rodrigo em 2026-09-22:
-  // "no mês 1 vendeu 20%, no mês 2 vendeu 17%", não uma curva sempre subindo ou sempre descendo.
-  // Visão mês soma os percPeriodo dos dias daquele bloco de 30 dias (mês ainda em andamento soma
-  // só os dias que já aconteceram, mostrando o parcial até agora).
-  const curvaData =
+  // Tabela cohort: 1 linha por coleção, 1 coluna por período de vida (dia ou mês desde a 1ª
+  // venda) — pedido do Rodrigo em 2026-09-22 ("queria fazer tipo um cohort"). Cada coluna soma o
+  // percPeriodo (não acumulado) daquele período; mês ainda em andamento soma só os dias que já
+  // aconteceram.
+  const colunas =
     visao === "dia"
-      ? Array.from({ length: JANELA_DIA + 1 }, (_, dias) => {
-          const row: Record<string, string | number | null> = { dias };
-          for (const c of curvaVida) row[c.colecao] = dias < c.pontos.length ? Number(c.pontos[dias].percPeriodo.toFixed(1)) : null;
-          return row;
-        })
+      ? Array.from({ length: JANELA_DIA + 1 }, (_, dias) => ({
+          label: `D${dias}`,
+          valor: (c: (typeof curvaVida)[number]) => (dias < c.pontos.length ? c.pontos[dias].percPeriodo : null),
+        }))
       : Array.from({ length: JANELA_MES / 30 }, (_, i) => {
           const mes = i + 1;
-          const diaInicio = (mes - 1) * 30;
+          const diaInicio = i * 30;
           const diaFim = mes * 30 - 1;
-          const row: Record<string, string | number | null> = { mesesVida: mes };
-          for (const c of curvaVida) {
-            if (diaInicio > c.pontos.length - 1) {
-              row[c.colecao] = null;
-            } else {
+          return {
+            label: `M${mes}`,
+            valor: (c: (typeof curvaVida)[number]) => {
+              if (diaInicio > c.pontos.length - 1) return null;
               const diasDoMes = c.pontos.slice(diaInicio, Math.min(diaFim, c.pontos.length - 1) + 1);
-              const somaPeriodo = diasDoMes.reduce((s, p) => s + p.percPeriodo, 0);
-              row[c.colecao] = Number(somaPeriodo.toFixed(1));
-            }
-          }
-          return row;
+              return diasDoMes.reduce((s, p) => s + p.percPeriodo, 0);
+            },
+          };
         });
+
+  const grade = curvaVida.map((c) => ({
+    colecao: c.colecao,
+    primeiraVenda: c.primeiraVenda,
+    totalHoje: c.pontos[c.pontos.length - 1].percCumulativo,
+    celulas: colunas.map((col) => col.valor(c)),
+  }));
+
+  const maxValor = Math.max(0, ...grade.flatMap((g) => g.celulas.filter((v): v is number => v !== null)));
 
   return (
     <div>
@@ -114,11 +130,10 @@ export default async function CurvaVidaColecaoPage({
       </CollapsibleFilters>
 
       <p className="mb-4 text-sm text-[var(--text-secondary)]">
-        % do estoque+saída total vendido em cada {visao === "mes" ? "mês" : "dia"} de vida da coleção — não acumulado (ex: no{" "}
-        {visao === "mes" ? "mês 1 vendeu 20%, no mês 2 vendeu 17%" : "dia 3 vendeu 4%, no dia 4 vendeu 2%"}). &quot;
-        {visao === "mes" ? "Mês 1" : "Dia 0"}&quot; = data da 1ª venda registrada (proxy de lançamento — o DAPIC não expõe uma
-        data de lançamento formal). Aproximado: soma o vendido dia a dia contra o mesmo estoque+saída da tabela de
-        Sell-through, sem descontar devolução/brinde dia a dia.
+        Cohort: cada linha é uma coleção, cada coluna é um {visao === "mes" ? "mês" : "dia"} de vida a partir da 1ª venda dela
+        (não do calendário) — a célula é o % do estoque+saída total vendido só {visao === "mes" ? "naquele mês" : "naquele dia"},
+        não acumulado. Cor mais forte = período mais forte de venda. Aproximado: soma o vendido dia a dia contra o mesmo
+        estoque+saída da tabela de Sell-through, sem descontar devolução/brinde dia a dia.
       </p>
 
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3">
@@ -156,38 +171,40 @@ export default async function CurvaVidaColecaoPage({
         </div>
       </div>
 
-      {curvaVida.length > 0 ? (
-        <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
-          <IndicatorChart data={curvaData} series={curvaSeries} format="percent" granularity={visao === "mes" ? "mesesVida" : "dias"} />
-        </section>
-      ) : (
-        <p className="mb-6 text-sm text-[var(--text-muted)]">Nenhuma coleção selecionada tem dados suficientes pra essa curva.</p>
-      )}
-
-      {curvaVida.length > 0 && (
+      {grade.length > 0 ? (
         <div className="overflow-x-auto overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-          <table className="w-full text-sm">
+          <table className="text-sm" style={{ borderCollapse: "separate", borderSpacing: 0 }}>
             <thead>
               <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
-                <th className="px-4 py-2 font-medium">Coleção</th>
-                <th className="px-4 py-2 font-medium">Lançada em</th>
-                <th className="px-4 py-2 font-medium">Vendido até hoje</th>
+                <th className="sticky left-0 z-10 bg-[var(--surface-1)] px-4 py-2 font-medium">Coleção</th>
+                <th className="px-3 py-2 font-medium whitespace-nowrap">Lançada em</th>
+                {colunas.map((col) => (
+                  <th key={col.label} className="w-11 px-1 py-2 text-center font-medium">{col.label}</th>
+                ))}
+                <th className="px-3 py-2 font-medium whitespace-nowrap">Total hoje</th>
               </tr>
             </thead>
             <tbody>
-              {curvaVida.map((c, i) => (
-                <tr key={c.colecao} className="border-b border-[var(--gridline)] last:border-0">
-                  <td className="px-4 py-2 font-medium">
-                    <span className="mr-2 inline-block h-2 w-2 rounded-full align-middle" style={{ backgroundColor: CORES_CURVA[i % CORES_CURVA.length] }} />
-                    {c.colecao}
-                  </td>
-                  <td className="px-4 py-2 text-[var(--text-secondary)]">{formatDataBR(c.primeiraVenda)}</td>
-                  <td className="px-4 py-2 tabular-nums">{c.pontos[c.pontos.length - 1].percCumulativo.toFixed(1)}%</td>
+              {grade.map((g) => (
+                <tr key={g.colecao} className="border-b border-[var(--gridline)] last:border-0">
+                  <td className="sticky left-0 z-10 bg-[var(--surface-1)] px-4 py-2 font-medium whitespace-nowrap">{g.colecao}</td>
+                  <td className="px-3 py-2 whitespace-nowrap text-[var(--text-secondary)]">{formatDataBR(g.primeiraVenda)}</td>
+                  {g.celulas.map((valor, i) => {
+                    const { bg, fg } = corCelula(valor, maxValor);
+                    return (
+                      <td key={i} className="w-11 px-1 py-2 text-center tabular-nums" style={{ backgroundColor: bg, color: fg }}>
+                        {valor !== null ? valor.toFixed(0) : ""}
+                      </td>
+                    );
+                  })}
+                  <td className="px-3 py-2 tabular-nums font-medium whitespace-nowrap">{g.totalHoje.toFixed(1)}%</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+      ) : (
+        <p className="mb-6 text-sm text-[var(--text-muted)]">Nenhuma coleção selecionada tem dados suficientes pra essa curva.</p>
       )}
     </div>
   );
