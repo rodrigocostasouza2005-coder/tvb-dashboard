@@ -43,6 +43,10 @@ export default async function PesquisaPage({
     grupoIn,
   };
   const produtoSelecionado = typeof rawParams.produto === "string" && rawParams.produto ? rawParams.produto : null;
+  // Visão do gráfico por produto — dia (padrão, como já era) ou mês, pedido do Rodrigo em
+  // 2026-09-22. Não precisa de nova query: já busca o histórico inteiro dia a dia, mês é só
+  // agrupar esses mesmos pontos.
+  const visaoProduto = rawParams.visaoProduto === "mes" ? "mes" : "dia";
   const dataInicioRange = brasiliaDayStart(DATA_START_MONTH + "-01");
   const dataFimRange = new Date();
 
@@ -62,13 +66,29 @@ export default async function PesquisaPage({
   ]);
   const showFinancials = canSeeFinancials(user);
 
-  const produtoChartData = produtoSerie.map((p) => ({
+  const produtoChartDataDia = produtoSerie.map((p) => ({
     day: p.day,
     unitsBruta: p.unitsBruta,
     unitsLiquida: p.unitsLiquida,
     revenueBruta: p.revenueBruta,
     revenueLiquida: p.revenueLiquida,
   }));
+  // Agrupa os mesmos pontos diários por "YYYY-MM" — mesmo formato que IndicatorChart já espera
+  // pra granularity="month" (ver formatMonthShort).
+  const produtoChartDataMes = (() => {
+    const porMes = new Map<string, { month: string; unitsBruta: number; unitsLiquida: number; revenueBruta: number; revenueLiquida: number }>();
+    for (const p of produtoSerie) {
+      const month = p.day.slice(0, 7);
+      const cur = porMes.get(month) ?? { month, unitsBruta: 0, unitsLiquida: 0, revenueBruta: 0, revenueLiquida: 0 };
+      cur.unitsBruta += p.unitsBruta;
+      cur.unitsLiquida += p.unitsLiquida;
+      cur.revenueBruta += p.revenueBruta;
+      cur.revenueLiquida += p.revenueLiquida;
+      porMes.set(month, cur);
+    }
+    return [...porMes.values()].sort((a, b) => a.month.localeCompare(b.month));
+  })();
+  const produtoChartData = visaoProduto === "mes" ? produtoChartDataMes : produtoChartDataDia;
 
   const baseParams = new URLSearchParams();
   if (query) baseParams.set("q", query);
@@ -77,6 +97,12 @@ export default async function PesquisaPage({
   for (const t of filters.tabelasPreco ?? []) baseParams.append("tabelaPreco", t);
   const produtoHrefBase = `/dashboard/pesquisa?${baseParams.toString()}`;
   const clearProdutoHref = produtoHrefBase;
+  function visaoProdutoHref(v: "dia" | "mes") {
+    const p = new URLSearchParams(baseParams);
+    if (produtoSelecionado) p.set("produto", produtoSelecionado);
+    if (v !== "dia") p.set("visaoProduto", v);
+    return `/dashboard/pesquisa?${p.toString()}`;
+  }
 
   function clienteHref(nome: string) {
     const p = new URLSearchParams();
@@ -189,19 +215,35 @@ export default async function PesquisaPage({
 
       {produtoSelecionado && (
         <div className="mb-6 flex flex-col gap-4 rounded-lg border border-[var(--series-1)] bg-[var(--surface-1)] p-4">
-          <div className="flex items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-sm font-medium text-[var(--text-primary)]">{produtoSelecionado}</h2>
-            <a href={clearProdutoHref} className="rounded-md border border-[var(--border)] px-3 py-1.5 text-sm text-[var(--text-secondary)] hover:bg-[var(--page-plane)]">
-              Fechar
-            </a>
+            <div className="flex items-center gap-2">
+              <div className="flex overflow-hidden rounded-md border border-[var(--border)] text-xs">
+                <a
+                  href={visaoProdutoHref("dia")}
+                  className={`px-2.5 py-1 ${visaoProduto === "dia" ? "bg-[var(--series-1)] text-white" : "text-[var(--text-secondary)] hover:bg-[var(--page-plane)]"}`}
+                >
+                  Dia
+                </a>
+                <a
+                  href={visaoProdutoHref("mes")}
+                  className={`px-2.5 py-1 ${visaoProduto === "mes" ? "bg-[var(--series-1)] text-white" : "text-[var(--text-secondary)] hover:bg-[var(--page-plane)]"}`}
+                >
+                  Mês
+                </a>
+              </div>
+              <a href={clearProdutoHref} className="rounded-md border border-[var(--border)] px-3 py-1.5 text-sm text-[var(--text-secondary)] hover:bg-[var(--page-plane)]">
+                Fechar
+              </a>
+            </div>
           </div>
           {showFinancials && (
             <section>
-              <h3 className="mb-3 text-xs font-medium text-[var(--text-muted)]">Receita por dia</h3>
+              <h3 className="mb-3 text-xs font-medium text-[var(--text-muted)]">Receita por {visaoProduto === "mes" ? "mês" : "dia"}</h3>
               <IndicatorChart
                 data={produtoChartData}
                 format="currency"
-                granularity="day"
+                granularity={visaoProduto === "mes" ? "month" : "day"}
                 series={[
                   { key: "revenueBruta", name: "Bruta", color: "var(--series-1)" },
                   { key: "revenueLiquida", name: "Líquida", color: "var(--series-2)" },
@@ -210,11 +252,11 @@ export default async function PesquisaPage({
             </section>
           )}
           <section>
-            <h3 className="mb-3 text-xs font-medium text-[var(--text-muted)]">Unidades vendidas por dia</h3>
+            <h3 className="mb-3 text-xs font-medium text-[var(--text-muted)]">Unidades vendidas por {visaoProduto === "mes" ? "mês" : "dia"}</h3>
             <IndicatorChart
               data={produtoChartData}
               format="number"
-              granularity="day"
+              granularity={visaoProduto === "mes" ? "month" : "day"}
               series={[
                 { key: "unitsBruta", name: "Brutas", color: "var(--series-1)" },
                 { key: "unitsLiquida", name: "Líquidas", color: "var(--series-2)" },
