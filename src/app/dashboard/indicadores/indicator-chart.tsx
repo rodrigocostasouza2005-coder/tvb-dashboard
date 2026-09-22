@@ -27,6 +27,11 @@ function formatDiasDesde(diasStr: string) {
   return `d${diasStr}`;
 }
 
+// Mesma ideia de formatDiasDesde, em meses — visão "mês a mês" da curva de vida da coleção.
+function formatMesesDesde(mesesStr: string) {
+  return `M${mesesStr}`;
+}
+
 function formatValue(value: number, format: "currency" | "number" | "percent") {
   if (format === "currency") return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
   if (format === "percent") return `${value.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
@@ -47,13 +52,19 @@ export function IndicatorChart({
   data: Record<string, string | number | null>[];
   series: Series[];
   format: "currency" | "number" | "percent";
-  granularity?: "month" | "day" | "monthOfYear" | "dias";
+  granularity?: "month" | "day" | "monthOfYear" | "dias" | "mesesVida";
 }) {
-  const xKey = granularity === "day" ? "day" : granularity === "monthOfYear" ? "mes" : granularity === "dias" ? "dias" : "month";
+  const xKey =
+    granularity === "day" ? "day"
+    : granularity === "monthOfYear" ? "mes"
+    : granularity === "dias" ? "dias"
+    : granularity === "mesesVida" ? "mesesVida"
+    : "month";
   const tickFormatter =
     granularity === "day" ? formatDayShort
     : granularity === "monthOfYear" ? formatMonthOfYear
     : granularity === "dias" ? formatDiasDesde
+    : granularity === "mesesVida" ? formatMesesDesde
     : formatMonthShort;
 
   if (data.length < 2) {

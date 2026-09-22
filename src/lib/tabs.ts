@@ -10,6 +10,7 @@ export type TabKey =
   | "estoque-atual"
   | "estoque"
   | "sellthrough"
+  | "curva-vida-colecao"
   | "reposicao"
   | "pesquisa"
   | "clientes"
@@ -70,6 +71,7 @@ export const TABS: TabEntry[] = [
   { key: "estoque", label: "Estoque × Vendas", href: "/dashboard/estoque", group: "estoque" },
   { key: "cobertura", label: "Cobertura", href: "/dashboard/cobertura", group: "estoque" },
   { key: "sellthrough", label: "Sell-through", href: "/dashboard/sellthrough", group: "estoque" },
+  { key: "curva-vida-colecao", label: "Curva de Vida da Coleção", href: "/dashboard/curva-vida-colecao", group: "estoque" },
   { key: "envelhecimento", label: "Envelhecimento", href: "/dashboard/envelhecimento", group: "estoque" },
   { key: "reposicao", label: "Reposição de lojas", href: "/dashboard/reposicao", group: "estoque" },
   { key: "estoque-minimo", label: "Estoque Mínimo", href: "/dashboard/estoque-minimo", group: "estoque" },
