@@ -69,17 +69,15 @@ export default async function CurvaVidaColecaoPage({
   const curvaVida = await getColecaoCurvaVida(filters, curvaAlvo, janela);
   const curvaSeries = curvaVida.map((c, i) => ({ key: c.colecao, name: c.colecao, color: CORES_CURVA[i % CORES_CURVA.length] }));
 
-  // Estoque restante (%) = 100 − sell-through acumulado — a coleção começa perto de 100% (recém
-  // chegada) e cai até esgotar. Pedido do Rodrigo em 2026-09-22: "não deveria ser o estoque
-  // caindo, e não ela subindo?" — a curva anterior mostrava o vendido acumulado (subindo), essa
-  // mostra o que falta vender (caindo), mais intuitivo pra pensar em "quando isso esgota".
-  const estoqueRestante = (percCumulativo: number) => Math.max(0, 100 - percCumulativo);
-
+  // % vendido NAQUELE período específico (não acumulado) — pedido do Rodrigo em 2026-09-22:
+  // "no mês 1 vendeu 20%, no mês 2 vendeu 17%", não uma curva sempre subindo ou sempre descendo.
+  // Visão mês soma os percPeriodo dos dias daquele bloco de 30 dias (mês ainda em andamento soma
+  // só os dias que já aconteceram, mostrando o parcial até agora).
   const curvaData =
     visao === "dia"
       ? Array.from({ length: JANELA_DIA + 1 }, (_, dias) => {
           const row: Record<string, string | number | null> = { dias };
-          for (const c of curvaVida) row[c.colecao] = dias < c.pontos.length ? Number(estoqueRestante(c.pontos[dias].percCumulativo).toFixed(1)) : null;
+          for (const c of curvaVida) row[c.colecao] = dias < c.pontos.length ? Number(c.pontos[dias].percPeriodo.toFixed(1)) : null;
           return row;
         })
       : Array.from({ length: JANELA_MES / 30 }, (_, i) => {
@@ -91,8 +89,9 @@ export default async function CurvaVidaColecaoPage({
             if (diaInicio > c.pontos.length - 1) {
               row[c.colecao] = null;
             } else {
-              const ponto = c.pontos[Math.min(diaFim, c.pontos.length - 1)];
-              row[c.colecao] = Number(estoqueRestante(ponto.percCumulativo).toFixed(1));
+              const diasDoMes = c.pontos.slice(diaInicio, Math.min(diaFim, c.pontos.length - 1) + 1);
+              const somaPeriodo = diasDoMes.reduce((s, p) => s + p.percPeriodo, 0);
+              row[c.colecao] = Number(somaPeriodo.toFixed(1));
             }
           }
           return row;
@@ -115,10 +114,11 @@ export default async function CurvaVidaColecaoPage({
       </CollapsibleFilters>
 
       <p className="mb-4 text-sm text-[var(--text-secondary)]">
-        Estoque restante (%) a partir do dia da 1ª venda de cada coleção — começa perto de 100% e cai até esgotar. Responde
-        &quot;com quantos {visao === "mes" ? "meses" : "dias"} de vida essa coleção deve esgotar?&quot;. &quot;{visao === "mes" ? "Mês 1" : "Dia 0"}&quot; = data
-        da 1ª venda registrada (proxy de lançamento — o DAPIC não expõe uma data de lançamento formal). Aproximado: soma o
-        vendido dia a dia contra o mesmo estoque+saída da tabela de Sell-through, sem descontar devolução/brinde dia a dia.
+        % do estoque+saída total vendido em cada {visao === "mes" ? "mês" : "dia"} de vida da coleção — não acumulado (ex: no{" "}
+        {visao === "mes" ? "mês 1 vendeu 20%, no mês 2 vendeu 17%" : "dia 3 vendeu 4%, no dia 4 vendeu 2%"}). &quot;
+        {visao === "mes" ? "Mês 1" : "Dia 0"}&quot; = data da 1ª venda registrada (proxy de lançamento — o DAPIC não expõe uma
+        data de lançamento formal). Aproximado: soma o vendido dia a dia contra o mesmo estoque+saída da tabela de
+        Sell-through, sem descontar devolução/brinde dia a dia.
       </p>
 
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3">
@@ -171,7 +171,7 @@ export default async function CurvaVidaColecaoPage({
               <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
                 <th className="px-4 py-2 font-medium">Coleção</th>
                 <th className="px-4 py-2 font-medium">Lançada em</th>
-                <th className="px-4 py-2 font-medium">Estoque restante hoje</th>
+                <th className="px-4 py-2 font-medium">Vendido até hoje</th>
               </tr>
             </thead>
             <tbody>
@@ -182,7 +182,7 @@ export default async function CurvaVidaColecaoPage({
                     {c.colecao}
                   </td>
                   <td className="px-4 py-2 text-[var(--text-secondary)]">{formatDataBR(c.primeiraVenda)}</td>
-                  <td className="px-4 py-2 tabular-nums">{estoqueRestante(c.pontos[c.pontos.length - 1].percCumulativo).toFixed(1)}%</td>
+                  <td className="px-4 py-2 tabular-nums">{c.pontos[c.pontos.length - 1].percCumulativo.toFixed(1)}%</td>
                 </tr>
               ))}
             </tbody>

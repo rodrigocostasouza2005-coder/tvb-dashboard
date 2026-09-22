@@ -317,7 +317,10 @@ export async function getColecoes(filters: Pick<DashboardFilters, "marcas" | "gr
 export type CurvaVidaColecao = {
   colecao: string;
   primeiraVenda: string; // ISO date da 1ª venda registrada — proxy de "data de lançamento"
-  pontos: { dias: number; percCumulativo: number }[];
+  // percPeriodo = % do produzido vendido NAQUELE dia específico (não acumulado) — pedido do
+  // Rodrigo em 2026-09-22: "no mês 1 vendeu 20%, no mês 2 vendeu 17%", não uma curva sempre
+  // subindo/descendo. percCumulativo continua disponível pra quem precisar do total acumulado.
+  pontos: { dias: number; percPeriodo: number; percCumulativo: number }[];
 };
 
 // "Curva de vida da coleção" — sell-through acumulado por dias desde o lançamento, pra comparar
@@ -375,10 +378,15 @@ export async function getColecaoCurvaVida(
     const limiteOffset = Math.min(janelaDias, hojeOffset);
 
     let acumulado = 0;
-    const pontos: { dias: number; percCumulativo: number }[] = [];
+    const pontos: { dias: number; percPeriodo: number; percCumulativo: number }[] = [];
     for (let offset = 0; offset <= limiteOffset; offset++) {
-      acumulado += porDiaOffset.get(offset) ?? 0;
-      pontos.push({ dias: offset, percCumulativo: (acumulado / produzido) * 100 });
+      const unidadesNoDia = porDiaOffset.get(offset) ?? 0;
+      acumulado += unidadesNoDia;
+      pontos.push({
+        dias: offset,
+        percPeriodo: (unidadesNoDia / produzido) * 100,
+        percCumulativo: (acumulado / produzido) * 100,
+      });
     }
 
     resultado.push({ colecao, primeiraVenda: primeiraVenda.toISOString().slice(0, 10), pontos });
