@@ -95,7 +95,7 @@ export default async function SellthroughPage({
       <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="text-base font-semibold">Sell-through por coleção</h2>
         <a href="/dashboard/curva-vida-colecao" className="text-xs text-[var(--series-1)] hover:underline">
-          Ver curva de vida da coleção →
+          Ver Cohort →
         </a>
       </div>
       <p className="mb-3 text-xs text-[var(--text-muted)]">
