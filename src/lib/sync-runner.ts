@@ -26,6 +26,7 @@ export async function syncArmazenadores(client: DapicClient) {
   const armazenadores = await client.fetchArmazenadores();
   const storeByDapicId = new Map<number, string>();
   let primaryStoreId: string | null = null;
+  let atacadoStoreId: string | null = null;
 
   for (const a of armazenadores) {
     const existing = await prisma.store.findFirst({
@@ -35,8 +36,12 @@ export async function syncArmazenadores(client: DapicClient) {
     const group = displayGroupFor(a.Descricao);
     const store = existing
       ? await prisma.store.update({
+          // Bug real achado em 2026-09-23: esse update nunca reescrevia "sellsProducts", então um
+          // valor errado gravado uma vez (ex: ATACADO com false) ficava preso pra sempre mesmo
+          // depois da regra em sellsProducts() já calcular certo — corrigido incluindo o campo
+          // aqui, igual o create já fazia.
           where: { id: existing.id },
-          data: { dapicArmazenadorId: a.Id, displayGroup: group },
+          data: { dapicArmazenadorId: a.Id, displayGroup: group, sellsProducts: sells },
         })
       : await prisma.store.create({
           data: {
@@ -49,9 +54,10 @@ export async function syncArmazenadores(client: DapicClient) {
         });
     storeByDapicId.set(a.Id, store.id);
     if (sells && !primaryStoreId) primaryStoreId = store.id;
+    if (a.Descricao === "ATACADO") atacadoStoreId = store.id;
   }
 
-  return { storeByDapicId, primaryStoreId };
+  return { storeByDapicId, primaryStoreId, atacadoStoreId };
 }
 
 async function syncEstoque(client: DapicClient, storeByDapicId: Map<number, string>) {
@@ -80,8 +86,21 @@ async function syncEstoque(client: DapicClient, storeByDapicId: Map<number, stri
 // Pro token cd-atacado, vendaspdv só tem devolução de verdade — a venda do canal Site+Atacado
 // vem de /faturas (confirmado com Rodrigo em 2026-08-10). As linhas "Venda" que aparecem aqui
 // pra esse token são só o lado de troca (pareada com uma devolução), não a venda real — ignora.
-async function syncVendas(client: DapicClient, storeId: string | null, dias: number, priceCatalog: PriceCatalog) {
+//
+// Bug real achado em 2026-09-23: pra esse token, tudo (inclusive devolução real de atacado) era
+// gravado sempre na loja "site" (storeId/primaryStoreId=CD) — a loja ATACADO só recebia estoque,
+// nunca venda/devolução, então produto de atacado aparecia misturado em "TVB Site e Atacado".
+// Corrigido: quando `atacadoStoreId` existe (só acontece pro token cd-atacado), cada linha escolhe
+// a loja pela tabelaPreco já inferida (mesmo sinal que já era usado só pro filtro de canal B2B/B2C).
+async function syncVendas(
+  client: DapicClient,
+  storeId: string | null,
+  atacadoStoreId: string | null,
+  dias: number,
+  priceCatalog: PriceCatalog
+) {
   if (!storeId) return { vendas: 0, devolucoes: 0, brindes: 0, vendedorCorrigido: [] as VendedorCorrigido[] };
+  const siteStoreId: string = storeId;
   const contaVendaDoPdv = client.label !== "cd-atacado";
   const hoje = new Date();
   const inicio = new Date(hoje);
@@ -92,6 +111,12 @@ async function syncVendas(client: DapicClient, storeId: string | null, dias: num
   const returnData: Prisma.ReturnCreateManyInput[] = [];
   const giftData: Prisma.GiftCreateManyInput[] = [];
 
+  // atacadoStoreId só vem preenchido pro token cd-atacado — nos outros (loja física), sempre cai
+  // em `storeId` (comportamento igual ao de antes).
+  function resolveStoreId(tabelaPreco: string | null): string {
+    return tabelaPreco === "Tabela atacado" && atacadoStoreId ? atacadoStoreId : siteStoreId;
+  }
+
   for (const venda of vendasPdv) {
     if (venda.Status !== "Fechada" || !venda.DataFechamento) continue;
     const saleDate = parseDapicDateTime(venda.DataFechamento);
@@ -99,8 +124,9 @@ async function syncVendas(client: DapicClient, storeId: string | null, dias: num
     venda.Produtos.forEach((item) => {
       const cod = item.IdGradeProduto != null ? String(item.IdGradeProduto) : venda.Codigo;
       if (item.Tipo === "Venda" && contaVendaDoPdv) {
+        const tabelaPreco = inferTabelaPreco(cod, item.ValorUnitario, priceCatalog);
         saleData.push({
-          storeId,
+          storeId: resolveStoreId(tabelaPreco),
           dapicVendaId: venda.Id,
           // Id da linha (estável), não posição no array (ver comentário no tipo
           // DapicVendaPdvProduto) — achado real de duplicata em 2026-08-12.
@@ -118,13 +144,14 @@ async function syncVendas(client: DapicClient, storeId: string | null, dias: num
           estado: venda.Cidade?.Estado ?? null,
           quantidade: item.Quantidade,
           valorTotalLiquido: item.ValorLiquido,
-          tabelaPreco: inferTabelaPreco(cod, item.ValorUnitario, priceCatalog),
+          tabelaPreco,
           codigo: venda.Codigo ?? null,
           saleDate,
         });
       } else if (item.Tipo === "Devolução") {
+        const tabelaPreco = inferTabelaPreco(cod, item.ValorUnitario, priceCatalog);
         returnData.push({
-          storeId,
+          storeId: resolveStoreId(tabelaPreco),
           dapicVendaId: venda.Id,
           itemIndex: item.Id,
           cod,
@@ -134,7 +161,7 @@ async function syncVendas(client: DapicClient, storeId: string | null, dias: num
           tamanho: item.Tamanho ?? null,
           marca: item.Marca ?? null,
           colecao: item.Colecao ?? null,
-          tabelaPreco: inferTabelaPreco(cod, item.ValorUnitario, priceCatalog),
+          tabelaPreco,
           quantidade: item.Quantidade,
           valorTotal: item.ValorLiquido,
           returnDate: saleDate,
@@ -189,11 +216,14 @@ type VendedorCorrigido = {
 // verdade), pra entrar no resumo do Telegram.
 async function upsertSalesComVendedorAtualizavel(saleData: Prisma.SaleCreateManyInput[]): Promise<VendedorCorrigido[]> {
   if (saleData.length === 0) return [];
-  const storeId = saleData[0].storeId as string;
+  // storeId não é mais único no lote (cd-atacado agora espalha venda entre loja site e atacado,
+  // ver resolveStoreId em syncVendas) — filtrar só pelas lojas que aparecem, senão a busca abaixo
+  // ignorava a "vendedor antigo" de metade do lote.
+  const storeIds = [...new Set(saleData.map((s) => s.storeId as string))];
   const dapicVendaIds = [...new Set(saleData.map((s) => s.dapicVendaId as number))];
 
   const existentes = await prisma.sale.findMany({
-    where: { storeId, dapicVendaId: { in: dapicVendaIds } },
+    where: { storeId: { in: storeIds }, dapicVendaId: { in: dapicVendaIds } },
     select: { dapicVendaId: true, itemIndex: true, vendedor: true },
   });
   const vendedorAntigoPorChave = new Map(existentes.map((e) => [`${e.dapicVendaId}::${e.itemIndex}`, e.vendedor]));
@@ -238,7 +268,17 @@ async function upsertSalesComVendedorAtualizavel(saleData: Prisma.SaleCreateMany
 // Venda de verdade do canal Site+Atacado (só cd-atacado tem acesso a /faturas). Mesma chave de
 // idempotência (storeId, dapicVendaId=Id da fatura, itemIndex) — nunca colide com vendaspdv
 // porque esse token não grava mais Sale via vendaspdv (ver syncVendas).
-async function syncFaturas(client: DapicClient, storeId: string | null, dias: number, priceCatalog: PriceCatalog) {
+//
+// Bug real achado em 2026-09-23: toda fatura (site E atacado) caía sempre na loja "site" — ver
+// comentário em syncVendas. Mesma correção aqui: fatura com tabelaPreco="Tabela atacado" vai pra
+// loja ATACADO.
+async function syncFaturas(
+  client: DapicClient,
+  storeId: string | null,
+  atacadoStoreId: string | null,
+  dias: number,
+  priceCatalog: PriceCatalog
+) {
   if (!storeId || client.label !== "cd-atacado") return { vendas: 0, brindes: 0 };
   const hoje = new Date();
   const inicio = new Date(hoje);
@@ -273,8 +313,9 @@ async function syncFaturas(client: DapicClient, storeId: string | null, dias: nu
         return;
       }
       if (item.Tipo !== "Venda") return;
+      const tabelaPreco = inferTabelaPreco(String(item.IdGradeProduto), item.Valores.ValorUnitario, priceCatalog);
       saleData.push({
-        storeId,
+        storeId: tabelaPreco === "Tabela atacado" && atacadoStoreId ? atacadoStoreId : storeId,
         dapicVendaId: fatura.Id,
         itemIndex: item.Id,
         cod: String(item.IdGradeProduto),
@@ -289,7 +330,7 @@ async function syncFaturas(client: DapicClient, storeId: string | null, dias: nu
         estado: fatura.Estado ?? null,
         quantidade: item.Quantidade,
         valorTotalLiquido: item.Valores.ValorTotal,
-        tabelaPreco: inferTabelaPreco(String(item.IdGradeProduto), item.Valores.ValorUnitario, priceCatalog),
+        tabelaPreco,
         codigo: fatura.Codigo ?? null,
         saleDate,
       });
@@ -491,7 +532,7 @@ async function doSync() {
   const matrizClient = allClients.find((c) => c.label === "matriz");
 
   async function syncOneClient(client: DapicClient) {
-    const { storeByDapicId, primaryStoreId } = await syncArmazenadores(client);
+    const { storeByDapicId, primaryStoreId, atacadoStoreId } = await syncArmazenadores(client);
     const [estoque, priceCatalog] = await Promise.all([
       syncEstoque(client, storeByDapicId),
       fetchPriceCatalogCached(prisma, client),
@@ -500,8 +541,8 @@ async function doSync() {
     // reduz o volume processado (menos chamadas de /faturas, que é 1 por fatura pro
     // Site+Atacado). Se um sync falhar, o self-heal-sync.ts (dispara sozinho se o último
     // SyncLog tiver mais de 5h) cobre o risco de perder dado mais velho que essa janela.
-    const vendas = await syncVendas(client, primaryStoreId, 1, priceCatalog);
-    const faturas = await syncFaturas(client, primaryStoreId, 1, priceCatalog);
+    const vendas = await syncVendas(client, primaryStoreId, atacadoStoreId, 1, priceCatalog);
+    const faturas = await syncFaturas(client, primaryStoreId, atacadoStoreId, 1, priceCatalog);
     return {
       estoque,
       vendas: vendas.vendas + faturas.vendas,
