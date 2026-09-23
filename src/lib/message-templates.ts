@@ -97,7 +97,7 @@ Com carinho, TVB SHORTS.`,
   {
     key: "follow_up",
     label: "Follow-up pós-compra",
-    placeholders: ["nome", "produtos", "codigo"],
+    placeholders: ["nome", "produtos"],
     defaultTexto: `Oi, {nome}! Tudo beleza?
 
 Aqui é da TVB SHORTS! Passando pra saber se você curtiu o {produtos}.
@@ -105,10 +105,10 @@ E se tem algum feedback pra gente!
 
 Se precisar de qualquer coisa, é só chamar a gente por aqui!
 
-Obrigado pela compra e por escolher a TVB.
-
-Código da venda: {codigo}`,
-    extra: "{codigo} = código real da venda que gerou esse follow-up (não é o mesmo id interno do sistema). Se a nota/cupom fiscal da compra também for encontrada, uma linha extra com o número é adicionada automaticamente no final.",
+Obrigado pela compra e por escolher a TVB.`,
+    // Pedido do Rodrigo em 2026-09-23: não mostrar mais o código interno da venda pro cliente —
+    // a identificação da compra passou a ser só pela NFC-e/nota, quando encontrada.
+    extra: "Se a nota/cupom fiscal da compra for encontrada, uma linha extra com o número dela é adicionada automaticamente no final.",
   },
 ];
 

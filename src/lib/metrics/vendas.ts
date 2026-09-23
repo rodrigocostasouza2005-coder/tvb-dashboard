@@ -826,6 +826,59 @@ export async function getMonthlySalesByStore(filters: DashboardFilters, canal: C
   return { data, series };
 }
 
+// Vendas mensais por Família (= "grupo" no schema, mesmo campo usado em toda a aplicação — não
+// existe um campo "família" separado no DAPIC/banco). Mesmo padrão de query/agregação de
+// getMonthlySalesByStore acima, só trocando a dimensão (grupo em vez de loja) — pedido do Rodrigo
+// em 2026-09-23 ("Vendas mensais por família de produto"), reaproveitando a mesma lógica de
+// bucket de mês + unidades/receita já validada ali, sem duplicar a fórmula.
+export async function getMonthlySalesByGrupo(filters: DashboardFilters, canal: Canal = "todos") {
+  const b2bClientes = canal !== "todos" ? [...(await getB2BClienteNomes())] : [];
+  const rows = await prisma.$queryRaw<{ month: Date; grupo: string; units: bigint; revenue: number }[]>`
+    SELECT
+      DATE_TRUNC('month', ("saleDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo') AS month,
+      "grupo",
+      SUM("quantidade") AS units,
+      SUM("valorTotalLiquido") AS revenue
+    FROM "Sale"
+    WHERE "saleDate" >= ${filters.from}
+      AND "saleDate" <= ${filters.to}
+      ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
+      ${filters.marcas !== undefined ? Prisma.sql`AND "marca" = ANY(${filters.marcas})` : Prisma.empty}
+      ${filters.tabelasPreco !== undefined ? Prisma.sql`AND ("tabelaPreco" = ANY(${filters.tabelasPreco}) OR "tabelaPreco" IS NULL)` : Prisma.empty}
+      ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
+      ${canal === "b2b" ? Prisma.sql`AND ("tabelaPreco" = 'Tabela atacado' OR "clienteNome" = ANY(${b2bClientes}))` : Prisma.empty}
+      ${canal === "b2c" ? Prisma.sql`AND "tabelaPreco" IS DISTINCT FROM 'Tabela atacado' AND ("clienteNome" IS NULL OR "clienteNome" <> ALL(${b2bClientes}))` : Prisma.empty}
+    GROUP BY month, "grupo"
+    ORDER BY month ASC
+  `;
+
+  const byMonth = new Map<string, Record<string, number>>();
+  const byMonthUnits = new Map<string, Record<string, number>>();
+  const gruposSet = new Set<string>();
+
+  for (const r of rows) {
+    const monthStr = new Date(r.month).toISOString().slice(0, 7); // "YYYY-MM"
+    gruposSet.add(r.grupo);
+    const monthRow = byMonth.get(monthStr) ?? {};
+    monthRow[r.grupo] = (monthRow[r.grupo] ?? 0) + Number(r.revenue);
+    byMonth.set(monthStr, monthRow);
+    const monthRowUnits = byMonthUnits.get(monthStr) ?? {};
+    monthRowUnits[r.grupo] = (monthRowUnits[r.grupo] ?? 0) + Number(r.units);
+    byMonthUnits.set(monthStr, monthRowUnits);
+  }
+
+  const series = [...gruposSet].sort();
+  const months = [...byMonth.keys()].sort();
+
+  const data = months.map((month) => ({
+    month,
+    revenue: byMonth.get(month) ?? {},
+    units: byMonthUnits.get(month) ?? {},
+  }));
+
+  return { data, series };
+}
+
 export type DailyProdutoPoint = {
   day: string;
   unitsBruta: number;

@@ -68,7 +68,10 @@ function mensagemSugestao(s: SugestaoContato, templates: Record<TemplateKey, str
   const base = renderTemplate(texto, { nome, detalhe: s.detalhe, shopping });
 
   if (key && MOTIVOS_COM_GANCHO_ESTOQUE.has(key) && s.tamanhoDisponivel && s.produtoFavorito) {
-    return `${base} Inclusive ainda temos o ${s.produtoFavorito} no seu tamanho (${s.tamanhoDisponivel}) aqui na loja!`;
+    // Achado em 2026-09-23: colava direto sem quebra de linha (virava frase corrida grudada no
+    // fim do texto, sem pontuação, ex: "...no Shopping Leblon Inclusive ainda temos..."). Mesmo
+    // padrão de parágrafo extra usado em mensagemFollowUp (linha da nota fiscal).
+    return `${base}\n\nInclusive ainda temos o ${s.produtoFavorito} no seu tamanho (${s.tamanhoDisponivel}) aqui na loja!`;
   }
   return base;
 }
@@ -85,7 +88,7 @@ function mensagemFollowUp(f: FollowUpComNota, templates: Record<TemplateKey, str
     f.produtos.length === 1
       ? f.produtos[0]
       : `${f.produtos.slice(0, -1).join(", ")} e ${f.produtos[f.produtos.length - 1]}`;
-  const base = renderTemplate(templates.follow_up, { nome, produtos, codigo: f.codigo ?? "" });
+  const base = renderTemplate(templates.follow_up, { nome, produtos });
   if (f.numeroNota) {
     return `${base}\n\nE se precisar trocar alguma coisa, já separa o número da nota aqui: ${f.numeroNota}.`;
   }
