@@ -36,32 +36,44 @@ async function main() {
   if (!cdAtacadoOrUndefined) { console.error("cd-atacado client not found"); process.exit(1); return; }
   const cdAtacado = cdAtacadoOrUndefined;
 
-  // Get storeId for cd-atacado
+  // Site (CD) e Atacado (ATACADO) — desde 2026-09-23 são 2 lojas separadas, ver sync-runner.ts
+  // (resolveStoreId). Esse script rodou originalmente quando tudo ia pra uma loja só; atualizado
+  // agora pra escolher a loja certa por item, igual a sync automática.
   const armazenadores = await cdAtacado.fetchArmazenadores();
-  let storeIdOrNull: string | null = null;
+  let siteStoreId: string | null = null;
+  let atacadoStoreId: string | null = null;
   for (const a of armazenadores) {
     const store = await prisma.store.findFirst({ where: { OR: [{ code: a.Descricao }, { dapicArmazenadorId: a.Id }] } });
-    if (store?.sellsProducts) { storeIdOrNull = store.id; break; }
+    if (!store) continue;
+    if (a.Descricao === "CD") siteStoreId = store.id;
+    if (a.Descricao === "ATACADO") atacadoStoreId = store.id;
   }
-  if (!storeIdOrNull) { console.error("No sellsProducts store found for cd-atacado"); process.exit(1); return; }
-  const storeId = storeIdOrNull;
-  console.log(`Store: ${storeId}`);
+  if (!siteStoreId) { console.error("Store CD não encontrada"); process.exit(1); return; }
+  console.log(`Store site (CD): ${siteStoreId} | Store atacado: ${atacadoStoreId ?? "(não encontrada)"}`);
 
   const priceCatalog = await fetchPriceCatalogCached(prisma, cdAtacado);
+  function resolveStoreId(tabelaPreco: string | null): string {
+    return tabelaPreco === "Tabela atacado" && atacadoStoreId ? atacadoStoreId : siteStoreId!;
+  }
 
   console.log(`Fetching /faturas from ${DATA_INICIAL} to ${DATA_FINAL}...`);
   const faturas = await withRetry(() => cdAtacado.fetchFaturas(DATA_INICIAL, DATA_FINAL));
   const fechadas = faturas.filter((f) => f.Status === "Fechado" && f.DataFechamento);
   console.log(`${faturas.length} faturas found, ${fechadas.length} fechadas`);
 
+  // "Já gravada" precisa olhar as 2 lojas — uma fatura antiga pode ter itens espalhados entre
+  // CD e ATACADO dependendo da tabelaPreco de cada item.
+  const storeIdsBusca = [siteStoreId, atacadoStoreId].filter((x): x is string => !!x);
   const jaGravadas = await prisma.sale.findMany({
-    where: { storeId, dapicVendaId: { in: fechadas.map((f) => f.Id) } },
-    select: { dapicVendaId: true },
-    distinct: ["dapicVendaId"],
+    where: { storeId: { in: storeIdsBusca }, dapicVendaId: { in: fechadas.map((f) => f.Id) } },
+    select: { dapicVendaId: true, itemIndex: true },
   });
-  const jaGravadasSet = new Set(jaGravadas.map((s) => s.dapicVendaId));
-  const pendentes = fechadas.filter((f) => !jaGravadasSet.has(f.Id));
-  console.log(`${jaGravadasSet.size} faturas já gravadas antes (pulando), ${pendentes.length} pendentes.`);
+  // Chave por (fatura, item) — não só fatura: uma fatura pode ter alguns itens já gravados e
+  // outros faltando (achado real na auditoria de 2026-09-24, ver PLANO.md/conversa).
+  const jaGravadasSet = new Set(jaGravadas.map((s) => `${s.dapicVendaId}::${s.itemIndex}`));
+  const dapicVendaIdsComAlgumItem = new Set(jaGravadas.map((s) => s.dapicVendaId));
+  const pendentes = fechadas; // reprocessa todas as fechadas — o filtro por item acontece dentro de processOne agora
+  console.log(`${dapicVendaIdsComAlgumItem.size} faturas com pelo menos 1 item já gravado, ${jaGravadasSet.size} itens já gravados no total. Reprocessando todas as ${pendentes.length} faturas fechadas pra achar item faltando.`);
 
   let saleData: Prisma.SaleCreateManyInput[] = [];
   let processed = 0;
@@ -92,8 +104,14 @@ async function main() {
 
     for (const item of produtos) {
       if (item.Tipo !== "Venda") continue;
+      // Item a item, não fatura inteira — achado real na auditoria de 2026-09-24: comparando
+      // contra o Excel do Rodrigo, ~23% da receita de atacado sumia, espalhado (não um corte de
+      // data) — bate com fatura PARCIALMENTE gravada (alguns itens foram, outros não, provável
+      // falha transiente que nunca é re-tentada, já que a sync normal só olha "ontem").
+      if (jaGravadasSet.has(`${fatura.Id}::${item.Id}`)) continue;
+      const tabelaPreco = inferTabelaPreco(String(item.IdGradeProduto), item.Valores.ValorUnitario, priceCatalog);
       saleData.push({
-        storeId,
+        storeId: resolveStoreId(tabelaPreco),
         dapicVendaId: fatura.Id,
         itemIndex: item.Id,
         cod: String(item.IdGradeProduto),
@@ -108,7 +126,7 @@ async function main() {
         estado: fatura.Estado ?? null,
         quantidade: item.Quantidade,
         valorTotalLiquido: item.Valores.ValorTotal,
-        tabelaPreco: inferTabelaPreco(String(item.IdGradeProduto), item.Valores.ValorUnitario, priceCatalog),
+        tabelaPreco,
         saleDate,
       });
     }
