@@ -65,7 +65,12 @@ export default async function VendasPage({
   const grupoIn = await getGrupoRestriction(user.role);
   const allowedStores = getStoreRestriction(user);
   const allowedMarcas = getMarcaRestriction(user);
-  const allowedTabelasPreco = getTabelaPrecoRestriction(user);
+  // "Tabela atacado" nunca aparece nem é selecionável aqui — pedido do Rodrigo em 2026-09-24:
+  // atacado fica 100% isolado na aba Atacado, sem misturar nos números/filtro da aba Vendas
+  // (mãe). Tirando do allowedTabelasPreco (a restrição concreta que parseFilters cruza com o
+  // que vier da URL) fecha os dois lados de uma vez: nem aparece como opção no dropdown (que
+  // usa esse mesmo array via getTabelasPreco) nem dá pra forçar via link/URL antigo.
+  const allowedTabelasPreco = getTabelaPrecoRestriction(user).filter((t) => t !== "Tabela atacado");
   const filters = {
     ...parseFilters(rawParams, { allowedStoreIds: allowedStores, allowedMarcas, allowedTabelasPreco }),
     grupoIn,
