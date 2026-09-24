@@ -21,6 +21,7 @@ import {
   getDistinctColecoes,
   getSiteVarejoCidades,
   getTopClientes,
+  type DashboardFilters,
 } from "@/lib/metrics";
 import {
   canSeeFinancials,
@@ -81,11 +82,16 @@ export default async function VendasPage({
   const emptyTamanhoSalesRows: Awaited<ReturnType<typeof getSalesByGrupoProdutoTamanho>> = [];
   const emptyTamanhoReturnRows: Awaited<ReturnType<typeof getReturnsByGrupoProdutoTamanho>> = [];
 
+  // Vendas mensais por Família: histórico completo, não segue o filtro de data da página —
+  // pedido do Rodrigo em 2026-09-24, mesmo padrão das outras seções mensais do Radar (Ticket por
+  // faixa, Mix de tamanho em Análise). Continua respeitando loja/marca/tabelaPreco/grupo.
+  const historicoFilters: DashboardFilters = { ...filters, from: new Date("2020-01-01"), to: new Date() };
+
   const [rows, salesByColecao, salesByDayPerColecao, porFamilia, salesSubRows, salesTamanhoRows, salesByDay, salesByDayPerStore, returnRows, returnSubRows, returnTamanhoRows, returnsByDay, stores, marcas, tabelasPreco, colecoes, siteCidades, topClientes] = await Promise.all([
     getSalesByDimension(filters, dimension),
     getSalesByDimension(filters, "colecao"),
     getSalesByDayPerColecao(filters),
-    getMonthlySalesByGrupo(filters),
+    getMonthlySalesByGrupo(historicoFilters),
     dimension === "grupo"
       ? getSalesByGrupoProduto(filters)
       : dimension === "tamanho"
@@ -142,10 +148,9 @@ export default async function VendasPage({
     return `/dashboard/clientes-ficha?${p.toString()}`;
   }
 
-  // Vendas mensais por Família (grupo): mesmo período/filtro global da página (respeita o
-  // filtro de data, diferente das seções "histórico completo" de Análise/Indicadores no Tempo).
-  // Seleção de família tipo "Comparar" (top 5 por padrão) — mesmo padrão já usado em Curva de
-  // Vida da Coleção.
+  // Vendas mensais por Família (grupo): histórico completo (ver historicoFilters acima), só
+  // loja/marca/tabelaPreco/grupo seguem o filtro da página. Seleção de família tipo "Comparar"
+  // (top 5 por padrão) — mesmo padrão já usado em Curva de Vida da Coleção.
   const visaoFamilia = rawParams.visaoFamilia === "qtd" ? "qtd" : "faturamento";
   const totalPorFamilia = new Map(
     porFamilia.series.map((f) => [
@@ -277,7 +282,7 @@ export default async function VendasPage({
       <section id="familia" className="mb-6">
         <h2 className="mb-1 text-sm font-medium text-[var(--text-secondary)]">Vendas mensais por família</h2>
         <p className="mb-3 text-xs text-[var(--text-muted)]">
-          Evolução mês a mês por família de produto (mesmo filtro de período/loja/marca desta página) — pra
+          Evolução mês a mês por família de produto (histórico completo — não segue o filtro de data acima, só loja/marca/tabela de preço) — pra
           identificar crescimento, queda ou concentração de vendas numa família.
         </p>
 

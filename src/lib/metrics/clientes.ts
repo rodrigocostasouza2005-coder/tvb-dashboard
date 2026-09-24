@@ -25,6 +25,7 @@ import {
   getMarcas,
   getTabelasPreco,
   getLastSyncs,
+  getSiteAtacadoStoreIds,
   Dimension,
   DashboardFilters,
   Canal,
@@ -1545,11 +1546,10 @@ async function computeAniversariantesDoMes(filters: DashboardFilters, vendedor: 
 }
 
 export async function getClienteRetencaoPorMes(filters: DashboardFilters) {
-  const cdStore = await prisma.store.findFirst({ where: { code: "CD" } });
-  if (!cdStore) return { months: [], compraram1x: 0, compraramMaisde1x: 0 };
-  if (filters.storeIds !== undefined && !filters.storeIds.includes(cdStore.id)) {
-    return { months: [], compraram1x: 0, compraramMaisde1x: 0 };
-  }
+  const siteAtacadoIds = await getSiteAtacadoStoreIds();
+  if (siteAtacadoIds.length === 0) return { months: [], compraram1x: 0, compraramMaisde1x: 0 };
+  const storeIds = filters.storeIds !== undefined ? siteAtacadoIds.filter((id) => filters.storeIds!.includes(id)) : siteAtacadoIds;
+  if (storeIds.length === 0) return { months: [], compraram1x: 0, compraramMaisde1x: 0 };
 
   // Mesmo filtro de getAtacadoClientes — cliente já classificado como atacado (canalWhere("b2b")),
   // não só a linha bater com "Tabela atacado" — não mistura com o varejo do site que passa pela
@@ -1559,7 +1559,7 @@ export async function getClienteRetencaoPorMes(filters: DashboardFilters) {
     prisma.sale.findMany({
       where: {
         ...saleWhere(filters),
-        storeId: cdStore.id,
+        storeId: { in: storeIds },
         AND: [b2bWhere],
         clienteNome: { not: null },
       },
@@ -1569,7 +1569,7 @@ export async function getClienteRetencaoPorMes(filters: DashboardFilters) {
       by: ["clienteNome"],
       where: {
         ...saleWhere(filters),
-        storeId: cdStore.id,
+        storeId: { in: storeIds },
         AND: [b2bWhere],
         clienteNome: { not: null },
         saleDate: { lte: filters.to },

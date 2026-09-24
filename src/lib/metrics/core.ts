@@ -380,6 +380,19 @@ export async function getRawStores() {
   return prisma.store.findMany({ orderBy: { name: "asc" } });
 }
 
+// IDs dos 2 armazenadores por trás de "TVB Site e Atacado" (CD + ATACADO) — usado em toda função
+// que precisa achar venda de atacado (canalWhere("b2b")) por baixo do token cd-atacado. Achado
+// em 2026-09-23: até então venda/devolução de atacado (faturas) e venda de site ficavam TODAS
+// gravadas na loja CD; corrigido a sync pra separar por loja de verdade (ver sync-runner.ts). As
+// funções de Atacado (getAtacadoVendas etc) e getClienteRetencaoPorMes ficaram hardcoded só em
+// "storeId: cdStore.id" de uma época em que isso bastava — agora precisam olhar as 2 lojas juntas
+// (a definição de "é atacado" continua sendo canalWhere("b2b"), não a loja em si — a loja só
+// limita o universo de busca pro canal que pode ter atacado).
+export async function getSiteAtacadoStoreIds(): Promise<string[]> {
+  const stores = await prisma.store.findMany({ where: { code: { in: ["CD", "ATACADO"] } } });
+  return stores.map((s) => s.id);
+}
+
 // Listas completas (não filtradas entre si) pra montar os dropdowns da tela de Estoque Mínimo —
 // Rodrigo quer preencher via Tab, então nenhum campo pode ficar vazio/desabilitado esperando
 // outro ser escolhido primeiro.

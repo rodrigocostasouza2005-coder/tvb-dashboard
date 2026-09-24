@@ -25,6 +25,7 @@ import {
   getMarcas,
   getTabelasPreco,
   getLastSyncs,
+  getSiteAtacadoStoreIds,
   Dimension,
   DashboardFilters,
   Canal,
@@ -145,13 +146,13 @@ import {
 
 
 export async function getAtacadoVendas(filters: DashboardFilters) {
-  const cdStore = await prisma.store.findFirst({ where: { code: "CD" } });
-  if (!cdStore) return { kpis: { receita: 0, pedidos: 0, unidades: 0, ticketMedio: 0 }, byDay: [], topProdutos: [] };
-  // Atacado só existe na loja CD — usuário restrito que não tem CD liberado não vê nada aqui
-  // (achado na auditoria de 2026-09-08: antes o storeId ficava hardcoded, ignorando a restrição).
-  if (filters.storeIds !== undefined && !filters.storeIds.includes(cdStore.id)) {
-    return { kpis: { receita: 0, pedidos: 0, unidades: 0, ticketMedio: 0 }, byDay: [], topProdutos: [] };
-  }
+  const siteAtacadoIds = await getSiteAtacadoStoreIds();
+  if (siteAtacadoIds.length === 0) return { kpis: { receita: 0, pedidos: 0, unidades: 0, ticketMedio: 0 }, byDay: [], topProdutos: [] };
+  // Atacado só existe no canal Site+Atacado (2 lojas: CD e ATACADO, ver getSiteAtacadoStoreIds) —
+  // usuário restrito que não tem nenhuma das duas liberada não vê nada aqui (achado na auditoria
+  // de 2026-09-08: antes o storeId ficava hardcoded, ignorando a restrição).
+  const storeIds = filters.storeIds !== undefined ? siteAtacadoIds.filter((id) => filters.storeIds!.includes(id)) : siteAtacadoIds;
+  if (storeIds.length === 0) return { kpis: { receita: 0, pedidos: 0, unidades: 0, ticketMedio: 0 }, byDay: [], topProdutos: [] };
 
   // Cliente já classificado como atacado (canalWhere("b2b")), não tabelaPreco direto — achado na
   // auditoria de 2026-09-02: essa aba tinha o mesmo bug da Guarderia (cliente que negocia preço
@@ -160,7 +161,7 @@ export async function getAtacadoVendas(filters: DashboardFilters) {
   const b2bClientes = [...(await getB2BClienteNomes())];
   const where: Prisma.SaleWhereInput = {
     ...saleWhere(filters),
-    storeId: cdStore.id,
+    storeId: { in: storeIds },
     AND: [b2bWhere],
   };
 
@@ -172,7 +173,7 @@ export async function getAtacadoVendas(filters: DashboardFilters) {
         SUM("quantidade") AS units,
         SUM("valorTotalLiquido") AS revenue
       FROM "Sale"
-      WHERE "storeId" = ${cdStore.id}
+      WHERE "storeId" = ANY(${storeIds})
         AND "saleDate" >= ${filters.from}
         AND "saleDate" <= ${filters.to}
         AND ("tabelaPreco" = 'Tabela atacado' OR "clienteNome" = ANY(${b2bClientes}))
@@ -203,16 +204,15 @@ export async function getAtacadoVendas(filters: DashboardFilters) {
 }
 
 export async function getAtacadoCidades(filters: DashboardFilters) {
-  const cdStore = await prisma.store.findFirst({ where: { code: "CD" } });
-  if (!cdStore) return { rows: [], totalCidades: 0, totalEstados: 0 };
-  if (filters.storeIds !== undefined && !filters.storeIds.includes(cdStore.id)) {
-    return { rows: [], totalCidades: 0, totalEstados: 0 };
-  }
+  const siteAtacadoIds = await getSiteAtacadoStoreIds();
+  if (siteAtacadoIds.length === 0) return { rows: [], totalCidades: 0, totalEstados: 0 };
+  const storeIds = filters.storeIds !== undefined ? siteAtacadoIds.filter((id) => filters.storeIds!.includes(id)) : siteAtacadoIds;
+  if (storeIds.length === 0) return { rows: [], totalCidades: 0, totalEstados: 0 };
 
   // Mesmo fix de getAtacadoVendas — cliente já classificado como atacado, não tabelaPreco direto.
   const where: Prisma.SaleWhereInput = {
     ...saleWhere(filters),
-    storeId: cdStore.id,
+    storeId: { in: storeIds },
     cidade: { not: null },
     AND: [await canalWhere("b2b")],
   };
@@ -241,11 +241,10 @@ export async function getAtacadoCidades(filters: DashboardFilters) {
 }
 
 export async function getAtacadoClientes(filters: DashboardFilters) {
-  const cdStore = await prisma.store.findFirst({ where: { code: "CD" } });
-  if (!cdStore) return { rows: [], totalClientes: 0, novosNoPeriodo: 0 };
-  if (filters.storeIds !== undefined && !filters.storeIds.includes(cdStore.id)) {
-    return { rows: [], totalClientes: 0, novosNoPeriodo: 0 };
-  }
+  const siteAtacadoIds = await getSiteAtacadoStoreIds();
+  if (siteAtacadoIds.length === 0) return { rows: [], totalClientes: 0, novosNoPeriodo: 0 };
+  const storeIds = filters.storeIds !== undefined ? siteAtacadoIds.filter((id) => filters.storeIds!.includes(id)) : siteAtacadoIds;
+  if (storeIds.length === 0) return { rows: [], totalClientes: 0, novosNoPeriodo: 0 };
 
   // Essa aba é especificamente sobre clientes de ATACADO (B2B) — sem esse filtro, misturava
   // com clientes de varejo do site (mesma loja física "Site+Atacado", canal diferente). Usa
@@ -255,7 +254,7 @@ export async function getAtacadoClientes(filters: DashboardFilters) {
   const b2bWhere = await canalWhere("b2b");
   const where: Prisma.SaleWhereInput = {
     ...saleWhere(filters),
-    storeId: cdStore.id,
+    storeId: { in: storeIds },
     AND: [b2bWhere],
     clienteNome: { not: null },
   };
@@ -272,7 +271,7 @@ export async function getAtacadoClientes(filters: DashboardFilters) {
     }),
     prisma.sale.groupBy({
       by: ["clienteNome"],
-      where: { ...saleWhere(filters), storeId: cdStore.id, AND: [b2bWhere], saleDate: { lt: filters.from }, clienteNome: { not: null } },
+      where: { ...saleWhere(filters), storeId: { in: storeIds }, AND: [b2bWhere], saleDate: { lt: filters.from }, clienteNome: { not: null } },
       _count: { id: true },
     }),
   ]);
@@ -365,8 +364,8 @@ export async function getAtacadoClienteEvolucao(
   filters: Pick<DashboardFilters, "marcas" | "tabelasPreco" | "grupoIn">,
   referenceDate: Date = new Date()
 ): Promise<AtacadoClienteEvolucao | null> {
-  const cdStore = await prisma.store.findFirst({ where: { code: "CD" } });
-  if (!cdStore) return null;
+  const siteAtacadoIds = await getSiteAtacadoStoreIds();
+  if (siteAtacadoIds.length === 0) return null;
 
   const hojeStr = todayBrasiliaStr(referenceDate);
   const anoAtual = Number(hojeStr.slice(0, 4));
@@ -383,7 +382,7 @@ export async function getAtacadoClienteEvolucao(
   const norm = clienteNome.trim().toUpperCase();
   const variantRows = await prisma.$queryRaw<{ nome: string }[]>`
     SELECT DISTINCT "clienteNome" AS nome FROM "Sale"
-    WHERE "storeId" = ${cdStore.id} AND UPPER(TRIM("clienteNome")) = ${norm}
+    WHERE "storeId" = ANY(${siteAtacadoIds}) AND UPPER(TRIM("clienteNome")) = ${norm}
   `;
   if (variantRows.length === 0) return null;
   const variantes = variantRows.map((r) => r.nome);
@@ -391,7 +390,7 @@ export async function getAtacadoClienteEvolucao(
   const rangeFilters: DashboardFilters = { ...filters, from: fromAnterior, to: toAtual };
   const where: Prisma.SaleWhereInput = {
     ...saleWhere(rangeFilters),
-    storeId: cdStore.id,
+    storeId: { in: siteAtacadoIds },
     clienteNome: { in: variantes },
   };
   const sales = await prisma.sale.findMany({
