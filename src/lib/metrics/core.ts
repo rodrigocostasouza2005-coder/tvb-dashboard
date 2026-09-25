@@ -261,7 +261,19 @@ export async function canalWhere(canal: Canal): Promise<Prisma.SaleWhereInput> {
   if (canal === "todos") return {};
   const b2bClientes = [...(await getB2BClienteNomes())];
   if (canal === "b2b") {
-    return { OR: [{ tabelaPreco: "Tabela atacado" }, { clienteNome: { in: b2bClientes } }] };
+    // Cliente já classificado como atacado (getB2BClienteNomes) só entra como fallback quando
+    // ESSA venda específica não tem tabelaPreco inferida (null) — preço negociado que não bate com
+    // nenhuma tabela do catálogo (achado real: Guarderia, 2026-09-01). Nunca sobrescreve uma venda
+    // já classificada com confiança como outra tabela (ex: "Tabela varejo") — um cliente atacado
+    // também pode comprar no varejo, e essa venda específica não devia virar atacado só pelo
+    // histórico do cliente. Validado em 2026-09-25 contra o Excel real do Rodrigo: pura +
+    // excedente-null bate 98.3% com a receita real de "Tabela atacado" (vs 76.7% só com pura).
+    return {
+      OR: [
+        { tabelaPreco: "Tabela atacado" },
+        { AND: [{ tabelaPreco: null }, { clienteNome: { in: b2bClientes } }] },
+      ],
+    };
   }
   // "not: X" no Prisma exclui null (vira "<>" puro no SQL) — precisa do OR explícito com null,
   // senão toda venda sem tabelaPreco inferida (boa parte da base) sumia do B2C. Achado testando
@@ -269,7 +281,10 @@ export async function canalWhere(canal: Canal): Promise<Prisma.SaleWhereInput> {
   return {
     AND: [
       { OR: [{ tabelaPreco: { not: "Tabela atacado" } }, { tabelaPreco: null }] },
-      { OR: [{ clienteNome: null }, { clienteNome: { notIn: b2bClientes } }] },
+      // Espelha a regra do b2b acima: só exclui do B2C por causa do cliente quando a venda não tem
+      // tabelaPreco própria (null) — venda com tabelaPreco explícita não-atacado (ex: varejo) fica
+      // em B2C mesmo vindo de um cliente que também compra atacado.
+      { OR: [{ tabelaPreco: { not: null } }, { clienteNome: null }, { clienteNome: { notIn: b2bClientes } }] },
     ],
   };
 }

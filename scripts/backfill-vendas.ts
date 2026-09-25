@@ -44,11 +44,37 @@ async function primaryStoreIdFor(client: DapicClient): Promise<string | null> {
   return null;
 }
 
+// Só preenchido pro token cd-atacado (única loja com armazenador "ATACADO" separado) — usado pra
+// mandar devolução com tabelaPreco="Tabela atacado" pra loja certa, igual sync-runner.ts já faz.
+async function atacadoStoreIdFor(client: DapicClient): Promise<string | null> {
+  if (client.label !== "cd-atacado") return null;
+  const armazenadores = await client.fetchArmazenadores();
+  for (const a of armazenadores) {
+    if (a.Descricao !== "ATACADO") continue;
+    const store = await withRetry(() =>
+      prisma.store.findFirst({ where: { OR: [{ code: a.Descricao }, { dapicArmazenadorId: a.Id }] } })
+    );
+    if (store) return store.id;
+  }
+  return null;
+}
+
 async function backfillLoja(client: DapicClient) {
   const storeId = await primaryStoreIdFor(client);
   if (!storeId) {
     console.log(`[${client.label}] nenhuma loja "sellsProducts" encontrada — pulando.`);
     return { vendas: 0, devolucoes: 0 };
+  }
+  // Pro token cd-atacado, /vendaspdv só tem devolução de verdade — a venda real do canal
+  // Site+Atacado vem de /faturas (backfill-faturas.ts). As linhas "Venda" que aparecem aqui pra
+  // esse token são só o lado de troca (pareada com uma devolução), não venda real. Mesma exclusão
+  // que sync-runner.ts (contaVendaDoPdv) já fazia — faltava aqui, achado em 2026-09-25 ao rodar
+  // este script de novo e ver 133 "vendas" de cd-atacado aparecerem contaminando a loja CD.
+  const contaVendaDoPdv = client.label !== "cd-atacado";
+  const atacadoStoreId = await atacadoStoreIdFor(client);
+  const siteStoreId: string = storeId;
+  function resolveStoreId(tabelaPreco: string | null): string {
+    return tabelaPreco === "Tabela atacado" && atacadoStoreId ? atacadoStoreId : siteStoreId;
   }
 
   const priceCatalog = await fetchPriceCatalogCached(prisma, client);
@@ -72,7 +98,7 @@ async function backfillLoja(client: DapicClient) {
     venda.Produtos.forEach((item, pos) => {
       const itemIndex = itemIndexes[pos];
       const cod = item.IdGradeProduto != null ? String(item.IdGradeProduto) : venda.Codigo;
-      if (item.Tipo === "Venda") {
+      if (item.Tipo === "Venda" && contaVendaDoPdv) {
         saleData.push({
           storeId,
           dapicVendaId: venda.Id,
@@ -93,8 +119,9 @@ async function backfillLoja(client: DapicClient) {
           saleDate,
         });
       } else if (item.Tipo === "Devolução") {
+        const tabelaPreco = inferTabelaPreco(cod, item.ValorUnitario, priceCatalog);
         returnData.push({
-          storeId,
+          storeId: resolveStoreId(tabelaPreco),
           dapicVendaId: venda.Id,
           itemIndex,
           cod,
@@ -103,7 +130,7 @@ async function backfillLoja(client: DapicClient) {
           cor: item.Cor ?? null,
           tamanho: item.Tamanho ?? null,
           marca: item.Marca ?? null,
-          tabelaPreco: inferTabelaPreco(cod, item.ValorUnitario, priceCatalog),
+          tabelaPreco,
           quantidade: item.Quantidade,
           valorTotal: item.ValorLiquido,
           returnDate: saleDate,
