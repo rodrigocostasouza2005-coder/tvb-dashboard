@@ -196,7 +196,7 @@ async function AtacadoVisaoGeral({
   showFinancials: boolean;
 }) {
   // getAtacadoVendas já filtra só B2B por dentro (canalWhere("b2b"), cliente-level).
-  const { kpis, byDay, topProdutos } = await getAtacadoVendas(filters);
+  const { kpis, byMonth, topProdutos } = await getAtacadoVendas(filters);
 
   return (
     <>
@@ -219,8 +219,10 @@ async function AtacadoVisaoGeral({
 
       {showFinancials && (
         <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
-          <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Receita bruta por dia</h2>
-          <AtacadoTrendChart data={byDay} />
+          <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">
+            Receita bruta por mês <span className="font-normal text-[var(--text-muted)]">(histórico completo, não segue o filtro de data acima)</span>
+          </h2>
+          <AtacadoTrendChart data={byMonth} />
         </section>
       )}
 

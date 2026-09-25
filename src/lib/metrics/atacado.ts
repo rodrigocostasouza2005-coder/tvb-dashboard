@@ -147,12 +147,12 @@ import {
 
 export async function getAtacadoVendas(filters: DashboardFilters) {
   const siteAtacadoIds = await getSiteAtacadoStoreIds();
-  if (siteAtacadoIds.length === 0) return { kpis: { receita: 0, pedidos: 0, unidades: 0, ticketMedio: 0 }, byDay: [], topProdutos: [] };
+  if (siteAtacadoIds.length === 0) return { kpis: { receita: 0, pedidos: 0, unidades: 0, ticketMedio: 0 }, byMonth: [], topProdutos: [] };
   // Atacado só existe no canal Site+Atacado (2 lojas: CD e ATACADO, ver getSiteAtacadoStoreIds) —
   // usuário restrito que não tem nenhuma das duas liberada não vê nada aqui (achado na auditoria
   // de 2026-09-08: antes o storeId ficava hardcoded, ignorando a restrição).
   const storeIds = filters.storeIds !== undefined ? siteAtacadoIds.filter((id) => filters.storeIds!.includes(id)) : siteAtacadoIds;
-  if (storeIds.length === 0) return { kpis: { receita: 0, pedidos: 0, unidades: 0, ticketMedio: 0 }, byDay: [], topProdutos: [] };
+  if (storeIds.length === 0) return { kpis: { receita: 0, pedidos: 0, unidades: 0, ticketMedio: 0 }, byMonth: [], topProdutos: [] };
 
   // Cliente já classificado como atacado (canalWhere("b2b")), não tabelaPreco direto — achado na
   // auditoria de 2026-09-02: essa aba tinha o mesmo bug da Guarderia (cliente que negocia preço
@@ -165,22 +165,27 @@ export async function getAtacadoVendas(filters: DashboardFilters) {
     AND: [b2bWhere],
   };
 
-  const [agg, byDayRaw, topGrupos] = await Promise.all([
+  const [agg, byMonthRaw, topGrupos] = await Promise.all([
     prisma.sale.aggregate({ where, _sum: { quantidade: true, valorTotalLiquido: true }, _count: { dapicVendaId: true } }),
-    prisma.$queryRaw<{ day: Date; units: bigint; revenue: number }[]>`
+    // Por mês, não por dia — e ignora filters.from/to de propósito (pedido do Rodrigo em
+    // 2026-09-25, mesmo padrão das outras seções mensais do Radar, ex: "Vendas mensais por
+    // família"): a evolução de receita não deve sumir/ficar ilegível quando o filtro de data é
+    // estreitado pra um período curto. Continua respeitando loja/grupo/marca/tabela de preço.
+    // Condição de B2B espelhada de canalWhere("b2b") em core.ts — cliente já atacado só entra
+    // como fallback quando ESSA venda não tem tabelaPreco própria (null), não sobrescreve uma
+    // venda já classificada como outra tabela.
+    prisma.$queryRaw<{ month: Date; units: bigint; revenue: number }[]>`
       SELECT
-        (("saleDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo')::date AS day,
+        date_trunc('month', ("saleDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo') AS month,
         SUM("quantidade") AS units,
         SUM("valorTotalLiquido") AS revenue
       FROM "Sale"
       WHERE "storeId" = ANY(${storeIds})
-        AND "saleDate" >= ${filters.from}
-        AND "saleDate" <= ${filters.to}
-        AND ("tabelaPreco" = 'Tabela atacado' OR "clienteNome" = ANY(${b2bClientes}))
+        AND ("tabelaPreco" = 'Tabela atacado' OR ("tabelaPreco" IS NULL AND "clienteNome" = ANY(${b2bClientes})))
         ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
         ${filters.marcas !== undefined ? Prisma.sql`AND "marca" = ANY(${filters.marcas})` : Prisma.empty}
         ${filters.tabelasPreco !== undefined ? Prisma.sql`AND ("tabelaPreco" = ANY(${filters.tabelasPreco}) OR "tabelaPreco" IS NULL)` : Prisma.empty}
-      GROUP BY day ORDER BY day ASC
+      GROUP BY month ORDER BY month ASC
     `,
     prisma.sale.groupBy({
       by: ["grupo", "produto"],
@@ -198,7 +203,7 @@ export async function getAtacadoVendas(filters: DashboardFilters) {
 
   return {
     kpis: { receita, pedidos, unidades, ticketMedio: pedidos > 0 ? receita / pedidos : 0 },
-    byDay: byDayRaw.map(r => ({ day: new Date(r.day).toISOString().slice(0, 10), units: Number(r.units), revenue: Number(r.revenue) })),
+    byMonth: byMonthRaw.map(r => ({ month: new Date(r.month).toISOString().slice(0, 7), units: Number(r.units), revenue: Number(r.revenue) })),
     topProdutos: topGrupos.map(r => ({ grupo: r.grupo, produto: r.produto, unidades: r._sum.quantidade ?? 0, receita: r._sum.valorTotalLiquido ?? 0 })),
   };
 }
