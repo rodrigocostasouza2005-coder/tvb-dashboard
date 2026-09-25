@@ -1,3 +1,9 @@
+// DESATUALIZADO desde a separação CD/ATACADO em 2026-09-23 — não resolve atacadoStoreId nem
+// tabelaPreco, grava tudo sempre na loja "site". A sync de produção de verdade é
+// src/lib/sync-runner.ts, chamada pelas rotas /api/sync*. Também ainda usa item.Id como
+// itemIndex (instável — ver stableItemIndexes em dapic.ts), então rodar isso hoje pode duplicar
+// venda. Mantido só como referência histórica — não rodar sem revisar a fundo antes.
+//
 // Sincronização real com a API do DAPIC — agora com um token por loja (CD/Atacado, Leblon,
 // Rio Sul, Barra), confirmado em 2026-08-07. Cada token só enxerga sua(s) própria(s) loja(s).
 // Uso: npx tsx scripts/sync-dapic.ts [diasDeVendas]

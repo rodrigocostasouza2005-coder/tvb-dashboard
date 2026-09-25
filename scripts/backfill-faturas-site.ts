@@ -1,3 +1,9 @@
+// SUPERADO desde 2026-09-23 por backfill-faturas.ts — este script não conhece a separação
+// CD/ATACADO (grava tudo em cdStore.id) e apaga TODO o Sale da loja CD antes de reinserir. Rodar
+// isso hoje reverteria a separação site/atacado e recriaria a mistura que foi corrigida depois.
+// Mantido só como referência histórica — NÃO RODAR sem revisar a fundo antes. Use
+// backfill-faturas.ts.
+//
 // Backfill do histórico de vendas do canal Site+Atacado via /faturas (nota fiscal) — endpoint
 // descoberto em 2026-08-10, confirmado pelo Rodrigo como a fonte de verdade de VENDA desse canal
 // (vendaspdv desse token só tem devolução de troca, não a venda real). Ver comentário em

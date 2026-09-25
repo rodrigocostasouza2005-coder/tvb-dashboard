@@ -5,7 +5,7 @@
 // Uso: npx tsx scripts/backfill-vendas.ts
 
 import { PrismaClient, type Prisma } from "@prisma/client";
-import { createDapicClients, parseDapicDateTime, type DapicClient } from "../src/lib/connectors/dapic";
+import { createDapicClients, parseDapicDateTime, stableItemIndexes, type DapicClient } from "../src/lib/connectors/dapic";
 import { fetchPriceCatalogCached, inferTabelaPreco } from "../src/lib/connectors/tabela-preco";
 import { sendTelegramMessage } from "../src/lib/telegram";
 
@@ -64,13 +64,19 @@ async function backfillLoja(client: DapicClient) {
     if (venda.Status !== "Fechada" || !venda.DataFechamento) continue;
     const saleDate = parseDapicDateTime(venda.DataFechamento);
 
-    venda.Produtos.forEach((item) => {
+    const itemIndexes = stableItemIndexes(
+      venda.Produtos,
+      (p) => `${p.IdGradeProduto ?? venda.Codigo}::${p.Quantidade}::${p.ValorLiquido.toFixed(2)}::${p.Tipo}`
+    );
+
+    venda.Produtos.forEach((item, pos) => {
+      const itemIndex = itemIndexes[pos];
       const cod = item.IdGradeProduto != null ? String(item.IdGradeProduto) : venda.Codigo;
       if (item.Tipo === "Venda") {
         saleData.push({
           storeId,
           dapicVendaId: venda.Id,
-          itemIndex: item.Id,
+          itemIndex,
           cod,
           produto: item.Produto,
           grupo: item.Grupo ?? "(sem grupo)",
@@ -90,7 +96,7 @@ async function backfillLoja(client: DapicClient) {
         returnData.push({
           storeId,
           dapicVendaId: venda.Id,
-          itemIndex: item.Id,
+          itemIndex,
           cod,
           produto: item.Produto,
           grupo: item.Grupo ?? "(sem grupo)",

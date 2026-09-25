@@ -3,7 +3,7 @@ import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import { randomUUID } from "crypto";
-import { createDapicClients, stripReferenciaPrefix, parseDapicDateTime, waitMsFromDapicError, sleep, type DapicClient } from "@/lib/connectors/dapic";
+import { createDapicClients, stripReferenciaPrefix, parseDapicDateTime, stableItemIndexes, waitMsFromDapicError, sleep, type DapicClient } from "@/lib/connectors/dapic";
 // (import type { Prisma } removido abaixo — já importado acima como valor+tipo)
 import { displayGroupFor, sellsProducts } from "@/lib/connectors/armazenadores";
 import { upsertStockSnapshots, type StockSnapshotRow } from "@/lib/connectors/upsert-stock";
@@ -121,16 +121,24 @@ async function syncVendas(
     if (venda.Status !== "Fechada" || !venda.DataFechamento) continue;
     const saleDate = parseDapicDateTime(venda.DataFechamento);
 
-    venda.Produtos.forEach((item) => {
+    // Índice determinístico pelo CONTEÚDO dos itens, não pelo item.Id da API (instável — ver
+    // stableItemIndexes em dapic.ts). Calculado sobre a venda inteira (Venda+Devolução+Brinde
+    // juntos): cada Tipo grava numa tabela diferente, então não colide entre si mesmo
+    // compartilhando o índice.
+    const itemIndexes = stableItemIndexes(
+      venda.Produtos,
+      (p) => `${p.IdGradeProduto ?? venda.Codigo}::${p.Quantidade}::${p.ValorLiquido.toFixed(2)}::${p.Tipo}`
+    );
+
+    venda.Produtos.forEach((item, pos) => {
+      const itemIndex = itemIndexes[pos];
       const cod = item.IdGradeProduto != null ? String(item.IdGradeProduto) : venda.Codigo;
       if (item.Tipo === "Venda" && contaVendaDoPdv) {
         const tabelaPreco = inferTabelaPreco(cod, item.ValorUnitario, priceCatalog);
         saleData.push({
           storeId: resolveStoreId(tabelaPreco),
           dapicVendaId: venda.Id,
-          // Id da linha (estável), não posição no array (ver comentário no tipo
-          // DapicVendaPdvProduto) — achado real de duplicata em 2026-08-12.
-          itemIndex: item.Id,
+          itemIndex,
           cod,
           produto: item.Produto,
           grupo: item.Grupo ?? "(sem grupo)",
@@ -153,7 +161,7 @@ async function syncVendas(
         returnData.push({
           storeId: resolveStoreId(tabelaPreco),
           dapicVendaId: venda.Id,
-          itemIndex: item.Id,
+          itemIndex,
           cod,
           produto: item.Produto,
           grupo: item.Grupo ?? "(sem grupo)",
@@ -170,7 +178,7 @@ async function syncVendas(
         giftData.push({
           storeId,
           dapicVendaId: venda.Id,
-          itemIndex: item.Id,
+          itemIndex,
           cod,
           produto: item.Produto,
           grupo: item.Grupo ?? "(sem grupo)",
@@ -291,13 +299,18 @@ async function syncFaturas(
     if (fatura.Status !== "Fechado" || !fatura.DataFechamento) continue;
     const saleDate = parseDapicDateTime(fatura.DataFechamento);
     const produtos = await client.fetchFaturaProdutos(fatura.Id);
+    const itemIndexes = stableItemIndexes(
+      produtos,
+      (p) => `${p.IdGradeProduto}::${p.Quantidade}::${p.Valores.ValorTotal.toFixed(2)}::${p.Tipo}`
+    );
 
-    produtos.forEach((item) => {
+    produtos.forEach((item, pos) => {
+      const itemIndex = itemIndexes[pos];
       if (item.Tipo === "Brinde") {
         giftData.push({
           storeId,
           dapicVendaId: fatura.Id,
-          itemIndex: item.Id,
+          itemIndex,
           cod: String(item.IdGradeProduto),
           produto: stripReferenciaPrefix(item.Produto),
           grupo: item.Grupo ?? "(sem grupo)",
@@ -317,7 +330,7 @@ async function syncFaturas(
       saleData.push({
         storeId: tabelaPreco === "Tabela atacado" && atacadoStoreId ? atacadoStoreId : storeId,
         dapicVendaId: fatura.Id,
-        itemIndex: item.Id,
+        itemIndex,
         cod: String(item.IdGradeProduto),
         produto: stripReferenciaPrefix(item.Produto),
         grupo: item.Grupo ?? "(sem grupo)",

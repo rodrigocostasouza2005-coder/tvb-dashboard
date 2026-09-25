@@ -4,7 +4,7 @@
 // storeId+dapicVendaId+itemIndex).
 // Uso: npx tsx scripts/backfill-brindes.ts
 import { PrismaClient, type Prisma } from "@prisma/client";
-import { createDapicClients, parseDapicDateTime, stripReferenciaPrefix, type DapicClient } from "../src/lib/connectors/dapic";
+import { createDapicClients, parseDapicDateTime, stripReferenciaPrefix, stableItemIndexes, type DapicClient } from "../src/lib/connectors/dapic";
 import { sellsProducts } from "../src/lib/connectors/armazenadores";
 import { sendTelegramMessage } from "../src/lib/telegram";
 
@@ -58,13 +58,17 @@ async function backfillViaVendasPdv(client: DapicClient, storeId: string) {
   for (const venda of vendas) {
     if (venda.Status !== "Fechada" || !venda.DataFechamento) continue;
     const giftDate = parseDapicDateTime(venda.DataFechamento);
-    venda.Produtos.forEach((item) => {
+    const itemIndexes = stableItemIndexes(
+      venda.Produtos,
+      (p) => `${p.IdGradeProduto ?? venda.Codigo}::${p.Quantidade}::${p.ValorLiquido.toFixed(2)}::${p.Tipo}`
+    );
+    venda.Produtos.forEach((item, pos) => {
       if (item.Tipo !== "Brinde") return;
       const cod = item.IdGradeProduto != null ? String(item.IdGradeProduto) : venda.Codigo;
       giftData.push({
         storeId,
         dapicVendaId: venda.Id,
-        itemIndex: item.Id,
+        itemIndex: itemIndexes[pos],
         cod,
         produto: item.Produto,
         grupo: item.Grupo ?? "(sem grupo)",
@@ -93,12 +97,16 @@ async function backfillViaFaturas(client: DapicClient, storeId: string) {
   for (const fatura of fechadas) {
     const produtos = await withRetry(() => client.fetchFaturaProdutos(fatura.Id));
     const giftDate = parseDapicDateTime(fatura.DataFechamento as string);
-    produtos.forEach((item) => {
+    const itemIndexes = stableItemIndexes(
+      produtos,
+      (p) => `${p.IdGradeProduto}::${p.Quantidade}::${p.Valores.ValorTotal.toFixed(2)}::${p.Tipo}`
+    );
+    produtos.forEach((item, pos) => {
       if (item.Tipo !== "Brinde") return;
       giftData.push({
         storeId,
         dapicVendaId: fatura.Id,
-        itemIndex: item.Id,
+        itemIndex: itemIndexes[pos],
         cod: String(item.IdGradeProduto),
         produto: stripReferenciaPrefix(item.Produto),
         grupo: item.Grupo ?? "(sem grupo)",

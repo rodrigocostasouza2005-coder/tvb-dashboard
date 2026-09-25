@@ -363,6 +363,32 @@ export function stripReferenciaPrefix(produto: string): string {
   return produto.replace(/^\S+\s-\s/, "");
 }
 
+// `item.Id` (em DapicVendaPdvProduto/DapicFaturaProduto) NÃO é estável ao longo do tempo — achado
+// real em 2026-09-25: o mesmo item da fatura 12 tinha Id=12 numa consulta e Id=109 numa consulta
+// posterior (a DAPIC renumera por baixo dos panos, provavelmente um contador global entre faturas
+// que cresce). Foi usado como itemIndex (chave de idempotência) desde 2026-08-12 achando que era
+// estável — só tinha sido testado numa janela curta — e causou ~R$800k em vendas duplicadas
+// (~2400 linhas) ao longo de reprocessamentos/backfills repetidos: cada rodada que via um Id novo
+// pro mesmo item de verdade não reconhecia como "já gravado" e inseria de novo.
+//
+// Substitui por um índice determinístico calculado do CONTEÚDO dos itens (não da identidade que a
+// API atribui) — ordena os itens de uma mesma venda/fatura por uma chave estável (cod+quantidade+
+// valor+tipo) e usa a posição no resultado como itemIndex. Reprocessar a mesma venda do zero
+// sempre gera os mesmos índices, então a idempotência (storeId, dapicVendaId, itemIndex) volta a
+// funcionar de verdade. Itens genuinamente idênticos (mesmo cod+quantidade+valor+tipo na mesma
+// venda) ficam com índices intercambiáveis entre si — inofensivo, já que o conteúdo é idêntico.
+export function stableItemIndexes<T>(items: T[], keyOf: (item: T) => string): number[] {
+  const withOrig = items.map((item, i) => ({ i, key: keyOf(item) }));
+  withOrig.sort((a, b) => {
+    if (a.key < b.key) return -1;
+    if (a.key > b.key) return 1;
+    return a.i - b.i;
+  });
+  const result = new Array<number>(items.length);
+  withOrig.forEach((w, idx) => { result[w.i] = idx; });
+  return result;
+}
+
 export type DapicArmazenador = {
   Id: number;
   Status: string;
@@ -420,11 +446,9 @@ export type DapicPedidoVendaDetalhe = {
 };
 
 export type DapicVendaPdvProduto = {
-  // Id da linha em si (não confundir com IdGradeProduto, o SKU) — único e estável por item,
-  // ao contrário da posição no array Produtos[], que a API não garante manter entre chamadas
-  // diferentes (achado em 2026-08-12: causou duplicata real quando o mesmo pedido foi buscado
-  // 2x em janelas sobrepostas e a ordem dos itens mudou). Usar isso como chave de idempotência
-  // em vez da posição.
+  // Id da linha em si (não confundir com IdGradeProduto, o SKU) — único DENTRO de uma mesma
+  // consulta, mas NÃO estável ao longo do tempo (achado em 2026-09-25: a DAPIC renumera por baixo
+  // dos panos). NÃO usar como chave de idempotência — ver stableItemIndexes() em dapic.ts.
   Id: number;
   IdGradeProduto?: number;
   Produto: string;

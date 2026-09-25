@@ -4,7 +4,7 @@
 // faturas cujo dapicVendaId já existe no banco (resume seguro sem rebuscar tudo de novo).
 // Uso: npx tsx scripts/backfill-faturas.ts
 import { PrismaClient, type Prisma } from "@prisma/client";
-import { createDapicClients, parseDapicDateTime, stripReferenciaPrefix } from "../src/lib/connectors/dapic";
+import { createDapicClients, parseDapicDateTime, stripReferenciaPrefix, stableItemIndexes } from "../src/lib/connectors/dapic";
 import { fetchPriceCatalogCached, inferTabelaPreco } from "../src/lib/connectors/tabela-preco";
 import { sendTelegramMessage } from "../src/lib/telegram";
 
@@ -61,19 +61,12 @@ async function main() {
   const fechadas = faturas.filter((f) => f.Status === "Fechado" && f.DataFechamento);
   console.log(`${faturas.length} faturas found, ${fechadas.length} fechadas`);
 
-  // "Já gravada" precisa olhar as 2 lojas — uma fatura antiga pode ter itens espalhados entre
-  // CD e ATACADO dependendo da tabelaPreco de cada item.
-  const storeIdsBusca = [siteStoreId, atacadoStoreId].filter((x): x is string => !!x);
-  const jaGravadas = await prisma.sale.findMany({
-    where: { storeId: { in: storeIdsBusca }, dapicVendaId: { in: fechadas.map((f) => f.Id) } },
-    select: { dapicVendaId: true, itemIndex: true },
-  });
-  // Chave por (fatura, item) — não só fatura: uma fatura pode ter alguns itens já gravados e
-  // outros faltando (achado real na auditoria de 2026-09-24, ver PLANO.md/conversa).
-  const jaGravadasSet = new Set(jaGravadas.map((s) => `${s.dapicVendaId}::${s.itemIndex}`));
-  const dapicVendaIdsComAlgumItem = new Set(jaGravadas.map((s) => s.dapicVendaId));
-  const pendentes = fechadas; // reprocessa todas as fechadas — o filtro por item acontece dentro de processOne agora
-  console.log(`${dapicVendaIdsComAlgumItem.size} faturas com pelo menos 1 item já gravado, ${jaGravadasSet.size} itens já gravados no total. Reprocessando todas as ${pendentes.length} faturas fechadas pra achar item faltando.`);
+  // Reprocessa todas as fechadas — com itemIndex determinístico (não item.Id, instável),
+  // skipDuplicates no flush() já cuida de não duplicar o que já está gravado; o que sobra de
+  // verdade é só o que faltava (fatura parcialmente gravada, achado real na auditoria de
+  // 2026-09-24).
+  const pendentes = fechadas;
+  console.log(`Reprocessando todas as ${pendentes.length} faturas fechadas pra achar item faltando.`);
 
   let saleData: Prisma.SaleCreateManyInput[] = [];
   let processed = 0;
@@ -102,18 +95,22 @@ async function main() {
     const produtos = await withRetry(() => cdAtacado.fetchFaturaProdutos(fatura.Id));
     processed++;
 
-    for (const item of produtos) {
-      if (item.Tipo !== "Venda") continue;
-      // Item a item, não fatura inteira — achado real na auditoria de 2026-09-24: comparando
-      // contra o Excel do Rodrigo, ~23% da receita de atacado sumia, espalhado (não um corte de
-      // data) — bate com fatura PARCIALMENTE gravada (alguns itens foram, outros não, provável
-      // falha transiente que nunca é re-tentada, já que a sync normal só olha "ontem").
-      if (jaGravadasSet.has(`${fatura.Id}::${item.Id}`)) continue;
+    // Índice determinístico pelo conteúdo do item (não item.Id — instável, ver stableItemIndexes
+    // em dapic.ts). Não precisa mais checar "já gravada" aqui: com índice reproduzível, o
+    // createMany({skipDuplicates:true}) no flush() já pula sozinho qualquer item que bater com o
+    // que já está no banco — o que sobra de verdade é só o que faltava (fatura parcialmente
+    // gravada, achado real na auditoria de 2026-09-24).
+    const itemIndexes = stableItemIndexes(
+      produtos,
+      (p) => `${p.IdGradeProduto}::${p.Quantidade}::${p.Valores.ValorTotal.toFixed(2)}::${p.Tipo}`
+    );
+    produtos.forEach((item, pos) => {
+      if (item.Tipo !== "Venda") return;
       const tabelaPreco = inferTabelaPreco(String(item.IdGradeProduto), item.Valores.ValorUnitario, priceCatalog);
       saleData.push({
         storeId: resolveStoreId(tabelaPreco),
         dapicVendaId: fatura.Id,
-        itemIndex: item.Id,
+        itemIndex: itemIndexes[pos],
         cod: String(item.IdGradeProduto),
         produto: stripReferenciaPrefix(item.Produto),
         grupo: item.Grupo ?? "(sem grupo)",
@@ -129,7 +126,7 @@ async function main() {
         tabelaPreco,
         saleDate,
       });
-    }
+    });
 
     if (processed % FLUSH_EVERY === 0) {
       console.log(`  ${processed}/${pendentes.length} faturas processadas...`);
