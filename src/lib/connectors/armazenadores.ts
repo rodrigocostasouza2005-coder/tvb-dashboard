@@ -1,8 +1,11 @@
 // Regras de mapeamento armazenador (DAPIC) -> Store (nosso banco).
 // Centralizado aqui porque script de sync e a rota /api/sync precisam da mesma lógica.
 
-// Armazenadores de "defeito", lixeira, bonificação e marketing/produção não são loja de venda.
-const NAO_VENDE = /defeito|lixeira|bonifica|marketing/i;
+// Armazenadores de "defeito", lixeira, bonificação, marketing/produção e extraviados (perda de
+// estoque, achado em 2026-09-25 — o DAPIC criou esse armazenador novo e a sync classificou como
+// loja de venda por engano, aparecendo na aba Pesquisa sem o Rodrigo ter liberado) não são loja
+// de venda.
+const NAO_VENDE = /defeito|lixeira|bonifica|marketing|extravia/i;
 
 // Agrupamento só visual (pro filtro mostrar uma opção só) — os dados continuam em Stores
 // separadas por baixo, porque CD e ATACADO têm quantidades diferentes pro mesmo produto
