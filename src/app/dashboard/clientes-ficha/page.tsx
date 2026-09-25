@@ -1,6 +1,6 @@
 import { getSessionUser } from "@/lib/auth";
 import { getStores, getMarcas, getTabelasPreco, getDistinctColecoes, getClienteFicha, getClienteTopMeses } from "@/lib/metrics";
-import { canSeeFinancials, getMarcaRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
+import { canSeeFinancials, getMarcaRestriction, getTabelaPrecoRestrictionSemAtacado } from "@/lib/permissions";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
@@ -47,7 +47,7 @@ export default async function ClientesFichaPage({
   // pedido do Rodrigo em 2026-09-03 (precisa ver o histórico do cliente na base toda).
   const allowedStores = undefined;
   const allowedMarcas = getMarcaRestriction(user);
-  const allowedTabelasPreco = getTabelaPrecoRestriction(user);
+  const allowedTabelasPreco = getTabelaPrecoRestrictionSemAtacado(user);
   const rawParams = await searchParams;
   const filtrosOpen = rawParams.filtros === "1";
   const filters = parseFilters(rawParams, {

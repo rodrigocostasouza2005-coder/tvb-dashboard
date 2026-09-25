@@ -1,6 +1,6 @@
 import { getSessionUser } from "@/lib/auth";
 import { getStockAging, getAllStores, getMarcas, getTabelasPreco, getDistinctColecoes } from "@/lib/metrics";
-import { getGrupoRestriction, getStoreRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
+import { getGrupoRestriction, getStoreRestriction, getTabelaPrecoRestrictionSemAtacado } from "@/lib/permissions";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
@@ -28,7 +28,7 @@ export default async function EnvelhecimentoPage({
 
   const grupoIn = await getGrupoRestriction(user.role);
   const allowedStores = getStoreRestriction(user);
-  const allowedTabelasPreco = getTabelaPrecoRestriction(user);
+  const allowedTabelasPreco = getTabelaPrecoRestrictionSemAtacado(user);
   const filters = {
     ...parseFilters(await searchParams, { allowedStoreIds: allowedStores, allowedTabelasPreco }),
     grupoIn,

@@ -831,43 +831,56 @@ export async function getMonthlySalesByStore(filters: DashboardFilters, canal: C
 // getMonthlySalesByStore acima, só trocando a dimensão (grupo em vez de loja) — pedido do Rodrigo
 // em 2026-09-23 ("Vendas mensais por família de produto"), reaproveitando a mesma lógica de
 // bucket de mês + unidades/receita já validada ali, sem duplicar a fórmula.
-export async function getMonthlySalesByGrupo(filters: DashboardFilters, canal: Canal = "todos") {
+// Núcleo compartilhado de getMonthlySalesByGrupo/getMonthlySalesByProduto — mesma agregação
+// mensal, só troca a coluna de agrupamento (nome de coluna fixo/hardcoded nas 2 chamadas, nunca
+// vindo de input do usuário, seguro pra Prisma.raw). `grupoScope`, quando informado, restringe a
+// UMA família específica (uso da visão "Produto", que já parte de uma família escolhida) — nesse
+// caso ignora filters.grupoIn (redundante, já que o próprio grupoScope é sempre um valor que a
+// tela só oferece dentre os permitidos pro usuário).
+async function getMonthlySalesByColuna(
+  filters: DashboardFilters,
+  coluna: "grupo" | "produto",
+  canal: Canal,
+  grupoScope?: string
+) {
   const b2bClientes = canal !== "todos" ? [...(await getB2BClienteNomes())] : [];
-  const rows = await prisma.$queryRaw<{ month: Date; grupo: string; units: bigint; revenue: number }[]>`
+  const colunaSql = Prisma.raw(`"${coluna}"`);
+  const rows = await prisma.$queryRaw<{ month: Date; key: string; units: bigint; revenue: number }[]>`
     SELECT
       DATE_TRUNC('month', ("saleDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo') AS month,
-      "grupo",
+      ${colunaSql} AS key,
       SUM("quantidade") AS units,
       SUM("valorTotalLiquido") AS revenue
     FROM "Sale"
     WHERE "saleDate" >= ${filters.from}
       AND "saleDate" <= ${filters.to}
+      ${grupoScope ? Prisma.sql`AND "grupo" = ${grupoScope}` : Prisma.empty}
       ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
       ${filters.marcas !== undefined ? Prisma.sql`AND "marca" = ANY(${filters.marcas})` : Prisma.empty}
       ${filters.tabelasPreco !== undefined ? Prisma.sql`AND ("tabelaPreco" = ANY(${filters.tabelasPreco}) OR "tabelaPreco" IS NULL)` : Prisma.empty}
-      ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
+      ${!grupoScope && filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
       ${canal === "b2b" ? Prisma.sql`AND ("tabelaPreco" = 'Tabela atacado' OR "clienteNome" = ANY(${b2bClientes}))` : Prisma.empty}
       ${canal === "b2c" ? Prisma.sql`AND "tabelaPreco" IS DISTINCT FROM 'Tabela atacado' AND ("clienteNome" IS NULL OR "clienteNome" <> ALL(${b2bClientes}))` : Prisma.empty}
-    GROUP BY month, "grupo"
+    GROUP BY month, ${colunaSql}
     ORDER BY month ASC
   `;
 
   const byMonth = new Map<string, Record<string, number>>();
   const byMonthUnits = new Map<string, Record<string, number>>();
-  const gruposSet = new Set<string>();
+  const keysSet = new Set<string>();
 
   for (const r of rows) {
     const monthStr = new Date(r.month).toISOString().slice(0, 7); // "YYYY-MM"
-    gruposSet.add(r.grupo);
+    keysSet.add(r.key);
     const monthRow = byMonth.get(monthStr) ?? {};
-    monthRow[r.grupo] = (monthRow[r.grupo] ?? 0) + Number(r.revenue);
+    monthRow[r.key] = (monthRow[r.key] ?? 0) + Number(r.revenue);
     byMonth.set(monthStr, monthRow);
     const monthRowUnits = byMonthUnits.get(monthStr) ?? {};
-    monthRowUnits[r.grupo] = (monthRowUnits[r.grupo] ?? 0) + Number(r.units);
+    monthRowUnits[r.key] = (monthRowUnits[r.key] ?? 0) + Number(r.units);
     byMonthUnits.set(monthStr, monthRowUnits);
   }
 
-  const series = [...gruposSet].sort();
+  const series = [...keysSet].sort();
   const months = [...byMonth.keys()].sort();
 
   const data = months.map((month) => ({
@@ -877,6 +890,42 @@ export async function getMonthlySalesByGrupo(filters: DashboardFilters, canal: C
   }));
 
   return { data, series };
+}
+
+export async function getMonthlySalesByGrupo(filters: DashboardFilters, canal: Canal = "todos") {
+  return getMonthlySalesByColuna(filters, "grupo", canal);
+}
+
+// Mesma visão mensal, mas dentro de UMA família só — pedido do Rodrigo em 2026-09-25 (hierarquia
+// Família → Produto na seção "Vendas mensais por família"). "Produto" aqui é o campo Sale.produto
+// (nome do modelo, ex: "Classic Blend Mar") — já a granularidade usada em todo o resto do Radar
+// pra produto (Pesquisa, Estoque × Vendas etc), não o SKU/cor/tamanho.
+export async function getMonthlySalesByProduto(filters: DashboardFilters, grupo: string, canal: Canal = "todos") {
+  return getMonthlySalesByColuna(filters, "produto", canal, grupo);
+}
+
+// Lista de produtos de uma família — pro dropdown "Produto" (dependente da família escolhida) na
+// seção "Vendas mensais por família". Sem filtro de data de propósito (mesmo espírito de
+// histórico completo já usado nessa seção) — só loja/marca/tabela de preço, pra não esconder um
+// produto que só vendeu fora da janela atual do filtro de data da página.
+export async function getDistinctProdutosPorGrupo(
+  filters: Pick<DashboardFilters, "storeIds" | "marcas" | "tabelasPreco">,
+  grupo: string
+): Promise<string[]> {
+  const rows = await prisma.sale.findMany({
+    where: {
+      grupo,
+      ...(filters.storeIds !== undefined ? { storeId: { in: filters.storeIds } } : {}),
+      ...(filters.marcas !== undefined ? { marca: { in: filters.marcas } } : {}),
+      ...(filters.tabelasPreco !== undefined
+        ? { OR: [{ tabelaPreco: { in: filters.tabelasPreco } }, { tabelaPreco: null }] }
+        : {}),
+    },
+    select: { produto: true },
+    distinct: ["produto"],
+    orderBy: { produto: "asc" },
+  });
+  return rows.map((r) => r.produto);
 }
 
 export type DailyProdutoPoint = {

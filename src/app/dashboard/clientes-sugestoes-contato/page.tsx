@@ -1,6 +1,6 @@
 import { getSessionUser, getVendedorAtualCookie } from "@/lib/auth";
 import { getStores, getMarcas, getTabelasPreco, getDistinctColecoes, getSugestoesDeContato, getFollowUpPosCompra, getVendedoresAtivos, type SugestaoContato, type FollowUpPosCompra } from "@/lib/metrics";
-import { getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
+import { getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestrictionSemAtacado } from "@/lib/permissions";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { getNumeroNotaFiscal } from "@/lib/connectors/nota-fiscal";
@@ -272,7 +272,7 @@ export default async function ClientesSugestoesContatoPage({
 
   const allowedStores = getStoreRestriction(user);
   const allowedMarcas = getMarcaRestriction(user);
-  const allowedTabelasPreco = getTabelaPrecoRestriction(user);
+  const allowedTabelasPreco = getTabelaPrecoRestrictionSemAtacado(user);
   const rawParams = await searchParams;
   const filtrosOpen = rawParams.filtros === "1";
   const filters = parseFilters(rawParams, {

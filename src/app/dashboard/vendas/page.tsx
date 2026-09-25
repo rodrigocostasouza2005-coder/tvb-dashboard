@@ -9,6 +9,8 @@ import {
   getSalesByDayPerStore,
   getSalesByDayPerColecao,
   getMonthlySalesByGrupo,
+  getMonthlySalesByProduto,
+  getDistinctProdutosPorGrupo,
   getReturnsByDimension,
   getReturnsByGrupoProduto,
   getReturnsByGrupoProdutoTamanho,
@@ -28,7 +30,7 @@ import {
   getGrupoRestriction,
   getStoreRestriction,
   getMarcaRestriction,
-  getTabelaPrecoRestriction,
+  getTabelaPrecoRestrictionSemAtacado,
 } from "@/lib/permissions";
 import { parseFilters, parseDimension, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
@@ -40,11 +42,9 @@ import { ReturnsTrendChart } from "../returns-trend-chart";
 import { TopBarChart } from "../top-bar-chart";
 import { StoreCompareChart } from "../store-compare-chart";
 import { BrazilMap } from "../brazil-map";
-import { IndicatorChart } from "../indicadores/indicator-chart";
 import { ExpandableSalesTable } from "./expandable-sales-table";
 import { ExpandableReturnsTable } from "./expandable-returns-table";
-
-const FAMILIA_COR = ["var(--cat-1)", "var(--cat-2)", "var(--cat-3)", "var(--cat-4)", "var(--cat-5)", "var(--cat-6)", "var(--cat-7)", "var(--cat-8)"];
+import { FamiliaProdutoSection } from "./familia-produto-section";
 
 function formatBRL(value: number) {
   return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -65,12 +65,10 @@ export default async function VendasPage({
   const grupoIn = await getGrupoRestriction(user.role);
   const allowedStores = getStoreRestriction(user);
   const allowedMarcas = getMarcaRestriction(user);
-  // "Tabela atacado" nunca aparece nem é selecionável aqui — pedido do Rodrigo em 2026-09-24:
-  // atacado fica 100% isolado na aba Atacado, sem misturar nos números/filtro da aba Vendas
-  // (mãe). Tirando do allowedTabelasPreco (a restrição concreta que parseFilters cruza com o
-  // que vier da URL) fecha os dois lados de uma vez: nem aparece como opção no dropdown (que
-  // usa esse mesmo array via getTabelasPreco) nem dá pra forçar via link/URL antigo.
-  const allowedTabelasPreco = getTabelaPrecoRestriction(user).filter((t) => t !== "Tabela atacado");
+  // "Tabela atacado" nunca aparece nem é selecionável aqui — pedido do Rodrigo em 2026-09-24/25:
+  // atacado fica 100% isolado na aba Atacado, sem misturar nos números/filtro do resto do Radar
+  // (ver getTabelaPrecoRestrictionSemAtacado em lib/permissions.ts).
+  const allowedTabelasPreco = getTabelaPrecoRestrictionSemAtacado(user);
   const filters = {
     ...parseFilters(rawParams, { allowedStoreIds: allowedStores, allowedMarcas, allowedTabelasPreco }),
     grupoIn,
@@ -153,46 +151,14 @@ export default async function VendasPage({
     return `/dashboard/clientes-ficha?${p.toString()}`;
   }
 
-  // Vendas mensais por Família (grupo): histórico completo (ver historicoFilters acima), só
-  // loja/marca/tabelaPreco/grupo seguem o filtro da página. Seleção de família tipo "Comparar"
-  // (top 5 por padrão) — mesmo padrão já usado em Curva de Vida da Coleção.
-  const visaoFamilia = rawParams.visaoFamilia === "qtd" ? "qtd" : "faturamento";
-  const totalPorFamilia = new Map(
-    porFamilia.series.map((f) => [
-      f,
-      porFamilia.data.reduce((s, d) => s + (visaoFamilia === "qtd" ? (d.units[f] ?? 0) : (d.revenue[f] ?? 0)), 0),
-    ])
-  );
-  const top5Familias = [...porFamilia.series].sort((a, b) => (totalPorFamilia.get(b) ?? 0) - (totalPorFamilia.get(a) ?? 0)).slice(0, 5);
-  const familiaParam = rawParams.familia;
-  const familiaSelecionadaParam = Array.isArray(familiaParam) ? familiaParam : typeof familiaParam === "string" ? [familiaParam] : undefined;
-  const familiasSelecionadas = (familiaSelecionadaParam ?? top5Familias).filter((f) => porFamilia.series.includes(f));
-
-  // Reconstrói a partir de TODOS os rawParams (não só dos campos de DashboardFilters) — mesma
-  // técnica do DimensionToggle (buildHref em dimension-toggle.tsx) — senão perderia o filtro de
-  // data (from/to) dessa página ao trocar a visão Faturamento/Quantidade.
-  function familiaQueryBase() {
-    const p = new URLSearchParams();
-    for (const [key, value] of Object.entries(rawParams)) {
-      if (key === "familia" || key === "visaoFamilia" || value === undefined) continue;
-      if (Array.isArray(value)) value.forEach((v) => p.append(key, v));
-      else p.append(key, value);
-    }
-    return p;
-  }
-
-  function visaoFamiliaHref(v: "faturamento" | "qtd") {
-    const p = familiaQueryBase();
-    for (const f of familiasSelecionadas) p.append("familia", f);
-    p.set("visaoFamilia", v);
-    return `/dashboard/vendas?${p.toString()}#familia`;
-  }
-
-  const chartDataFamilia = porFamilia.data.map((d) => {
-    const point: Record<string, string | number> = { month: d.month };
-    for (const f of familiasSelecionadas) point[f] = (visaoFamilia === "qtd" ? d.units[f] : d.revenue[f]) ?? 0;
-    return point;
-  });
+  // Querystring de loja/marca/tabelaPreco pra repassar pro fetch client-side do drilldown de
+  // produto (/api/vendas/produtos-familia) — mesmos filtros da página, sem os demais params
+  // (dimension, filtros=1 etc, que não fazem sentido nessa rota).
+  const filtrosQueryParams = new URLSearchParams();
+  for (const id of filters.storeIds ?? []) filtrosQueryParams.append("store", id);
+  for (const m of filters.marcas ?? []) filtrosQueryParams.append("marca", m);
+  for (const t of filters.tabelasPreco ?? []) filtrosQueryParams.append("tabelaPreco", t);
+  const filtrosQuery = filtrosQueryParams.toString();
 
   return (
     <div>
@@ -284,95 +250,7 @@ export default async function VendasPage({
         </div>
       </section>
 
-      <section id="familia" className="mb-6">
-        <h2 className="mb-1 text-sm font-medium text-[var(--text-secondary)]">Vendas mensais por família</h2>
-        <p className="mb-3 text-xs text-[var(--text-muted)]">
-          Evolução mês a mês por família de produto (histórico completo — não segue o filtro de data acima, só loja/marca/tabela de preço) — pra
-          identificar crescimento, queda ou concentração de vendas numa família.
-        </p>
-
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3">
-          <form method="GET" action="/dashboard/vendas#familia" className="flex flex-wrap items-center gap-2">
-            {[...familiaQueryBase().entries()]
-              .filter(([key]) => key !== "familia")
-              .map(([key, value], i) => (
-                <input key={`${key}-${i}`} type="hidden" name={key} value={value} />
-              ))}
-            {porFamilia.series.map((f) => (
-              <label key={f} className="cursor-pointer">
-                <input type="checkbox" name="familia" value={f} defaultChecked={familiasSelecionadas.includes(f)} className="peer sr-only" />
-                <span className="inline-block rounded-full border border-[var(--border)] bg-[var(--page-plane)] px-3 py-1 text-xs text-[var(--text-secondary)] transition-colors peer-checked:border-[var(--series-1)] peer-checked:bg-[var(--series-1)] peer-checked:text-white">
-                  {f}
-                </span>
-              </label>
-            ))}
-            <button type="submit" className="rounded-md bg-[var(--series-1)] px-3 py-1.5 text-xs font-medium text-white">
-              Comparar
-            </button>
-          </form>
-
-          <div className="flex overflow-hidden rounded-md border border-[var(--border)] text-xs">
-            <a
-              href={visaoFamiliaHref("faturamento")}
-              className={`px-3 py-1.5 ${visaoFamilia === "faturamento" ? "bg-[var(--series-1)] text-white" : "text-[var(--text-secondary)] hover:bg-[var(--page-plane)]"}`}
-            >
-              Faturamento
-            </a>
-            <a
-              href={visaoFamiliaHref("qtd")}
-              className={`px-3 py-1.5 ${visaoFamilia === "qtd" ? "bg-[var(--series-1)] text-white" : "text-[var(--text-secondary)] hover:bg-[var(--page-plane)]"}`}
-            >
-              Quantidade
-            </a>
-          </div>
-        </div>
-
-        {familiasSelecionadas.length > 0 && chartDataFamilia.length > 0 ? (
-          <>
-            <div className="mb-4 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-              <IndicatorChart
-                data={chartDataFamilia}
-                format={visaoFamilia === "qtd" ? "number" : "currency"}
-                series={familiasSelecionadas.map((f, i) => ({ key: f, name: f, color: FAMILIA_COR[i % FAMILIA_COR.length] }))}
-              />
-            </div>
-
-            <div className="overflow-x-auto rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-              <table className="w-full min-w-[600px] text-sm">
-                <thead>
-                  <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
-                    <th className="px-4 py-2 font-medium">Família</th>
-                    {porFamilia.data.map((d) => (
-                      <th key={d.month} className="px-4 py-2 text-right font-medium">{d.month}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {familiasSelecionadas.map((f) => (
-                    <tr key={f} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
-                      <td className="px-4 py-2 font-medium text-[var(--text-primary)]">{f}</td>
-                      {porFamilia.data.map((d) => {
-                        const v = (visaoFamilia === "qtd" ? d.units[f] : d.revenue[f]) ?? 0;
-                        return (
-                          <td key={d.month} className="px-4 py-2 text-right tabular-nums text-[var(--text-secondary)]">
-                            {v > 0
-                              ? visaoFamilia === "qtd"
-                                ? v.toLocaleString("pt-BR")
-                                : v.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 })
-                              : "—"}
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </>
-        ) : (
-          <p className="text-sm text-[var(--text-muted)]">Sem família com vendas suficientes no filtro selecionado.</p>
-        )}
-      </section>
+      <FamiliaProdutoSection porFamilia={porFamilia} filtrosQuery={filtrosQuery} />
 
       {showFinancials && topClientes.length > 0 && (
         <section className="mb-6 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">

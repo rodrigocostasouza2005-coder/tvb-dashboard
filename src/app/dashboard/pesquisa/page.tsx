@@ -1,6 +1,6 @@
 import { getSessionUser } from "@/lib/auth";
 import { searchStockVsSalesComTamanhos, getTopClientes, getDailySalesByProduto, getStores, getMarcas, getTabelasPreco, getDistinctColecoes } from "@/lib/metrics";
-import { canSeeFinancials, getGrupoRestriction, getMarcaRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
+import { canSeeFinancials, getGrupoRestriction, getMarcaRestriction, getTabelaPrecoRestrictionSemAtacado } from "@/lib/permissions";
 import { parseFilters, brasiliaDayStart, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
@@ -37,7 +37,7 @@ export default async function PesquisaPage({
   // Rodrigo em 2026-09-03 (busca de produto/cliente precisa ver a base toda).
   const allowedStores = undefined;
   const allowedMarcas = getMarcaRestriction(user);
-  const allowedTabelasPreco = getTabelaPrecoRestriction(user);
+  const allowedTabelasPreco = getTabelaPrecoRestrictionSemAtacado(user);
   const filters = {
     ...parseFilters(rawParams, { allowedStoreIds: allowedStores, allowedMarcas, allowedTabelasPreco }),
     grupoIn,

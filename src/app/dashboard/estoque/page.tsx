@@ -9,7 +9,7 @@ import {
   getMarcas,
   getTabelasPreco,
 } from "@/lib/metrics";
-import { getGrupoRestriction, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
+import { getGrupoRestriction, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestrictionSemAtacado } from "@/lib/permissions";
 import { parseFilters, toArray, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
@@ -44,7 +44,7 @@ export default async function EstoquePage({
   const tamanhoSelecionado = toArray(rawParams.tamanho);
   const allowedStores = getStoreRestriction(user);
   const allowedMarcas = getMarcaRestriction(user);
-  const allowedTabelasPreco = getTabelaPrecoRestriction(user);
+  const allowedTabelasPreco = getTabelaPrecoRestrictionSemAtacado(user);
   const filters = {
     ...parseFilters(rawParams, { allowedStoreIds: allowedStores, allowedMarcas, allowedTabelasPreco }),
     grupoIn,

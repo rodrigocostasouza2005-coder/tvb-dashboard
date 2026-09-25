@@ -1,6 +1,6 @@
 import { getSessionUser } from "@/lib/auth";
 import { getStockVsSales, getStores, getMarcas, getTabelasPreco, getDistinctColecoes, getDistinctGrupos } from "@/lib/metrics";
-import { getGrupoRestriction, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
+import { getGrupoRestriction, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestrictionSemAtacado } from "@/lib/permissions";
 import { parseFilters, parseDimension, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
@@ -25,7 +25,7 @@ export default async function MarketingPage({
   const grupoRestriction = await getGrupoRestriction(user.role);
   const allowedStores = getStoreRestriction(user);
   const allowedMarcas = getMarcaRestriction(user);
-  const allowedTabelasPreco = getTabelaPrecoRestriction(user);
+  const allowedTabelasPreco = getTabelaPrecoRestrictionSemAtacado(user);
 
   // Dropdown "Grupo de produto" (2026-09-15) — escolher um grupo aqui estreita o ranking pra só
   // os produtos/tamanhos daquele grupo. Cruza com a restrição de grupo do usuário do mesmo jeito

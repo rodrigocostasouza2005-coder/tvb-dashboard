@@ -1,6 +1,6 @@
 import { getSessionUser } from "@/lib/auth";
 import { getVendasHojeComComparacao, getMaisVendidosSemana, getTopParaIncentivar } from "@/lib/metrics";
-import { canSeeFinancials, getGrupoRestriction, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
+import { canSeeFinancials, getGrupoRestriction, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestrictionSemAtacado } from "@/lib/permissions";
 import { requireTabAccess } from "@/lib/tabs";
 import { StatTile } from "../stat-tile";
 
@@ -22,7 +22,7 @@ export default async function ResumoDiaPage() {
   const grupoIn = await getGrupoRestriction(user.role);
   const allowedStores = getStoreRestriction(user);
   const allowedMarcas = getMarcaRestriction(user);
-  const allowedTabelasPreco = getTabelaPrecoRestriction(user);
+  const allowedTabelasPreco = getTabelaPrecoRestrictionSemAtacado(user);
   const filters = { storeIds: allowedStores, marcas: allowedMarcas, tabelasPreco: allowedTabelasPreco, grupoIn };
   const showFinancials = canSeeFinancials(user);
 

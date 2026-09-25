@@ -1,6 +1,6 @@
 import { getSessionUser } from "@/lib/auth";
 import { getVendedorRanking, getStores, getMarcas, getTabelasPreco, getDistinctColecoes } from "@/lib/metrics";
-import { canSeeFinancials, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction } from "@/lib/permissions";
+import { canSeeFinancials, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestrictionSemAtacado } from "@/lib/permissions";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
@@ -23,7 +23,7 @@ export default async function VendedoresPage({
 
   const allowedStores = getStoreRestriction(user);
   const allowedMarcas = getMarcaRestriction(user);
-  const allowedTabelasPreco = getTabelaPrecoRestriction(user);
+  const allowedTabelasPreco = getTabelaPrecoRestrictionSemAtacado(user);
   const filters = parseFilters(await searchParams, {
     allowedStoreIds: allowedStores,
     allowedMarcas,

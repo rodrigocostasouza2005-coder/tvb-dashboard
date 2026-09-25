@@ -49,3 +49,12 @@ export function getMarcaRestriction(user: { allowedMarcas: string[] }): string[]
 export function getTabelaPrecoRestriction(user: { allowedTabelasPreco: string[] }): string[] {
   return user.allowedTabelasPreco;
 }
+
+// Mesma restrição, mas sem "Tabela atacado" — pedido do Rodrigo em 2026-09-25: atacado só existe
+// na área Atacado (atacado, atacado-cidades, atacado-clientes — essas continuam usando
+// getTabelaPrecoRestriction puro), em nenhum outro lugar do Radar. Tirando do allowedTabelasPreco
+// (a restrição concreta que parseFilters cruza com o que vier da URL) fecha os dois lados de uma
+// vez: nem aparece como opção nos dropdowns de filtro nem dá pra forçar via link/URL antigo.
+export function getTabelaPrecoRestrictionSemAtacado(user: { allowedTabelasPreco: string[] }): string[] {
+  return user.allowedTabelasPreco.filter((t) => t !== "Tabela atacado");
+}

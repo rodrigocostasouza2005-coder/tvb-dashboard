@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import type { DashboardFilters } from "@/lib/metrics";
 import { toDateInputValue } from "@/lib/filters";
+import { GetForm } from "./get-form";
 
 type Store = { id: string; name: string };
 
@@ -88,9 +89,8 @@ export function FilterBar({
   const selectedColecoes = new Set(filters.colecaoIn ?? []);
 
   return (
-    <form
+    <GetForm
       action={action}
-      method="GET"
       className="mb-6 flex flex-wrap items-start gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-3 text-sm"
     >
       {/* Se o Aplicar veio daqui, o painel de filtros estava aberto — mantém aberto na
@@ -169,6 +169,6 @@ export function FilterBar({
       >
         Aplicar
       </button>
-    </form>
+    </GetForm>
   );
 }

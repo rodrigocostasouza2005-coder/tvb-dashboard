@@ -18,7 +18,7 @@ import {
   getGrupoRestriction,
   getStoreRestriction,
   getMarcaRestriction,
-  getTabelaPrecoRestriction,
+  getTabelaPrecoRestrictionSemAtacado,
 } from "@/lib/permissions";
 import { parseFilters, parseDimension, type RawSearchParams } from "@/lib/filters";
 import { FilterBar } from "./filter-bar";
@@ -63,7 +63,7 @@ export default async function OverviewPage({
   const grupoIn = await getGrupoRestriction(user.role);
   const allowedStores = getStoreRestriction(user);
   const allowedMarcas = getMarcaRestriction(user);
-  const allowedTabelasPreco = getTabelaPrecoRestriction(user);
+  const allowedTabelasPreco = getTabelaPrecoRestrictionSemAtacado(user);
   const rawParams = await searchParams;
   const filtrosOpen = rawParams.filtros === "1";
   const filters = {
