@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { IndicatorChart } from "../indicadores/indicator-chart";
 
 const COR = ["var(--cat-1)", "var(--cat-2)", "var(--cat-3)", "var(--cat-4)", "var(--cat-5)", "var(--cat-6)", "var(--cat-7)", "var(--cat-8)"];
@@ -53,15 +53,9 @@ export function FamiliaProdutoSection({
 
   const porProdutoAtual = familiaEscolhida ? produtosCache.get(familiaEscolhida) : undefined;
 
-  async function escolherFamiliaParaProduto(familia: string) {
-    setFamiliaEscolhida(familia);
-    setErro(null);
-    if (produtosCache.has(familia)) {
-      const cached = produtosCache.get(familia)!;
-      setProdutosSelecionados(top5PorValor(cached, visao));
-      return;
-    }
+  async function buscarProdutosFamilia(familia: string) {
     setCarregando(true);
+    setErro(null);
     try {
       const res = await fetch(`/api/vendas/produtos-familia?familia=${encodeURIComponent(familia)}&${filtrosQuery}`);
       if (!res.ok) throw new Error("Não consegui carregar os produtos dessa família.");
@@ -75,6 +69,31 @@ export function FamiliaProdutoSection({
       setCarregando(false);
     }
   }
+
+  async function escolherFamiliaParaProduto(familia: string) {
+    setFamiliaEscolhida(familia);
+    setErro(null);
+    const cached = produtosCache.get(familia);
+    if (cached) {
+      setProdutosSelecionados(top5PorValor(cached, visao));
+      return;
+    }
+    await buscarProdutosFamilia(familia);
+  }
+
+  // GetForm navega os filtros de loja/marca/tabela de preço client-side (sem remount da página —
+  // ver get-form.tsx), então esse componente sobrevive à troca de filtro com seu estado intacto.
+  // Sem isso, produtosCache (indexado só pela família) continuaria servindo dado buscado sob o
+  // filtro ANTERIOR depois do usuário trocar de loja/marca/tabela de preço, mostrando número
+  // errado sem nenhum aviso. Invalida o cache e rebusca a família em vista quando o filtro muda.
+  const filtrosQueryAnterior = useRef(filtrosQuery);
+  useEffect(() => {
+    if (filtrosQueryAnterior.current === filtrosQuery) return;
+    filtrosQueryAnterior.current = filtrosQuery;
+    setProdutosCache(new Map());
+    if (familiaEscolhida) void buscarProdutosFamilia(familiaEscolhida);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtrosQuery]);
 
   function trocarAnalise(v: "familia" | "produto") {
     setAnalise(v);
