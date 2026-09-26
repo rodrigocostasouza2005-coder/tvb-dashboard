@@ -1,7 +1,13 @@
 import { prisma } from "@/lib/prisma";
 import { getVarejoPriceMap, resolveSellThrough } from "./estoque";
-import type { DashboardFilters } from "./core";
+import { stockWhere, type DashboardFilters } from "./core";
 import { getDescontoRecomendado } from "@/lib/promotion-rules";
+
+// "(sem grupo)" é sempre matéria-prima/insumo (etiqueta, zíper, tecido em rolo), nunca produto de
+// verdade à venda — Rodrigo já tinha pedido pra tirar do dashboard inteiro (ver stockWhere em
+// core.ts). Bug real achado em 2026-09-26: essa função usava where solto em vez de stockWhere,
+// então matéria-prima vazava pra dentro da análise de promoção junto com produto de venda.
+const SEM_MATERIA_PRIMA = { grupo: { not: "(sem grupo)" } } as const;
 
 export { promotionRules, getDescontoRecomendado, type DescontoRecomendado } from "@/lib/promotion-rules";
 
@@ -35,7 +41,7 @@ export async function getPromotionRows(filters: Pick<DashboardFilters, "storeIds
 
   const [stockRows, varejoPrices] = await Promise.all([
     prisma.stockSnapshot.findMany({
-      where: { ...grupoWhere, ...(filters.storeIds !== undefined ? { storeId: { in: filters.storeIds } } : {}) },
+      where: stockWhere(filters),
       select: { grupo: true, produto: true, colecao: true, cod: true, quantidadeDisponivel: true },
     }),
     getVarejoPriceMap(),
@@ -45,11 +51,11 @@ export async function getPromotionRows(filters: Pick<DashboardFilters, "storeIds
   // getStockVsSales.
   const stockEmpresaRows = filters.storeIds === undefined
     ? stockRows
-    : await prisma.stockSnapshot.findMany({ where: grupoWhere, select: { grupo: true, produto: true, colecao: true, quantidadeDisponivel: true } });
+    : await prisma.stockSnapshot.findMany({ where: stockWhere({ grupoIn: filters.grupoIn }), select: { grupo: true, produto: true, colecao: true, quantidadeDisponivel: true } });
 
   const [vendasEmpresa, producaoEmpresa] = await Promise.all([
-    prisma.sale.groupBy({ by: ["grupo", "produto", "colecao"], where: { ...grupoWhere, colecao: { not: null } }, _sum: { quantidade: true } }),
-    prisma.productionOrder.groupBy({ by: ["grupo", "produto", "colecao"], where: { ...grupoWhere, colecao: { not: null } }, _sum: { quantidade: true } }),
+    prisma.sale.groupBy({ by: ["grupo", "produto", "colecao"], where: { ...grupoWhere, ...SEM_MATERIA_PRIMA, colecao: { not: null } }, _sum: { quantidade: true } }),
+    prisma.productionOrder.groupBy({ by: ["grupo", "produto", "colecao"], where: { ...grupoWhere, ...SEM_MATERIA_PRIMA, colecao: { not: null } }, _sum: { quantidade: true } }),
   ]);
 
   const triplasPorChave = new Map<string, { grupo: string; produto: string; colecao: string }>();

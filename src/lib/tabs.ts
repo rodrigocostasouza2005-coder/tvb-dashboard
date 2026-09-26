@@ -42,7 +42,7 @@ export type TabKey =
   | "analytics-site"
   | "analises-promocao";
 
-export type TabGroup = "visao-geral" | "resumo-dia" | "vendas" | "estoque" | "atacado" | "clientes" | "marketing" | "pesquisa" | "lamina" | "performance" | "promocao";
+export type TabGroup = "visao-geral" | "resumo-dia" | "vendas" | "estoque" | "atacado" | "clientes" | "marketing" | "pesquisa" | "lamina" | "performance";
 
 export type TabEntry =
   | { key: TabKey; label: string; href: string; group: TabGroup; todo?: false }
@@ -65,6 +65,7 @@ export const TABS: TabEntry[] = [
   { key: "curva-abc", label: "Curva ABC", href: "/dashboard/curva-abc", group: "vendas" },
   { key: "indicadores", label: "Indicadores no Tempo", href: "/dashboard/indicadores", group: "vendas" },
   { key: "analise-vendas", label: "Análise", href: "/dashboard/analise-vendas", group: "vendas" },
+  { key: "analises-promocao", label: "Análises de Promoção", href: "/dashboard/analises-promocao", group: "vendas" },
   { label: "Comparativo vs. meta/ano ant.", group: "vendas", todo: true },
 
   // estoque
@@ -103,9 +104,6 @@ export const TABS: TabEntry[] = [
   // pesquisa (direct link, like visao-geral)
   { key: "pesquisa", label: "Pesquisa", href: "/dashboard/pesquisa", group: "pesquisa" },
 
-  // análises de promoção (direct link, like visao-geral) — simulador de desconto/receita potencial
-  { key: "analises-promocao", label: "Análises de Promoção", href: "/dashboard/analises-promocao", group: "promocao" },
-
   // performance — registro (Performance) e análise (Análise de Performance) de conteúdo/influenciador
   { key: "performance", label: "Performance", href: "/dashboard/performance", group: "performance" },
   { key: "analise-performance", label: "Análise de Performance", href: "/dashboard/analise-performance", group: "performance" },
@@ -125,7 +123,6 @@ export const GROUPS: { key: TabGroup; label: string; single?: boolean }[] = [
   { key: "marketing", label: "Marketing" },
   { key: "pesquisa", label: "Pesquisa", single: true },
   { key: "performance", label: "Performance" },
-  { key: "promocao", label: "Análises de Promoção", single: true },
 ];
 
 const BLOCKED_BY_DEFAULT_FOR_VENDEDOR: TabKey[] = [
