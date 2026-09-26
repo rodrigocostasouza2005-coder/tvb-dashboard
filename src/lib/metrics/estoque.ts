@@ -223,7 +223,7 @@ async function getProductionByDimension(
 // nenhum e outros têm só o último lote de reposição (produzido < vendido histórico nesses casos,
 // o que daria sell-through impossível tipo 800%). Nesses casos cai pro cálculo antigo. Pedido do
 // Rodrigo em 2026-08-11 depois de eu mostrar os números reais de cobertura/inconsistência.
-function resolveSellThrough(unitsSoldAllTime: number, currentStock: number, produzido: number) {
+export function resolveSellThrough(unitsSoldAllTime: number, currentStock: number, produzido: number) {
   if (produzido > 0 && produzido >= unitsSoldAllTime) {
     return Math.min((unitsSoldAllTime / produzido) * 100, 100);
   }
@@ -666,7 +666,7 @@ export async function getStockAging(
 let varejoPriceMapCache: { at: number; map: Map<string, number> } | null = null;
 const VAREJO_PRICE_CACHE_MS = 5 * 60 * 1000;
 
-async function getVarejoPriceMap(): Promise<Map<string, number>> {
+export async function getVarejoPriceMap(): Promise<Map<string, number>> {
   if (varejoPriceMapCache && Date.now() - varejoPriceMapCache.at < VAREJO_PRICE_CACHE_MS) {
     return varejoPriceMapCache.map;
   }

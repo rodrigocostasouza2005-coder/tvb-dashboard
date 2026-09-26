@@ -39,9 +39,10 @@ export type TabKey =
   | "mapa-compras"
   | "performance"
   | "analise-performance"
-  | "analytics-site";
+  | "analytics-site"
+  | "analises-promocao";
 
-export type TabGroup = "visao-geral" | "resumo-dia" | "vendas" | "estoque" | "atacado" | "clientes" | "marketing" | "pesquisa" | "lamina" | "performance";
+export type TabGroup = "visao-geral" | "resumo-dia" | "vendas" | "estoque" | "atacado" | "clientes" | "marketing" | "pesquisa" | "lamina" | "performance" | "promocao";
 
 export type TabEntry =
   | { key: TabKey; label: string; href: string; group: TabGroup; todo?: false }
@@ -102,6 +103,9 @@ export const TABS: TabEntry[] = [
   // pesquisa (direct link, like visao-geral)
   { key: "pesquisa", label: "Pesquisa", href: "/dashboard/pesquisa", group: "pesquisa" },
 
+  // análises de promoção (direct link, like visao-geral) — simulador de desconto/receita potencial
+  { key: "analises-promocao", label: "Análises de Promoção", href: "/dashboard/analises-promocao", group: "promocao" },
+
   // performance — registro (Performance) e análise (Análise de Performance) de conteúdo/influenciador
   { key: "performance", label: "Performance", href: "/dashboard/performance", group: "performance" },
   { key: "analise-performance", label: "Análise de Performance", href: "/dashboard/analise-performance", group: "performance" },
@@ -121,6 +125,7 @@ export const GROUPS: { key: TabGroup; label: string; single?: boolean }[] = [
   { key: "marketing", label: "Marketing" },
   { key: "pesquisa", label: "Pesquisa", single: true },
   { key: "performance", label: "Performance" },
+  { key: "promocao", label: "Análises de Promoção", single: true },
 ];
 
 const BLOCKED_BY_DEFAULT_FOR_VENDEDOR: TabKey[] = [
