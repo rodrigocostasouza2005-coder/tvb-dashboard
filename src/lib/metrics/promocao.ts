@@ -1,54 +1,9 @@
 import { prisma } from "@/lib/prisma";
 import { getVarejoPriceMap, resolveSellThrough } from "./estoque";
 import type { DashboardFilters } from "./core";
+import { getDescontoRecomendado } from "@/lib/promotion-rules";
 
-// Regra de desconto extraída da planilha real do Rodrigo (ANALISE_BLACK_FRIDAY - 2026.xlsx,
-// abas "sellthrough"/"analise"/"valor possível", auditada em 2026-09-25). A planilha calcula,
-// por PRODUTO: desconto = BESTSELLER ? 10% fixo : lookup numa matriz Coleção × faixa de
-// sell-through (INDEX/MATCH com MATCH tipo -1, que acha a MENOR faixa que ainda é >= ao
-// sell-through real — equivale a "arredonda pra cima" pra faixa mais próxima). Sem entrada na
-// matriz (coleção não mapeada) cai no fallback de 10% (IFERROR da planilha).
-//
-// Isso é curadoria manual do Rodrigo por campanha/coleção — centralizado aqui (promotionRules)
-// pra não espalhar número mágico pelos componentes, e fácil de editar quando uma campanha nova
-// tiver coleções diferentes. Faixas em ORDEM DECRESCENTE (100/75/50/25), mesma ordem da planilha
-// original.
-export const promotionRules = {
-  faixasSellThrough: [100, 75, 50, 25] as const,
-  descontoBestseller: 0.10,
-  descontoPadrao: 0.10, // fallback quando a coleção não tem linha na matriz (= IFERROR da planilha)
-  matrizPorColecao: {
-    "V26.1": [0.30, 0.30, 0.35, 0.40],
-    "Drop1 Inverno.26": [0.20, 0.20, 0.25, 0.30],
-    "Drop 2 Inverno 26": [0.15, 0.15, 0.20, 0.20],
-  } as Record<string, number[]>,
-};
-
-export type DescontoRecomendado = { desconto: number; motivo: string };
-
-export function getDescontoRecomendado(colecao: string, sellThroughRate: number | null): DescontoRecomendado {
-  if (colecao === "BESTSELLER") {
-    return { desconto: promotionRules.descontoBestseller, motivo: "Bestseller — desconto simbólico fixo, não depende do sell-through" };
-  }
-  const linha = promotionRules.matrizPorColecao[colecao];
-  if (!linha || sellThroughRate === null) {
-    return { desconto: promotionRules.descontoPadrao, motivo: "Coleção sem regra de desconto definida — usando padrão" };
-  }
-  const faixas = promotionRules.faixasSellThrough;
-  let idx = faixas.length - 1;
-  for (let i = 0; i < faixas.length; i++) {
-    if (faixas[i] >= sellThroughRate) { idx = i; break; }
-  }
-  const desconto = linha[idx];
-  const faixaLabel = idx === 0 ? "acima de 75%" : idx === faixas.length - 1 ? `até ${faixas[idx]}%` : `${faixas[idx]}%–${faixas[idx - 1]}%`;
-  const motivo =
-    sellThroughRate <= 25
-      ? `Sell-through baixo (faixa ${faixaLabel}) — estoque parado, desconto maior pra girar`
-      : sellThroughRate >= 75
-        ? `Sell-through alto (faixa ${faixaLabel}) — já vende bem, desconto mínimo`
-        : `Sell-through moderado (faixa ${faixaLabel})`;
-  return { desconto, motivo };
-}
+export { promotionRules, getDescontoRecomendado, type DescontoRecomendado } from "@/lib/promotion-rules";
 
 export type PromotionRow = {
   grupo: string;

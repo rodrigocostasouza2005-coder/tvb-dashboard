@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { StatTile } from "../stat-tile";
 import type { PromotionRow } from "@/lib/metrics";
+import { promotionRules, getDescontoRecomendado } from "@/lib/promotion-rules";
 
 type DescontoModo = "recomendado" | "sem" | "+5" | "+10" | "+15" | "personalizado";
 
@@ -16,38 +17,18 @@ function formatNum(v: number) {
   return v.toLocaleString("pt-BR", { maximumFractionDigits: 0 });
 }
 
-// Aplica o modo de desconto escolhido no simulador em cima do desconto RECOMENDADO de cada linha
-// (a regra real, vinda da planilha auditada) — "+5/+10/+15" soma pontos percentuais ao
-// recomendado, "sem" zera, "personalizado" ignora o recomendado e usa o valor digitado.
-function descontoEfetivo(row: PromotionRow, modo: DescontoModo, personalizado: number): number {
-  switch (modo) {
-    case "sem": return 0;
-    case "+5": return Math.min(row.desconto + 0.05, 0.95);
-    case "+10": return Math.min(row.desconto + 0.10, 0.95);
-    case "+15": return Math.min(row.desconto + 0.15, 0.95);
-    case "personalizado": return Math.min(Math.max(personalizado / 100, 0), 0.95);
-    default: return row.desconto;
-  }
-}
+const FAIXAS = promotionRules.faixasSellThrough;
+const FAIXA_LABELS = ["100%", "75%", "50%", "25%"];
+const CAMPANHAS_PRESET = ["Black Friday 2026", "Liquidação", "Promoção"];
 
 type Linha = PromotionRow & {
+  descontoRecomendadoAoVivo: number;
+  motivoAoVivo: string;
   descontoAplicado: number;
   precoPromoAplicado: number | null;
   valorEstoquePromoAplicado: number;
+  receitaPotencialLinha: number;
 };
-
-function aplicarDesconto(rows: PromotionRow[], modo: DescontoModo, personalizado: number): Linha[] {
-  return rows.map((r) => {
-    const d = descontoEfetivo(r, modo, personalizado);
-    const precoPromoAplicado = r.precoCheio !== null ? r.precoCheio * (1 - d) : null;
-    return {
-      ...r,
-      descontoAplicado: d,
-      precoPromoAplicado,
-      valorEstoquePromoAplicado: precoPromoAplicado !== null ? r.estoque * precoPromoAplicado : 0,
-    };
-  });
-}
 
 function somaPonderada(rows: Linha[], pctVendido: number) {
   const estoqueTotal = rows.reduce((s, r) => s + r.estoque, 0);
@@ -66,7 +47,14 @@ function somaPonderada(rows: Linha[], pctVendido: number) {
   return { estoqueTotal, valorCheio, valorPromo, receitaPotencial, unidadesPotenciais, descontoMedio, valorDescontoConcedido, sellThroughMedio };
 }
 
-const CAMPANHAS_PRESET = ["Black Friday 2026", "Liquidação", "Promoção"];
+function seedMatriz(colecoes: string[]): Record<string, number[]> {
+  const m: Record<string, number[]> = {};
+  for (const c of colecoes) {
+    if (c === "BESTSELLER") continue;
+    m[c] = promotionRules.matrizPorColecao[c] ? [...promotionRules.matrizPorColecao[c]] : FAIXAS.map(() => promotionRules.descontoPadrao);
+  }
+  return m;
+}
 
 export function PromocaoClient({ rows }: { rows: PromotionRow[] }) {
   const [campanha, setCampanha] = useState(CAMPANHAS_PRESET[0]);
@@ -79,6 +67,24 @@ export function PromocaoClient({ rows }: { rows: PromotionRow[] }) {
   const [ordenacao, setOrdenacao] = useState<"receita" | "estoque" | "sellthrough" | "desconto">("receita");
 
   const coleções = useMemo(() => [...new Set(rows.map((r) => r.colecao))].sort(), [rows]);
+
+  // "Quadrinho" de sell-through pedido pelo Rodrigo em 2026-09-26 — a mesma matriz Coleção ×
+  // faixa de sell-through da planilha, só que editável na tela ao vivo (estado local, mesmo
+  // espírito não-persistido da campanha). Toda coleção real do estoque atual entra como linha,
+  // não só as 3 que a planilha original tinha curado — pra cobrir coleção nova sem precisar
+  // mexer em código.
+  const [matriz, setMatriz] = useState<Record<string, number[]>>(() => seedMatriz(coleções));
+  const [descontoBestseller, setDescontoBestseller] = useState(promotionRules.descontoBestseller * 100);
+  const [descontoPadrao, setDescontoPadrao] = useState(promotionRules.descontoPadrao * 100);
+
+  function setCelula(colecao: string, faixaIdx: number, valorPct: number) {
+    setMatriz((prev) => {
+      const linha = [...(prev[colecao] ?? FAIXAS.map(() => promotionRules.descontoPadrao))];
+      linha[faixaIdx] = Math.min(Math.max(valorPct / 100, 0), 0.95);
+      return { ...prev, [colecao]: linha };
+    });
+  }
+
   const gruposDaColecao = useMemo(
     () => [...new Set(rows.filter((r) => !colecaoSel || r.colecao === colecaoSel).map((r) => r.grupo))].sort(),
     [rows, colecaoSel]
@@ -104,7 +110,35 @@ export function PromocaoClient({ rows }: { rows: PromotionRow[] }) {
     [rows, colecaoSel, grupoSel, produtoSel]
   );
 
-  const linhas = useMemo(() => aplicarDesconto(filtradas, descontoModo, descontoPersonalizado), [filtradas, descontoModo, descontoPersonalizado]);
+  // Recalcula o desconto RECOMENDADO ao vivo, usando o quadrinho editado (não o valor que veio
+  // do servidor) — e só depois aplica o modo do simulador (+5/+10/+15/sem/personalizado) em cima.
+  const linhas = useMemo<Linha[]>(() => {
+    return filtradas.map((r) => {
+      const { desconto: descontoRecomendadoAoVivo, motivo: motivoAoVivo } = getDescontoRecomendado(
+        r.colecao, r.sellThroughRate, matriz, descontoBestseller / 100, descontoPadrao / 100
+      );
+      let d: number;
+      switch (descontoModo) {
+        case "sem": d = 0; break;
+        case "+5": d = Math.min(descontoRecomendadoAoVivo + 0.05, 0.95); break;
+        case "+10": d = Math.min(descontoRecomendadoAoVivo + 0.10, 0.95); break;
+        case "+15": d = Math.min(descontoRecomendadoAoVivo + 0.15, 0.95); break;
+        case "personalizado": d = Math.min(Math.max(descontoPersonalizado / 100, 0), 0.95); break;
+        default: d = descontoRecomendadoAoVivo;
+      }
+      const precoPromoAplicado = r.precoCheio !== null ? r.precoCheio * (1 - d) : null;
+      const valorEstoquePromoAplicado = precoPromoAplicado !== null ? r.estoque * precoPromoAplicado : 0;
+      return {
+        ...r,
+        descontoRecomendadoAoVivo, motivoAoVivo,
+        descontoAplicado: d,
+        precoPromoAplicado,
+        valorEstoquePromoAplicado,
+        receitaPotencialLinha: valorEstoquePromoAplicado * (pctVendido / 100),
+      };
+    });
+  }, [filtradas, matriz, descontoBestseller, descontoPadrao, descontoModo, descontoPersonalizado, pctVendido]);
+
   const kpis = useMemo(() => somaPonderada(linhas, pctVendido), [linhas, pctVendido]);
 
   const linhasOrdenadas = useMemo(() => {
@@ -171,94 +205,157 @@ export function PromocaoClient({ rows }: { rows: PromotionRow[] }) {
   }, [linhas]);
 
   return (
-    <div>
-      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+    <div className="pb-6">
+      {/* Header */}
+      <div className="mb-5 flex flex-wrap items-start justify-between gap-3 border-b border-[var(--gridline)] pb-4">
         <div>
-          <h1 className="text-lg font-semibold text-[var(--text-primary)]">Análises de Promoção</h1>
-          <p className="text-sm text-[var(--text-muted)]">Simulação de estoque, descontos e potencial de receita</p>
+          <h1 className="text-xl font-semibold tracking-tight text-[var(--text-primary)]">Análises de Promoção</h1>
+          <p className="mt-0.5 text-sm text-[var(--text-muted)]">Simulação de estoque, descontos e potencial de receita</p>
         </div>
-        <select
-          value={campanha}
-          onChange={(e) => setCampanha(e.target.value)}
-          className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-3 py-1.5 text-sm text-[var(--text-primary)]"
-          style={{ colorScheme: "light dark" }}
-        >
-          {CAMPANHAS_PRESET.map((c) => (
-            <option key={c} value={c}>{c}</option>
-          ))}
-          <option value="personalizada">Campanha personalizada</option>
-        </select>
+        <div className="flex flex-col gap-1">
+          <span className="text-[10px] font-medium uppercase tracking-wide text-[var(--text-muted)]">Campanha</span>
+          <select
+            value={campanha}
+            onChange={(e) => setCampanha(e.target.value)}
+            className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-3 py-1.5 text-sm text-[var(--text-primary)]"
+            style={{ colorScheme: "light dark" }}
+          >
+            {CAMPANHAS_PRESET.map((c) => <option key={c} value={c}>{c}</option>)}
+            <option value="personalizada">Campanha personalizada</option>
+          </select>
+        </div>
       </div>
 
       {/* Filtros hierárquicos — Coleção → Grupo → Produto, listas completas (não bloqueiam Tab), só restringem as OPÇÕES conforme o pai escolhido. */}
-      <div className="mb-4 flex flex-wrap gap-3 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3">
+      <div className="mb-5 flex flex-wrap gap-3 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3">
         <FiltroSelect label="Coleção" value={colecaoSel} onChange={(v) => { setColecaoSel(v); setGrupoSel(""); setProdutoSel(""); }} options={coleções} />
         <FiltroSelect label="Grupo" value={grupoSel} onChange={(v) => { setGrupoSel(v); setProdutoSel(""); }} options={gruposDaColecao} />
         <FiltroSelect label="Produto" value={produtoSel} onChange={setProdutoSel} options={produtosDoGrupo} />
       </div>
 
       {/* KPIs principais */}
-      <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8">
         <StatTile label="Estoque total" value={formatNum(kpis.estoqueTotal)} />
         <StatTile label="Valor a preço cheio" value={formatBRL(kpis.valorCheio)} />
         <StatTile label="Valor promocional" value={formatBRL(kpis.valorPromo)} />
         <StatTile label="Receita potencial" value={formatBRL(kpis.receitaPotencial)} />
-        <StatTile label="Unidades potenciais vendidas" value={formatNum(kpis.unidadesPotenciais)} />
+        <StatTile label="Unidades potenciais" value={formatNum(kpis.unidadesPotenciais)} />
         <StatTile label="Desconto médio" value={formatPct(kpis.descontoMedio * 100)} />
-        <StatTile label="Valor de desconto concedido" value={formatBRL(kpis.valorDescontoConcedido)} />
+        <StatTile label="Desconto concedido" value={formatBRL(kpis.valorDescontoConcedido)} />
         <StatTile label="Sell-through médio" value={formatPct(kpis.sellThroughMedio)} />
       </div>
 
-      {/* Simulador */}
-      <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
-        <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Simulador</h2>
-        <div className="flex flex-wrap items-end gap-6">
-          <div className="flex min-w-[220px] flex-col gap-1">
-            <label className="text-[10px] font-medium uppercase tracking-wide text-[var(--text-muted)]">
-              % do estoque vendido — <span className="text-[var(--text-primary)]">{pctVendido}%</span>
-            </label>
-            <input
-              type="range" min={0} max={100} step={5} value={pctVendido}
-              onChange={(e) => setPctVendido(Number(e.target.value))}
-              className="w-full accent-[var(--series-1)]"
-            />
-          </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-[10px] font-medium uppercase tracking-wide text-[var(--text-muted)]">Desconto</label>
-            <select
-              value={descontoModo}
-              onChange={(e) => setDescontoModo(e.target.value as DescontoModo)}
-              className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-xs text-[var(--text-primary)]"
-              style={{ colorScheme: "light dark" }}
-            >
-              <option value="recomendado">Desconto recomendado</option>
-              <option value="sem">Sem desconto</option>
-              <option value="+5">+5%</option>
-              <option value="+10">+10%</option>
-              <option value="+15">+15%</option>
-              <option value="personalizado">Personalizado</option>
-            </select>
-          </div>
-          {descontoModo === "personalizado" && (
+      {/* Painel de controle: Simulador + Regras de Desconto lado a lado — as duas coisas que
+          dirigem todo o resto da página, destacadas visualmente do restante (só leitura). */}
+      <div className="mb-6 grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]">
+        {/* Simulador */}
+        <section className="rounded-lg border border-[var(--series-1)]/30 bg-[var(--surface-1)] p-4">
+          <h2 className="mb-3 text-sm font-semibold text-[var(--text-primary)]">Simulador</h2>
+          <div className="flex flex-col gap-4">
             <div className="flex flex-col gap-1">
-              <label className="text-[10px] font-medium uppercase tracking-wide text-[var(--text-muted)]">% personalizado</label>
+              <label className="text-[10px] font-medium uppercase tracking-wide text-[var(--text-muted)]">
+                % do estoque vendido — <span className="text-[var(--text-primary)]">{pctVendido}%</span>
+              </label>
               <input
-                type="number" min={0} max={95} value={descontoPersonalizado}
-                onChange={(e) => setDescontoPersonalizado(Number(e.target.value))}
-                className="w-24 rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-xs text-[var(--text-primary)]"
+                type="range" min={0} max={100} step={5} value={pctVendido}
+                onChange={(e) => setPctVendido(Number(e.target.value))}
+                className="w-full accent-[var(--series-1)]"
               />
             </div>
-          )}
-          <div className="flex flex-col gap-1">
-            <span className="text-[10px] font-medium uppercase tracking-wide text-[var(--text-muted)]">Receita estimada</span>
-            <span className="text-xl font-semibold tabular-nums text-[var(--text-primary)]">{formatBRL(kpis.receitaPotencial)}</span>
+            <div className="flex flex-wrap items-end gap-4">
+              <div className="flex flex-col gap-1">
+                <label className="text-[10px] font-medium uppercase tracking-wide text-[var(--text-muted)]">Desconto</label>
+                <select
+                  value={descontoModo}
+                  onChange={(e) => setDescontoModo(e.target.value as DescontoModo)}
+                  className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-xs text-[var(--text-primary)]"
+                  style={{ colorScheme: "light dark" }}
+                >
+                  <option value="recomendado">Desconto recomendado</option>
+                  <option value="sem">Sem desconto</option>
+                  <option value="+5">+5%</option>
+                  <option value="+10">+10%</option>
+                  <option value="+15">+15%</option>
+                  <option value="personalizado">Personalizado</option>
+                </select>
+              </div>
+              {descontoModo === "personalizado" && (
+                <div className="flex flex-col gap-1">
+                  <label className="text-[10px] font-medium uppercase tracking-wide text-[var(--text-muted)]">% personalizado</label>
+                  <input
+                    type="number" min={0} max={95} value={descontoPersonalizado}
+                    onChange={(e) => setDescontoPersonalizado(Number(e.target.value))}
+                    className="w-24 rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-xs text-[var(--text-primary)]"
+                  />
+                </div>
+              )}
+              <div className="flex flex-col gap-1">
+                <span className="text-[10px] font-medium uppercase tracking-wide text-[var(--text-muted)]">Receita estimada</span>
+                <span className="text-2xl font-semibold tabular-nums text-[var(--text-primary)]">{formatBRL(kpis.receitaPotencial)}</span>
+              </div>
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
+
+        {/* Quadrinho de sell-through: matriz Coleção × faixa, editável — pedido do Rodrigo em 2026-09-26. */}
+        <section className="rounded-lg border border-[var(--series-1)]/30 bg-[var(--surface-1)] p-4">
+          <h2 className="mb-1 text-sm font-semibold text-[var(--text-primary)]">Regras de Desconto por Sell-through</h2>
+          <p className="mb-3 text-xs text-[var(--text-muted)]">
+            Mesma matriz da planilha (Coleção × faixa de sell-through) — edite os % livremente, o resto da página recalcula na hora.
+          </p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-left text-[var(--text-muted)]">
+                  <th className="py-1 pr-2 font-medium">Coleção</th>
+                  {FAIXA_LABELS.map((f) => <th key={f} className="px-1 py-1 text-center font-medium">{f}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {coleções.filter((c) => c !== "BESTSELLER").map((colecao) => (
+                  <tr key={colecao} className="border-t border-[var(--gridline)]">
+                    <td className="py-1 pr-2 font-medium whitespace-nowrap text-[var(--text-primary)]">{colecao}</td>
+                    {FAIXAS.map((_, i) => (
+                      <td key={i} className="px-1 py-1">
+                        <input
+                          type="number" min={0} max={95}
+                          value={Math.round((matriz[colecao]?.[i] ?? promotionRules.descontoPadrao) * 100)}
+                          onChange={(e) => setCelula(colecao, i, Number(e.target.value))}
+                          className="w-14 rounded border border-[var(--border)] bg-[var(--page-plane)] px-1.5 py-1 text-center tabular-nums text-[var(--text-primary)]"
+                        />
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+                <tr className="border-t border-[var(--gridline)]">
+                  <td className="py-1 pr-2 font-medium whitespace-nowrap text-[var(--text-primary)]">Bestseller <span className="font-normal text-[var(--text-muted)]">(fixo)</span></td>
+                  <td className="px-1 py-1" colSpan={4}>
+                    <input
+                      type="number" min={0} max={95} value={Math.round(descontoBestseller)}
+                      onChange={(e) => setDescontoBestseller(Number(e.target.value))}
+                      className="w-14 rounded border border-[var(--border)] bg-[var(--page-plane)] px-1.5 py-1 text-center tabular-nums text-[var(--text-primary)]"
+                    />
+                  </td>
+                </tr>
+                <tr className="border-t border-[var(--gridline)]">
+                  <td className="py-1 pr-2 font-medium whitespace-nowrap text-[var(--text-primary)]">Padrão <span className="font-normal text-[var(--text-muted)]">(sem regra)</span></td>
+                  <td className="px-1 py-1" colSpan={4}>
+                    <input
+                      type="number" min={0} max={95} value={Math.round(descontoPadrao)}
+                      onChange={(e) => setDescontoPadrao(Number(e.target.value))}
+                      className="w-14 rounded border border-[var(--border)] bg-[var(--page-plane)] px-1.5 py-1 text-center tabular-nums text-[var(--text-primary)]"
+                    />
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
 
       {/* Comparador de cenários */}
       <section className="mb-6 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)]">
-        <h2 className="border-b border-[var(--gridline)] px-4 py-3 text-sm font-medium text-[var(--text-secondary)]">Cenários</h2>
+        <h2 className="border-b border-[var(--gridline)] px-4 py-3 text-sm font-semibold text-[var(--text-primary)]">Cenários</h2>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
@@ -278,73 +375,74 @@ export function PromocaoClient({ rows }: { rows: PromotionRow[] }) {
         </div>
       </section>
 
-      {/* Análise por Coleção */}
-      <section className="mb-6 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)]">
-        <h2 className="border-b border-[var(--gridline)] px-4 py-3 text-sm font-medium text-[var(--text-secondary)]">Potencial por Coleção</h2>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-[var(--gridline)] bg-[var(--page-plane)] text-left text-[var(--text-muted)]">
-                <th className="px-4 py-2 font-medium">Coleção</th>
-                <th className="px-4 py-2 text-right font-medium">Produtos</th>
-                <th className="px-4 py-2 text-right font-medium">Estoque</th>
-                <th className="px-4 py-2 text-right font-medium">Receita potencial</th>
-              </tr>
-            </thead>
-            <tbody>
-              {porColecao.map((c) => (
-                <tr
-                  key={c.colecao}
-                  onClick={() => setColecaoSel(c.colecao)}
-                  className="cursor-pointer border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]"
-                >
-                  <td className="px-4 py-2 font-medium text-[var(--text-primary)]">{c.colecao}</td>
-                  <td className="px-4 py-2 text-right tabular-nums text-[var(--text-secondary)]">{c.produtos}</td>
-                  <td className="px-4 py-2 text-right tabular-nums text-[var(--text-secondary)]">{formatNum(c.estoque)}</td>
-                  <td className="px-4 py-2 text-right tabular-nums font-medium text-[var(--text-primary)]">{formatBRL(c.receitaPotencial)}</td>
+      {/* Análise por Coleção + por Grupo, lado a lado em telas largas */}
+      <div className="mb-6 grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <section className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)]">
+          <h2 className="border-b border-[var(--gridline)] px-4 py-3 text-sm font-semibold text-[var(--text-primary)]">Potencial por Coleção</h2>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-[var(--gridline)] bg-[var(--page-plane)] text-left text-[var(--text-muted)]">
+                  <th className="px-4 py-2 font-medium">Coleção</th>
+                  <th className="px-4 py-2 text-right font-medium">Produtos</th>
+                  <th className="px-4 py-2 text-right font-medium">Estoque</th>
+                  <th className="px-4 py-2 text-right font-medium">Receita potencial</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
+              </thead>
+              <tbody>
+                {porColecao.map((c) => (
+                  <tr
+                    key={c.colecao}
+                    onClick={() => setColecaoSel(c.colecao)}
+                    className="cursor-pointer border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]"
+                  >
+                    <td className="px-4 py-2 font-medium text-[var(--text-primary)]">{c.colecao}</td>
+                    <td className="px-4 py-2 text-right tabular-nums text-[var(--text-secondary)]">{c.produtos}</td>
+                    <td className="px-4 py-2 text-right tabular-nums text-[var(--text-secondary)]">{formatNum(c.estoque)}</td>
+                    <td className="px-4 py-2 text-right tabular-nums font-medium text-[var(--text-primary)]">{formatBRL(c.receitaPotencial)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
 
-      {/* Análise por Grupo */}
-      <section className="mb-6 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)]">
-        <h2 className="border-b border-[var(--gridline)] px-4 py-3 text-sm font-medium text-[var(--text-secondary)]">Potencial por Grupo</h2>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-[var(--gridline)] bg-[var(--page-plane)] text-left text-[var(--text-muted)]">
-                <th className="px-4 py-2 font-medium">Grupo</th>
-                <th className="px-4 py-2 text-right font-medium">Estoque</th>
-                <th className="px-4 py-2 text-right font-medium">Sell-through</th>
-                <th className="px-4 py-2 text-right font-medium">Desconto médio</th>
-                <th className="px-4 py-2 text-right font-medium">Receita potencial</th>
-              </tr>
-            </thead>
-            <tbody>
-              {porGrupo.map((g) => (
-                <tr
-                  key={g.grupo}
-                  onClick={() => setGrupoSel(g.grupo)}
-                  className="cursor-pointer border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]"
-                >
-                  <td className="px-4 py-2 font-medium text-[var(--text-primary)]">{g.grupo}</td>
-                  <td className="px-4 py-2 text-right tabular-nums text-[var(--text-secondary)]">{formatNum(g.estoque)}</td>
-                  <td className="px-4 py-2 text-right tabular-nums text-[var(--text-secondary)]">{g.sellThroughMedio !== null ? formatPct(g.sellThroughMedio) : "—"}</td>
-                  <td className="px-4 py-2 text-right tabular-nums text-[var(--text-secondary)]">{formatPct(g.descontoMedio * 100)}</td>
-                  <td className="px-4 py-2 text-right tabular-nums font-medium text-[var(--text-primary)]">{formatBRL(g.receitaPotencial)}</td>
+        <section className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)]">
+          <h2 className="border-b border-[var(--gridline)] px-4 py-3 text-sm font-semibold text-[var(--text-primary)]">Potencial por Grupo</h2>
+          <div className="max-h-[360px] overflow-auto">
+            <table className="w-full text-sm">
+              <thead className="sticky top-0 bg-[var(--page-plane)]">
+                <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
+                  <th className="px-4 py-2 font-medium">Grupo</th>
+                  <th className="px-4 py-2 text-right font-medium">Estoque</th>
+                  <th className="px-4 py-2 text-right font-medium">Sell-th.</th>
+                  <th className="px-4 py-2 text-right font-medium">Desc. médio</th>
+                  <th className="px-4 py-2 text-right font-medium">Receita</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
+              </thead>
+              <tbody>
+                {porGrupo.map((g) => (
+                  <tr
+                    key={g.grupo}
+                    onClick={() => setGrupoSel(g.grupo)}
+                    className="cursor-pointer border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]"
+                  >
+                    <td className="px-4 py-2 font-medium text-[var(--text-primary)]">{g.grupo}</td>
+                    <td className="px-4 py-2 text-right tabular-nums text-[var(--text-secondary)]">{formatNum(g.estoque)}</td>
+                    <td className="px-4 py-2 text-right tabular-nums text-[var(--text-secondary)]">{g.sellThroughMedio !== null ? formatPct(g.sellThroughMedio) : "—"}</td>
+                    <td className="px-4 py-2 text-right tabular-nums text-[var(--text-secondary)]">{formatPct(g.descontoMedio * 100)}</td>
+                    <td className="px-4 py-2 text-right tabular-nums font-medium text-[var(--text-primary)]">{formatBRL(g.receitaPotencial)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
 
       {/* Produtos que merecem atenção */}
       <section className="mb-6 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)]">
-        <h2 className="border-b border-[var(--gridline)] px-4 py-3 text-sm font-medium text-[var(--text-secondary)]">Produtos que merecem atenção</h2>
+        <h2 className="border-b border-[var(--gridline)] px-4 py-3 text-sm font-semibold text-[var(--text-primary)]">Produtos que merecem atenção</h2>
         <p className="px-4 pt-2 text-xs text-[var(--text-muted)]">Estoque financeiro relevante + sell-through abaixo de 50%, ordenado por valor de estoque.</p>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -367,8 +465,8 @@ export function PromocaoClient({ rows }: { rows: PromotionRow[] }) {
                   <td className="px-4 py-2 text-right tabular-nums text-[var(--text-secondary)]">{formatNum(r.estoque)}</td>
                   <td className="px-4 py-2 text-right tabular-nums text-[var(--text-secondary)]">{r.sellThroughRate !== null ? formatPct(r.sellThroughRate) : "—"}</td>
                   <td className="px-4 py-2 text-right tabular-nums text-[var(--text-secondary)]">{formatBRL(r.valorEstoqueCheio)}</td>
-                  <td className="px-4 py-2 text-right tabular-nums text-[var(--text-secondary)]">{formatPct(r.descontoAplicado * 100)}</td>
-                  <td className="px-4 py-2 text-right tabular-nums font-medium text-[var(--text-primary)]">{formatBRL(r.valorEstoquePromoAplicado * (pctVendido / 100))}</td>
+                  <td className="px-4 py-2 text-right tabular-nums text-[var(--text-secondary)]" title={r.motivoAoVivo}>{formatPct(r.descontoAplicado * 100)}</td>
+                  <td className="px-4 py-2 text-right tabular-nums font-medium text-[var(--text-primary)]">{formatBRL(r.receitaPotencialLinha)}</td>
                 </tr>
               ))}
             </tbody>
@@ -379,7 +477,7 @@ export function PromocaoClient({ rows }: { rows: PromotionRow[] }) {
       {/* Tabela principal */}
       <section className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)]">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--gridline)] px-4 py-3">
-          <h2 className="text-sm font-medium text-[var(--text-secondary)]">Todos os produtos ({linhasOrdenadas.length})</h2>
+          <h2 className="text-sm font-semibold text-[var(--text-primary)]">Todos os produtos ({linhasOrdenadas.length})</h2>
           <div className="flex items-center gap-2 text-xs">
             <span className="text-[var(--text-muted)]">Ordenar por</span>
             <select
@@ -422,10 +520,10 @@ export function PromocaoClient({ rows }: { rows: PromotionRow[] }) {
                   <td className="px-4 py-2 text-right tabular-nums whitespace-nowrap text-[var(--text-secondary)]">{r.precoCheio !== null ? formatBRL(r.precoCheio) : "—"}</td>
                   <td className="px-4 py-2 text-right tabular-nums text-[var(--text-secondary)]">{formatNum(r.estoque)}</td>
                   <td className="px-4 py-2 text-right tabular-nums text-[var(--text-secondary)]">{r.sellThroughRate !== null ? formatPct(r.sellThroughRate) : "—"}</td>
-                  <td className="px-4 py-2 text-right tabular-nums text-[var(--text-secondary)]" title={r.motivoDesconto}>{formatPct(r.descontoAplicado * 100)}</td>
+                  <td className="px-4 py-2 text-right tabular-nums text-[var(--text-secondary)]" title={r.motivoAoVivo}>{formatPct(r.descontoAplicado * 100)}</td>
                   <td className="px-4 py-2 text-right tabular-nums whitespace-nowrap text-[var(--text-secondary)]">{r.precoPromoAplicado !== null ? formatBRL(r.precoPromoAplicado) : "—"}</td>
                   <td className="px-4 py-2 text-right tabular-nums whitespace-nowrap text-[var(--text-secondary)]">{formatBRL(r.valorEstoqueCheio)}</td>
-                  <td className="px-4 py-2 text-right tabular-nums font-medium whitespace-nowrap text-[var(--text-primary)]">{formatBRL(r.valorEstoquePromoAplicado * (pctVendido / 100))}</td>
+                  <td className="px-4 py-2 text-right tabular-nums font-medium whitespace-nowrap text-[var(--text-primary)]">{formatBRL(r.receitaPotencialLinha)}</td>
                 </tr>
               ))}
             </tbody>
