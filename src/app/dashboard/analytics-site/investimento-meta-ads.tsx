@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { MetaInsight } from "@/lib/connectors/meta-ads";
+import { FotoGaleria } from "./foto-galeria";
 
 export type InvestimentoRow = MetaInsight & { nome: string; fotos: string[]; ativo: boolean };
 
@@ -94,21 +95,7 @@ export function InvestimentoMetaAds({
                   </span>
                 </td>
                 <td className="px-4 py-2">
-                  {i.fotos.length > 0 ? (
-                    <div className="flex gap-1.5">
-                      {i.fotos.map((url, idx) => (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          key={idx}
-                          src={url}
-                          alt={`Criativo ${idx + 1} de ${i.nome}`}
-                          className="h-10 w-10 rounded border border-[var(--border)] object-cover"
-                        />
-                      ))}
-                    </div>
-                  ) : (
-                    <span className="text-xs text-[var(--text-muted)]">sem foto</span>
-                  )}
+                  <FotoGaleria fotos={i.fotos} label={i.nome} />
                 </td>
                 <td className="px-4 py-2 text-right tabular-nums font-medium">{formatBRL(i.gasto)}</td>
                 <td className="px-4 py-2 text-right tabular-nums">{i.cliques.toLocaleString("pt-BR")}</td>

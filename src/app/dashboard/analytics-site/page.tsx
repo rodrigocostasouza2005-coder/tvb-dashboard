@@ -26,6 +26,7 @@ import { StatTile } from "../stat-tile";
 import { PieChart } from "../pie-chart";
 import { IndicatorChart } from "../indicadores/indicator-chart";
 import { InvestimentoMetaAds, type InvestimentoRow } from "./investimento-meta-ads";
+import { FotoGaleria } from "./foto-galeria";
 
 function formatPct(v: number | null) {
   return v != null ? `${v.toFixed(1)}%` : "—";
@@ -264,21 +265,7 @@ export default async function AnalyticsSitePage({
                     <tr key={a.anuncio} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
                       <td className="px-4 py-2 font-medium">{a.anuncio}</td>
                       <td className="px-4 py-2">
-                        {fotos.length > 0 ? (
-                          <div className="flex gap-1.5">
-                            {fotos.map((url, i) => (
-                              // eslint-disable-next-line @next/next/no-img-element
-                              <img
-                                key={i}
-                                src={url}
-                                alt={`Criativo ${i + 1} de ${a.anuncio}`}
-                                className="h-10 w-10 rounded border border-[var(--border)] object-cover"
-                              />
-                            ))}
-                          </div>
-                        ) : (
-                          <span className="text-xs text-[var(--text-muted)]">sem foto</span>
-                        )}
+                        <FotoGaleria fotos={fotos} label={a.anuncio} />
                       </td>
                       <td className="px-4 py-2 text-right tabular-nums">{a.sessoes.toLocaleString("pt-BR")}</td>
                       <td className="px-4 py-2 text-right tabular-nums">{a.conversoes.toLocaleString("pt-BR")}</td>
