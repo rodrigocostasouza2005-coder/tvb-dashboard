@@ -199,6 +199,23 @@ export function PromocaoClient({ rows }: { rows: PromotionRow[] }) {
 
   const kpis = useMemo(() => somaPonderada(linhas, pctVendido), [linhas, pctVendido]);
 
+  // Diagnóstico visível pro botão Aplicar: mostra o efeito da matriz PURA (ignora o modo do
+  // Simulador — "Sem desconto"/"Personalizado" zeram/ignoram o recomendado de propósito, então
+  // editar a matriz não muda nada visível nesses modos, o que parece bug mas não é). Achado em
+  // 2026-09-28 depois do Rodrigo reportar "aperto Aplicar mas não aplica" mesmo com o rascunho
+  // já separado — isso isola se é a matriz que não aplica ou só o modo do Simulador escondendo o efeito.
+  const descontoRecomendadoMedioAplicado = useMemo(() => {
+    if (filtradas.length === 0) return 0;
+    let somaEstoque = 0;
+    let somaDesconto = 0;
+    for (const r of filtradas) {
+      const { desconto } = getDescontoRecomendado(r.colecao, r.sellThroughRate, matriz, descontoBestseller / 100, descontoPadrao / 100);
+      somaDesconto += desconto * r.estoque;
+      somaEstoque += r.estoque;
+    }
+    return somaEstoque > 0 ? somaDesconto / somaEstoque : 0;
+  }, [filtradas, matriz, descontoBestseller, descontoPadrao]);
+
   const linhasOrdenadas = useMemo(() => {
     const copia = [...linhas];
     switch (ordenacao) {
@@ -376,20 +393,33 @@ export function PromocaoClient({ rows }: { rows: PromotionRow[] }) {
               <h2 className="text-sm font-semibold text-[var(--text-primary)]">Regras de Desconto por Sell-through</h2>
               <p className="mt-1 text-xs text-[var(--text-muted)]">
                 Mesma matriz da planilha (Coleção × faixa de sell-through) — edite os % e aperte Aplicar pra recalcular a página.
+                {descontoModo !== "recomendado" && (
+                  <span className="mt-1 block text-[var(--status-warning)]">
+                    ⚠ O Simulador está em modo &quot;{descontoModo === "sem" ? "Sem desconto" : descontoModo === "personalizado" ? "Personalizado" : `+${descontoModo.slice(1)}%`}&quot; — a tabela usa esse valor, não a matriz. Troque o Simulador pra &quot;Desconto recomendado&quot; pra ver a matriz refletida nos produtos.
+                  </span>
+                )}
               </p>
             </div>
-            <button
-              type="button"
-              onClick={aplicarRegras}
-              disabled={!regrasPendentes}
-              className={`shrink-0 rounded-md border px-3 py-1.5 text-xs font-medium disabled:cursor-default disabled:opacity-50 ${
-                regrasPendentes
-                  ? "border-[var(--series-1)] bg-[var(--series-1)] text-white"
-                  : "border-[var(--border)] bg-[var(--surface-1)] text-[var(--text-muted)]"
-              }`}
-            >
-              {regrasPendentes ? "Aplicar mudanças" : "Aplicado"}
-            </button>
+            <div className="flex shrink-0 flex-col items-end gap-1">
+              <button
+                type="button"
+                onClick={aplicarRegras}
+                disabled={!regrasPendentes}
+                className={`rounded-md border px-3 py-1.5 text-xs font-medium disabled:cursor-default disabled:opacity-50 ${
+                  regrasPendentes
+                    ? "border-[var(--series-1)] bg-[var(--series-1)] text-white"
+                    : "border-[var(--border)] bg-[var(--surface-1)] text-[var(--text-muted)]"
+                }`}
+              >
+                {regrasPendentes ? "Aplicar mudanças" : "Aplicado"}
+              </button>
+              {/* Feedback imediato, do lado do botão — reflete a matriz aplicada de verdade,
+                  independente do modo do Simulador (que pode estar em "Sem desconto" ou
+                  "Personalizado", casos em que a matriz não afeta a tabela — não é bug). */}
+              <span className="text-[11px] text-[var(--text-muted)]">
+                Desconto médio aplicado agora: <strong className="text-[var(--text-primary)]">{formatPct(descontoRecomendadoMedioAplicado * 100)}</strong>
+              </span>
+            </div>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
