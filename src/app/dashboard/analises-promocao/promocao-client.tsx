@@ -10,11 +10,25 @@ type DescontoModo = "recomendado" | "sem" | "+5" | "+10" | "+15" | "personalizad
 function formatBRL(v: number) {
   return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
 }
+// Auto-compacto pros cards de KPI (1 casa: R$ 7,1M / R$ 233,9K) — número cheio só na tabela, onde
+// as colunas já são tabular e comparar linha a linha importa mais que caber num card pequeno.
+// Valor exato sempre disponível no title (tooltip) de quem chama isso.
+function formatBRLCompact(v: number) {
+  const abs = Math.abs(v);
+  if (abs >= 1_000_000) return `R$ ${(v / 1_000_000).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}M`;
+  if (abs >= 1_000) return `R$ ${(v / 1_000).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}K`;
+  return formatBRL(v);
+}
 function formatPct(v: number) {
   return `${v.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
 }
 function formatNum(v: number) {
   return v.toLocaleString("pt-BR", { maximumFractionDigits: 0 });
+}
+function formatNumCompact(v: number) {
+  const abs = Math.abs(v);
+  if (abs >= 1_000) return `${(v / 1_000).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}K`;
+  return formatNum(v);
 }
 
 const FAIXAS = promotionRules.faixasSellThrough;
@@ -261,23 +275,35 @@ export function PromocaoClient({ rows }: { rows: PromotionRow[] }) {
         <FiltroSelect label="Produto" value={produtoSel} onChange={setProdutoSel} options={produtosDoGrupo} />
       </div>
 
-      {/* KPIs principais */}
-      <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8">
-        <StatTile label="Estoque total" value={formatNum(kpis.estoqueTotal)} />
-        <StatTile label="Valor a preço cheio" value={formatBRL(kpis.valorCheio)} />
-        <StatTile label="Valor promocional" value={formatBRL(kpis.valorPromo)} />
-        <StatTile label="Receita potencial" value={formatBRL(kpis.receitaPotencial)} />
-        <StatTile label="Unidades potenciais" value={formatNum(kpis.unidadesPotenciais)} />
-        <StatTile label="Desconto médio" value={formatPct(kpis.descontoMedio * 100)} />
-        <StatTile label="Desconto concedido" value={formatBRL(kpis.valorDescontoConcedido)} />
-        <StatTile label="Sell-through médio" value={formatPct(kpis.sellThroughMedio)} />
+      {/* KPIs principais — agrupados por assunto (financeiro / operacional) em vez de ordem
+          arbitrária, valor grande compactado (R$ 7,1M) com o valor exato disponível no hover,
+          pra não estourar o card nem virar uma parede de dígitos difícil de escanear. */}
+      <div className="mb-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div>
+          <span className="mb-2 block text-[10px] font-semibold tracking-wide text-[var(--text-muted)] uppercase">Financeiro</span>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <KpiTile label="Valor a preço cheio" value={formatBRLCompact(kpis.valorCheio)} title={formatBRL(kpis.valorCheio)} />
+            <KpiTile label="Valor promocional" value={formatBRLCompact(kpis.valorPromo)} title={formatBRL(kpis.valorPromo)} />
+            <KpiTile label="Receita potencial" value={formatBRLCompact(kpis.receitaPotencial)} title={formatBRL(kpis.receitaPotencial)} />
+            <KpiTile label="Desconto concedido" value={formatBRLCompact(kpis.valorDescontoConcedido)} title={formatBRL(kpis.valorDescontoConcedido)} />
+          </div>
+        </div>
+        <div>
+          <span className="mb-2 block text-[10px] font-semibold tracking-wide text-[var(--text-muted)] uppercase">Operacional</span>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <KpiTile label="Estoque total" value={formatNumCompact(kpis.estoqueTotal)} title={formatNum(kpis.estoqueTotal)} />
+            <KpiTile label="Unidades potenciais" value={formatNumCompact(kpis.unidadesPotenciais)} title={formatNum(kpis.unidadesPotenciais)} />
+            <StatTile label="Desconto médio" value={formatPct(kpis.descontoMedio * 100)} />
+            <StatTile label="Sell-through médio" value={formatPct(kpis.sellThroughMedio)} />
+          </div>
+        </div>
       </div>
 
       {/* Painel de controle: Simulador + Regras de Desconto lado a lado — as duas coisas que
           dirigem todo o resto da página, destacadas visualmente do restante (só leitura). */}
       <div className="mb-6 grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]">
         {/* Simulador */}
-        <section className="rounded-lg border border-[var(--series-1)]/30 bg-[var(--surface-1)] p-4">
+        <section className="rounded-lg border border-[var(--series-1)]/30 bg-[var(--surface-1)] p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
           <h2 className="mb-3 text-sm font-semibold text-[var(--text-primary)]">Simulador</h2>
           <div className="flex flex-col gap-4">
             <div className="flex flex-col gap-1">
@@ -319,14 +345,16 @@ export function PromocaoClient({ rows }: { rows: PromotionRow[] }) {
               )}
               <div className="flex flex-col gap-1">
                 <span className="text-[10px] font-medium uppercase tracking-wide text-[var(--text-muted)]">Receita estimada</span>
-                <span className="text-2xl font-semibold tabular-nums text-[var(--text-primary)]">{formatBRL(kpis.receitaPotencial)}</span>
+                <span className="text-2xl font-semibold text-[var(--text-primary)]" title={formatBRL(kpis.receitaPotencial)}>
+                  {formatBRLCompact(kpis.receitaPotencial)}
+                </span>
               </div>
             </div>
           </div>
         </section>
 
         {/* Quadrinho de sell-through: matriz Coleção × faixa, editável — pedido do Rodrigo em 2026-09-26. */}
-        <section className="rounded-lg border border-[var(--series-1)]/30 bg-[var(--surface-1)] p-4">
+        <section className="rounded-lg border border-[var(--series-1)]/30 bg-[var(--surface-1)] p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
           <h2 className="mb-1 text-sm font-semibold text-[var(--text-primary)]">Regras de Desconto por Sell-through</h2>
           <p className="mb-3 text-xs text-[var(--text-muted)]">
             Mesma matriz da planilha (Coleção × faixa de sell-through) — edite os % livremente, o resto da página recalcula na hora.
@@ -438,12 +466,9 @@ export function PromocaoClient({ rows }: { rows: PromotionRow[] }) {
 
           {resultadoReal && (
             <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-              <ComparativoTile label="Receita" real={resultadoReal.receita} projetado={kpis.receitaPotencial} formato={formatBRL} />
-              <ComparativoTile label="Unidades" real={resultadoReal.unidades} projetado={kpis.unidadesPotenciais} formato={formatNum} />
-              <div className="rounded-lg border border-[var(--border)] bg-[var(--page-plane)] p-3">
-                <div className="text-xs font-medium text-[var(--text-muted)]">Pedidos no período</div>
-                <div className="mt-1 text-xl font-semibold tabular-nums text-[var(--text-primary)]">{formatNum(resultadoReal.pedidos)}</div>
-              </div>
+              <ComparativoTile label="Receita" real={resultadoReal.receita} projetado={kpis.receitaPotencial} formato={formatBRLCompact} formatoExato={formatBRL} />
+              <ComparativoTile label="Unidades" real={resultadoReal.unidades} projetado={kpis.unidadesPotenciais} formato={formatNumCompact} formatoExato={formatNum} />
+              <KpiTile label="Pedidos no período" value={formatNum(resultadoReal.pedidos)} title={formatNum(resultadoReal.pedidos)} />
             </div>
           )}
         </div>
@@ -634,18 +659,36 @@ function RowCenario({ label, values }: { label: string; values: string[] }) {
   );
 }
 
-function ComparativoTile({ label, real, projetado, formato }: { label: string; real: number; projetado: number; formato: (v: number) => string }) {
+// Envolve StatTile com um title (tooltip nativo) mostrando o valor exato por trás do número
+// compactado — o card fica legível, o valor preciso continua a um hover de distância.
+function KpiTile({ label, value, title }: { label: string; value: string; title: string }) {
+  return (
+    <div title={title}>
+      <StatTile label={label} value={value} />
+    </div>
+  );
+}
+
+function ComparativoTile({
+  label, real, projetado, formato, formatoExato,
+}: {
+  label: string; real: number; projetado: number;
+  formato: (v: number) => string; // exibido no card (pode ser compacto)
+  formatoExato: (v: number) => string; // usado no title (tooltip), sempre valor cheio
+}) {
   const diff = projetado > 0 ? ((real - projetado) / projetado) * 100 : null;
   const bateu = diff !== null && diff >= 0;
   return (
-    <div className="rounded-lg border border-[var(--border)] bg-[var(--page-plane)] p-3">
+    // Mesmo tratamento visual do StatTile (surface-1 + sombra sutil) — antes usava page-plane
+    // sem sombra, destoando do resto dos cards da página.
+    <div className="min-w-0 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
       <div className="text-xs font-medium text-[var(--text-muted)]">{label} — real vs. projetado</div>
-      <div className="mt-1 flex items-baseline gap-2">
-        <span className="text-xl font-semibold tabular-nums text-[var(--text-primary)]">{formato(real)}</span>
-        <span className="text-xs text-[var(--text-muted)]">/ {formato(projetado)}</span>
+      <div className="mt-1 flex flex-wrap items-baseline gap-x-2" title={`Real: ${formatoExato(real)} · Projetado: ${formatoExato(projetado)}`}>
+        <span className="text-xl font-semibold text-[var(--text-primary)]">{formato(real)}</span>
+        <span className="text-xs text-[var(--text-muted)]">/ {formato(projetado)} projetado</span>
       </div>
       {diff !== null && (
-        <div className={`mt-0.5 text-xs font-medium ${bateu ? "text-[var(--status-good)]" : "text-[var(--status-critical)]"}`}>
+        <div className={`mt-1 text-xs font-medium ${bateu ? "text-[var(--status-good)]" : "text-[var(--status-critical)]"}`}>
           {bateu ? "▲" : "▼"} {Math.abs(diff).toFixed(1)}% {bateu ? "acima" : "abaixo"} do projetado
         </div>
       )}
