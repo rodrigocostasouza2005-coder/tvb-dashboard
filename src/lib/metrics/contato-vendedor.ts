@@ -257,11 +257,11 @@ const ESFRIANDO_DIAS_MAX = 90;
 // fatiaDoDia) sorteava a fatia do dia só olhando o pool inteiro, sem checar se o cliente já tinha
 // ContatoMarcado (tipo "sugestao") recente — o segmento dele (VIP esfriando etc.) não muda de um
 // dia pro outro, então bastava o pool ser pequeno pra ele recair na fatia poucos dias depois.
-// Cooldown de 7 dias (mesma janela usada no follow-up pós-compra) dá tempo do cliente responder
-// antes de reaparecer. Vale pra qualquer motivo — se já contatei essa pessoa essa semana por
-// QUALQUER motivo de sugestão, não preciso ver ela de novo, mesmo que o segmento dela tenha mudado
-// nesse meio tempo.
-const COOLDOWN_CONTATO_DIAS = 7;
+// Cooldown de 30 dias (pedido do Rodrigo em 2026-09-28, depois de já ter subido 7) dá bem mais
+// tempo do cliente responder antes de reaparecer. Vale pra qualquer motivo — se já contatei essa
+// pessoa esse mês por QUALQUER motivo de sugestão, não preciso ver ela de novo, mesmo que o
+// segmento dela tenha mudado nesse meio tempo.
+const COOLDOWN_CONTATO_DIAS = 30;
 
 async function getClientesContatadosRecente(): Promise<Set<string>> {
   const cutoff = new Date(Date.now() - COOLDOWN_CONTATO_DIAS * 86400000);
