@@ -51,7 +51,11 @@ function somaPonderada(rows: Linha[], pctVendido: number) {
   const receitaPotencial = valorPromo * (pctVendido / 100);
   const unidadesPotenciais = estoqueTotal * (pctVendido / 100);
   const descontoMedio = valorCheio > 0 ? 1 - valorPromo / valorCheio : 0;
-  const valorDescontoConcedido = valorCheio - valorPromo;
+  // Desconto concedido só existe sobre o que REALMENTE vende — achado do Rodrigo em 2026-09-28:
+  // antes calculava em cima do estoque inteiro (100%), inconsistente com Receita/Unidades
+  // potenciais (que já escalam por pctVendido). Estoque que não vende não gera desconto nenhum,
+  // só fica parado.
+  const valorDescontoConcedido = (valorCheio - valorPromo) * (pctVendido / 100);
   const comSellThrough = rows.filter((r) => r.sellThroughRate !== null);
   const sellThroughMedio =
     comSellThrough.length > 0
