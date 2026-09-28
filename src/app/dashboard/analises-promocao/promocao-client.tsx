@@ -665,6 +665,13 @@ export function PromocaoClient({
               <option value="sellthrough">Menor sell-through</option>
               <option value="desconto">Maior desconto</option>
             </select>
+            <button
+              type="button"
+              onClick={() => exportarExcel(linhasOrdenadas)}
+              className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1 font-medium text-[var(--text-secondary)] hover:bg-[var(--page-plane)]"
+            >
+              Exportar Excel
+            </button>
           </div>
         </div>
         <div className="max-h-[600px] overflow-auto">
@@ -732,6 +739,40 @@ function RowCenario({ label, values }: { label: string; values: string[] }) {
       {values.map((v, i) => <td key={i} className="px-4 py-2 text-right tabular-nums font-medium text-[var(--text-primary)]">{v}</td>)}
     </tr>
   );
+}
+
+// CSV com ";" (delimitador padrão do Excel em pt-BR) e vírgula decimal — abre direto no Excel já
+// formatado certo, sem precisar do assistente de importação. BOM (﻿) garante que acento
+// apareça certo. Exporta exatamente o que está na tela (linhasOrdenadas já reflete filtro +
+// ordenação + simulador aplicados) — pedido do Rodrigo em 2026-09-28.
+function exportarExcel(linhas: Linha[]) {
+  const numCSV = (v: number, casas = 2) => v.toFixed(casas).replace(".", ",");
+  const header = ["Grupo", "Produto", "Coleção", "Preço", "Estoque", "Sell-through (%)", "Desconto (%)", "Preço Promo", "Valor Estoque", "Receita Potencial"];
+  const corpo = linhas.map((r) => [
+    r.grupo,
+    r.produto,
+    r.colecao,
+    r.precoCheio !== null ? numCSV(r.precoCheio) : "",
+    String(r.estoque),
+    r.sellThroughRate !== null ? numCSV(r.sellThroughRate, 1) : "",
+    numCSV(r.descontoAplicado * 100, 1),
+    r.precoPromoAplicado !== null ? numCSV(r.precoPromoAplicado) : "",
+    numCSV(r.valorEstoqueCheio),
+    numCSV(r.receitaPotencialLinha),
+  ]);
+  const csv = [header, ...corpo]
+    .map((linha) => linha.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(";"))
+    .join("\r\n");
+  const BOM = "﻿"; // garante acento certo quando o Excel abrir o CSV
+  const blob = new Blob([BOM + csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `analises-promocao-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 // Envolve StatTile com um title (tooltip nativo) mostrando o valor exato por trás do número
