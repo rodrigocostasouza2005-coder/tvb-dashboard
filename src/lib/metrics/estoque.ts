@@ -1408,3 +1408,47 @@ export async function getStockCoverage(
       return a.diasCobertura - b.diasCobertura;
     });
 }
+
+export type TamanhoBreakdownRow = { tamanho: string; estoque: number; vendido: number };
+
+// Quebra por tamanho (estoque disponível + vendido no período/filtro) pra um conjunto de
+// produtos — pedido do Rodrigo em 2026-09-28, pro dropdown de tamanho no Top 10 mais/menos
+// vendidos. Só busca os produtos passados (não a base inteira), então é barato mesmo pra poucas
+// linhas como um top 10.
+export async function getTamanhoBreakdown(
+  filters: DashboardFilters,
+  produtos: string[]
+): Promise<Map<string, TamanhoBreakdownRow[]>> {
+  if (produtos.length === 0) return new Map();
+
+  const [vendasTamanho, stock] = await Promise.all([
+    prisma.sale.groupBy({
+      by: ["produto", "tamanho"],
+      where: { ...saleWhere(filters), produto: { in: produtos } },
+      _sum: { quantidade: true },
+    }),
+    prisma.stockSnapshot.findMany({
+      where: { ...stockWhere(filters), produto: { in: produtos } },
+      select: { produto: true, tamanho: true, quantidadeDisponivel: true },
+    }),
+  ]);
+
+  const porProduto = new Map<string, Map<string, TamanhoBreakdownRow>>();
+  function linha(produto: string, tamanhoRaw: string | null): TamanhoBreakdownRow {
+    const tamanho = tamanhoRaw ?? "—";
+    const porTamanho = porProduto.get(produto) ?? new Map<string, TamanhoBreakdownRow>();
+    const entry = porTamanho.get(tamanho) ?? { tamanho, estoque: 0, vendido: 0 };
+    porTamanho.set(tamanho, entry);
+    porProduto.set(produto, porTamanho);
+    return entry;
+  }
+  for (const v of vendasTamanho) linha(v.produto, v.tamanho).vendido += v._sum.quantidade ?? 0;
+  for (const s of stock) linha(s.produto, s.tamanho).estoque += s.quantidadeDisponivel;
+
+  const result = new Map<string, TamanhoBreakdownRow[]>();
+  for (const [produto, porTamanho] of porProduto) {
+    const ordem = sortTamanhos([...porTamanho.keys()]);
+    result.set(produto, ordem.map((t) => porTamanho.get(t)!));
+  }
+  return result;
+}

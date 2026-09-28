@@ -1,17 +1,14 @@
 import { getSessionUser } from "@/lib/auth";
-import { getSalesByGrupoProduto, getReturnsByGrupoProduto, netByReturns, getStores, getMarcas, getTabelasPreco, getDistinctColecoes, getEstoqueAtualPorGrupoProduto } from "@/lib/metrics";
+import { getSalesByGrupoProduto, getReturnsByGrupoProduto, netByReturns, getStores, getMarcas, getTabelasPreco, getDistinctColecoes, getEstoqueAtualPorGrupoProduto, getTamanhoBreakdown } from "@/lib/metrics";
 import { canSeeFinancials, getGrupoRestriction, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestrictionSemAtacado } from "@/lib/permissions";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
 import { CollapsibleFilters } from "../collapsible-filters";
 import { MetricBarChart } from "../metric-bar-chart";
+import { TopProdutosTable } from "../top-produtos-table";
 
 const LIMIT = 10;
-
-function formatBRL(value: number) {
-  return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-}
 
 export default async function TopMaisVendidosPage({
   searchParams,
@@ -52,6 +49,15 @@ export default async function TopMaisVendidosPage({
   const showFinancials = canSeeFinancials(user);
   const top = allRows.slice(0, LIMIT);
 
+  // Dropdown de tamanho (estoque disponível + vendido) — só busca pros 10 produtos do ranking,
+  // pedido do Rodrigo em 2026-09-28.
+  const tamanhoPorProduto = await getTamanhoBreakdown(filters, top.map((r) => r.key));
+  const topComTamanhos = top.map((r) => ({
+    ...r,
+    estoque: estoqueByProduto.get(r.key) ?? 0,
+    tamanhos: tamanhoPorProduto.get(r.key) ?? [],
+  }));
+
   return (
     <div>
       <CollapsibleFilters defaultOpen={filtrosOpen}>
@@ -77,47 +83,7 @@ export default async function TopMaisVendidosPage({
         />
       </section>
 
-      <div className="overflow-x-auto overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
-              <th className="px-4 py-2 font-medium">#</th>
-              <th className="px-4 py-2 font-medium">Grupo</th>
-              <th className="px-4 py-2 font-medium">Produto</th>
-              <th className="px-4 py-2 font-medium text-right">Unidades líquidas</th>
-              <th className="px-4 py-2 font-medium text-right">Estoque atual</th>
-              {showFinancials && <th className="px-4 py-2 font-medium text-right">Receita líquida</th>}
-            </tr>
-          </thead>
-          <tbody>
-            {top.map((r, i) => (
-              <tr key={r.key} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
-                <td className="px-4 py-2 tabular-nums text-[var(--text-muted)]">{i + 1}</td>
-                <td className="px-4 py-2 text-[var(--text-secondary)]">{r.grupo}</td>
-                <td className="px-4 py-2 font-medium text-[var(--text-primary)]">{r.key}</td>
-                <td className="px-4 py-2 tabular-nums text-right text-[var(--text-secondary)]">
-                  {r.unitsSold.toLocaleString("pt-BR")}
-                </td>
-                <td className="px-4 py-2 tabular-nums text-right text-[var(--text-secondary)]">
-                  {(estoqueByProduto.get(r.key) ?? 0).toLocaleString("pt-BR")}
-                </td>
-                {showFinancials && (
-                  <td className="px-4 py-2 tabular-nums text-right text-[var(--text-primary)]">
-                    {formatBRL(r.revenue)}
-                  </td>
-                )}
-              </tr>
-            ))}
-            {top.length === 0 && (
-              <tr>
-                <td colSpan={showFinancials ? 6 : 5} className="px-4 py-6 text-center text-[var(--text-muted)]">
-                  Sem vendas no período selecionado.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      <TopProdutosTable rows={topComTamanhos} showFinancials={showFinancials} />
     </div>
   );
 }
