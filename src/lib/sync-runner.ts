@@ -3,7 +3,7 @@ import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import { randomUUID } from "crypto";
-import { createDapicClients, stripReferenciaPrefix, parseDapicDateTime, stableItemIndexes, waitMsFromDapicError, sleep, type DapicClient } from "@/lib/connectors/dapic";
+import { createDapicClients, stripReferenciaPrefix, parseDapicDateTime, stableItemIndexes, isGarrafaBrinde, waitMsFromDapicError, sleep, type DapicClient } from "@/lib/connectors/dapic";
 // (import type { Prisma } removido abaixo — já importado acima como valor+tipo)
 import { displayGroupFor, sellsProducts } from "@/lib/connectors/armazenadores";
 import { upsertStockSnapshots, type StockSnapshotRow } from "@/lib/connectors/upsert-stock";
@@ -151,7 +151,7 @@ async function syncVendas(
           cidade: venda.Cidade?.Nome ?? null,
           estado: venda.Cidade?.Estado ?? null,
           quantidade: item.Quantidade,
-          valorTotalLiquido: item.ValorLiquido,
+          valorTotalLiquido: isGarrafaBrinde(item.Produto) ? 0 : item.ValorLiquido,
           tabelaPreco,
           codigo: venda.Codigo ?? null,
           saleDate,
@@ -342,7 +342,9 @@ async function syncFaturas(
         cidade: fatura.Cidade ?? null,
         estado: fatura.Estado ?? null,
         quantidade: item.Quantidade,
-        valorTotalLiquido: item.Valores.ValorTotal,
+        // item.Produto ainda tem a referência colada ("XXX - Garrafa...") nesse endpoint — isGarrafaBrinde
+        // precisa do nome já stripado (stripReferenciaPrefix), senão o startsWith nunca bate aqui.
+        valorTotalLiquido: isGarrafaBrinde(stripReferenciaPrefix(item.Produto)) ? 0 : item.Valores.ValorTotal,
         tabelaPreco,
         codigo: fatura.Codigo ?? null,
         saleDate,

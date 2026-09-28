@@ -363,6 +363,14 @@ export function stripReferenciaPrefix(produto: string): string {
   return produto.replace(/^\S+\s-\s/, "");
 }
 
+// "Garrafa 1200 ml [Cor]" (grupo Acessorios) é sempre brinde na prática — Rodrigo confirmou em
+// 2026-09-28 que é registrada como "Venda" no DAPIC só por questão tributária, nunca é cobrada de
+// verdade. Zera o valor no sync pra não inflar receita em nenhuma métrica do Radar (a linha em si
+// continua existindo em Sale, pra não sumir do histórico de unidades/contagem).
+export function isGarrafaBrinde(produto: string): boolean {
+  return produto.startsWith("Garrafa");
+}
+
 // `item.Id` (em DapicVendaPdvProduto/DapicFaturaProduto) NÃO é estável ao longo do tempo — achado
 // real em 2026-09-25: o mesmo item da fatura 12 tinha Id=12 numa consulta e Id=109 numa consulta
 // posterior (a DAPIC renumera por baixo dos panos, provavelmente um contador global entre faturas
