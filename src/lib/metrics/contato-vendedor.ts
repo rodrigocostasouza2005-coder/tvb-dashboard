@@ -252,6 +252,26 @@ function fatiaDoDia<T>(pool: T[], porDia: number, seed: number): T[] {
 const ESFRIANDO_DIAS_MIN = 70;
 const ESFRIANDO_DIAS_MAX = 90;
 
+// Cooldown pós-contato — achado pelo Rodrigo em 2026-09-28: mandava mensagem pra um cliente e
+// 2-3 dias depois ele voltava a aparecer na lista pra mandar de novo. Causa: a rotação (
+// fatiaDoDia) sorteava a fatia do dia só olhando o pool inteiro, sem checar se o cliente já tinha
+// ContatoMarcado (tipo "sugestao") recente — o segmento dele (VIP esfriando etc.) não muda de um
+// dia pro outro, então bastava o pool ser pequeno pra ele recair na fatia poucos dias depois.
+// Cooldown de 7 dias (mesma janela usada no follow-up pós-compra) dá tempo do cliente responder
+// antes de reaparecer. Vale pra qualquer motivo — se já contatei essa pessoa essa semana por
+// QUALQUER motivo de sugestão, não preciso ver ela de novo, mesmo que o segmento dela tenha mudado
+// nesse meio tempo.
+const COOLDOWN_CONTATO_DIAS = 7;
+
+async function getClientesContatadosRecente(): Promise<Set<string>> {
+  const cutoff = new Date(Date.now() - COOLDOWN_CONTATO_DIAS * 86400000);
+  const rows = await prisma.contatoMarcado.findMany({
+    where: { tipo: "sugestao", contatadoEm: { gte: cutoff } },
+    select: { cliente: true },
+  });
+  return new Set(rows.map((r) => r.cliente.trim().toUpperCase()));
+}
+
 // vendedor opcional (2026-09-21, reescrito): NÃO filtra mais direto em Sale.vendedor (isso
 // prendia o cliente pra sempre a quem baixou a última venda, sem jeito de redistribuir quando
 // alguém sai da empresa). A geração dos 6 pools continua idêntica (segmentação/aniversariantes
@@ -263,37 +283,39 @@ const ESFRIANDO_DIAS_MAX = 90;
 export async function getSugestoesDeContato(filters: DashboardFilters, vendedor?: string | null): Promise<SugestaoContato[]> {
   const storeIdUnico = filters.storeIds?.length === 1 ? filters.storeIds[0] : null;
   const mesAtual = new Date().getUTCMonth() + 1;
-  const [segmentacao, aniversariantes] = await Promise.all([
+  const [segmentacao, aniversariantes, contatadosRecente] = await Promise.all([
     getClienteSegmentacao(filters, "b2c"),
     getAniversariantesDoMes(filters, null, mesAtual, "b2c"),
+    getClientesContatadosRecente(),
   ]);
+  const naoContatadoRecente = (nome: string) => !contatadosRecente.has(nome.trim().toUpperCase());
 
   // Só quem tem telefone no cadastro — sem isso não dá pra chamar no WhatsApp, não faz sentido
   // ocupar uma vaga do dia com alguém incontatável. Pedido do Rodrigo em 2026-08-31.
   const vipPool = segmentacao
-    .filter((s) => s.segmento === "vip" && s.telefone && s.recenciaDias >= ESFRIANDO_DIAS_MIN && s.recenciaDias <= ESFRIANDO_DIAS_MAX)
+    .filter((s) => s.segmento === "vip" && s.telefone && s.recenciaDias >= ESFRIANDO_DIAS_MIN && s.recenciaDias <= ESFRIANDO_DIAS_MAX && naoContatadoRecente(s.cliente))
     .sort((a, b) => a.cliente.localeCompare(b.cliente));
   const recorrentePool = segmentacao
-    .filter((s) => s.segmento === "recorrente" && s.telefone && s.recenciaDias >= ESFRIANDO_DIAS_MIN && s.recenciaDias <= ESFRIANDO_DIAS_MAX)
+    .filter((s) => s.segmento === "recorrente" && s.telefone && s.recenciaDias >= ESFRIANDO_DIAS_MIN && s.recenciaDias <= ESFRIANDO_DIAS_MAX && naoContatadoRecente(s.cliente))
     .sort((a, b) => a.cliente.localeCompare(b.cliente));
   // 3 grupos a mais, pedido do Rodrigo em 2026-08-31 — esses já são "frios" pela própria definição
   // do segmento (em_risco/inativo já passaram do limiar de recência, ocasional nunca teve um 2º
   // pedido), então não precisam da janela extra de "esfriando" que VIP/Recorrente usam.
   const emRiscoPool = segmentacao
-    .filter((s) => s.segmento === "em_risco" && s.telefone)
+    .filter((s) => s.segmento === "em_risco" && s.telefone && naoContatadoRecente(s.cliente))
     .sort((a, b) => a.cliente.localeCompare(b.cliente));
   const ocasionalPool = segmentacao
-    .filter((s) => s.segmento === "ocasional" && s.telefone)
+    .filter((s) => s.segmento === "ocasional" && s.telefone && naoContatadoRecente(s.cliente))
     .sort((a, b) => a.cliente.localeCompare(b.cliente));
   const inativoPool = segmentacao
-    .filter((s) => s.segmento === "inativo" && s.telefone)
+    .filter((s) => s.segmento === "inativo" && s.telefone && naoContatadoRecente(s.cliente))
     .sort((a, b) => a.cliente.localeCompare(b.cliente));
   // Só o dia exato do aniversário — pedido do Rodrigo em 2026-08-31 (diferente da Visão Geral,
   // que mostra o mês inteiro de propósito, pra planejamento; aqui é "ligar hoje", só faz sentido
   // no dia certo).
   const hojeDia = new Date().getUTCDate();
   const aniversarioPool = aniversariantes
-    .filter((a) => (a.telefone ?? a.celular) && a.dataNascimento.getUTCDate() === hojeDia)
+    .filter((a) => (a.telefone ?? a.celular) && a.dataNascimento.getUTCDate() === hojeDia && naoContatadoRecente(a.nome))
     .sort((a, b) => a.nome.localeCompare(b.nome));
 
   // Loja principal de qualquer cliente (mesmo os que só apareceram via aniversariante, que vem
