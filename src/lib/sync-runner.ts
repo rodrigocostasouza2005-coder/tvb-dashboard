@@ -10,7 +10,7 @@ import { upsertStockSnapshots, type StockSnapshotRow } from "@/lib/connectors/up
 import { upsertProductionOrders, type ProductionOrderRow } from "@/lib/connectors/upsert-production-order";
 import { fetchPriceCatalogCached, inferTabelaPreco, type PriceCatalog } from "@/lib/connectors/tabela-preco";
 import { sendTelegramMessage } from "@/lib/telegram";
-import { getTopParaIncentivar, getTopVendidosPorLoja } from "@/lib/metrics";
+import { getTopParaIncentivar, getTopVendidosPorLoja, getPromotionRows } from "@/lib/metrics";
 import { brasiliaDayStart, brasiliaDayEnd, todayBrasiliaStr } from "@/lib/filters";
 
 // Lógica compartilhada pelas duas rotas de sync (/api/sync e /api/sync-evening) — precisam ser
@@ -521,6 +521,61 @@ async function buildResumoMessage(desde: Date, ate: Date) {
   return partes.join("\n");
 }
 
+// Rede de segurança contra o incidente de 2026-09-25 (item.Id da DAPIC não é estável — ver
+// stableItemIndexes em dapic.ts — causou ~R$800k em vendas duplicadas ao longo de vários
+// reprocessamentos antes de ser achado por acidente). Roda 1x/dia (só na sync das 8h, ver
+// checkDuplicates em runSyncLocked) e verifica se duplicata real reapareceu: mesma loja+venda+
+// produto+quantidade+valor com mais de 1 linha — não deveria mais acontecer com o índice
+// determinístico, mas mais vale checar sozinho do que descobrir de novo só quando o número já
+// tiver errado na tela. Silencioso quando não acha nada, pra não virar ruído diário.
+async function checkForDuplicateSales(): Promise<string | null> {
+  const [saleGroups, returnGroups] = await Promise.all([
+    prisma.sale.groupBy({
+      by: ["storeId", "dapicVendaId", "cod", "quantidade", "valorTotalLiquido"],
+      _count: { _all: true },
+    }),
+    prisma.return.groupBy({
+      by: ["storeId", "dapicVendaId", "cod", "quantidade", "valorTotal"],
+      _count: { _all: true },
+    }),
+  ]);
+
+  const saleDupGroups = saleGroups.filter((g) => g._count._all > 1);
+  const returnDupGroups = returnGroups.filter((g) => g._count._all > 1);
+  if (saleDupGroups.length === 0 && returnDupGroups.length === 0) return null;
+
+  const saleValorExtra = saleDupGroups.reduce((s, g) => s + g.valorTotalLiquido * (g._count._all - 1), 0);
+  const returnValorExtra = returnDupGroups.reduce((s, g) => s + g.valorTotal * (g._count._all - 1), 0);
+
+  const linhas: string[] = [];
+  if (saleDupGroups.length) linhas.push(`Vendas: ${saleDupGroups.length} grupo(s) duplicado(s), ~R$ ${saleValorExtra.toFixed(0)} inflado`);
+  if (returnDupGroups.length) linhas.push(`Devoluções: ${returnDupGroups.length} grupo(s) duplicado(s), ~R$ ${returnValorExtra.toFixed(0)} inflado`);
+  return `⚠️ Duplicata de dado achada na checagem diária:\n${linhas.join("\n")}\nInvestigar antes de confiar nos números.`;
+}
+
+// Complemento financeiro ao "Top pra incentivar" (que é só unidades) — pedido do Rodrigo em
+// 2026-09-28. Roda 1x/semana (segunda-feira, só na sync das 8h) e reaproveita a mesma regra de
+// "Produtos que merecem atenção" da Análises de Promoção (valor de estoque alto + sell-through
+// abaixo de 50%), pra destacar QUANTO dinheiro está parado, não só quantas unidades.
+async function buildAlertaEstoqueParadoSemanal(): Promise<string | null> {
+  const rows = await getPromotionRows({});
+  const parados = rows
+    .filter((r) => r.valorEstoqueCheio > 0 && r.sellThroughRate !== null && r.sellThroughRate < 50)
+    .sort((a, b) => b.valorEstoqueCheio - a.valorEstoqueCheio)
+    .slice(0, 10);
+  if (parados.length === 0) return null;
+
+  const totalParado = parados.reduce((s, r) => s + r.valorEstoqueCheio, 0);
+  const linhas = parados.map(
+    (r, i) =>
+      `${i + 1}. ${r.produto} — R$ ${r.valorEstoqueCheio.toFixed(0)} parado (sell-through ${r.sellThroughRate?.toFixed(0)}%)`
+  );
+  return (
+    `💰 Estoque parado da semana (top 10 por valor, sell-through < 50%):\n${linhas.join("\n")}\n` +
+    `Total desses 10: R$ ${totalParado.toFixed(0)} — ver aba Análises de Promoção pra simular desconto.`
+  );
+}
+
 // Um "attempt" da sync inteira — devolve o resumo em caso de sucesso, ou lança em caso de erro.
 // Separado de runSync() pra permitir tentar de novo (retryBudgetMs) sem duplicar a lógica de
 // notificação/log, que só acontece uma vez, no fim, em runSync().
@@ -676,21 +731,21 @@ async function releaseSyncLock() {
   await prisma.syncLock.update({ where: { id: SYNC_LOCK_ID }, data: { finishedAt: new Date() } }).catch(() => {});
 }
 
-export async function runSync(options: { silent?: boolean; retryBudgetMs?: number } = {}) {
-  const { silent = false, retryBudgetMs = 0 } = options;
+export async function runSync(options: { silent?: boolean; retryBudgetMs?: number; checkDuplicates?: boolean } = {}) {
+  const { silent = false, retryBudgetMs = 0, checkDuplicates = false } = options;
 
   if (!(await acquireSyncLock())) {
     return NextResponse.json({ ok: true, skipped: true, reason: "outra sincronização já em andamento" });
   }
 
   try {
-    return await runSyncLocked(silent, retryBudgetMs);
+    return await runSyncLocked(silent, retryBudgetMs, checkDuplicates);
   } finally {
     await releaseSyncLock();
   }
 }
 
-async function runSyncLocked(silent: boolean, retryBudgetMs: number) {
+async function runSyncLocked(silent: boolean, retryBudgetMs: number, checkDuplicates: boolean) {
   const start = Date.now();
   let lastMessage = "";
   let attempt = 0;
@@ -721,6 +776,20 @@ async function runSyncLocked(silent: boolean, retryBudgetMs: number) {
           { adminOnly: true }
         );
       }
+
+      // Checagens periódicas (só na sync das 8h — ver checkDuplicates em /api/sync/route.ts —
+      // pra não rodar 3x/dia à toa nem espalhar a lógica de "que dia é hoje" por vários lugares).
+      if (checkDuplicates) {
+        const alertaDuplicata = await checkForDuplicateSales().catch(() => null);
+        if (alertaDuplicata) await sendTelegramMessage(alertaDuplicata, { adminOnly: true });
+
+        const diaSemanaBrasilia = new Intl.DateTimeFormat("en-US", { timeZone: "America/Sao_Paulo", weekday: "long" }).format(new Date());
+        if (diaSemanaBrasilia === "Monday") { // segunda-feira
+          const alertaEstoqueParado = await buildAlertaEstoqueParadoSemanal().catch(() => null);
+          if (alertaEstoqueParado) await sendTelegramMessage(alertaEstoqueParado, { adminOnly: true });
+        }
+      }
+
       return NextResponse.json({ ok: true, ...result, attempt });
     } catch (error) {
       lastMessage = error instanceof Error ? error.message : String(error);
@@ -752,7 +821,7 @@ async function runSyncLocked(silent: boolean, retryBudgetMs: number) {
 }
 
 // Vercel Cron chama via GET com "Authorization: Bearer <CRON_SECRET>" automático.
-export async function handleSyncGet(request: NextRequest, options?: { silent?: boolean; retryBudgetMs?: number }) {
+export async function handleSyncGet(request: NextRequest, options?: { silent?: boolean; retryBudgetMs?: number; checkDuplicates?: boolean }) {
   const auth = request.headers.get("authorization");
   if (!process.env.CRON_SECRET || auth !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -761,7 +830,7 @@ export async function handleSyncGet(request: NextRequest, options?: { silent?: b
 }
 
 // Disparo manual (ex: pra testar), com o segredo num header próprio.
-export async function handleSyncPost(request: NextRequest, options?: { silent?: boolean; retryBudgetMs?: number }) {
+export async function handleSyncPost(request: NextRequest, options?: { silent?: boolean; retryBudgetMs?: number; checkDuplicates?: boolean }) {
   const secret = request.headers.get("x-cron-secret");
   if (!process.env.CRON_SECRET || secret !== process.env.CRON_SECRET) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });

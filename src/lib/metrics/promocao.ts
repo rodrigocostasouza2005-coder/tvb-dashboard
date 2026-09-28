@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@prisma/client";
 import { getVarejoPriceMap, resolveSellThrough } from "./estoque";
 import { stockWhere, type DashboardFilters } from "./core";
 import { getDescontoRecomendado } from "@/lib/promotion-rules";
@@ -126,4 +127,43 @@ export async function getPromotionRows(filters: Pick<DashboardFilters, "storeIds
   }
 
   return rows.sort((a, b) => b.valorEstoquePromo - a.valorEstoquePromo);
+}
+
+export type PromotionResultadoReal = { receita: number; unidades: number; pedidos: number };
+
+// Fecha o loop da simulação — pedido do Rodrigo em 2026-09-28: depois que uma campanha (ex: Black
+// Friday) realmente acontece, comparar a receita REAL do período com a "receita potencial"
+// projetada antes. Filtros de coleção/grupo/produto espelham exatamente o que a tela já filtra
+// (single-select, não precisa de chave composta — grupo/coleção/produto batendo junto já
+// identifica a mesma fatia que a projeção usa).
+export async function getPromotionResultadoReal(params: {
+  from: Date;
+  to: Date;
+  storeIds?: string[];
+  grupoIn?: string[];
+  colecao?: string;
+  grupo?: string;
+  produto?: string;
+}): Promise<PromotionResultadoReal> {
+  const conditions: Prisma.SaleWhereInput[] = [
+    { saleDate: { gte: params.from, lte: params.to } },
+    SEM_MATERIA_PRIMA,
+  ];
+  if (params.storeIds !== undefined) conditions.push({ storeId: { in: params.storeIds } });
+  if (params.grupoIn) conditions.push({ grupo: { in: params.grupoIn } });
+  if (params.colecao) conditions.push({ colecao: params.colecao });
+  if (params.grupo) conditions.push({ grupo: params.grupo });
+  if (params.produto) conditions.push({ produto: params.produto });
+
+  const where: Prisma.SaleWhereInput = { AND: conditions };
+  const [agg, pedidosDistintos] = await Promise.all([
+    prisma.sale.aggregate({ where, _sum: { valorTotalLiquido: true, quantidade: true } }),
+    prisma.sale.findMany({ where, select: { dapicVendaId: true }, distinct: ["dapicVendaId"] }),
+  ]);
+
+  return {
+    receita: agg._sum.valorTotalLiquido ?? 0,
+    unidades: agg._sum.quantidade ?? 0,
+    pedidos: pedidosDistintos.length,
+  };
 }

@@ -66,6 +66,34 @@ export function PromocaoClient({ rows }: { rows: PromotionRow[] }) {
   const [descontoPersonalizado, setDescontoPersonalizado] = useState(20);
   const [ordenacao, setOrdenacao] = useState<"receita" | "estoque" | "sellthrough" | "desconto">("receita");
 
+  // Período da campanha — só usado pro comparativo de Resultado Real (seção abaixo). Estado
+  // local, mesmo espírito não-persistido da campanha (pedido do Rodrigo em 2026-09-28: fechar o
+  // loop comparando receita potencial projetada vs receita real DEPOIS da campanha acontecer).
+  const [dataInicio, setDataInicio] = useState("");
+  const [dataFim, setDataFim] = useState("");
+  const [resultadoReal, setResultadoReal] = useState<{ receita: number; unidades: number; pedidos: number } | null>(null);
+  const [carregandoResultado, setCarregandoResultado] = useState(false);
+  const [erroResultado, setErroResultado] = useState<string | null>(null);
+
+  async function verResultadoReal() {
+    if (!dataInicio || !dataFim) { setErroResultado("Escolha o período da campanha (início e fim)."); return; }
+    setCarregandoResultado(true);
+    setErroResultado(null);
+    try {
+      const qs = new URLSearchParams({ from: dataInicio, to: dataFim });
+      if (colecaoSel) qs.set("colecao", colecaoSel);
+      if (grupoSel) qs.set("grupo", grupoSel);
+      if (produtoSel) qs.set("produto", produtoSel);
+      const res = await fetch(`/api/promocao/resultado-real?${qs.toString()}`);
+      if (!res.ok) throw new Error();
+      setResultadoReal(await res.json());
+    } catch {
+      setErroResultado("Não consegui carregar o resultado real. Tenta de novo.");
+    } finally {
+      setCarregandoResultado(false);
+    }
+  }
+
   const coleções = useMemo(() => [...new Set(rows.map((r) => r.colecao))].sort(), [rows]);
 
   // "Quadrinho" de sell-through pedido pelo Rodrigo em 2026-09-26 — a mesma matriz Coleção ×
@@ -375,6 +403,52 @@ export function PromocaoClient({ rows }: { rows: PromotionRow[] }) {
         </div>
       </section>
 
+      {/* Resultado Real — fecha o loop depois que a campanha acontece de verdade */}
+      <section className="mb-6 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)]">
+        <h2 className="border-b border-[var(--gridline)] px-4 py-3 text-sm font-semibold text-[var(--text-primary)]">Resultado Real</h2>
+        <div className="p-4">
+          <p className="mb-3 text-xs text-[var(--text-muted)]">
+            Depois que a campanha acontecer, escolha o período pra comparar a receita REAL vendida com a receita potencial projetada acima (respeita os mesmos filtros de Coleção/Grupo/Produto selecionados).
+          </p>
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] font-medium uppercase tracking-wide text-[var(--text-muted)]">Início</label>
+              <input
+                type="date" value={dataInicio} onChange={(e) => setDataInicio(e.target.value)}
+                className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-xs text-[var(--text-primary)]"
+                style={{ colorScheme: "light dark" }}
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] font-medium uppercase tracking-wide text-[var(--text-muted)]">Fim</label>
+              <input
+                type="date" value={dataFim} onChange={(e) => setDataFim(e.target.value)}
+                className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-xs text-[var(--text-primary)]"
+                style={{ colorScheme: "light dark" }}
+              />
+            </div>
+            <button
+              type="button" onClick={verResultadoReal} disabled={carregandoResultado}
+              className="rounded-md border border-[var(--series-1)] bg-[var(--series-1)] px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+            >
+              {carregandoResultado ? "Carregando..." : "Ver resultado real"}
+            </button>
+            {erroResultado && <span className="text-xs text-[var(--status-critical)]">{erroResultado}</span>}
+          </div>
+
+          {resultadoReal && (
+            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <ComparativoTile label="Receita" real={resultadoReal.receita} projetado={kpis.receitaPotencial} formato={formatBRL} />
+              <ComparativoTile label="Unidades" real={resultadoReal.unidades} projetado={kpis.unidadesPotenciais} formato={formatNum} />
+              <div className="rounded-lg border border-[var(--border)] bg-[var(--page-plane)] p-3">
+                <div className="text-xs font-medium text-[var(--text-muted)]">Pedidos no período</div>
+                <div className="mt-1 text-xl font-semibold tabular-nums text-[var(--text-primary)]">{formatNum(resultadoReal.pedidos)}</div>
+              </div>
+            </div>
+          )}
+        </div>
+      </section>
+
       {/* Análise por Coleção + por Grupo, lado a lado em telas largas */}
       <div className="mb-6 grid grid-cols-1 gap-4 xl:grid-cols-2">
         <section className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)]">
@@ -557,5 +631,24 @@ function RowCenario({ label, values }: { label: string; values: string[] }) {
       <td className="px-4 py-2 text-[var(--text-secondary)]">{label}</td>
       {values.map((v, i) => <td key={i} className="px-4 py-2 text-right tabular-nums font-medium text-[var(--text-primary)]">{v}</td>)}
     </tr>
+  );
+}
+
+function ComparativoTile({ label, real, projetado, formato }: { label: string; real: number; projetado: number; formato: (v: number) => string }) {
+  const diff = projetado > 0 ? ((real - projetado) / projetado) * 100 : null;
+  const bateu = diff !== null && diff >= 0;
+  return (
+    <div className="rounded-lg border border-[var(--border)] bg-[var(--page-plane)] p-3">
+      <div className="text-xs font-medium text-[var(--text-muted)]">{label} — real vs. projetado</div>
+      <div className="mt-1 flex items-baseline gap-2">
+        <span className="text-xl font-semibold tabular-nums text-[var(--text-primary)]">{formato(real)}</span>
+        <span className="text-xs text-[var(--text-muted)]">/ {formato(projetado)}</span>
+      </div>
+      {diff !== null && (
+        <div className={`mt-0.5 text-xs font-medium ${bateu ? "text-[var(--status-good)]" : "text-[var(--status-critical)]"}`}>
+          {bateu ? "▲" : "▼"} {Math.abs(diff).toFixed(1)}% {bateu ? "acima" : "abaixo"} do projetado
+        </div>
+      )}
+    </div>
   );
 }
