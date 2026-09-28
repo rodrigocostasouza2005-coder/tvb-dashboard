@@ -2,8 +2,9 @@
 
 import { useMemo, useState } from "react";
 import { StatTile } from "../stat-tile";
-import type { PromotionRow } from "@/lib/metrics";
+import type { PromotionRow, PromotionRulesData } from "@/lib/metrics";
 import { promotionRules, getDescontoRecomendado } from "@/lib/promotion-rules";
+import { salvarRegrasPromocaoAction } from "./actions";
 
 type DescontoModo = "recomendado" | "sem" | "+5" | "+10" | "+15" | "personalizado";
 
@@ -33,7 +34,6 @@ function formatNumCompact(v: number) {
 
 const FAIXAS = promotionRules.faixasSellThrough;
 const FAIXA_LABELS = ["100%", "75%", "50%", "25%"];
-const CAMPANHAS_PRESET = ["Black Friday 2026", "Liquidação", "Promoção"];
 
 type Linha = PromotionRow & {
   descontoRecomendadoAoVivo: number;
@@ -61,17 +61,24 @@ function somaPonderada(rows: Linha[], pctVendido: number) {
   return { estoqueTotal, valorCheio, valorPromo, receitaPotencial, unidadesPotenciais, descontoMedio, valorDescontoConcedido, sellThroughMedio };
 }
 
-function seedMatriz(colecoes: string[]): Record<string, number[]> {
+// Semente da matriz: prioriza o que já foi SALVO no banco (regrasSalvas.matriz) pra cada coleção;
+// coleção nova que ainda não tem regra salva cai no default de promotionRules.
+function seedMatriz(colecoes: string[], salvo: Record<string, number[]>): Record<string, number[]> {
   const m: Record<string, number[]> = {};
   for (const c of colecoes) {
     if (c === "BESTSELLER") continue;
-    m[c] = promotionRules.matrizPorColecao[c] ? [...promotionRules.matrizPorColecao[c]] : FAIXAS.map(() => promotionRules.descontoPadrao);
+    m[c] = salvo[c] ? [...salvo[c]] : promotionRules.matrizPorColecao[c] ? [...promotionRules.matrizPorColecao[c]] : FAIXAS.map(() => promotionRules.descontoPadrao);
   }
   return m;
 }
 
-export function PromocaoClient({ rows }: { rows: PromotionRow[] }) {
-  const [campanha, setCampanha] = useState(CAMPANHAS_PRESET[0]);
+export function PromocaoClient({
+  rows, regrasSalvas, podeEditarRegras,
+}: {
+  rows: PromotionRow[];
+  regrasSalvas: PromotionRulesData;
+  podeEditarRegras: boolean;
+}) {
   const [colecaoSel, setColecaoSel] = useState<string>("");
   const [grupoSel, setGrupoSel] = useState<string>("");
   const [produtoSel, setProdutoSel] = useState<string>("");
@@ -111,21 +118,22 @@ export function PromocaoClient({ rows }: { rows: PromotionRow[] }) {
   const coleções = useMemo(() => [...new Set(rows.map((r) => r.colecao))].sort(), [rows]);
 
   // "Quadrinho" de sell-through pedido pelo Rodrigo em 2026-09-26 — a mesma matriz Coleção ×
-  // faixa de sell-through da planilha, só que editável na tela ao vivo (estado local, mesmo
-  // espírito não-persistido da campanha). Toda coleção real do estoque atual entra como linha,
-  // não só as 3 que a planilha original tinha curado — pra cobrir coleção nova sem precisar
-  // mexer em código.
-  // Separado em "aplicado" (o que realmente entra no cálculo, dispara o recálculo de ~350
-  // linhas) vs "rascunho" (o que os campos mostram enquanto o Rodrigo digita) — achado em
-  // 2026-09-28: recalcular a tabela inteira a cada tecla digitada travava a resposta visual,
-  // parecia que não tava atualizando. Agora só recalcula 1x, quando aperta "Aplicar".
-  const [matriz, setMatriz] = useState<Record<string, number[]>>(() => seedMatriz(coleções));
-  const [matrizRascunho, setMatrizRascunho] = useState<Record<string, number[]>>(() => seedMatriz(coleções));
-  const [descontoBestseller, setDescontoBestseller] = useState(promotionRules.descontoBestseller * 100);
-  const [descontoBestsellerRascunho, setDescontoBestsellerRascunho] = useState(promotionRules.descontoBestseller * 100);
-  const [descontoPadrao, setDescontoPadrao] = useState(promotionRules.descontoPadrao * 100);
-  const [descontoPadraoRascunho, setDescontoPadraoRascunho] = useState(promotionRules.descontoPadrao * 100);
+  // faixa de sell-through da planilha, editável na tela. Semeada com o que já está SALVO no
+  // banco (regrasSalvas) — antes só vivia em estado local e sumia num F5 (achado em 2026-09-28:
+  // "não está salvando"), agora persiste via salvarRegrasPromocaoAction.
+  // Separado em "aplicado" (o que entra no cálculo, dispara o recálculo de ~350 linhas) vs
+  // "rascunho" (o que os campos mostram enquanto edita) — achado em 2026-09-28: recalcular a
+  // tabela inteira a cada tecla digitada travava a resposta visual. Só recalcula 1x, quando
+  // aperta "Aplicar e salvar".
+  const [matriz, setMatriz] = useState<Record<string, number[]>>(() => seedMatriz(coleções, regrasSalvas.matriz));
+  const [matrizRascunho, setMatrizRascunho] = useState<Record<string, number[]>>(() => seedMatriz(coleções, regrasSalvas.matriz));
+  const [descontoBestseller, setDescontoBestseller] = useState(regrasSalvas.descontoBestseller * 100);
+  const [descontoBestsellerRascunho, setDescontoBestsellerRascunho] = useState(regrasSalvas.descontoBestseller * 100);
+  const [descontoPadrao, setDescontoPadrao] = useState(regrasSalvas.descontoPadrao * 100);
+  const [descontoPadraoRascunho, setDescontoPadraoRascunho] = useState(regrasSalvas.descontoPadrao * 100);
   const [regrasPendentes, setRegrasPendentes] = useState(false);
+  const [salvando, setSalvando] = useState(false);
+  const [erroSalvar, setErroSalvar] = useState<string | null>(null);
 
   function setCelulaRascunho(colecao: string, faixaIdx: number, valorPct: number) {
     setMatrizRascunho((prev) => {
@@ -136,11 +144,25 @@ export function PromocaoClient({ rows }: { rows: PromotionRow[] }) {
     setRegrasPendentes(true);
   }
 
-  function aplicarRegras() {
+  async function aplicarRegras() {
     setMatriz(matrizRascunho);
     setDescontoBestseller(descontoBestsellerRascunho);
     setDescontoPadrao(descontoPadraoRascunho);
     setRegrasPendentes(false);
+    setSalvando(true);
+    setErroSalvar(null);
+    try {
+      const r = await salvarRegrasPromocaoAction({
+        matriz: matrizRascunho,
+        descontoBestseller: descontoBestsellerRascunho / 100,
+        descontoPadrao: descontoPadraoRascunho / 100,
+      });
+      if (!r.ok) setErroSalvar(r.erro ?? "Não consegui salvar.");
+    } catch {
+      setErroSalvar("Não consegui salvar — a mudança só vale até você sair da página.");
+    } finally {
+      setSalvando(false);
+    }
   }
 
   const gruposDaColecao = useMemo(
@@ -282,23 +304,9 @@ export function PromocaoClient({ rows }: { rows: PromotionRow[] }) {
   return (
     <div className="pb-6">
       {/* Header */}
-      <div className="mb-5 flex flex-wrap items-start justify-between gap-3 border-b border-[var(--gridline)] pb-4">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight text-[var(--text-primary)]">Análises de Promoção</h1>
-          <p className="mt-0.5 text-sm text-[var(--text-muted)]">Simulação de estoque, descontos e potencial de receita</p>
-        </div>
-        <div className="flex flex-col gap-1">
-          <span className="text-[10px] font-medium uppercase tracking-wide text-[var(--text-muted)]">Campanha</span>
-          <select
-            value={campanha}
-            onChange={(e) => setCampanha(e.target.value)}
-            className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-3 py-1.5 text-sm text-[var(--text-primary)]"
-            style={{ colorScheme: "light dark" }}
-          >
-            {CAMPANHAS_PRESET.map((c) => <option key={c} value={c}>{c}</option>)}
-            <option value="personalizada">Campanha personalizada</option>
-          </select>
-        </div>
+      <div className="mb-5 border-b border-[var(--gridline)] pb-4">
+        <h1 className="text-xl font-semibold tracking-tight text-[var(--text-primary)]">Análises de Promoção</h1>
+        <p className="mt-0.5 text-sm text-[var(--text-muted)]">Simulação de estoque, descontos e potencial de receita</p>
       </div>
 
       {/* Filtros hierárquicos — Coleção → Grupo → Produto, listas completas (não bloqueiam Tab), só restringem as OPÇÕES conforme o pai escolhido. */}
@@ -392,7 +400,9 @@ export function PromocaoClient({ rows }: { rows: PromotionRow[] }) {
             <div>
               <h2 className="text-sm font-semibold text-[var(--text-primary)]">Regras de Desconto por Sell-through</h2>
               <p className="mt-1 text-xs text-[var(--text-muted)]">
-                Mesma matriz da planilha (Coleção × faixa de sell-through) — edite os % e aperte Aplicar pra recalcular a página.
+                {podeEditarRegras
+                  ? "Mesma matriz da planilha (Coleção × faixa de sell-through) — edite os % e aperte Salvar. Vale pra todo mundo que abrir essa tela."
+                  : "Mesma matriz da planilha (Coleção × faixa de sell-through) — só ADMIN/GESTAO pode editar."}
                 {descontoModo !== "recomendado" && (
                   <span className="mt-1 block text-[var(--status-warning)]">
                     ⚠ O Simulador está em modo &quot;{descontoModo === "sem" ? "Sem desconto" : descontoModo === "personalizado" ? "Personalizado" : `+${descontoModo.slice(1)}%`}&quot; — a tabela usa esse valor, não a matriz. Troque o Simulador pra &quot;Desconto recomendado&quot; pra ver a matriz refletida nos produtos.
@@ -400,26 +410,29 @@ export function PromocaoClient({ rows }: { rows: PromotionRow[] }) {
                 )}
               </p>
             </div>
-            <div className="flex shrink-0 flex-col items-end gap-1">
-              <button
-                type="button"
-                onClick={aplicarRegras}
-                disabled={!regrasPendentes}
-                className={`rounded-md border px-3 py-1.5 text-xs font-medium disabled:cursor-default disabled:opacity-50 ${
-                  regrasPendentes
-                    ? "border-[var(--series-1)] bg-[var(--series-1)] text-white"
-                    : "border-[var(--border)] bg-[var(--surface-1)] text-[var(--text-muted)]"
-                }`}
-              >
-                {regrasPendentes ? "Aplicar mudanças" : "Aplicado"}
-              </button>
-              {/* Feedback imediato, do lado do botão — reflete a matriz aplicada de verdade,
-                  independente do modo do Simulador (que pode estar em "Sem desconto" ou
-                  "Personalizado", casos em que a matriz não afeta a tabela — não é bug). */}
-              <span className="text-[11px] text-[var(--text-muted)]">
-                Desconto médio aplicado agora: <strong className="text-[var(--text-primary)]">{formatPct(descontoRecomendadoMedioAplicado * 100)}</strong>
-              </span>
-            </div>
+            {podeEditarRegras && (
+              <div className="flex shrink-0 flex-col items-end gap-1">
+                <button
+                  type="button"
+                  onClick={aplicarRegras}
+                  disabled={!regrasPendentes || salvando}
+                  className={`rounded-md border px-3 py-1.5 text-xs font-medium disabled:cursor-default disabled:opacity-50 ${
+                    regrasPendentes
+                      ? "border-[var(--series-1)] bg-[var(--series-1)] text-white"
+                      : "border-[var(--border)] bg-[var(--surface-1)] text-[var(--text-muted)]"
+                  }`}
+                >
+                  {salvando ? "Salvando..." : regrasPendentes ? "Salvar mudanças" : "Salvo"}
+                </button>
+                {/* Feedback imediato, do lado do botão — reflete a matriz aplicada de verdade,
+                    independente do modo do Simulador (que pode estar em "Sem desconto" ou
+                    "Personalizado", casos em que a matriz não afeta a tabela — não é bug). */}
+                <span className="text-[11px] text-[var(--text-muted)]">
+                  Desconto médio aplicado agora: <strong className="text-[var(--text-primary)]">{formatPct(descontoRecomendadoMedioAplicado * 100)}</strong>
+                </span>
+                {erroSalvar && <span className="text-[11px] text-[var(--status-critical)]">{erroSalvar}</span>}
+              </div>
+            )}
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
@@ -436,10 +449,10 @@ export function PromocaoClient({ rows }: { rows: PromotionRow[] }) {
                     {FAIXAS.map((_, i) => (
                       <td key={i} className="px-1 py-1">
                         <input
-                          type="number" min={0} max={95}
+                          type="number" min={0} max={95} disabled={!podeEditarRegras}
                           value={Math.round((matrizRascunho[colecao]?.[i] ?? promotionRules.descontoPadrao) * 100)}
                           onChange={(e) => setCelulaRascunho(colecao, i, Number(e.target.value))}
-                          className="w-14 rounded border border-[var(--border)] bg-[var(--page-plane)] px-1.5 py-1 text-center tabular-nums text-[var(--text-primary)]"
+                          className="w-14 rounded border border-[var(--border)] bg-[var(--page-plane)] px-1.5 py-1 text-center tabular-nums text-[var(--text-primary)] disabled:opacity-60"
                         />
                       </td>
                     ))}
@@ -449,9 +462,9 @@ export function PromocaoClient({ rows }: { rows: PromotionRow[] }) {
                   <td className="py-1 pr-2 font-medium whitespace-nowrap text-[var(--text-primary)]">Bestseller <span className="font-normal text-[var(--text-muted)]">(fixo)</span></td>
                   <td className="px-1 py-1" colSpan={4}>
                     <input
-                      type="number" min={0} max={95} value={Math.round(descontoBestsellerRascunho)}
+                      type="number" min={0} max={95} disabled={!podeEditarRegras} value={Math.round(descontoBestsellerRascunho)}
                       onChange={(e) => { setDescontoBestsellerRascunho(Number(e.target.value)); setRegrasPendentes(true); }}
-                      className="w-14 rounded border border-[var(--border)] bg-[var(--page-plane)] px-1.5 py-1 text-center tabular-nums text-[var(--text-primary)]"
+                      className="w-14 rounded border border-[var(--border)] bg-[var(--page-plane)] px-1.5 py-1 text-center tabular-nums text-[var(--text-primary)] disabled:opacity-60"
                     />
                   </td>
                 </tr>
@@ -459,9 +472,9 @@ export function PromocaoClient({ rows }: { rows: PromotionRow[] }) {
                   <td className="py-1 pr-2 font-medium whitespace-nowrap text-[var(--text-primary)]">Padrão <span className="font-normal text-[var(--text-muted)]">(sem regra)</span></td>
                   <td className="px-1 py-1" colSpan={4}>
                     <input
-                      type="number" min={0} max={95} value={Math.round(descontoPadraoRascunho)}
+                      type="number" min={0} max={95} disabled={!podeEditarRegras} value={Math.round(descontoPadraoRascunho)}
                       onChange={(e) => { setDescontoPadraoRascunho(Number(e.target.value)); setRegrasPendentes(true); }}
-                      className="w-14 rounded border border-[var(--border)] bg-[var(--page-plane)] px-1.5 py-1 text-center tabular-nums text-[var(--text-primary)]"
+                      className="w-14 rounded border border-[var(--border)] bg-[var(--page-plane)] px-1.5 py-1 text-center tabular-nums text-[var(--text-primary)] disabled:opacity-60"
                     />
                   </td>
                 </tr>

@@ -154,6 +154,19 @@ model MapaComprasConfig {
   crescimentoPct Float
 }
 
+// Matriz de desconto por Coleção × faixa de sell-through da Análises de Promoção — o "quadrinho"
+// editável (ver promotion-rules.ts). Uma linha só (id fixo "global"), mesma convenção de
+// MapaComprasConfig. Sem linha ainda = usa os defaults hardcoded em promotionRules (nunca editado
+// ainda). Pedido do Rodrigo em 2026-09-28: a matriz editada na tela precisa sobreviver a um
+// F5/nova sessão, não só durar enquanto a aba tá aberta.
+model PromotionRulesConfig {
+  id                 String   @id
+  matriz             Json
+  descontoBestseller Float
+  descontoPadrao     Float
+  updatedAt          DateTime @updatedAt
+}
+
 // Token pra conectar o Radar num Custom GPT (ChatGPT) ou Conector MCP (Claude) — pedido do
 // Rodrigo em 2026-09-08. Uma linha só (id fixo "radar-api"), gerada/trocada e RE-VISUALIZADA
 // pelo Painel Admin (pedido dele: não quer ser forçado a reconectar ChatGPT/Claude só porque

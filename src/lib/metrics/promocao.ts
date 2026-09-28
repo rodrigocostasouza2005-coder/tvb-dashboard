@@ -2,7 +2,7 @@ import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@prisma/client";
 import { getVarejoPriceMap, resolveSellThrough } from "./estoque";
 import { stockWhere, type DashboardFilters } from "./core";
-import { getDescontoRecomendado } from "@/lib/promotion-rules";
+import { getDescontoRecomendado, promotionRules } from "@/lib/promotion-rules";
 
 // "(sem grupo)" é sempre matéria-prima/insumo (etiqueta, zíper, tecido em rolo), nunca produto de
 // verdade à venda — Rodrigo já tinha pedido pra tirar do dashboard inteiro (ver stockWhere em
@@ -40,12 +40,16 @@ function key3(grupo: string, produto: string, colecao: string) {
 export async function getPromotionRows(filters: Pick<DashboardFilters, "storeIds" | "grupoIn">): Promise<PromotionRow[]> {
   const grupoWhere = filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {};
 
-  const [stockRows, varejoPrices] = await Promise.all([
+  const [stockRows, varejoPrices, regrasConfig] = await Promise.all([
     prisma.stockSnapshot.findMany({
       where: stockWhere(filters),
       select: { grupo: true, produto: true, colecao: true, cod: true, quantidadeDisponivel: true },
     }),
     getVarejoPriceMap(),
+    // Usa a matriz SALVA (editada por um ADMIN/GESTAO na tela), não o default hardcoded — assim
+    // o alerta semanal de estoque parado (sync-runner.ts) e qualquer outro consumidor server-side
+    // ficam consistentes com o que a tela mostra.
+    getPromotionRulesConfig(),
   ]);
 
   // Estoque empresa toda (ignora filtro de loja) — denominador do sell-through, mesma regra de
@@ -113,7 +117,7 @@ export async function getPromotionRows(filters: Pick<DashboardFilters, "storeIds
       producaoMap.get(k) ?? 0
     );
 
-    const { desconto, motivo } = getDescontoRecomendado(colecao, sellThroughRate);
+    const { desconto, motivo } = getDescontoRecomendado(colecao, sellThroughRate, regrasConfig.matriz, regrasConfig.descontoBestseller, regrasConfig.descontoPadrao);
     const precoPromocional = precoCheio !== null ? precoCheio * (1 - desconto) : null;
     const valorEstoqueCheio = precoCheio !== null ? estoque * precoCheio : 0;
     const valorEstoquePromo = precoPromocional !== null ? estoque * precoPromocional : 0;
@@ -166,4 +170,33 @@ export async function getPromotionResultadoReal(params: {
     unidades: agg._sum.quantidade ?? 0,
     pedidos: pedidosDistintos.length,
   };
+}
+
+export type PromotionRulesData = { matriz: Record<string, number[]>; descontoBestseller: number; descontoPadrao: number };
+
+// Persiste a matriz editada na tela — antes vivia só em estado local do React (se perdia num F5
+// ou sessão nova). Uma linha só (id "global", mesmo padrão de MapaComprasConfig). Sem linha ainda
+// (nunca editado) cai nos defaults hardcoded de promotionRules.
+export async function getPromotionRulesConfig(): Promise<PromotionRulesData> {
+  const row = await prisma.promotionRulesConfig.findUnique({ where: { id: "global" } });
+  if (!row) {
+    return {
+      matriz: promotionRules.matrizPorColecao,
+      descontoBestseller: promotionRules.descontoBestseller,
+      descontoPadrao: promotionRules.descontoPadrao,
+    };
+  }
+  return {
+    matriz: row.matriz as Record<string, number[]>,
+    descontoBestseller: row.descontoBestseller,
+    descontoPadrao: row.descontoPadrao,
+  };
+}
+
+export async function savePromotionRulesConfig(data: PromotionRulesData): Promise<void> {
+  await prisma.promotionRulesConfig.upsert({
+    where: { id: "global" },
+    create: { id: "global", ...data },
+    update: data,
+  });
 }
