@@ -687,6 +687,8 @@ export function PromocaoClient({
                 <th className="px-4 py-2 font-medium">Coleção</th>
                 <th className="px-4 py-2 text-right font-medium">Preço</th>
                 <th className="px-4 py-2 text-right font-medium">Estoque</th>
+                <th className="px-4 py-2 text-right font-medium">A vender ({pctVendido}%)</th>
+                <th className="px-4 py-2 text-right font-medium">Sobra</th>
                 <th className="px-4 py-2 text-right font-medium">Sell-through</th>
                 <th className="px-4 py-2 text-right font-medium">Desc.</th>
                 <th className="px-4 py-2 text-right font-medium">Preço Promo</th>
@@ -696,21 +698,26 @@ export function PromocaoClient({
             </thead>
             <tbody>
               {linhasOrdenadas.length === 0 ? (
-                <tr><td colSpan={10} className="px-4 py-8 text-center text-sm text-[var(--text-muted)]">Nenhum produto encontrado para os filtros selecionados.</td></tr>
-              ) : linhasOrdenadas.map((r) => (
+                <tr><td colSpan={12} className="px-4 py-8 text-center text-sm text-[var(--text-muted)]">Nenhum produto encontrado para os filtros selecionados.</td></tr>
+              ) : linhasOrdenadas.map((r) => {
+                const unidadesVender = Math.round(r.estoque * (pctVendido / 100));
+                return (
                 <tr key={`${r.grupo}-${r.produto}-${r.colecao}`} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
                   <td className="px-4 py-2 whitespace-nowrap text-[var(--text-secondary)]">{r.grupo}</td>
                   <td className="px-4 py-2 font-medium whitespace-nowrap text-[var(--text-primary)]">{r.produto}</td>
                   <td className="px-4 py-2 whitespace-nowrap text-[var(--text-secondary)]">{r.colecao}</td>
                   <td className="px-4 py-2 text-right tabular-nums whitespace-nowrap text-[var(--text-secondary)]">{r.precoCheio !== null ? formatBRL(r.precoCheio) : "—"}</td>
                   <td className="px-4 py-2 text-right tabular-nums text-[var(--text-secondary)]">{formatNum(r.estoque)}</td>
+                  <td className="px-4 py-2 text-right tabular-nums text-[var(--text-secondary)]">{formatNum(unidadesVender)}</td>
+                  <td className="px-4 py-2 text-right tabular-nums text-[var(--text-secondary)]">{formatNum(r.estoque - unidadesVender)}</td>
                   <td className="px-4 py-2 text-right tabular-nums text-[var(--text-secondary)]">{r.sellThroughRate !== null ? formatPct(r.sellThroughRate) : "—"}</td>
                   <td className="px-4 py-2 text-right tabular-nums text-[var(--text-secondary)]" title={r.motivoAoVivo}>{formatPct(r.descontoAplicado * 100)}</td>
                   <td className="px-4 py-2 text-right tabular-nums whitespace-nowrap text-[var(--text-secondary)]">{r.precoPromoAplicado !== null ? formatBRL(r.precoPromoAplicado) : "—"}</td>
                   <td className="px-4 py-2 text-right tabular-nums whitespace-nowrap text-[var(--text-secondary)]">{formatBRL(r.valorEstoqueCheio)}</td>
                   <td className="px-4 py-2 text-right tabular-nums font-medium whitespace-nowrap text-[var(--text-primary)]">{formatBRL(r.receitaPotencialLinha)}</td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
