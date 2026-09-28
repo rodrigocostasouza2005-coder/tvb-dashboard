@@ -90,7 +90,8 @@ function mensagemFollowUp(f: FollowUpComNota, templates: Record<TemplateKey, str
       : `${f.produtos.slice(0, -1).join(", ")} e ${f.produtos[f.produtos.length - 1]}`;
   const base = renderTemplate(templates.follow_up, { nome, produtos });
   if (f.numeroNota) {
-    return `${base}\n\nE se precisar trocar alguma coisa, já separa o número da nota aqui: ${f.numeroNota}.`;
+    // Pedido do Rodrigo em 2026-09-28: formato seco em vez de frase.
+    return `${base}\n\nNFC-E: ${f.numeroNota}`;
   }
   return base;
 }
