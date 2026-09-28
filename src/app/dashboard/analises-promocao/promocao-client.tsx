@@ -671,7 +671,7 @@ export function PromocaoClient({
             </select>
             <button
               type="button"
-              onClick={() => exportarExcel(linhasOrdenadas)}
+              onClick={() => exportarExcel(linhasOrdenadas, pctVendido)}
               className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1 font-medium text-[var(--text-secondary)] hover:bg-[var(--page-plane)]"
             >
               Exportar Excel
@@ -749,21 +749,29 @@ function RowCenario({ label, values }: { label: string; values: string[] }) {
 // formatado certo, sem precisar do assistente de importação. BOM (﻿) garante que acento
 // apareça certo. Exporta exatamente o que está na tela (linhasOrdenadas já reflete filtro +
 // ordenação + simulador aplicados) — pedido do Rodrigo em 2026-09-28.
-function exportarExcel(linhas: Linha[]) {
+function exportarExcel(linhas: Linha[], pctVendido: number) {
   const numCSV = (v: number, casas = 2) => v.toFixed(casas).replace(".", ",");
-  const header = ["Grupo", "Produto", "Coleção", "Preço", "Estoque", "Sell-through (%)", "Desconto (%)", "Preço Promo", "Valor Estoque", "Receita Potencial"];
-  const corpo = linhas.map((r) => [
-    r.grupo,
-    r.produto,
-    r.colecao,
-    r.precoCheio !== null ? numCSV(r.precoCheio) : "",
-    String(r.estoque),
-    r.sellThroughRate !== null ? numCSV(r.sellThroughRate, 1) : "",
-    numCSV(r.descontoAplicado * 100, 1),
-    r.precoPromoAplicado !== null ? numCSV(r.precoPromoAplicado) : "",
-    numCSV(r.valorEstoqueCheio),
-    numCSV(r.receitaPotencialLinha),
-  ]);
+  const header = [
+    "Grupo", "Produto", "Coleção", "Preço", "Estoque", "Sell-through (%)", "Desconto (%)", "Preço Promo",
+    "Valor Estoque", `Unidades a vender (${pctVendido}%)`, "Unidades que sobram", "Receita Potencial",
+  ];
+  const corpo = linhas.map((r) => {
+    const unidadesVender = Math.round(r.estoque * (pctVendido / 100));
+    return [
+      r.grupo,
+      r.produto,
+      r.colecao,
+      r.precoCheio !== null ? numCSV(r.precoCheio) : "",
+      String(r.estoque),
+      r.sellThroughRate !== null ? numCSV(r.sellThroughRate, 1) : "",
+      numCSV(r.descontoAplicado * 100, 1),
+      r.precoPromoAplicado !== null ? numCSV(r.precoPromoAplicado) : "",
+      numCSV(r.valorEstoqueCheio),
+      String(unidadesVender),
+      String(r.estoque - unidadesVender),
+      numCSV(r.receitaPotencialLinha),
+    ];
+  });
   const csv = [header, ...corpo]
     .map((linha) => linha.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(";"))
     .join("\r\n");
