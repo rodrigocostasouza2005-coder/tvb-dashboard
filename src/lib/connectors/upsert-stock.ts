@@ -41,7 +41,10 @@ export async function upsertStockSnapshots(
         "grupo" = EXCLUDED."grupo",
         "cor" = EXCLUDED."cor",
         "tamanho" = EXCLUDED."tamanho",
-        "colecao" = EXCLUDED."colecao",
+        -- COALESCE: o DAPIC às vezes manda Colecao vazio pra um produto que já tinha coleção
+        -- preenchida num sync anterior (achado com as Garrafas em 2026-09-28) — preferir manter
+        -- a coleção que já sabíamos em vez de apagar. Só sobrescreve quando o novo valor É algo.
+        "colecao" = COALESCE(EXCLUDED."colecao", "StockSnapshot"."colecao"),
         "quantidadeDisponivel" = EXCLUDED."quantidadeDisponivel",
         "estoqueMinimo" = EXCLUDED."estoqueMinimo",
         "valorCusto" = EXCLUDED."valorCusto",
