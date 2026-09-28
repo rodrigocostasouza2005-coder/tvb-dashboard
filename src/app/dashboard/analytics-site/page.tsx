@@ -9,7 +9,13 @@ import {
   getAnuncios,
   getFunilCompra,
 } from "@/lib/connectors/google-analytics";
-import { getFotosPorNomeConjunto, getInsightsPorConjunto, type MetaInsight } from "@/lib/connectors/meta-ads";
+import {
+  getFotosPorNomeConjunto,
+  getInsightsPorConjunto,
+  getFotosPorNomeAnuncio,
+  getInsightsPorAnuncio,
+  type MetaInsight,
+} from "@/lib/connectors/meta-ads";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { requireTabAccess } from "@/lib/tabs";
@@ -17,13 +23,10 @@ import { defaultRecentRangeStr, type RawSearchParams } from "@/lib/filters";
 import { StatTile } from "../stat-tile";
 import { PieChart } from "../pie-chart";
 import { IndicatorChart } from "../indicadores/indicator-chart";
+import { InvestimentoMetaAds, type InvestimentoRow } from "./investimento-meta-ads";
 
 function formatPct(v: number | null) {
   return v != null ? `${v.toFixed(1)}%` : "—";
-}
-
-function formatBRL(v: number) {
-  return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
 export default async function AnalyticsSitePage({
@@ -73,25 +76,50 @@ export default async function AnalyticsSitePage({
   // Ads falhar (token vencido, credencial faltando etc), a página continua mostrando o resto dos
   // dados do GA4 normalmente, só sem essa parte (fallback silencioso).
   let insightsPorConjunto = new Map<string, MetaInsight>();
+  let insightsPorAnuncio = new Map<string, MetaInsight>();
   try {
-    insightsPorConjunto = await getInsightsPorConjunto({ since: from, until: to });
+    [insightsPorConjunto, insightsPorAnuncio] = await Promise.all([
+      getInsightsPorConjunto({ since: from, until: to }),
+      getInsightsPorAnuncio({ since: from, until: to }),
+    ]);
   } catch {
     // sem investimento — não quebra a página.
   }
-  // Top 15 conjuntos por gasto (visão de investimento, diferente do top por sessão do GA4 acima).
+  // Top 15 conjuntos/criativos por gasto (visão de investimento, diferente do top por sessão do
+  // GA4 acima). Toggle entre os dois na tela — ver investimento-meta-ads.tsx.
   const investimentoPorConjunto = [...insightsPorConjunto.entries()]
     .map(([conjunto, insight]) => ({ conjunto, ...insight }))
     .filter((i) => i.gasto > 0)
     .sort((a, b) => b.gasto - a.gasto)
     .slice(0, 15);
+  const investimentoPorAnuncio = [...insightsPorAnuncio.entries()]
+    .map(([anuncio, insight]) => ({ anuncio, ...insight }))
+    .filter((i) => i.gasto > 0)
+    .sort((a, b) => b.gasto - a.gasto)
+    .slice(0, 15);
 
   let fotosPorConjunto = new Map<string, string[]>();
+  let fotosPorAnuncio = new Map<string, string[]>();
   try {
     const nomesParaFoto = [...new Set([...anuncios.map((a) => a.anuncio), ...investimentoPorConjunto.map((i) => i.conjunto)])];
-    fotosPorConjunto = await getFotosPorNomeConjunto(prisma, nomesParaFoto);
+    [fotosPorConjunto, fotosPorAnuncio] = await Promise.all([
+      getFotosPorNomeConjunto(prisma, nomesParaFoto),
+      getFotosPorNomeAnuncio(prisma, investimentoPorAnuncio.map((i) => i.anuncio)),
+    ]);
   } catch {
     // sem foto — não quebra a página.
   }
+
+  const investimentoRowsConjunto: InvestimentoRow[] = investimentoPorConjunto.map((i) => ({
+    ...i,
+    nome: i.conjunto,
+    fotos: fotosPorConjunto.get(i.conjunto) ?? [],
+  }));
+  const investimentoRowsCriativo: InvestimentoRow[] = investimentoPorAnuncio.map((i) => ({
+    ...i,
+    nome: i.anuncio,
+    fotos: fotosPorAnuncio.get(i.anuncio) ?? [],
+  }));
 
   const sessoesChartData = sessoesPorDia.map((s) => ({ day: s.data, sessoes: s.sessoes }));
   const totalSessoesOrigem = origemTrafego.reduce((sum, o) => sum + o.sessoes, 0);
@@ -256,77 +284,7 @@ export default async function AnalyticsSitePage({
             </table>
           </section>
 
-          <section className="mb-10 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-            <h3 className="border-b border-[var(--gridline)] px-4 py-2.5 text-sm font-medium text-[var(--text-secondary)]">Investimento por conjunto (Meta Ads)</h3>
-            <p className="px-4 pt-2 text-xs text-[var(--text-muted)]">
-              Top 15 conjuntos por gasto no período. ROAS é o retorno calculado pelo próprio Meta
-              (receita atribuída ao pixel ÷ gasto) — números de sessão/conversão do GA4 acima podem
-              divergir um pouco, já que cada plataforma atribui a venda de um jeito diferente.
-            </p>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
-                    <th className="px-4 py-2 font-medium">Conjunto</th>
-                    <th className="px-4 py-2 font-medium">Foto</th>
-                    <th className="px-4 py-2 font-medium text-right">Gasto</th>
-                    <th className="px-4 py-2 font-medium text-right">Cliques</th>
-                    <th className="px-4 py-2 font-medium text-right">CTR</th>
-                    <th className="px-4 py-2 font-medium text-right">CPC</th>
-                    <th className="px-4 py-2 font-medium text-right">CPM</th>
-                    <th className="px-4 py-2 font-medium text-right">Compras</th>
-                    <th className="px-4 py-2 font-medium text-right">Custo/compra</th>
-                    <th className="px-4 py-2 font-medium text-right">ROAS</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {investimentoPorConjunto.map((i) => {
-                    const fotos = fotosPorConjunto.get(i.conjunto) ?? [];
-                    return (
-                      <tr key={i.conjunto} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
-                        <td className="px-4 py-2 font-medium">{i.conjunto}</td>
-                        <td className="px-4 py-2">
-                          {fotos.length > 0 ? (
-                            <div className="flex gap-1.5">
-                              {fotos.map((url, idx) => (
-                                // eslint-disable-next-line @next/next/no-img-element
-                                <img
-                                  key={idx}
-                                  src={url}
-                                  alt={`Criativo ${idx + 1} de ${i.conjunto}`}
-                                  className="h-10 w-10 rounded border border-[var(--border)] object-cover"
-                                />
-                              ))}
-                            </div>
-                          ) : (
-                            <span className="text-xs text-[var(--text-muted)]">sem foto</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-2 text-right tabular-nums font-medium">{formatBRL(i.gasto)}</td>
-                        <td className="px-4 py-2 text-right tabular-nums">{i.cliques.toLocaleString("pt-BR")}</td>
-                        <td className="px-4 py-2 text-right tabular-nums">{i.ctrPct.toFixed(2)}%</td>
-                        <td className="px-4 py-2 text-right tabular-nums">{formatBRL(i.cpc)}</td>
-                        <td className="px-4 py-2 text-right tabular-nums">{formatBRL(i.cpm)}</td>
-                        <td className="px-4 py-2 text-right tabular-nums">{i.compras.toLocaleString("pt-BR")}</td>
-                        <td className="px-4 py-2 text-right tabular-nums">
-                          {i.custoPorCompra != null ? formatBRL(i.custoPorCompra) : "—"}
-                        </td>
-                        <td
-                          className="px-4 py-2 text-right tabular-nums font-medium"
-                          style={{ color: i.roas != null && i.roas >= 1 ? "var(--status-good)" : "var(--status-critical)" }}
-                        >
-                          {i.roas != null ? `${i.roas.toFixed(2)}x` : "—"}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                  {investimentoPorConjunto.length === 0 && (
-                    <tr><td colSpan={10} className="px-4 py-6 text-center text-[var(--text-muted)]">Sem dado de investimento no período (ou Meta Ads não conectado).</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </section>
+          <InvestimentoMetaAds porConjunto={investimentoRowsConjunto} porCriativo={investimentoRowsCriativo} />
 
           {/* ── Público: quem visita ── */}
           <h2 className="mb-3 text-base font-semibold">Público — quem visita</h2>

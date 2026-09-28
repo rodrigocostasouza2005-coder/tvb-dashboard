@@ -162,3 +162,92 @@ export async function getInsightsPorConjunto(range: { since: string; until: stri
   }
   return map;
 }
+
+// Mesma coisa, mas level=ad — pedido do Rodrigo em 2026-09-28 pra poder ver investimento por
+// CRIATIVO individual, não só o conjunto somado (essa parte vem direto do Meta, não depende do
+// GA4/utm_content — diferente da tabela "Anúncios" acima, que é limitada ao nível de conjunto
+// porque é isso que o link rastreado carrega).
+type MetaAdInsightRow = {
+  ad_name: string;
+  spend?: string;
+  impressions?: string;
+  reach?: string;
+  clicks?: string;
+  ctr?: string;
+  cpc?: string;
+  cpm?: string;
+  actions?: MetaAction[];
+  purchase_roas?: MetaAction[];
+};
+
+export async function getInsightsPorAnuncio(range: { since: string; until: string }): Promise<Map<string, MetaInsight>> {
+  const { accountId, accessToken } = getCredentials();
+  const timeRange = encodeURIComponent(JSON.stringify(range));
+  const fields = "ad_name,spend,impressions,reach,clicks,ctr,cpc,cpm,actions,purchase_roas";
+  const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/act_${accountId}/insights?level=ad&fields=${fields}&time_range=${timeRange}&limit=500&access_token=${accessToken}`;
+  const rows = await fetchAllPages<MetaAdInsightRow>(url);
+
+  const map = new Map<string, MetaInsight>();
+  for (const r of rows) {
+    const gasto = Number(r.spend ?? 0);
+    const compras = Number(r.actions?.find((a) => a.action_type === "purchase")?.value ?? 0);
+    const roasEntry = r.purchase_roas?.find((p) => p.action_type === "omni_purchase") ?? r.purchase_roas?.[0];
+    map.set(r.ad_name, {
+      gasto,
+      impressoes: Number(r.impressions ?? 0),
+      alcance: Number(r.reach ?? 0),
+      cliques: Number(r.clicks ?? 0),
+      ctrPct: Number(r.ctr ?? 0),
+      cpc: Number(r.cpc ?? 0),
+      cpm: Number(r.cpm ?? 0),
+      compras,
+      roas: roasEntry ? Number(roasEntry.value) : null,
+      custoPorCompra: compras > 0 ? gasto / compras : null,
+    });
+  }
+  return map;
+}
+
+// Foto de cada anúncio/criativo individual (1 conta inteira, 1 chamada só, diferente de
+// fetchFotosAtivas que é por conjunto) — cacheado com o mesmo padrão/janela de
+// getFotosPorNomeConjunto, chave de cache separada pra não misturar os dois caches.
+async function fetchTodosAnuncios(): Promise<MetaAd[]> {
+  const { accountId, accessToken } = getCredentials();
+  const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/act_${accountId}/ads?fields=id,name,status,creative{thumbnail_url}&limit=500&access_token=${accessToken}`;
+  return fetchAllPages<MetaAd>(url);
+}
+
+const CACHE_LABEL_CRIATIVO = "meta-ads-fotos-criativo";
+
+export async function getFotosPorNomeAnuncio(
+  prisma: PrismaClient,
+  nomesAnuncios: string[]
+): Promise<Map<string, string[]>> {
+  const cached = await prisma.priceCatalogCache.findUnique({ where: { clientLabel: CACHE_LABEL_CRIATIVO } });
+  const cachedData = (cached?.data as Record<string, string[]>) ?? {};
+  const isFresh = cached != null && Date.now() - cached.updatedAt.getTime() < FOTOS_MAX_AGE_HORAS * 60 * 60 * 1000;
+
+  const faltando = nomesAnuncios.filter((n) => !(n in cachedData));
+  if (isFresh && faltando.length === 0) {
+    return new Map(nomesAnuncios.map((n) => [n, cachedData[n] ?? []]));
+  }
+
+  const ads = await fetchTodosAnuncios();
+  const fotoPorNome = new Map<string, string>();
+  for (const a of ads) {
+    if (a.creative?.thumbnail_url && !fotoPorNome.has(a.name)) fotoPorNome.set(a.name, a.creative.thumbnail_url);
+  }
+  const novosDados: Record<string, string[]> = { ...cachedData };
+  for (const nome of nomesAnuncios) {
+    const url = fotoPorNome.get(nome);
+    novosDados[nome] = url ? [url] : [];
+  }
+
+  await prisma.priceCatalogCache.upsert({
+    where: { clientLabel: CACHE_LABEL_CRIATIVO },
+    create: { clientLabel: CACHE_LABEL_CRIATIVO, data: novosDados },
+    update: { data: novosDados },
+  });
+
+  return new Map(nomesAnuncios.map((n) => [n, novosDados[n] ?? []]));
+}
