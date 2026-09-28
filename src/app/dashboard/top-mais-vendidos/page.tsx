@@ -1,5 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
-import { getSalesByGrupoProduto, getReturnsByGrupoProduto, netByReturns, getStores, getMarcas, getTabelasPreco, getDistinctColecoes } from "@/lib/metrics";
+import { getSalesByGrupoProduto, getReturnsByGrupoProduto, netByReturns, getStores, getMarcas, getTabelasPreco, getDistinctColecoes, getEstoqueAtualPorGrupoProduto } from "@/lib/metrics";
 import { canSeeFinancials, getGrupoRestriction, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestrictionSemAtacado } from "@/lib/permissions";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
@@ -33,17 +33,21 @@ export default async function TopMaisVendidosPage({
     grupoIn,
   };
 
-  const [allRowsBrutas, returns, stores, marcas, tabelasPreco, colecoes] = await Promise.all([
+  const [allRowsBrutas, returns, stores, marcas, tabelasPreco, colecoes, estoquePorProduto] = await Promise.all([
     getSalesByGrupoProduto(filters),
     getReturnsByGrupoProduto(filters),
     getStores(allowedStores),
     getMarcas(allowedMarcas),
     getTabelasPreco(allowedTabelasPreco),
     getDistinctColecoes(),
+    getEstoqueAtualPorGrupoProduto(filters),
   ]);
   // Líquido (desconta devolução) — pedido do Rodrigo em 2026-08-24. Reordena depois de
   // descontar, já que a devolução pode mudar quem é "mais vendido" de verdade.
   const allRows = netByReturns(allRowsBrutas, returns).sort((a, b) => b.revenue - a.revenue);
+
+  // Estoque atual ao lado do ranking de vendas — pedido do Rodrigo em 2026-09-28.
+  const estoqueByProduto = new Map(estoquePorProduto.map((e) => [e.key, e.quantidade]));
 
   const showFinancials = canSeeFinancials(user);
   const top = allRows.slice(0, LIMIT);
@@ -81,6 +85,7 @@ export default async function TopMaisVendidosPage({
               <th className="px-4 py-2 font-medium">Grupo</th>
               <th className="px-4 py-2 font-medium">Produto</th>
               <th className="px-4 py-2 font-medium text-right">Unidades líquidas</th>
+              <th className="px-4 py-2 font-medium text-right">Estoque atual</th>
               {showFinancials && <th className="px-4 py-2 font-medium text-right">Receita líquida</th>}
             </tr>
           </thead>
@@ -93,6 +98,9 @@ export default async function TopMaisVendidosPage({
                 <td className="px-4 py-2 tabular-nums text-right text-[var(--text-secondary)]">
                   {r.unitsSold.toLocaleString("pt-BR")}
                 </td>
+                <td className="px-4 py-2 tabular-nums text-right text-[var(--text-secondary)]">
+                  {(estoqueByProduto.get(r.key) ?? 0).toLocaleString("pt-BR")}
+                </td>
                 {showFinancials && (
                   <td className="px-4 py-2 tabular-nums text-right text-[var(--text-primary)]">
                     {formatBRL(r.revenue)}
@@ -102,7 +110,7 @@ export default async function TopMaisVendidosPage({
             ))}
             {top.length === 0 && (
               <tr>
-                <td colSpan={showFinancials ? 5 : 4} className="px-4 py-6 text-center text-[var(--text-muted)]">
+                <td colSpan={showFinancials ? 6 : 5} className="px-4 py-6 text-center text-[var(--text-muted)]">
                   Sem vendas no período selecionado.
                 </td>
               </tr>
