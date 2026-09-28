@@ -41,6 +41,8 @@ type Linha = PromotionRow & {
   descontoAplicado: number;
   precoPromoAplicado: number | null;
   valorEstoquePromoAplicado: number;
+  pctVendidoLinha: number;
+  unidadesVenderLinha: number;
   receitaPotencialLinha: number;
 };
 
@@ -56,6 +58,31 @@ function somaPonderada(rows: Linha[], pctVendido: number) {
   // potenciais (que já escalam por pctVendido). Estoque que não vende não gera desconto nenhum,
   // só fica parado.
   const valorDescontoConcedido = (valorCheio - valorPromo) * (pctVendido / 100);
+  const comSellThrough = rows.filter((r) => r.sellThroughRate !== null);
+  const sellThroughMedio =
+    comSellThrough.length > 0
+      ? comSellThrough.reduce((s, r) => s + (r.sellThroughRate ?? 0) * r.estoque, 0) /
+        (comSellThrough.reduce((s, r) => s + r.estoque, 0) || 1)
+      : 0;
+  return { estoqueTotal, valorCheio, valorPromo, receitaPotencial, unidadesPotenciais, descontoMedio, valorDescontoConcedido, sellThroughMedio };
+}
+
+// Mesmos totais de somaPonderada, mas lendo o % JÁ APLICADO por linha (pctVendidoLinha), que pode
+// variar por coleção — pedido do Rodrigo em 2026-09-28 (antes só existia um % global pra empresa
+// toda). somaPonderada(rows, pct) continua existindo à parte pros 3 cenários fixos
+// (Conservador/Base/Agressivo), que são deliberadamente uniformes e não devem herdar os overrides
+// por coleção.
+function somaPonderadaLinhas(rows: Linha[]) {
+  const estoqueTotal = rows.reduce((s, r) => s + r.estoque, 0);
+  const valorCheio = rows.reduce((s, r) => s + r.valorEstoqueCheio, 0);
+  const valorPromo = rows.reduce((s, r) => s + r.valorEstoquePromoAplicado, 0);
+  const receitaPotencial = rows.reduce((s, r) => s + r.receitaPotencialLinha, 0);
+  const unidadesPotenciais = rows.reduce((s, r) => s + r.unidadesVenderLinha, 0);
+  const descontoMedio = valorCheio > 0 ? 1 - valorPromo / valorCheio : 0;
+  const valorDescontoConcedido = rows.reduce(
+    (s, r) => s + (r.valorEstoqueCheio - r.valorEstoquePromoAplicado) * (r.pctVendidoLinha / 100),
+    0
+  );
   const comSellThrough = rows.filter((r) => r.sellThroughRate !== null);
   const sellThroughMedio =
     comSellThrough.length > 0
@@ -86,7 +113,12 @@ export function PromocaoClient({
   const [colecaoSel, setColecaoSel] = useState<string>("");
   const [grupoSel, setGrupoSel] = useState<string>("");
   const [produtoSel, setProdutoSel] = useState<string>("");
-  const [pctVendido, setPctVendido] = useState(40);
+  const [pctPadrao, setPctPadrao] = useState(40);
+  // Override por coleção — pedido do Rodrigo em 2026-09-28 ("tem como alterar a % vendida por
+  // coleção?"). Coleção sem override cai no % padrão do Simulador. Não persiste no banco (mesmo
+  // espírito não-persistido que o % padrão já tinha antes — é premissa de simulação, não regra
+  // compartilhada como a matriz de desconto).
+  const [pctPorColecao, setPctPorColecao] = useState<Record<string, number>>({});
   const [descontoModo, setDescontoModo] = useState<DescontoModo>("recomendado");
   const [descontoPersonalizado, setDescontoPersonalizado] = useState(20);
   const [ordenacao, setOrdenacao] = useState<"receita" | "estoque" | "sellthrough" | "desconto">("receita");
@@ -212,18 +244,22 @@ export function PromocaoClient({
       }
       const precoPromoAplicado = r.precoCheio !== null ? r.precoCheio * (1 - d) : null;
       const valorEstoquePromoAplicado = precoPromoAplicado !== null ? r.estoque * precoPromoAplicado : 0;
+      const pctVendidoLinha = pctPorColecao[r.colecao] ?? pctPadrao;
+      const unidadesVenderLinha = Math.round(r.estoque * (pctVendidoLinha / 100));
       return {
         ...r,
         descontoRecomendadoAoVivo, motivoAoVivo,
         descontoAplicado: d,
         precoPromoAplicado,
         valorEstoquePromoAplicado,
-        receitaPotencialLinha: valorEstoquePromoAplicado * (pctVendido / 100),
+        pctVendidoLinha,
+        unidadesVenderLinha,
+        receitaPotencialLinha: valorEstoquePromoAplicado * (pctVendidoLinha / 100),
       };
     });
-  }, [filtradas, matriz, descontoBestseller, descontoPadrao, descontoModo, descontoPersonalizado, pctVendido]);
+  }, [filtradas, matriz, descontoBestseller, descontoPadrao, descontoModo, descontoPersonalizado, pctPadrao, pctPorColecao]);
 
-  const kpis = useMemo(() => somaPonderada(linhas, pctVendido), [linhas, pctVendido]);
+  const kpis = useMemo(() => somaPonderadaLinhas(linhas), [linhas]);
 
   // Diagnóstico visível pro botão Aplicar: mostra o efeito da matriz PURA (ignora o modo do
   // Simulador — "Sem desconto"/"Personalizado" zeram/ignoram o recomendado de propósito, então
@@ -253,27 +289,29 @@ export function PromocaoClient({
   }, [linhas, ordenacao]);
 
   const porColecao = useMemo(() => {
-    const map = new Map<string, { estoque: number; valorCheio: number; valorPromo: number; produtos: Set<string> }>();
+    const map = new Map<string, { estoque: number; valorCheio: number; valorPromo: number; receitaPotencial: number; produtos: Set<string> }>();
     for (const r of linhas) {
-      const e = map.get(r.colecao) ?? { estoque: 0, valorCheio: 0, valorPromo: 0, produtos: new Set<string>() };
+      const e = map.get(r.colecao) ?? { estoque: 0, valorCheio: 0, valorPromo: 0, receitaPotencial: 0, produtos: new Set<string>() };
       e.estoque += r.estoque;
       e.valorCheio += r.valorEstoqueCheio;
       e.valorPromo += r.valorEstoquePromoAplicado;
+      e.receitaPotencial += r.receitaPotencialLinha;
       e.produtos.add(r.produto);
       map.set(r.colecao, e);
     }
     return [...map.entries()]
-      .map(([colecao, v]) => ({ colecao, ...v, produtos: v.produtos.size, receitaPotencial: v.valorPromo * (pctVendido / 100) }))
+      .map(([colecao, v]) => ({ colecao, ...v, produtos: v.produtos.size }))
       .sort((a, b) => b.receitaPotencial - a.receitaPotencial);
-  }, [linhas, pctVendido]);
+  }, [linhas]);
 
   const porGrupo = useMemo(() => {
-    const map = new Map<string, { estoque: number; valorCheio: number; valorPromo: number; stCount: number; stSoma: number }>();
+    const map = new Map<string, { estoque: number; valorCheio: number; valorPromo: number; receitaPotencial: number; stCount: number; stSoma: number }>();
     for (const r of linhas) {
-      const e = map.get(r.grupo) ?? { estoque: 0, valorCheio: 0, valorPromo: 0, stCount: 0, stSoma: 0 };
+      const e = map.get(r.grupo) ?? { estoque: 0, valorCheio: 0, valorPromo: 0, receitaPotencial: 0, stCount: 0, stSoma: 0 };
       e.estoque += r.estoque;
       e.valorCheio += r.valorEstoqueCheio;
       e.valorPromo += r.valorEstoquePromoAplicado;
+      e.receitaPotencial += r.receitaPotencialLinha;
       if (r.sellThroughRate !== null) { e.stSoma += r.sellThroughRate; e.stCount += 1; }
       map.set(r.grupo, e);
     }
@@ -281,11 +319,11 @@ export function PromocaoClient({
       .map(([grupo, v]) => ({
         grupo, estoque: v.estoque, valorCheio: v.valorCheio,
         descontoMedio: v.valorCheio > 0 ? 1 - v.valorPromo / v.valorCheio : 0,
-        receitaPotencial: v.valorPromo * (pctVendido / 100),
+        receitaPotencial: v.receitaPotencial,
         sellThroughMedio: v.stCount > 0 ? v.stSoma / v.stCount : null,
       }))
       .sort((a, b) => b.receitaPotencial - a.receitaPotencial);
-  }, [linhas, pctVendido]);
+  }, [linhas]);
 
   // Produtos que merecem atenção: estoque financeiro relevante + sell-through baixo (achado
   // objetivo, não "nota" subjetiva — só ordena pelas 2 métricas reais).
@@ -353,13 +391,16 @@ export function PromocaoClient({
           <div className="flex flex-col gap-4">
             <div className="flex flex-col gap-1">
               <label className="text-[10px] font-medium uppercase tracking-wide text-[var(--text-muted)]">
-                % do estoque vendido — <span className="text-[var(--text-primary)]">{pctVendido}%</span>
+                % do estoque vendido (padrão) — <span className="text-[var(--text-primary)]">{pctPadrao}%</span>
               </label>
               <input
-                type="range" min={0} max={100} step={5} value={pctVendido}
-                onChange={(e) => setPctVendido(Number(e.target.value))}
+                type="range" min={0} max={100} step={5} value={pctPadrao}
+                onChange={(e) => setPctPadrao(Number(e.target.value))}
                 className="w-full accent-[var(--series-1)]"
               />
+              <span className="text-[11px] text-[var(--text-muted)]">
+                Vale pra coleção sem % própria — ajuste por coleção na tabela &quot;Potencial por Coleção&quot; abaixo.
+              </span>
             </div>
             <div className="flex flex-wrap items-end gap-4">
               <div className="flex flex-col gap-1">
@@ -564,6 +605,7 @@ export function PromocaoClient({
                   <th className="px-4 py-2 font-medium">Coleção</th>
                   <th className="px-4 py-2 text-right font-medium">Produtos</th>
                   <th className="px-4 py-2 text-right font-medium">Estoque</th>
+                  <th className="px-4 py-2 text-right font-medium">% vendido</th>
                   <th className="px-4 py-2 text-right font-medium">Receita potencial</th>
                 </tr>
               </thead>
@@ -577,6 +619,21 @@ export function PromocaoClient({
                     <td className="px-4 py-2 font-medium text-[var(--text-primary)]">{c.colecao}</td>
                     <td className="px-4 py-2 text-right tabular-nums text-[var(--text-secondary)]">{c.produtos}</td>
                     <td className="px-4 py-2 text-right tabular-nums text-[var(--text-secondary)]">{formatNum(c.estoque)}</td>
+                    <td className="px-4 py-2 text-right" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="number" min={0} max={100} step={5}
+                        value={pctPorColecao[c.colecao] ?? pctPadrao}
+                        onChange={(e) =>
+                          setPctPorColecao((prev) => ({
+                            ...prev,
+                            [c.colecao]: Math.min(100, Math.max(0, Number(e.target.value))),
+                          }))
+                        }
+                        className="w-14 rounded border border-[var(--border)] bg-[var(--surface-1)] px-1 py-0.5 text-right text-xs tabular-nums text-[var(--text-primary)]"
+                        style={{ colorScheme: "light dark" }}
+                      />
+                      <span className="ml-0.5 text-[var(--text-muted)]">%</span>
+                    </td>
                     <td className="px-4 py-2 text-right tabular-nums font-medium text-[var(--text-primary)]">{formatBRL(c.receitaPotencial)}</td>
                   </tr>
                 ))}
@@ -671,7 +728,7 @@ export function PromocaoClient({
             </select>
             <button
               type="button"
-              onClick={() => exportarExcel(linhasOrdenadas, pctVendido)}
+              onClick={() => exportarExcel(linhasOrdenadas)}
               className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1 font-medium text-[var(--text-secondary)] hover:bg-[var(--page-plane)]"
             >
               Exportar Excel
@@ -687,7 +744,7 @@ export function PromocaoClient({
                 <th className="px-4 py-2 font-medium">Coleção</th>
                 <th className="px-4 py-2 text-right font-medium">Preço</th>
                 <th className="px-4 py-2 text-right font-medium">Estoque</th>
-                <th className="px-4 py-2 text-right font-medium">A vender ({pctVendido}%)</th>
+                <th className="px-4 py-2 text-right font-medium">A vender</th>
                 <th className="px-4 py-2 text-right font-medium">Sobra</th>
                 <th className="px-4 py-2 text-right font-medium">Sell-through</th>
                 <th className="px-4 py-2 text-right font-medium">Desc.</th>
@@ -699,25 +756,22 @@ export function PromocaoClient({
             <tbody>
               {linhasOrdenadas.length === 0 ? (
                 <tr><td colSpan={12} className="px-4 py-8 text-center text-sm text-[var(--text-muted)]">Nenhum produto encontrado para os filtros selecionados.</td></tr>
-              ) : linhasOrdenadas.map((r) => {
-                const unidadesVender = Math.round(r.estoque * (pctVendido / 100));
-                return (
+              ) : linhasOrdenadas.map((r) => (
                 <tr key={`${r.grupo}-${r.produto}-${r.colecao}`} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
                   <td className="px-4 py-2 whitespace-nowrap text-[var(--text-secondary)]">{r.grupo}</td>
                   <td className="px-4 py-2 font-medium whitespace-nowrap text-[var(--text-primary)]">{r.produto}</td>
                   <td className="px-4 py-2 whitespace-nowrap text-[var(--text-secondary)]">{r.colecao}</td>
                   <td className="px-4 py-2 text-right tabular-nums whitespace-nowrap text-[var(--text-secondary)]">{r.precoCheio !== null ? formatBRL(r.precoCheio) : "—"}</td>
                   <td className="px-4 py-2 text-right tabular-nums text-[var(--text-secondary)]">{formatNum(r.estoque)}</td>
-                  <td className="px-4 py-2 text-right tabular-nums text-[var(--text-secondary)]">{formatNum(unidadesVender)}</td>
-                  <td className="px-4 py-2 text-right tabular-nums text-[var(--text-secondary)]">{formatNum(r.estoque - unidadesVender)}</td>
+                  <td className="px-4 py-2 text-right tabular-nums text-[var(--text-secondary)]" title={`${r.pctVendidoLinha}% vendido`}>{formatNum(r.unidadesVenderLinha)}</td>
+                  <td className="px-4 py-2 text-right tabular-nums text-[var(--text-secondary)]">{formatNum(r.estoque - r.unidadesVenderLinha)}</td>
                   <td className="px-4 py-2 text-right tabular-nums text-[var(--text-secondary)]">{r.sellThroughRate !== null ? formatPct(r.sellThroughRate) : "—"}</td>
                   <td className="px-4 py-2 text-right tabular-nums text-[var(--text-secondary)]" title={r.motivoAoVivo}>{formatPct(r.descontoAplicado * 100)}</td>
                   <td className="px-4 py-2 text-right tabular-nums whitespace-nowrap text-[var(--text-secondary)]">{r.precoPromoAplicado !== null ? formatBRL(r.precoPromoAplicado) : "—"}</td>
                   <td className="px-4 py-2 text-right tabular-nums whitespace-nowrap text-[var(--text-secondary)]">{formatBRL(r.valorEstoqueCheio)}</td>
                   <td className="px-4 py-2 text-right tabular-nums font-medium whitespace-nowrap text-[var(--text-primary)]">{formatBRL(r.receitaPotencialLinha)}</td>
                 </tr>
-                );
-              })}
+              ))}
             </tbody>
           </table>
         </div>
@@ -756,29 +810,27 @@ function RowCenario({ label, values }: { label: string; values: string[] }) {
 // formatado certo, sem precisar do assistente de importação. BOM (﻿) garante que acento
 // apareça certo. Exporta exatamente o que está na tela (linhasOrdenadas já reflete filtro +
 // ordenação + simulador aplicados) — pedido do Rodrigo em 2026-09-28.
-function exportarExcel(linhas: Linha[], pctVendido: number) {
+function exportarExcel(linhas: Linha[]) {
   const numCSV = (v: number, casas = 2) => v.toFixed(casas).replace(".", ",");
   const header = [
     "Grupo", "Produto", "Coleção", "Preço", "Estoque", "Sell-through (%)", "Desconto (%)", "Preço Promo",
-    "Valor Estoque", `Unidades a vender (${pctVendido}%)`, "Unidades que sobram", "Receita Potencial",
+    "Valor Estoque", "% vendido (assumido)", "Unidades a vender", "Unidades que sobram", "Receita Potencial",
   ];
-  const corpo = linhas.map((r) => {
-    const unidadesVender = Math.round(r.estoque * (pctVendido / 100));
-    return [
-      r.grupo,
-      r.produto,
-      r.colecao,
-      r.precoCheio !== null ? numCSV(r.precoCheio) : "",
-      String(r.estoque),
-      r.sellThroughRate !== null ? numCSV(r.sellThroughRate, 1) : "",
-      numCSV(r.descontoAplicado * 100, 1),
-      r.precoPromoAplicado !== null ? numCSV(r.precoPromoAplicado) : "",
-      numCSV(r.valorEstoqueCheio),
-      String(unidadesVender),
-      String(r.estoque - unidadesVender),
-      numCSV(r.receitaPotencialLinha),
-    ];
-  });
+  const corpo = linhas.map((r) => [
+    r.grupo,
+    r.produto,
+    r.colecao,
+    r.precoCheio !== null ? numCSV(r.precoCheio) : "",
+    String(r.estoque),
+    r.sellThroughRate !== null ? numCSV(r.sellThroughRate, 1) : "",
+    numCSV(r.descontoAplicado * 100, 1),
+    r.precoPromoAplicado !== null ? numCSV(r.precoPromoAplicado) : "",
+    numCSV(r.valorEstoqueCheio),
+    numCSV(r.pctVendidoLinha, 0),
+    String(r.unidadesVenderLinha),
+    String(r.estoque - r.unidadesVenderLinha),
+    numCSV(r.receitaPotencialLinha),
+  ]);
   const csv = [header, ...corpo]
     .map((linha) => linha.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(";"))
     .join("\r\n");
