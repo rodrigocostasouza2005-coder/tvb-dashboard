@@ -115,16 +115,32 @@ export function PromocaoClient({ rows }: { rows: PromotionRow[] }) {
   // espírito não-persistido da campanha). Toda coleção real do estoque atual entra como linha,
   // não só as 3 que a planilha original tinha curado — pra cobrir coleção nova sem precisar
   // mexer em código.
+  // Separado em "aplicado" (o que realmente entra no cálculo, dispara o recálculo de ~350
+  // linhas) vs "rascunho" (o que os campos mostram enquanto o Rodrigo digita) — achado em
+  // 2026-09-28: recalcular a tabela inteira a cada tecla digitada travava a resposta visual,
+  // parecia que não tava atualizando. Agora só recalcula 1x, quando aperta "Aplicar".
   const [matriz, setMatriz] = useState<Record<string, number[]>>(() => seedMatriz(coleções));
+  const [matrizRascunho, setMatrizRascunho] = useState<Record<string, number[]>>(() => seedMatriz(coleções));
   const [descontoBestseller, setDescontoBestseller] = useState(promotionRules.descontoBestseller * 100);
+  const [descontoBestsellerRascunho, setDescontoBestsellerRascunho] = useState(promotionRules.descontoBestseller * 100);
   const [descontoPadrao, setDescontoPadrao] = useState(promotionRules.descontoPadrao * 100);
+  const [descontoPadraoRascunho, setDescontoPadraoRascunho] = useState(promotionRules.descontoPadrao * 100);
+  const [regrasPendentes, setRegrasPendentes] = useState(false);
 
-  function setCelula(colecao: string, faixaIdx: number, valorPct: number) {
-    setMatriz((prev) => {
+  function setCelulaRascunho(colecao: string, faixaIdx: number, valorPct: number) {
+    setMatrizRascunho((prev) => {
       const linha = [...(prev[colecao] ?? FAIXAS.map(() => promotionRules.descontoPadrao))];
       linha[faixaIdx] = Math.min(Math.max(valorPct / 100, 0), 0.95);
       return { ...prev, [colecao]: linha };
     });
+    setRegrasPendentes(true);
+  }
+
+  function aplicarRegras() {
+    setMatriz(matrizRascunho);
+    setDescontoBestseller(descontoBestsellerRascunho);
+    setDescontoPadrao(descontoPadraoRascunho);
+    setRegrasPendentes(false);
   }
 
   const gruposDaColecao = useMemo(
@@ -355,10 +371,26 @@ export function PromocaoClient({ rows }: { rows: PromotionRow[] }) {
 
         {/* Quadrinho de sell-through: matriz Coleção × faixa, editável — pedido do Rodrigo em 2026-09-26. */}
         <section className="rounded-lg border border-[var(--series-1)]/30 bg-[var(--surface-1)] p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-          <h2 className="mb-1 text-sm font-semibold text-[var(--text-primary)]">Regras de Desconto por Sell-through</h2>
-          <p className="mb-3 text-xs text-[var(--text-muted)]">
-            Mesma matriz da planilha (Coleção × faixa de sell-through) — edite os % livremente, o resto da página recalcula na hora.
-          </p>
+          <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <h2 className="text-sm font-semibold text-[var(--text-primary)]">Regras de Desconto por Sell-through</h2>
+              <p className="mt-1 text-xs text-[var(--text-muted)]">
+                Mesma matriz da planilha (Coleção × faixa de sell-through) — edite os % e aperte Aplicar pra recalcular a página.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={aplicarRegras}
+              disabled={!regrasPendentes}
+              className={`shrink-0 rounded-md border px-3 py-1.5 text-xs font-medium disabled:cursor-default disabled:opacity-50 ${
+                regrasPendentes
+                  ? "border-[var(--series-1)] bg-[var(--series-1)] text-white"
+                  : "border-[var(--border)] bg-[var(--surface-1)] text-[var(--text-muted)]"
+              }`}
+            >
+              {regrasPendentes ? "Aplicar mudanças" : "Aplicado"}
+            </button>
+          </div>
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
@@ -375,8 +407,8 @@ export function PromocaoClient({ rows }: { rows: PromotionRow[] }) {
                       <td key={i} className="px-1 py-1">
                         <input
                           type="number" min={0} max={95}
-                          value={Math.round((matriz[colecao]?.[i] ?? promotionRules.descontoPadrao) * 100)}
-                          onChange={(e) => setCelula(colecao, i, Number(e.target.value))}
+                          value={Math.round((matrizRascunho[colecao]?.[i] ?? promotionRules.descontoPadrao) * 100)}
+                          onChange={(e) => setCelulaRascunho(colecao, i, Number(e.target.value))}
                           className="w-14 rounded border border-[var(--border)] bg-[var(--page-plane)] px-1.5 py-1 text-center tabular-nums text-[var(--text-primary)]"
                         />
                       </td>
@@ -387,8 +419,8 @@ export function PromocaoClient({ rows }: { rows: PromotionRow[] }) {
                   <td className="py-1 pr-2 font-medium whitespace-nowrap text-[var(--text-primary)]">Bestseller <span className="font-normal text-[var(--text-muted)]">(fixo)</span></td>
                   <td className="px-1 py-1" colSpan={4}>
                     <input
-                      type="number" min={0} max={95} value={Math.round(descontoBestseller)}
-                      onChange={(e) => setDescontoBestseller(Number(e.target.value))}
+                      type="number" min={0} max={95} value={Math.round(descontoBestsellerRascunho)}
+                      onChange={(e) => { setDescontoBestsellerRascunho(Number(e.target.value)); setRegrasPendentes(true); }}
                       className="w-14 rounded border border-[var(--border)] bg-[var(--page-plane)] px-1.5 py-1 text-center tabular-nums text-[var(--text-primary)]"
                     />
                   </td>
@@ -397,8 +429,8 @@ export function PromocaoClient({ rows }: { rows: PromotionRow[] }) {
                   <td className="py-1 pr-2 font-medium whitespace-nowrap text-[var(--text-primary)]">Padrão <span className="font-normal text-[var(--text-muted)]">(sem regra)</span></td>
                   <td className="px-1 py-1" colSpan={4}>
                     <input
-                      type="number" min={0} max={95} value={Math.round(descontoPadrao)}
-                      onChange={(e) => setDescontoPadrao(Number(e.target.value))}
+                      type="number" min={0} max={95} value={Math.round(descontoPadraoRascunho)}
+                      onChange={(e) => { setDescontoPadraoRascunho(Number(e.target.value)); setRegrasPendentes(true); }}
                       className="w-14 rounded border border-[var(--border)] bg-[var(--page-plane)] px-1.5 py-1 text-center tabular-nums text-[var(--text-primary)]"
                     />
                   </td>
