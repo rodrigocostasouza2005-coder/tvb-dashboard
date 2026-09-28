@@ -1263,9 +1263,13 @@ export async function getTopVendidosPorLoja(desde: Date, ate: Date, limit = 3) {
 // dia tá bom ou fraco sem precisar decorar histórico.
 export async function getVendasHojeComComparacao(
   filters: Pick<DashboardFilters, "storeIds" | "marcas" | "tabelasPreco" | "grupoIn">,
-  diasComparacao = 14
+  diasComparacao = 14,
+  // Dia de referência (YYYY-MM-DD, Brasília) — default hoje. Só admin pode escolher outro dia
+  // (filtro pedido em 2026-09-28, ver resumo-dia/page.tsx); pra todo mundo o comportamento não
+  // muda: continua sempre "hoje" quando omitido.
+  dataRef?: string
 ) {
-  const hojeStr = todayBrasiliaStr(new Date());
+  const hojeStr = dataRef ?? todayBrasiliaStr(new Date());
   const inicioHoje = brasiliaDayStart(hojeStr);
   const fimHoje = brasiliaDayEnd(hojeStr);
   const inicioComparacao = new Date(inicioHoje);
@@ -1303,9 +1307,11 @@ export async function getVendasHojeComComparacao(
 // hoje) — janela de 1 dia só costuma ficar vazia/rala numa loja física pequena.
 export async function getMaisVendidosSemana(
   filters: Pick<DashboardFilters, "storeIds" | "marcas" | "tabelasPreco" | "grupoIn">,
-  limit = 10
+  limit = 10,
+  // Mesmo dataRef de getVendasHojeComComparacao — a janela de 7 dias termina nesse dia em vez de hoje.
+  dataRef?: string
 ) {
-  const hojeStr = todayBrasiliaStr(new Date());
+  const hojeStr = dataRef ?? todayBrasiliaStr(new Date());
   const fim = brasiliaDayEnd(hojeStr);
   const inicio = new Date(brasiliaDayStart(hojeStr));
   inicio.setDate(inicio.getDate() - 6);

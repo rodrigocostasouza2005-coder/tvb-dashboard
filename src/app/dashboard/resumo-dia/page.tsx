@@ -1,8 +1,10 @@
 import { getSessionUser } from "@/lib/auth";
-import { getVendasHojeComComparacao, getMaisVendidosSemana, getTopParaIncentivar } from "@/lib/metrics";
+import { getVendasHojeComComparacao, getMaisVendidosSemana, getTopParaIncentivar, getAllStores } from "@/lib/metrics";
 import { canSeeFinancials, getGrupoRestriction, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestrictionSemAtacado } from "@/lib/permissions";
+import { parseFilters, todayBrasiliaStr, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { StatTile } from "../stat-tile";
+import { GetForm } from "../get-form";
 
 function formatBRL(value: number) {
   return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -14,7 +16,11 @@ function formatVariacao(pct: number | null) {
   return `${sinal}${pct.toFixed(0)}% vs. média dos últimos dias`;
 }
 
-export default async function ResumoDiaPage() {
+export default async function ResumoDiaPage({
+  searchParams,
+}: {
+  searchParams: Promise<RawSearchParams>;
+}) {
   const user = await getSessionUser();
   if (!user) return null;
   requireTabAccess(user, user.role, "resumo-dia");
@@ -23,29 +29,77 @@ export default async function ResumoDiaPage() {
   const allowedStores = getStoreRestriction(user);
   const allowedMarcas = getMarcaRestriction(user);
   const allowedTabelasPreco = getTabelaPrecoRestrictionSemAtacado(user);
-  const filters = { storeIds: allowedStores, marcas: allowedMarcas, tabelasPreco: allowedTabelasPreco, grupoIn };
+
+  // Filtro de loja/dia — pedido do Rodrigo em 2026-09-28, só pra ADMIN (vendedor continua vendo
+  // fixo "hoje" + só a loja dele, sem filtro nenhum, exatamente como já era). Trava de verdade:
+  // mesmo que alguém force ?store=/&data= na URL, só é lido se o usuário logado for ADMIN.
+  const isAdmin = user.role === "ADMIN";
+  const rawParams = await searchParams;
+  const storeIds = isAdmin
+    ? parseFilters(rawParams, { allowedStoreIds: allowedStores }).storeIds
+    : allowedStores;
+  const dataRef = isAdmin && typeof rawParams.data === "string" && rawParams.data ? rawParams.data : undefined;
+
+  const filters = { storeIds, marcas: allowedMarcas, tabelasPreco: allowedTabelasPreco, grupoIn };
   const showFinancials = canSeeFinancials(user);
 
-  const [resumo, maisVendidos, produtosParados] = await Promise.all([
-    getVendasHojeComComparacao(filters),
-    getMaisVendidosSemana(filters),
-    getTopParaIncentivar(30, 10, allowedStores),
+  const [resumo, maisVendidos, produtosParados, stores] = await Promise.all([
+    getVendasHojeComComparacao(filters, 14, dataRef),
+    getMaisVendidosSemana(filters, 10, dataRef),
+    getTopParaIncentivar(30, 10, storeIds),
+    isAdmin ? getAllStores(allowedStores) : Promise.resolve([]),
   ]);
 
   return (
     <div>
-      <h1 className="mb-4 text-lg font-semibold text-[var(--text-primary)]">Resumo do Dia</h1>
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <h1 className="text-lg font-semibold text-[var(--text-primary)]">Resumo do Dia</h1>
+        {isAdmin && (
+          <GetForm action="/dashboard/resumo-dia" className="flex flex-wrap items-end gap-2">
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] font-medium uppercase tracking-wide text-[var(--text-muted)]">Loja</label>
+              <select
+                name="store"
+                defaultValue={rawParams.store as string | undefined}
+                className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-xs text-[var(--text-primary)]"
+                style={{ colorScheme: "light dark" }}
+              >
+                <option value="">Todas (consolidado)</option>
+                {stores.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] font-medium uppercase tracking-wide text-[var(--text-muted)]">Dia</label>
+              <input
+                type="date"
+                name="data"
+                defaultValue={dataRef ?? todayBrasiliaStr(new Date())}
+                className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-xs text-[var(--text-primary)]"
+                style={{ colorScheme: "light dark" }}
+              />
+            </div>
+            <button
+              type="submit"
+              className="rounded-md border border-[var(--series-1)] bg-[var(--series-1)] px-3 py-1.5 text-xs font-medium text-white"
+            >
+              Aplicar
+            </button>
+          </GetForm>
+        )}
+      </div>
 
       <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
         <StatTile
-          label="Unidades vendidas hoje"
+          label={dataRef ? "Unidades vendidas no dia" : "Unidades vendidas hoje"}
           value={resumo.hojeUnidades.toLocaleString("pt-BR")}
           subValue={formatVariacao(resumo.variacaoUnidadesPct)}
           trend={resumo.variacaoUnidadesPct === null ? undefined : resumo.variacaoUnidadesPct >= 0 ? "up" : "down"}
         />
         {showFinancials && (
           <StatTile
-            label="Receita hoje"
+            label={dataRef ? "Receita no dia" : "Receita hoje"}
             value={formatBRL(resumo.hojeReceita)}
             subValue={formatVariacao(resumo.variacaoReceitaPct)}
             trend={resumo.variacaoReceitaPct === null ? undefined : resumo.variacaoReceitaPct >= 0 ? "up" : "down"}
