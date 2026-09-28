@@ -3,7 +3,7 @@
 import { useState } from "react";
 import type { MetaInsight } from "@/lib/connectors/meta-ads";
 
-export type InvestimentoRow = MetaInsight & { nome: string; fotos: string[] };
+export type InvestimentoRow = MetaInsight & { nome: string; fotos: string[]; ativo: boolean };
 
 function formatBRL(v: number) {
   return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -20,28 +20,39 @@ export function InvestimentoMetaAds({
   porCriativo: InvestimentoRow[];
 }) {
   const [modo, setModo] = useState<"conjunto" | "criativo">("conjunto");
-  const linhas = modo === "conjunto" ? porConjunto : porCriativo;
+  // Só ativos ligado por padrão — pedido do Rodrigo em 2026-09-28 ("eu quero só os ativos"). O
+  // selo de status em cada linha continua visível mesmo com o filtro desligado, pra quem quiser
+  // ver o histórico completo (ex: conjunto que gastou a semana toda e foi pausado hoje).
+  const [soAtivos, setSoAtivos] = useState(true);
+  const base = modo === "conjunto" ? porConjunto : porCriativo;
+  const linhas = soAtivos ? base.filter((l) => l.ativo) : base;
   const rotulo = modo === "conjunto" ? "Conjunto" : "Criativo";
 
   return (
     <section className="mb-10 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--gridline)] px-4 py-2.5">
         <h3 className="text-sm font-medium text-[var(--text-secondary)]">Investimento por {rotulo.toLowerCase()} (Meta Ads)</h3>
-        <div className="flex overflow-hidden rounded-md border border-[var(--border)] text-xs">
-          {(["conjunto", "criativo"] as const).map((opcao) => (
-            <button
-              key={opcao}
-              type="button"
-              onClick={() => setModo(opcao)}
-              className="px-3 py-1 font-medium capitalize"
-              style={{
-                backgroundColor: modo === opcao ? "var(--series-1)" : "var(--surface-1)",
-                color: modo === opcao ? "white" : "var(--text-secondary)",
-              }}
-            >
-              {opcao}
-            </button>
-          ))}
+        <div className="flex items-center gap-3">
+          <label className="flex items-center gap-1.5 text-xs text-[var(--text-secondary)]">
+            <input type="checkbox" checked={soAtivos} onChange={(e) => setSoAtivos(e.target.checked)} />
+            Só ativos
+          </label>
+          <div className="flex overflow-hidden rounded-md border border-[var(--border)] text-xs">
+            {(["conjunto", "criativo"] as const).map((opcao) => (
+              <button
+                key={opcao}
+                type="button"
+                onClick={() => setModo(opcao)}
+                className="px-3 py-1 font-medium capitalize"
+                style={{
+                  backgroundColor: modo === opcao ? "var(--series-1)" : "var(--surface-1)",
+                  color: modo === opcao ? "white" : "var(--text-secondary)",
+                }}
+              >
+                {opcao}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
       <p className="px-4 pt-2 text-xs text-[var(--text-muted)]">
@@ -69,7 +80,19 @@ export function InvestimentoMetaAds({
           <tbody>
             {linhas.map((i) => (
               <tr key={i.nome} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
-                <td className="px-4 py-2 font-medium">{i.nome}</td>
+                <td className="px-4 py-2 font-medium">
+                  <span className="inline-flex items-center gap-1.5">
+                    <span
+                      aria-hidden
+                      className="h-1.5 w-1.5 shrink-0 rounded-full"
+                      style={{ backgroundColor: i.ativo ? "var(--status-good)" : "var(--text-muted)" }}
+                    />
+                    {i.nome}
+                    <span className="text-xs font-normal text-[var(--text-muted)]">
+                      {i.ativo ? "Ativo" : "Pausado"}
+                    </span>
+                  </span>
+                </td>
                 <td className="px-4 py-2">
                   {i.fotos.length > 0 ? (
                     <div className="flex gap-1.5">

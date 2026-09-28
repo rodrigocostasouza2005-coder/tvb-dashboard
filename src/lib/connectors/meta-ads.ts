@@ -44,13 +44,29 @@ async function fetchAllPages<T>(url: string): Promise<T[]> {
   return results;
 }
 
-type MetaAdSet = { id: string; name: string };
+type MetaAdSet = { id: string; name: string; status: string };
 type MetaAd = { id: string; name: string; status: string; creative?: { thumbnail_url?: string } };
 
 async function fetchAdSets(): Promise<MetaAdSet[]> {
   const { accountId, accessToken } = getCredentials();
-  const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/act_${accountId}/adsets?fields=id,name&limit=200&access_token=${accessToken}`;
+  const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/act_${accountId}/adsets?fields=id,name,status&limit=200&access_token=${accessToken}`;
   return fetchAllPages<MetaAdSet>(url);
+}
+
+// Status (ativo/pausado) pra sinalizar na tabela de Investimento — pedido do Rodrigo em
+// 2026-09-28. "status" aqui é o do CONJUNTO em si (ACTIVE/PAUSED/...), independente de ter tido
+// gasto no período do insight (um conjunto pausado hoje pode ter gastado a semana toda).
+export async function getStatusPorNomeConjunto(nomesConjuntos: string[]): Promise<Map<string, boolean>> {
+  const adsets = await fetchAdSets();
+  const porNome = new Map(adsets.map((a) => [a.name, a.status === "ACTIVE"]));
+  return new Map(nomesConjuntos.map((n) => [n, porNome.get(n) ?? false]));
+}
+
+export async function getStatusPorNomeAnuncio(nomesAnuncios: string[]): Promise<Map<string, boolean>> {
+  const ads = await fetchTodosAnuncios();
+  const porNome = new Map<string, boolean>();
+  for (const a of ads) if (!porNome.has(a.name)) porNome.set(a.name, a.status === "ACTIVE");
+  return new Map(nomesAnuncios.map((n) => [n, porNome.get(n) ?? false]));
 }
 
 // Só os anúncios ATIVOS do conjunto — anúncio pausado não é relevante pra "o que tá no ar agora".

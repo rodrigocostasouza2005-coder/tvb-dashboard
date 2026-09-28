@@ -14,6 +14,8 @@ import {
   getInsightsPorConjunto,
   getFotosPorNomeAnuncio,
   getInsightsPorAnuncio,
+  getStatusPorNomeConjunto,
+  getStatusPorNomeAnuncio,
   type MetaInsight,
 } from "@/lib/connectors/meta-ads";
 import { prisma } from "@/lib/prisma";
@@ -100,25 +102,31 @@ export default async function AnalyticsSitePage({
 
   let fotosPorConjunto = new Map<string, string[]>();
   let fotosPorAnuncio = new Map<string, string[]>();
+  let statusPorConjunto = new Map<string, boolean>();
+  let statusPorAnuncio = new Map<string, boolean>();
   try {
     const nomesParaFoto = [...new Set([...anuncios.map((a) => a.anuncio), ...investimentoPorConjunto.map((i) => i.conjunto)])];
-    [fotosPorConjunto, fotosPorAnuncio] = await Promise.all([
+    [fotosPorConjunto, fotosPorAnuncio, statusPorConjunto, statusPorAnuncio] = await Promise.all([
       getFotosPorNomeConjunto(prisma, nomesParaFoto),
       getFotosPorNomeAnuncio(prisma, investimentoPorAnuncio.map((i) => i.anuncio)),
+      getStatusPorNomeConjunto(investimentoPorConjunto.map((i) => i.conjunto)),
+      getStatusPorNomeAnuncio(investimentoPorAnuncio.map((i) => i.anuncio)),
     ]);
   } catch {
-    // sem foto — não quebra a página.
+    // sem foto/status — não quebra a página.
   }
 
   const investimentoRowsConjunto: InvestimentoRow[] = investimentoPorConjunto.map((i) => ({
     ...i,
     nome: i.conjunto,
     fotos: fotosPorConjunto.get(i.conjunto) ?? [],
+    ativo: statusPorConjunto.get(i.conjunto) ?? false,
   }));
   const investimentoRowsCriativo: InvestimentoRow[] = investimentoPorAnuncio.map((i) => ({
     ...i,
     nome: i.anuncio,
     fotos: fotosPorAnuncio.get(i.anuncio) ?? [],
+    ativo: statusPorAnuncio.get(i.anuncio) ?? false,
   }));
 
   const sessoesChartData = sessoesPorDia.map((s) => ({ day: s.data, sessoes: s.sessoes }));
