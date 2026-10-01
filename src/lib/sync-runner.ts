@@ -3,14 +3,14 @@ import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import { randomUUID } from "crypto";
-import { createDapicClients, stripReferenciaPrefix, parseDapicDateTime, stableItemIndexes, isGarrafaBrinde, waitMsFromDapicError, sleep, type DapicClient } from "@/lib/connectors/dapic";
+import { createDapicClients, stripReferenciaPrefix, parseDapicDateTime, stableItemIndexes, isGarrafaBrinde, waitMsFromDapicError, sleep, mapWithConcurrency, parseTabelaPrecosLabel, type DapicClient } from "@/lib/connectors/dapic";
 // (import type { Prisma } removido abaixo — já importado acima como valor+tipo)
 import { displayGroupFor, sellsProducts } from "@/lib/connectors/armazenadores";
 import { upsertStockSnapshots, type StockSnapshotRow } from "@/lib/connectors/upsert-stock";
 import { upsertProductionOrders, type ProductionOrderRow } from "@/lib/connectors/upsert-production-order";
 import { fetchPriceCatalogCached, inferTabelaPreco, type PriceCatalog } from "@/lib/connectors/tabela-preco";
 import { sendTelegramMessage } from "@/lib/telegram";
-import { getTopParaIncentivar, getTopVendidosPorLoja, getPromotionRows, getB2BClienteNomes } from "@/lib/metrics";
+import { getTopParaIncentivar, getTopVendidosPorLoja, getPromotionRows, getB2BClienteNomes, classifySaleChannel } from "@/lib/metrics";
 import { brasiliaDayStart, brasiliaDayEnd, todayBrasiliaStr } from "@/lib/filters";
 
 // Lógica compartilhada pelas duas rotas de sync (/api/sync e /api/sync-evening) — precisam ser
@@ -93,12 +93,13 @@ async function syncEstoque(client: DapicClient, storeByDapicId: Map<number, stri
 // Corrigido: quando `atacadoStoreId` existe (só acontece pro token cd-atacado), cada linha escolhe
 // a loja pela tabelaPreco já inferida (mesmo sinal que já era usado só pro filtro de canal B2B/B2C).
 // Preço pago que não bate com nenhuma tabela do catálogo (null) é comum em pedido de atacado com
-// preço negociado (ver comentário em canalWhere, core.ts). Antes isso ficava "perdido" como null e
-// vazava pro filtro de "Tabela varejo" na Visão Geral (saleWhere trata null como "passa junto" em
-// qualquer tabela selecionada). Reaproveita a mesma regra já validada (98.3% contra Excel real do
-// Rodrigo): se o cliente já tem histórico confirmado de "Tabela atacado", assume atacado em vez de
-// deixar null. Só se aplica quando atacadoStoreId existe (só pro token cd-atacado — física não tem
-// esse canal, confirmado com o Rodrigo em 2026-09-30).
+// preço negociado (ver comentário em canalWhere/classifySaleChannel, core.ts). Antes isso ficava
+// "perdido" como null e vazava pro filtro de "Tabela varejo" na Visão Geral (saleWhere trata null
+// como "passa junto" em qualquer tabela selecionada). Delega pra classifySaleChannel — a MESMA
+// função que decide canal em qualquer outro lugar do projeto — em vez de reimplementar a regra
+// aqui; só traduz o resultado de volta pro formato de string que o campo tabelaPreco espera. Só
+// se aplica quando atacadoStoreId existe (só pro token cd-atacado — física não tem esse canal,
+// confirmado com o Rodrigo em 2026-09-30).
 function inferTabelaPrecoComFallbackCliente(
   cod: string,
   valorUnitario: number,
@@ -108,8 +109,8 @@ function inferTabelaPrecoComFallbackCliente(
 ): string | null {
   const inferido = inferTabelaPreco(cod, valorUnitario, catalog);
   if (inferido !== null) return inferido;
-  if (clienteNome && b2bClientes.has(clienteNome)) return "Tabela atacado";
-  return null;
+  const classificacao = classifySaleChannel(inferido, clienteNome, b2bClientes);
+  return classificacao.channel === "B2B" ? "Tabela atacado" : null;
 }
 
 async function syncVendas(
@@ -138,6 +139,23 @@ async function syncVendas(
     return tabelaPreco === "Tabela atacado" && atacadoStoreId ? atacadoStoreId : siteStoreId;
   }
 
+  // Tabela de preço REAL por venda (ver parseTabelaPrecosLabel, dapic.ts) — 1 chamada extra por
+  // venda fechada com item de Venda/Devolução, buscada com concorrência limitada (volume medido em
+  // 2026-10-01: no máximo ~30 vendas distintas/loja num dia, então nem um limite baixo vira
+  // gargalo de tempo). Pulado pra vendas que só têm Brinde (tabelaPreco não é usado ali).
+  const vendasComItemRelevante = vendasPdv.filter(
+    (v) =>
+      v.Status === "Fechada" &&
+      v.DataFechamento &&
+      v.Produtos.some((item) => (item.Tipo === "Venda" && contaVendaDoPdv) || item.Tipo === "Devolução")
+  );
+  const tabelaPrecoRealPorVenda = new Map<number, string | null>(
+    await mapWithConcurrency(vendasComItemRelevante, 8, async (v) => {
+      const detalhe = await client.fetchVendaPdvDetalhe(v.Id).catch(() => null);
+      return [v.Id, parseTabelaPrecosLabel(detalhe?.TabelaPrecos)] as const;
+    })
+  );
+
   for (const venda of vendasPdv) {
     if (venda.Status !== "Fechada" || !venda.DataFechamento) continue;
     const saleDate = parseDapicDateTime(venda.DataFechamento);
@@ -155,7 +173,9 @@ async function syncVendas(
       const itemIndex = itemIndexes[pos];
       const cod = item.IdGradeProduto != null ? String(item.IdGradeProduto) : venda.Codigo;
       if (item.Tipo === "Venda" && contaVendaDoPdv) {
-        const tabelaPreco = inferTabelaPrecoComFallbackCliente(cod, item.ValorUnitario, priceCatalog, venda.Cliente ?? null, b2bClientes);
+        const tabelaPreco =
+          tabelaPrecoRealPorVenda.get(venda.Id) ??
+          inferTabelaPrecoComFallbackCliente(cod, item.ValorUnitario, priceCatalog, venda.Cliente ?? null, b2bClientes);
         saleData.push({
           storeId: resolveStoreId(tabelaPreco),
           dapicVendaId: venda.Id,
@@ -178,7 +198,9 @@ async function syncVendas(
           saleDate,
         });
       } else if (item.Tipo === "Devolução") {
-        const tabelaPreco = inferTabelaPrecoComFallbackCliente(cod, item.ValorUnitario, priceCatalog, venda.Cliente ?? null, b2bClientes);
+        const tabelaPreco =
+          tabelaPrecoRealPorVenda.get(venda.Id) ??
+          inferTabelaPrecoComFallbackCliente(cod, item.ValorUnitario, priceCatalog, venda.Cliente ?? null, b2bClientes);
         returnData.push({
           storeId: resolveStoreId(tabelaPreco),
           dapicVendaId: venda.Id,
@@ -217,18 +239,59 @@ async function syncVendas(
   }
 
   // Idempotente em cima de (storeId, dapicVendaId, itemIndex) — o cron roda 2x/dia olhando sempre
-  // "últimos N dias", então as janelas se sobrepõem. Devolução/Brinde continuam com createMany +
-  // skipDuplicates (não fazem sentido serem corrigidos depois). Venda usa upsert em massa que
-  // ATUALIZA o "vendedor" no conflito, em vez de só pular — achado em 2026-09-01 (Rodrigo): a loja
-  // às vezes bate a venda com um vendedor e corrige quem atendeu de verdade DEPOIS no DAPIC (ex:
-  // Ingrid registrou uma venda que era da Thye Mattos, cliente do Alexander); sem atualizar,
-  // ficávamos travados no vendedor errado pra sempre depois da 1ª sync daquela venda. Só o campo
-  // "vendedor" é reescrito — os outros ficam como vieram na 1ª sincronização (mesmo padrão de
-  // snapshot imutável do resto da Sale).
+  // "últimos N dias", então as janelas se sobrepõem. Brinde continua com createMany + skipDuplicates
+  // (sem campo conhecido que precise de correção depois). Venda usa upsert em massa que ATUALIZA o
+  // "vendedor" no conflito, em vez de só pular — achado em 2026-09-01 (Rodrigo): a loja às vezes
+  // bate a venda com um vendedor e corrige quem atendeu de verdade DEPOIS no DAPIC (ex: Ingrid
+  // registrou uma venda que era da Thye Mattos, cliente do Alexander); sem atualizar, ficávamos
+  // travados no vendedor errado pra sempre depois da 1ª sync daquela venda. Devolução usa o mesmo
+  // padrão de upsert pra "colecao" — ver upsertReturnsComColecaoAtualizavel acima (achado 2026-10-01,
+  // auditoria de Data Quality).
+  const storeIdsPossiveis = atacadoStoreId ? [siteStoreId, atacadoStoreId] : [siteStoreId];
+  await resolveStoreIdsEstaveis(prisma.sale, saleData as { dapicVendaId: number; itemIndex: number; storeId: string }[], storeIdsPossiveis);
+  await resolveStoreIdsEstaveis(prisma.return, returnData as { dapicVendaId: number; itemIndex: number; storeId: string }[], storeIdsPossiveis);
+
   const vendedorCorrigido = await upsertSalesComVendedorAtualizavel(saleData);
-  if (returnData.length) await prisma.return.createMany({ data: returnData, skipDuplicates: true });
+  await upsertReturnsComColecaoAtualizavel(returnData);
   if (giftData.length) await prisma.gift.createMany({ data: giftData, skipDuplicates: true });
   return { vendas: saleData.length, devolucoes: returnData.length, brindes: giftData.length, vendedorCorrigido };
+}
+
+// Preserva o storeId já gravado pra um item (dapicVendaId+itemIndex) já visto antes, mesmo que a
+// classificação de canal mude numa sync futura (preço reclassificado no catálogo, cliente virando
+// B2B confirmado via CNPJ, etc). Sem isso, o storeId calculado por resolveStoreId (derivado e
+// portanto mutável) podia divergir entre duas sincronizações do MESMO item — e como a chave de
+// idempotência (storeId, dapicVendaId, itemIndex) inclui justamente o storeId, isso não colidia
+// com nada: o item era inserido DE NOVO sob o novo storeId, duplicando a venda.
+//
+// Bug real achado em 2026-10-01: fatura NITHI (Id 11473, 52 itens) e PROS (Id 11472, 44 itens)
+// duplicadas exatamente assim — sincronizadas 1ª vez (storeId=CD) antes do commit 87ead95
+// (CNPJ passou a contar como sinal de B2B), e de novo (storeId=ATACADO) numa sync horas depois,
+// já com o commit no ar e o cliente reclassificado. R$20.076,08 de venda duplicada até ser achado.
+//
+// Só precisa consultar quando há mais de 1 storeId candidato (atacadoStoreId existe, só pro
+// token cd-atacado) — nos outros clientes resolveStoreId sempre devolve o mesmo valor, sem risco.
+type EstavelFindMany = (args: {
+  where: { storeId: { in: string[] }; dapicVendaId: { in: number[] } };
+  select: { dapicVendaId: true; itemIndex: true; storeId: true };
+}) => Promise<{ dapicVendaId: number | null; itemIndex: number | null; storeId: string }[]>;
+
+async function resolveStoreIdsEstaveis<T extends { dapicVendaId: number; itemIndex: number; storeId: string }>(
+  model: { findMany: EstavelFindMany },
+  items: T[],
+  storeIdsPossiveis: string[]
+): Promise<void> {
+  if (items.length === 0 || storeIdsPossiveis.length < 2) return;
+  const dapicVendaIds = [...new Set(items.map((i) => i.dapicVendaId))];
+  const existentes = await model.findMany({
+    where: { storeId: { in: storeIdsPossiveis }, dapicVendaId: { in: dapicVendaIds } },
+    select: { dapicVendaId: true, itemIndex: true, storeId: true },
+  });
+  const storeIdExistente = new Map(existentes.map((e) => [`${e.dapicVendaId}::${e.itemIndex}`, e.storeId]));
+  for (const item of items) {
+    const existente = storeIdExistente.get(`${item.dapicVendaId}::${item.itemIndex}`);
+    if (existente) item.storeId = existente;
+  }
 }
 
 type VendedorCorrigido = {
@@ -294,6 +357,39 @@ async function upsertSalesComVendedorAtualizavel(saleData: Prisma.SaleCreateMany
   return corrigidos;
 }
 
+// Bug real achado em 2026-10-01 (auditoria de Data Quality, pedido do Rodrigo): 98.9% das
+// devoluções do banco ficavam com colecao=null, inclusive sincronizadas há poucos dias — não era
+// "dado antigo de antes do campo existir" como o comentário antigo deste arquivo assumia. Causa
+// raiz: /vendaspdv devolve Colecao preenchida pra linha de Devolução (confirmado reconsultando a
+// API ao vivo pros mesmos registros que estavam null no banco — a informação SEMPRE existiu na
+// origem), mas createMany+skipDuplicates trata Return como imutável desde a 1ª sincronização —
+// se a API devolveu Colecao=null na primeira vez que o sync viu aquela devolução (ex: campo ainda
+// não propagado no backend do DAPIC naquele instante), ficava null PRA SEMPRE, mesmo depois da
+// API corrigir. Mesmo padrão de upsert já usado pra "vendedor" em Sale (ver função acima) —
+// atualiza colecao no conflito, mas só quando o valor novo não é null (nunca regride um dado bom
+// pra null se uma sync futura vier com o campo vazio por qualquer motivo transiente).
+async function upsertReturnsComColecaoAtualizavel(returnData: Prisma.ReturnCreateManyInput[]): Promise<void> {
+  if (returnData.length === 0) return;
+  const values = returnData.map(
+    (r) => Prisma.sql`(
+      ${randomUUID()}, ${r.storeId}, ${r.cod}, ${r.produto}, ${r.grupo}, ${r.cor ?? null}, ${r.tamanho ?? null},
+      ${r.marca ?? null}, ${r.tabelaPreco ?? null}, ${r.colecao ?? null}, ${r.quantidade}, ${r.valorTotal},
+      ${r.returnDate}, ${r.dapicVendaId}, ${r.itemIndex}
+    )`
+  );
+
+  await prisma.$executeRaw`
+    INSERT INTO "Return" (
+      "id", "storeId", "cod", "produto", "grupo", "cor", "tamanho",
+      "marca", "tabelaPreco", "colecao", "quantidade", "valorTotal",
+      "returnDate", "dapicVendaId", "itemIndex"
+    )
+    VALUES ${Prisma.join(values)}
+    ON CONFLICT ("storeId", "dapicVendaId", "itemIndex") DO UPDATE SET
+      "colecao" = COALESCE(EXCLUDED."colecao", "Return"."colecao")
+  `;
+}
+
 // Venda de verdade do canal Site+Atacado (só cd-atacado tem acesso a /faturas). Mesma chave de
 // idempotência (storeId, dapicVendaId=Id da fatura, itemIndex) — nunca colide com vendaspdv
 // porque esse token não grava mais Sale via vendaspdv (ver syncVendas).
@@ -321,6 +417,12 @@ async function syncFaturas(
     if (fatura.Status !== "Fechado" || !fatura.DataFechamento) continue;
     const saleDate = parseDapicDateTime(fatura.DataFechamento);
     const produtos = await client.fetchFaturaProdutos(fatura.Id);
+    // Tabela de preço REAL da fatura inteira (ver parseTabelaPrecosLabel, dapic.ts) — 1 chamada
+    // extra por fatura, mas o volume de faturas/dia é pequeno (medido em 2026-10-01: no máximo
+    // ~2-20/dia pro Site+Atacado). Se a chamada falhar (raro), cai pro heurístico antigo
+    // (inferTabelaPrecoComFallbackCliente) só pra essa fatura, em vez de derrubar a sync inteira.
+    const detalhe = await client.fetchFaturaDetalhe(fatura.Id).catch(() => null);
+    const tabelaPrecoReal = parseTabelaPrecosLabel(detalhe?.TabelaPrecos);
     const itemIndexes = stableItemIndexes(
       produtos,
       (p) => `${p.IdGradeProduto}::${p.Quantidade}::${p.Valores.ValorTotal.toFixed(2)}::${p.Tipo}`
@@ -348,13 +450,15 @@ async function syncFaturas(
         return;
       }
       if (item.Tipo !== "Venda") return;
-      const tabelaPreco = inferTabelaPrecoComFallbackCliente(
-        String(item.IdGradeProduto),
-        item.Valores.ValorUnitario,
-        priceCatalog,
-        fatura.Cliente ?? null,
-        b2bClientes
-      );
+      const tabelaPreco =
+        tabelaPrecoReal ??
+        inferTabelaPrecoComFallbackCliente(
+          String(item.IdGradeProduto),
+          item.Valores.ValorUnitario,
+          priceCatalog,
+          fatura.Cliente ?? null,
+          b2bClientes
+        );
       saleData.push({
         storeId: tabelaPreco === "Tabela atacado" && atacadoStoreId ? atacadoStoreId : storeId,
         dapicVendaId: fatura.Id,
@@ -381,6 +485,9 @@ async function syncFaturas(
   }
   if (giftData.length) await prisma.gift.createMany({ data: giftData, skipDuplicates: true });
 
+  if (atacadoStoreId) {
+    await resolveStoreIdsEstaveis(prisma.sale, saleData as { dapicVendaId: number; itemIndex: number; storeId: string }[], [storeId, atacadoStoreId]);
+  }
   if (saleData.length) await prisma.sale.createMany({ data: saleData, skipDuplicates: true });
   return { vendas: saleData.length, brindes: giftData.length };
 }

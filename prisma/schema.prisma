@@ -255,9 +255,15 @@ model Return {
   tamanho      String?
   marca        String?
   tabelaPreco  String?
-  // A API (/vendaspdv) já manda Colecao pra linhas de devolução também, mas a sync nunca
-  // salvava esse campo — adicionado em 2026-09-14. Registros sincronizados antes disso ficam
-  // com colecao=null pra sempre (não dá pra recuperar retroativamente sem re-buscar na API).
+  // A API (/vendaspdv) sempre manda Colecao pra linha de devolução, mas até 2026-10-01 o sync
+  // gravava com createMany+skipDuplicates (imutável desde a 1ª sincronização) — se a API
+  // devolvesse null na 1ª vez que o sync visse aquela devolução, ficava null pra sempre mesmo
+  // depois da API corrigir (confirmado reconsultando a API: 98.9% dos registros, inclusive
+  // recentes, tinham o dado certo na origem). Corrigido pra upsert que atualiza colecao no
+  // conflito (ver upsertReturnsComColecaoAtualizavel em sync-runner.ts) — dado futuro se
+  // autocorrige no sync seguinte; histórico precisa do backfill em
+  // scripts/backfill-return-colecao.ts (reescrito nessa mesma correção, a versão antiga tinha
+  // bug de matching e nunca funcionou de verdade).
   colecao      String?
   quantidade   Int
   valorTotal   Float

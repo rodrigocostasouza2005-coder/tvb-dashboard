@@ -76,6 +76,34 @@ export function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+// Limita concorrência de chamadas 1-por-registro (ex: detalhe de venda/fatura) — sem isso, um dia
+// com várias dezenas de vendas dispararia todas as chamadas de uma vez, arriscando 429 em cascata.
+// Volume real medido em 2026-10-01 (janela de 1 dia, todas as lojas): no máximo ~30 vendas/loja,
+// então mesmo um limite baixo como esse não vira gargalo de tempo de sync.
+export async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  async function worker() {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i]);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
+// "TabelaPrecos" em /faturas/{id} e /vendaspdv/{id} vem como "2 - Tabela atacado" (Id + " - " +
+// Descricao) — mesmo Descricao usado no catálogo de /tabelaprecos (ver tabela-preco.ts), só com o
+// Id colado na frente. Achado em 2026-10-01: esses dois endpoints de DETALHE trazem a tabela de
+// preço REAL usada no fechamento — ground truth, não inferência por preço batido nem heurística de
+// CNPJ (ver classifySaleChannel, metrics/core.ts). Só não vem nas listas em lote (/faturas,
+// /vendaspdv), por isso syncVendas/syncFaturas precisam de uma chamada de detalhe extra por venda.
+export function parseTabelaPrecosLabel(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  return raw.replace(/^\d+\s*-\s*/, "").trim() || null;
+}
+
 // Extrai o "DataLiberacao" (quando o DAPIC devolve no corpo do erro 429) e calcula quanto falta
 // pra esperar até lá — usado tanto pelo retry interno do login() quanto pelo retry externo do
 // runSync() (sync-runner.ts), pra não ficar tentando de novo antes da hora que o próprio DAPIC
@@ -496,6 +524,9 @@ export type DapicVendaPdvDetalhe = {
   NFCE: number | null;
   NFE: number | null;
   CFE: number | null;
+  // Achado em 2026-10-01 — ver parseTabelaPrecosLabel acima. Vem como "1 - Tabela varejo".
+  IdTabelaPrecos: number | null;
+  TabelaPrecos: string | null;
 };
 
 // Campos reais de /ordensproducao/produtos, confirmados em 2026-08-10 com o token da Matriz.
@@ -572,6 +603,9 @@ export type DapicFaturaDetalhe = {
     ChaveNotaFiscal: string;
     DataEmissao: string;
   } | null;
+  // Achado em 2026-10-01 — ver parseTabelaPrecosLabel acima. Vem como "2 - Tabela atacado".
+  IdTabelaPrecos: number | null;
+  TabelaPrecos: string | null;
 };
 
 // Campos reais de /faturas/{id}/produtos, confirmados em 2026-08-10. Produto vem com a
