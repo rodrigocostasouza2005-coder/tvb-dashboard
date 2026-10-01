@@ -10,7 +10,7 @@ import { upsertStockSnapshots, type StockSnapshotRow } from "@/lib/connectors/up
 import { upsertProductionOrders, type ProductionOrderRow } from "@/lib/connectors/upsert-production-order";
 import { fetchPriceCatalogCached, inferTabelaPreco, type PriceCatalog } from "@/lib/connectors/tabela-preco";
 import { sendTelegramMessage } from "@/lib/telegram";
-import { getTopParaIncentivar, getTopVendidosPorLoja, getPromotionRows } from "@/lib/metrics";
+import { getTopParaIncentivar, getTopVendidosPorLoja, getPromotionRows, getB2BClienteNomes } from "@/lib/metrics";
 import { brasiliaDayStart, brasiliaDayEnd, todayBrasiliaStr } from "@/lib/filters";
 
 // Lógica compartilhada pelas duas rotas de sync (/api/sync e /api/sync-evening) — precisam ser
@@ -92,6 +92,26 @@ async function syncEstoque(client: DapicClient, storeByDapicId: Map<number, stri
 // nunca venda/devolução, então produto de atacado aparecia misturado em "TVB Site e Atacado".
 // Corrigido: quando `atacadoStoreId` existe (só acontece pro token cd-atacado), cada linha escolhe
 // a loja pela tabelaPreco já inferida (mesmo sinal que já era usado só pro filtro de canal B2B/B2C).
+// Preço pago que não bate com nenhuma tabela do catálogo (null) é comum em pedido de atacado com
+// preço negociado (ver comentário em canalWhere, core.ts). Antes isso ficava "perdido" como null e
+// vazava pro filtro de "Tabela varejo" na Visão Geral (saleWhere trata null como "passa junto" em
+// qualquer tabela selecionada). Reaproveita a mesma regra já validada (98.3% contra Excel real do
+// Rodrigo): se o cliente já tem histórico confirmado de "Tabela atacado", assume atacado em vez de
+// deixar null. Só se aplica quando atacadoStoreId existe (só pro token cd-atacado — física não tem
+// esse canal, confirmado com o Rodrigo em 2026-09-30).
+function inferTabelaPrecoComFallbackCliente(
+  cod: string,
+  valorUnitario: number,
+  catalog: PriceCatalog,
+  clienteNome: string | null,
+  b2bClientes: Set<string>
+): string | null {
+  const inferido = inferTabelaPreco(cod, valorUnitario, catalog);
+  if (inferido !== null) return inferido;
+  if (clienteNome && b2bClientes.has(clienteNome)) return "Tabela atacado";
+  return null;
+}
+
 async function syncVendas(
   client: DapicClient,
   storeId: string | null,
@@ -102,6 +122,7 @@ async function syncVendas(
   if (!storeId) return { vendas: 0, devolucoes: 0, brindes: 0, vendedorCorrigido: [] as VendedorCorrigido[] };
   const siteStoreId: string = storeId;
   const contaVendaDoPdv = client.label !== "cd-atacado";
+  const b2bClientes = atacadoStoreId ? await getB2BClienteNomes() : new Set<string>();
   const hoje = new Date();
   const inicio = new Date(hoje);
   inicio.setDate(inicio.getDate() - dias);
@@ -134,7 +155,7 @@ async function syncVendas(
       const itemIndex = itemIndexes[pos];
       const cod = item.IdGradeProduto != null ? String(item.IdGradeProduto) : venda.Codigo;
       if (item.Tipo === "Venda" && contaVendaDoPdv) {
-        const tabelaPreco = inferTabelaPreco(cod, item.ValorUnitario, priceCatalog);
+        const tabelaPreco = inferTabelaPrecoComFallbackCliente(cod, item.ValorUnitario, priceCatalog, venda.Cliente ?? null, b2bClientes);
         saleData.push({
           storeId: resolveStoreId(tabelaPreco),
           dapicVendaId: venda.Id,
@@ -157,7 +178,7 @@ async function syncVendas(
           saleDate,
         });
       } else if (item.Tipo === "Devolução") {
-        const tabelaPreco = inferTabelaPreco(cod, item.ValorUnitario, priceCatalog);
+        const tabelaPreco = inferTabelaPrecoComFallbackCliente(cod, item.ValorUnitario, priceCatalog, venda.Cliente ?? null, b2bClientes);
         returnData.push({
           storeId: resolveStoreId(tabelaPreco),
           dapicVendaId: venda.Id,
@@ -288,6 +309,7 @@ async function syncFaturas(
   priceCatalog: PriceCatalog
 ) {
   if (!storeId || client.label !== "cd-atacado") return { vendas: 0, brindes: 0 };
+  const b2bClientes = atacadoStoreId ? await getB2BClienteNomes() : new Set<string>();
   const hoje = new Date();
   const inicio = new Date(hoje);
   inicio.setDate(inicio.getDate() - dias);
@@ -326,7 +348,13 @@ async function syncFaturas(
         return;
       }
       if (item.Tipo !== "Venda") return;
-      const tabelaPreco = inferTabelaPreco(String(item.IdGradeProduto), item.Valores.ValorUnitario, priceCatalog);
+      const tabelaPreco = inferTabelaPrecoComFallbackCliente(
+        String(item.IdGradeProduto),
+        item.Valores.ValorUnitario,
+        priceCatalog,
+        fatura.Cliente ?? null,
+        b2bClientes
+      );
       saleData.push({
         storeId: tabelaPreco === "Tabela atacado" && atacadoStoreId ? atacadoStoreId : storeId,
         dapicVendaId: fatura.Id,
