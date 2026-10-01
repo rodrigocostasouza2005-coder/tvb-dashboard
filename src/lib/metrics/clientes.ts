@@ -9,6 +9,7 @@ import {
   cacheAsync,
   getB2BClienteNomes,
   canalWhere,
+  classifySaleChannel,
   dimensionKey,
   getLastEstoqueSyncTime,
   latestStockSnapshots,
@@ -1104,7 +1105,10 @@ export async function getProdutosPortaDeEntrada(
     if (filters.marcas !== undefined && (r.marca === null || !filters.marcas.includes(r.marca))) return false;
     if (filters.tabelasPreco !== undefined && r.tabelaPreco !== null && !filters.tabelasPreco.includes(r.tabelaPreco)) return false;
     if (filters.grupoIn && !filters.grupoIn.includes(r.grupo)) return false;
-    const isB2B = r.tabelaPreco === "Tabela atacado" || (b2bNormSet?.has(r.norm) ?? false);
+    // classifySaleChannel espera clienteNome no formato CRU usado em getB2BClienteNomes, mas aqui
+    // só temos "norm" (já normalizado) — como b2bNormSet também já foi normalizado (linha acima),
+    // passar r.norm nos dois lados do set.has() dá o mesmo resultado sem precisar denormalizar.
+    const isB2B = classifySaleChannel(r.tabelaPreco, r.norm, b2bNormSet ?? new Set()).channel === "B2B";
     if (canal === "b2b" && !isB2B) return false;
     if (canal === "b2c" && isB2B) return false;
     return true;
@@ -1262,11 +1266,18 @@ export async function getClienteFicha(
     }
   }
 
-  // Cliente é B2B se JÁ teve QUALQUER venda (não só nesse período/filtro, no histórico todo já
-  // carregado em `sales`) batendo com "Tabela atacado" — mesma regra de canalWhere. Preço
-  // negociado (comum em atacado) não bate com a tabela e vira tabelaPreco=null, que por linha
-  // isolada pareceria B2C; aqui o cliente inteiro conta como B2B se algum dia bateu.
-  const clienteEhB2B = sales.some((s) => s.tabelaPreco === "Tabela atacado");
+  // Cliente é B2B se classifySaleChannel disser B2B — mesma regra usada em todo o resto do
+  // projeto (preço batendo com "Tabela atacado" OU CNPJ/histórico confirmado via
+  // getB2BClienteNomes, checado contra qualquer uma das `variantes` de nome desse cliente). Antes
+  // essa tela só olhava tabelaPreco==="Tabela atacado" direto nas vendas, sem o fallback de
+  // cliente — bug real achado em 2026-10-01: cliente CNPJ que nunca teve preço batendo exato (ex:
+  // NITHI/PROS Comércio de Roupas) aparecia como B2C na Ficha mesmo já corrigido em todo o resto
+  // do dashboard.
+  const b2bClientesHistorico = await getB2BClienteNomes();
+  const clienteNomeConhecidoB2B = variantes.find((v) => b2bClientesHistorico.has(v)) ?? null;
+  const clienteEhB2B = sales.some(
+    (s) => classifySaleChannel(s.tabelaPreco, clienteNomeConhecidoB2B, b2bClientesHistorico).channel === "B2B"
+  );
 
   const pedidos = new Set<string>();
   // true = pelo menos 1 item do pedido é B2B (Tabela atacado) — pedido misto é raro, mas conta

@@ -277,6 +277,41 @@ export async function getB2BClienteNomes(): Promise<Set<string>> {
   return set;
 }
 
+export type ChannelSource = "TABELA_PRECO" | "HISTORICO_CLIENTE" | "DESCONHECIDO";
+export type ChannelClassification =
+  | { channel: "B2B"; source: "TABELA_PRECO" | "HISTORICO_CLIENTE" }
+  | { channel: "B2C"; source: "TABELA_PRECO" }
+  | { channel: "DESCONHECIDO"; source: "DESCONHECIDO" };
+
+// Função única de classificação de canal — hierarquia de confiança (do mais confiável pro menos):
+//   1. tabelaPreco da própria venda (inferida batendo preço pago x catálogo, ver
+//      connectors/tabela-preco.ts) — se bateu com "Tabela atacado", é B2B; se bateu com qualquer
+//      outra tabela real (varejo, promoção, etc), é B2C. Fonte mais confiável porque é específica
+//      DESSA venda, não um histórico do cliente que pode ter mudado de comportamento.
+//   2. Histórico do cliente (getB2BClienteNomes — já inclui tanto "já comprou batendo exato com
+//      Tabela atacado alguma vez" quanto "é CNPJ/pessoa jurídica cadastrada") — só entra quando a
+//      venda em si não tem tabelaPreco (preço negociado que não bateu com nenhuma tabela do
+//      catálogo, comum em pedido de atacado). Nunca sobrescreve uma tabelaPreco explícita.
+//   3. DESCONHECIDO — sem tabelaPreco e cliente sem nenhum sinal de B2B. Era silenciosamente
+//      tratado como B2C em todo filtro existente (canalWhere/saleWhere) — ver comentário em
+//      canalWhere sobre por quê (histórico grande demais de dado null pra reclassificar tudo como
+//      "desconhecido" sem quebrar métrica já validada). Esta função EXPÕE esse terceiro estado
+//      (pedido do Rodrigo em 2026-10-01: não mascarar "sem dado" como B2C) — usada por
+//      getDataQualitySummary() e por quem precisa saber a origem da classificação, não só o
+//      canal. Único lugar que decide essa regra — qualquer nova tela/métrica de canal deve
+//      chamar esta função (ou canalWhere, pro caso de filtro em SQL) em vez de reimplementar o
+//      if/else.
+export function classifySaleChannel(
+  tabelaPreco: string | null,
+  clienteNome: string | null,
+  b2bClientes: Set<string>
+): ChannelClassification {
+  if (tabelaPreco === "Tabela atacado") return { channel: "B2B", source: "TABELA_PRECO" };
+  if (tabelaPreco !== null) return { channel: "B2C", source: "TABELA_PRECO" };
+  if (clienteNome && b2bClientes.has(clienteNome)) return { channel: "B2B", source: "HISTORICO_CLIENTE" };
+  return { channel: "DESCONHECIDO", source: "DESCONHECIDO" };
+}
+
 export async function canalWhere(canal: Canal): Promise<Prisma.SaleWhereInput> {
   if (canal === "todos") return {};
   const b2bClientes = [...(await getB2BClienteNomes())];
@@ -298,6 +333,12 @@ export async function canalWhere(canal: Canal): Promise<Prisma.SaleWhereInput> {
   // "not: X" no Prisma exclui null (vira "<>" puro no SQL) — precisa do OR explícito com null,
   // senão toda venda sem tabelaPreco inferida (boa parte da base) sumia do B2C. Achado testando
   // contra dado real: sem isso, b2b + b2c não batia com "todos" (2731 vs 1667 unidades).
+  //
+  // Nota (2026-10-01): isso é o pushdown SQL da MESMA regra de classifySaleChannel (acima), com
+  // uma diferença deliberada — aqui, DESCONHECIDO (sem tabelaPreco, cliente sem histórico de B2B)
+  // cai dentro de "b2c" por compatibilidade com toda métrica já validada que usa canal="b2c". Pra
+  // enxergar DESCONHECIDO separado de B2C de verdade, use classifySaleChannel() linha a linha ou
+  // getDataQualitySummary().vendasSemClassificacao.
   return {
     AND: [
       { OR: [{ tabelaPreco: { not: "Tabela atacado" } }, { tabelaPreco: null }] },

@@ -1,4 +1,5 @@
 export * from "./core";
+export * from "./data-quality";
 export * from "./vendas";
 export * from "./estoque";
 export * from "./sellthrough";
