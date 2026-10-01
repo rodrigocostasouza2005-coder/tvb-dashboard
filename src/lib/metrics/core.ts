@@ -253,6 +253,26 @@ export async function getB2BClienteNomes(): Promise<Set<string>> {
     distinct: ["clienteNome"],
   });
   const set = new Set(rows.map((r) => r.clienteNome as string));
+
+  // Achado real em 2026-09-30: NITHI COMERCIO DE ROUPAS LTDA e PROS COMERCIO DE ROUPAS LTDA (155
+  // peças juntas) nunca tiveram UMA venda sequer batendo exato com "Tabela atacado" (sempre preço
+  // negociado fora da tolerância de R$1) — ficavam de fora do set acima e vazavam como varejo em
+  // qualquer tela que filtra por Tabela de Preço. CNPJ (pessoa jurídica, campo cpfCnpj em
+  // ClienteCadastro) é sinal direto de revendedor/atacado, independente de já ter batido preço
+  // alguma vez. Join por nome normalizado (ClienteCadastro é sincronizado de /clientes, um
+  // endpoint diferente de /vendaspdv e /faturas, então a grafia pode variar) mas devolve o
+  // clienteNome CRU do próprio Sale — mantém o set 100% consistente com o que os ~10 lugares que
+  // consomem essa função já esperam (match exato contra Sale.clienteNome).
+  const cnpjRows = await prisma.$queryRaw<{ nome: string }[]>`
+    SELECT DISTINCT s."clienteNome" AS nome
+    FROM "Sale" s
+    JOIN "ClienteCadastro" c ON UPPER(TRIM(c.nome)) = UPPER(TRIM(s."clienteNome"))
+    WHERE s."clienteNome" IS NOT NULL
+      AND c."cpfCnpj" IS NOT NULL
+      AND length(regexp_replace(c."cpfCnpj", '[^0-9]', '', 'g')) = 14
+  `;
+  for (const r of cnpjRows) set.add(r.nome);
+
   b2bClientesCache = { set, expiresAt: Date.now() + B2B_CLIENTES_CACHE_MS };
   return set;
 }
