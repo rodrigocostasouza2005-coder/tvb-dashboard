@@ -17,22 +17,40 @@ export type ContatoTipo = "sugestao" | "followup";
 // fica null (ver getContatosPorVendedor, que exclui null quando quem vê é de loja única).
 async function resolverContatadoPor(
   user: NonNullable<Awaited<ReturnType<typeof getSessionUser>>>
-): Promise<{ contatadoPor: string; storeId: string | null }> {
+): Promise<{ contatadoPor: string; storeId: string | null; vendedorValidado: string | null }> {
   const allowedStores = getStoreRestriction(user);
   const storeIdLojaUnica = allowedStores.length === 1 ? allowedStores[0] : null;
 
   const cookieVendedor = await getVendedorAtualCookie();
-  if (!cookieVendedor || !storeIdLojaUnica) return { contatadoPor: user.name, storeId: storeIdLojaUnica };
+  if (!cookieVendedor || !storeIdLojaUnica) {
+    return { contatadoPor: user.name, storeId: storeIdLojaUnica, vendedorValidado: null };
+  }
   const permitidos = await getVendedoresAtivos(storeIdLojaUnica);
   return permitidos.includes(cookieVendedor)
-    ? { contatadoPor: cookieVendedor, storeId: storeIdLojaUnica }
-    : { contatadoPor: user.name, storeId: storeIdLojaUnica };
+    ? { contatadoPor: cookieVendedor, storeId: storeIdLojaUnica, vendedorValidado: cookieVendedor }
+    : { contatadoPor: user.name, storeId: storeIdLojaUnica, vendedorValidado: null };
 }
 
 export async function marcarContatadoAction(tipo: ContatoTipo, cliente: string, chave: string) {
   const user = await getSessionUser();
   if (!user) throw new Error("Não autenticado.");
-  const { contatadoPor, storeId } = await resolverContatadoPor(user);
+  const { contatadoPor, storeId, vendedorValidado } = await resolverContatadoPor(user);
+
+  // Mesma regra que já decide o que o vendedor VÊ nas listas (getFollowUpPosCompra/
+  // getSugestoesDeContato, via ClienteVendedorAtribuicao) — agora também trava do lado do
+  // servidor, não só escondendo na UI: um login de loja única com vendedor selecionado só pode
+  // marcar como tratado um cliente de verdade atribuído a ele, mesmo que a chamada seja forçada
+  // direto com outro nome de cliente. ADMIN/GESTÃO (login multi-loja, sem vendedor selecionado)
+  // continuam sem essa restrição extra, igual sempre foi (2026-10-02, pedido do Rodrigo).
+  if (vendedorValidado && storeId) {
+    const atribuicao = await prisma.clienteVendedorAtribuicao.findUnique({
+      where: { storeId_clienteNorm: { storeId, clienteNorm: cliente.trim().toUpperCase() } },
+      include: { vendedorAtual: true },
+    });
+    if (atribuicao?.vendedorAtual.nome !== vendedorValidado) {
+      throw new Error("Esse cliente não está atribuído a você.");
+    }
+  }
 
   const rec = await prisma.contatoMarcado.upsert({
     where: { tipo_cliente_chave: { tipo, cliente, chave } },

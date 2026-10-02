@@ -9,6 +9,7 @@ import { getMensagemTemplates, renderTemplate, type TemplateKey } from "@/lib/me
 import { FilterBar } from "../filter-bar";
 import { CollapsibleFilters } from "../collapsible-filters";
 import { ContatoWhatsappLink } from "./contato-whatsapp-link";
+import { FollowUpTableRow } from "./follow-up-row";
 import { VendedorGate, VendedorAtualSelect } from "./vendedor-select";
 
 type ContatoInfo = { contatadoPor: string; contatadoEm: string };
@@ -197,15 +198,11 @@ function TabelaFollowUp({
   loja,
   itens,
   clienteHref,
-  contatosMap,
-  podeVerCheck,
   templates,
 }: {
   loja: string;
   itens: FollowUpComNota[];
   clienteHref: (nome: string) => string;
-  contatosMap: Map<string, ContatoInfo>;
-  podeVerCheck: boolean;
   templates: Record<TemplateKey, string>;
 }) {
   return (
@@ -223,34 +220,18 @@ function TabelaFollowUp({
         </thead>
         <tbody>
           {itens.map((f) => (
-            <tr key={f.cliente} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
-              <td className="px-4 py-2 font-medium">
-                <a href={clienteHref(f.cliente)} className="hover:underline">{f.cliente}</a>
-                {f.vendedorOriginal && (
-                  <div className="text-xs font-normal text-[var(--text-muted)]">
-                    Ex-cliente de {primeiroNome(f.vendedorOriginal)}
-                  </div>
-                )}
-              </td>
-              <td className="px-4 py-2">
-                {f.telefone ? (
-                  <ContatoWhatsappLink
-                    telefone={f.telefone}
-                    mensagem={mensagemFollowUp(f, templates)}
-                    tipo="followup"
-                    cliente={f.cliente}
-                    chave={String(f.dapicVendaId)}
-                    contatadoInicial={contatosMap.get(`followup|${f.cliente}|${f.dapicVendaId}`) ?? null}
-                    podeVerCheck={podeVerCheck}
-                  />
-                ) : (
-                  <span className="text-[var(--text-muted)]">—</span>
-                )}
-              </td>
-              <td className="px-4 py-2 text-[var(--text-secondary)]">{f.produtos.join(", ")}</td>
-              <td className="px-4 py-2 tabular-nums text-[var(--text-secondary)]">{f.numeroNota ?? <span className="text-[var(--text-muted)]">—</span>}</td>
-              <td className="px-4 py-2 tabular-nums">{f.diasAtras}</td>
-            </tr>
+            <FollowUpTableRow
+              key={f.cliente}
+              cliente={f.cliente}
+              clienteHref={clienteHref(f.cliente)}
+              vendedorOriginal={f.vendedorOriginal}
+              telefone={f.telefone}
+              mensagem={mensagemFollowUp(f, templates)}
+              chave={String(f.dapicVendaId)}
+              produtos={f.produtos.join(", ")}
+              numeroNota={f.numeroNota}
+              diasAtras={f.diasAtras}
+            />
           ))}
         </tbody>
       </table>
@@ -381,7 +362,7 @@ export default async function ClientesSugestoesContatoPage({
         <p className="mb-3 text-xs text-[var(--text-muted)]">Clientes B2C que compraram há 7-10 dias — perguntar se gostou e conseguiu aproveitar o produto.</p>
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           {followUpPorLoja.map(([loja, itens]) => (
-            <TabelaFollowUp key={loja} loja={loja} itens={itens} clienteHref={clienteHref} contatosMap={contatosMap} podeVerCheck={podeVerCheck} templates={templates} />
+            <TabelaFollowUp key={loja} loja={loja} itens={itens} clienteHref={clienteHref} templates={templates} />
           ))}
           {followUpPorLoja.length === 0 && (
             <p className="text-sm text-[var(--text-muted)]">Nenhuma compra B2C nessa janela de 7-10 dias atrás.</p>

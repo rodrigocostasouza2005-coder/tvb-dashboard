@@ -456,11 +456,22 @@ export async function getFollowUpPosCompra(filters: DashboardFilters, vendedor?:
   }
 
   const nomes = [...porCliente.values()].map((c) => c.nome);
-  const cadastros = await prisma.clienteCadastro.findMany({ where: { nome: { in: nomes } } });
+  const [cadastros, jaMarcados] = await Promise.all([
+    prisma.clienteCadastro.findMany({ where: { nome: { in: nomes } } }),
+    // Pendente = ainda não marcado como tratado (2026-10-02, pedido do Rodrigo: clicar em
+    // Follow-up deve tirar o item da lista de pendências de verdade, não só mostrar um ✓ e
+    // deixar a linha pra sempre — diferente de Sugestões, que continua com o comportamento
+    // antigo). "chave" é o dapicVendaId da venda específica que gerou aquele follow-up (ver
+    // c.dapicVendaId abaixo), então marcar 1 follow-up nunca esconde outro follow-up pendente do
+    // mesmo cliente (venda diferente = chave diferente).
+    prisma.contatoMarcado.findMany({ where: { tipo: "followup", cliente: { in: nomes } }, select: { cliente: true, chave: true } }),
+  ]);
   const cadastroByNome = new Map(cadastros.map((c) => [c.nome, c]));
+  const chavesMarcadas = new Set(jaMarcados.map((m) => `${m.cliente}\x00${m.chave}`));
 
   const now = new Date();
   const base = [...porCliente.values()]
+    .filter((c) => !chavesMarcadas.has(`${c.nome}\x00${c.dapicVendaId}`))
     .map((c) => {
       const cad = cadastroByNome.get(c.nome);
       return {
