@@ -180,7 +180,8 @@ export async function getAtacadoVendas(filters: DashboardFilters) {
         SUM("quantidade") AS units,
         SUM("valorTotalLiquido") AS revenue
       FROM "Sale"
-      WHERE "storeId" = ANY(${storeIds})
+      WHERE "status" != 'Cancelada'
+        AND "storeId" = ANY(${storeIds})
         AND ("tabelaPreco" = 'Tabela atacado' OR ("tabelaPreco" IS NULL AND "clienteNome" = ANY(${b2bClientes})))
         ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
         ${filters.marcas !== undefined ? Prisma.sql`AND "marca" = ANY(${filters.marcas})` : Prisma.empty}

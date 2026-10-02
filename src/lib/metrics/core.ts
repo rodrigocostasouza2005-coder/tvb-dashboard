@@ -172,6 +172,9 @@ export function returnWhere(filters: DashboardFilters): Prisma.ReturnWhereInput 
   // disso ficam com colecao=null pra sempre, então o filtro passa null também (senão o histórico
   // inteiro de devolução sumiria assim que alguém filtrasse por coleção).
   return {
+    // Venda cancelada não é devolução válida — regra única de "status válido", ver saleWhere
+    // logo abaixo (mesmo motivo, mesma regra, duas tabelas).
+    status: { not: "Cancelada" },
     returnDate: { gte: filters.from, lte: filters.to },
     ...(filters.storeIds !== undefined ? { storeId: { in: filters.storeIds } } : {}),
     ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
@@ -180,8 +183,17 @@ export function returnWhere(filters: DashboardFilters): Prisma.ReturnWhereInput 
   };
 }
 
+// Regra central de "venda válida" (2026-10-01, auditoria de consistência pedida pelo Rodrigo):
+// venda cancelada no DAPIC depois de fechada (ver reconciliarCancelamentosVendas, sync-runner.ts)
+// continua existindo no banco (preserva histórico/auditoria), mas nunca deve contar em nenhuma
+// métrica. Centralizado AQUI — qualquer nova métrica que filtra Sale deve usar saleWhere(filters)
+// em vez de reimplementar um `where` próprio, senão essa exclusão não se aplica e a venda
+// cancelada volta a vazar pro número. Não existe hoje nenhum consumidor que precise ver vendas
+// canceladas separadamente — se surgir, deve pedir isso explicitamente (ex: um 2º where com
+// status:"Cancelada"), não reverter essa regra.
 export function saleWhere(filters: DashboardFilters): Prisma.SaleWhereInput {
   return {
+    status: { not: "Cancelada" },
     saleDate: { gte: filters.from, lte: filters.to },
     ...(filters.storeIds !== undefined ? { storeId: { in: filters.storeIds } } : {}),
     ...(filters.marcas !== undefined ? { marca: { in: filters.marcas } } : {}),

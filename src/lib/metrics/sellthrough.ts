@@ -167,19 +167,19 @@ export async function getSellthroughByColecao(filters: Pick<DashboardFilters, "s
   };
 
   const [sold, gifted, stock, returned, prodOrderProdutos] = await Promise.all([
-    prisma.sale.groupBy({ by: ["colecao"], where: saleWhereColl, _sum: { quantidade: true, valorTotalLiquido: true } }),
+    prisma.sale.groupBy({ by: ["colecao"], where: { ...saleWhereColl, status: { not: "Cancelada" } }, _sum: { quantidade: true, valorTotalLiquido: true } }),
     prisma.gift.groupBy({ by: ["colecao"], where: saleWhereColl, _sum: { quantidade: true } }),
     // Estoque atual agrupado por colecao
     prisma.stockSnapshot.groupBy({ by: ["colecao"], where: stockWhereColl, _sum: { quantidadeDisponivel: true } }),
     // Return não tem colecao — mapeia via produto
     prisma.return.groupBy({
       by: ["produto"],
-      where: { ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}) },
+      where: { status: { not: "Cancelada" }, ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}) },
       _sum: { quantidade: true },
     }),
     // Mapa produto → colecao via Sale (que sempre tem colecao quando vem da API)
     prisma.sale.findMany({
-      where: { colecao: { not: null }, ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}) },
+      where: { status: { not: "Cancelada" }, colecao: { not: null }, ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}) },
       select: { produto: true, colecao: true },
       distinct: ["produto"],
     }),
@@ -230,12 +230,17 @@ export async function getSellthroughColecaoDetalhe(
   };
 
   const [sold, gifted, returned, stock] = await Promise.all([
-    prisma.sale.groupBy({ by: ["grupo", "produto"], where: saleGiftWhere, _sum: { quantidade: true, valorTotalLiquido: true } }),
+    prisma.sale.groupBy({ by: ["grupo", "produto"], where: { ...saleGiftWhere, status: { not: "Cancelada" } }, _sum: { quantidade: true, valorTotalLiquido: true } }),
     prisma.gift.groupBy({ by: ["grupo", "produto"], where: saleGiftWhere, _sum: { quantidade: true } }),
     prisma.return.groupBy({
       by: ["grupo", "produto"],
       where: {
-        produto: { in: await prisma.sale.findMany({ where: saleGiftWhere, select: { produto: true }, distinct: ["produto"] }).then((r) => r.map((s) => s.produto)) },
+        status: { not: "Cancelada" },
+        produto: {
+          in: await prisma.sale
+            .findMany({ where: { ...saleGiftWhere, status: { not: "Cancelada" } }, select: { produto: true }, distinct: ["produto"] })
+            .then((r) => r.map((s) => s.produto)),
+        },
         ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
       },
       _sum: { quantidade: true },
@@ -385,7 +390,8 @@ export async function getColecaoCurvaVida(
       DATE_TRUNC('day', ("saleDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo') AS dia,
       SUM("quantidade") AS unidades
     FROM "Sale"
-    WHERE "colecao" = ANY(${colecoes})
+    WHERE "status" != 'Cancelada'
+      AND "colecao" = ANY(${colecoes})
       ${filters.marcas !== undefined ? Prisma.sql`AND "marca" = ANY(${filters.marcas})` : Prisma.empty}
       ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
     GROUP BY "colecao", dia
@@ -453,7 +459,7 @@ export async function getSellthroughHierarquico(
   const [sold, gifted, stock, returned, produtoColecaoRows] = await Promise.all([
     prisma.sale.groupBy({
       by: ["colecao", "grupo", "produto"],
-      where: saleWhereH,
+      where: { ...saleWhereH, status: { not: "Cancelada" } },
       _sum: { quantidade: true, valorTotalLiquido: true },
     }),
     prisma.gift.groupBy({ by: ["colecao", "grupo", "produto"], where: saleWhereH, _sum: { quantidade: true } }),
@@ -467,11 +473,11 @@ export async function getSellthroughHierarquico(
     // mapeia produto→colecao via Sale.
     prisma.return.groupBy({
       by: ["grupo", "produto"],
-      where: { ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}) },
+      where: { status: { not: "Cancelada" }, ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}) },
       _sum: { quantidade: true },
     }),
     prisma.sale.findMany({
-      where: { colecao: { in: colecoes }, ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}) },
+      where: { status: { not: "Cancelada" }, colecao: { in: colecoes }, ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}) },
       select: { produto: true, colecao: true },
       distinct: ["produto"],
     }),
@@ -588,7 +594,8 @@ export async function getCurvaVidaGrupoEProduto(
       DATE_TRUNC('day', ("saleDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo') AS dia,
       SUM("quantidade") AS unidades
     FROM "Sale"
-    WHERE "colecao" = ANY(${colecoes})
+    WHERE "status" != 'Cancelada'
+      AND "colecao" = ANY(${colecoes})
       ${filters.marcas !== undefined ? Prisma.sql`AND "marca" = ANY(${filters.marcas})` : Prisma.empty}
       ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
     GROUP BY "colecao", "grupo", "produto", dia

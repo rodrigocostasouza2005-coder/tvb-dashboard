@@ -213,6 +213,17 @@ model Sale {
   // sincronizadas antes desse campo existir ficam null pra sempre (histórico não é
   // reprocessado à toa).
   codigo            String?
+  // Reconciliação de cancelamento (2026-10-01): o DAPIC permite cancelar uma venda DEPOIS de
+  // fechada — quando isso acontece, o campo DataFechamento volta a null na API (não dá pra usar
+  // "ainda tem DataFechamento" como sinal), então o sync original (que só olha vendas "Fechada"
+  // dentro da janela normal) nunca vê a mudança. status espelha o `Status` da API no momento da
+  // última sync que tocou essa linha ("Fechada" por padrão pra todo histórico anterior a esse
+  // campo existir — nunca foi preciso reprocessar pra saber, API confirma o estado real).
+  // canceladaEm fica null até a reconciliação achar um cancelamento de verdade. Nunca deletar a
+  // linha (preserva histórico/auditoria) — ver saleWhere() em metrics/core.ts pra a regra central
+  // de "venda válida" (status != "Cancelada"), não reimplementar esse filtro em cada metrica.
+  status            String    @default("Fechada")
+  canceladaEm       DateTime?
 
   store Store @relation(fields: [storeId], references: [id])
 
@@ -220,6 +231,7 @@ model Sale {
   @@index([storeId, saleDate])
   @@index([grupo])
   @@index([marca])
+  @@index([status])
 }
 
 model StockSnapshot {
@@ -272,6 +284,10 @@ model Return {
   // antigos (seed-fictional-returns-production.ts), que não vêm da API.
   dapicVendaId Int?
   itemIndex    Int?
+  // Mesma reconciliação de cancelamento do Sale (ver comentário lá) — a devolução pertence à
+  // mesma venda/fatura que pode ser cancelada depois, então precisa do mesmo campo.
+  status       String    @default("Fechada")
+  canceladaEm  DateTime?
 
   store Store @relation(fields: [storeId], references: [id])
 
@@ -279,6 +295,7 @@ model Return {
   @@index([storeId, returnDate])
   @@index([marca])
   @@index([tabelaPreco])
+  @@index([status])
 }
 
 // Item "Tipo=Brinde" (vendaspdv/faturas) — antes era descartado no sync. Pedido do Rodrigo em

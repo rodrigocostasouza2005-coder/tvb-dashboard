@@ -59,7 +59,7 @@ export async function getPromotionRows(filters: Pick<DashboardFilters, "storeIds
     : await prisma.stockSnapshot.findMany({ where: stockWhere({ grupoIn: filters.grupoIn }), select: { grupo: true, produto: true, colecao: true, quantidadeDisponivel: true } });
 
   const [vendasEmpresa, producaoEmpresa] = await Promise.all([
-    prisma.sale.groupBy({ by: ["grupo", "produto", "colecao"], where: { ...grupoWhere, ...SEM_MATERIA_PRIMA, colecao: { not: null } }, _sum: { quantidade: true } }),
+    prisma.sale.groupBy({ by: ["grupo", "produto", "colecao"], where: { status: { not: "Cancelada" }, ...grupoWhere, ...SEM_MATERIA_PRIMA, colecao: { not: null } }, _sum: { quantidade: true } }),
     prisma.productionOrder.groupBy({ by: ["grupo", "produto", "colecao"], where: { ...grupoWhere, ...SEM_MATERIA_PRIMA, colecao: { not: null } }, _sum: { quantidade: true } }),
   ]);
 
@@ -150,6 +150,7 @@ export async function getPromotionResultadoReal(params: {
   produto?: string;
 }): Promise<PromotionResultadoReal> {
   const conditions: Prisma.SaleWhereInput[] = [
+    { status: { not: "Cancelada" } },
     { saleDate: { gte: params.from, lte: params.to } },
     SEM_MATERIA_PRIMA,
   ];

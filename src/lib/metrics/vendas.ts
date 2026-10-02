@@ -181,7 +181,8 @@ export async function getSalesByDay(filters: DashboardFilters) {
         SUM("quantidade") AS units,
         SUM("valorTotalLiquido") AS revenue
       FROM "Sale"
-      WHERE "saleDate" >= ${filters.from}
+      WHERE "status" != 'Cancelada'
+        AND "saleDate" >= ${filters.from}
         AND "saleDate" <= ${filters.to}
         ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
         ${filters.marcas !== undefined ? Prisma.sql`AND "marca" = ANY(${filters.marcas})` : Prisma.empty}
@@ -200,7 +201,8 @@ export async function getSalesByDay(filters: DashboardFilters) {
         SUM("quantidade") AS units,
         SUM("valorTotal") AS value
       FROM "Return"
-      WHERE "returnDate" >= ${filters.from}
+      WHERE "status" != 'Cancelada'
+        AND "returnDate" >= ${filters.from}
         AND "returnDate" <= ${filters.to}
         ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
         ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
@@ -246,7 +248,8 @@ export async function getSalesByDayPerStore(filters: DashboardFilters) {
         "storeId",
         SUM("quantidade") AS units
       FROM "Sale"
-      WHERE "saleDate" >= ${filters.from}
+      WHERE "status" != 'Cancelada'
+        AND "saleDate" >= ${filters.from}
         AND "saleDate" <= ${filters.to}
         ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
         ${filters.marcas !== undefined ? Prisma.sql`AND "marca" = ANY(${filters.marcas})` : Prisma.empty}
@@ -265,7 +268,8 @@ export async function getSalesByDayPerStore(filters: DashboardFilters) {
         "storeId",
         SUM("quantidade") AS units
       FROM "Return"
-      WHERE "returnDate" >= ${filters.from}
+      WHERE "status" != 'Cancelada'
+        AND "returnDate" >= ${filters.from}
         AND "returnDate" <= ${filters.to}
         ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
         ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
@@ -317,7 +321,8 @@ export async function getSalesByDayPerColecao(filters: DashboardFilters) {
         "colecao",
         SUM("quantidade") AS units
       FROM "Sale"
-      WHERE "saleDate" >= ${filters.from}
+      WHERE "status" != 'Cancelada'
+        AND "saleDate" >= ${filters.from}
         AND "saleDate" <= ${filters.to}
         ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
         ${filters.marcas !== undefined ? Prisma.sql`AND "marca" = ANY(${filters.marcas})` : Prisma.empty}
@@ -333,7 +338,8 @@ export async function getSalesByDayPerColecao(filters: DashboardFilters) {
         "colecao",
         SUM("quantidade") AS units
       FROM "Return"
-      WHERE "returnDate" >= ${filters.from}
+      WHERE "status" != 'Cancelada'
+        AND "returnDate" >= ${filters.from}
         AND "returnDate" <= ${filters.to}
         ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
         ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
@@ -686,7 +692,8 @@ export async function getReturnsByDay(filters: DashboardFilters) {
       SUM("quantidade") AS units,
       SUM("valorTotal") AS value
     FROM "Return"
-    WHERE "returnDate" >= ${filters.from}
+    WHERE "status" != 'Cancelada'
+      AND "returnDate" >= ${filters.from}
       AND "returnDate" <= ${filters.to}
       ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
       ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
@@ -774,7 +781,8 @@ export async function getMonthlySalesByStore(filters: DashboardFilters, canal: C
       SUM("quantidade") AS units,
       SUM("valorTotalLiquido") AS revenue
     FROM "Sale"
-    WHERE "saleDate" >= ${filters.from}
+    WHERE "status" != 'Cancelada'
+      AND "saleDate" >= ${filters.from}
       AND "saleDate" <= ${filters.to}
       ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
       ${filters.marcas !== undefined ? Prisma.sql`AND "marca" = ANY(${filters.marcas})` : Prisma.empty}
@@ -852,7 +860,8 @@ async function getMonthlySalesByColuna(
       SUM("quantidade") AS units,
       SUM("valorTotalLiquido") AS revenue
     FROM "Sale"
-    WHERE "saleDate" >= ${filters.from}
+    WHERE "status" != 'Cancelada'
+      AND "saleDate" >= ${filters.from}
       AND "saleDate" <= ${filters.to}
       ${grupoScope ? Prisma.sql`AND "grupo" = ${grupoScope}` : Prisma.empty}
       ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
@@ -955,7 +964,8 @@ export async function getDailySalesByProduto(
         SUM("quantidade") AS units,
         SUM("valorTotalLiquido") AS revenue
       FROM "Sale"
-      WHERE "produto" = ${produto}
+      WHERE "status" != 'Cancelada'
+        AND "produto" = ${produto}
         AND "saleDate" >= ${filters.from}
         AND "saleDate" <= ${filters.to}
         ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
@@ -976,7 +986,8 @@ export async function getDailySalesByProduto(
         SUM("quantidade") AS units,
         SUM("valorTotal") AS value
       FROM "Return"
-      WHERE "produto" = ${produto}
+      WHERE "status" != 'Cancelada'
+        AND "produto" = ${produto}
         AND "returnDate" >= ${filters.from}
         AND "returnDate" <= ${filters.to}
         ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
@@ -1098,7 +1109,8 @@ export async function getMonthlyReturnsTotal(filters: Pick<DashboardFilters, "st
       DATE_TRUNC('month', ("returnDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo') AS month,
       SUM("valorTotal") AS value
     FROM "Return"
-    WHERE "returnDate" >= ${filters.from}
+    WHERE "status" != 'Cancelada'
+      AND "returnDate" >= ${filters.from}
       AND "returnDate" <= ${filters.to}
       ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
       ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
@@ -1448,7 +1460,8 @@ export async function getTicketPorFaixaMensal(
         MIN("saleDate") AS "saleDate",
         SUM("valorTotalLiquido") AS "valorVenda"
       FROM "Sale"
-      WHERE "dapicVendaId" IS NOT NULL
+      WHERE "status" != 'Cancelada'
+        AND "dapicVendaId" IS NOT NULL
         ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
         ${filters.marcas !== undefined ? Prisma.sql`AND "marca" = ANY(${filters.marcas})` : Prisma.empty}
         ${filters.tabelasPreco !== undefined ? Prisma.sql`AND ("tabelaPreco" = ANY(${filters.tabelasPreco}) OR "tabelaPreco" IS NULL)` : Prisma.empty}
@@ -1459,7 +1472,8 @@ export async function getTicketPorFaixaMensal(
     devolucoes AS (
       SELECT "storeId", "dapicVendaId", SUM("valorTotal") AS "valorDevolvido"
       FROM "Return"
-      WHERE "dapicVendaId" IS NOT NULL
+      WHERE "status" != 'Cancelada'
+        AND "dapicVendaId" IS NOT NULL
       GROUP BY "storeId", "dapicVendaId"
     )
     SELECT
@@ -1519,7 +1533,8 @@ export async function getTamanhoMixMensal(
         date_trunc('month', (("saleDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo')) AS month,
         "quantidade" AS qty
       FROM "Sale"
-      WHERE "grupo" = ${grupo}
+      WHERE "status" != 'Cancelada'
+        AND "grupo" = ${grupo}
         AND "tamanho" IS NOT NULL
         ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
         ${filters.marcas !== undefined ? Prisma.sql`AND "marca" = ANY(${filters.marcas})` : Prisma.empty}
@@ -1531,7 +1546,8 @@ export async function getTamanhoMixMensal(
         date_trunc('month', (("returnDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo')) AS month,
         -"quantidade" AS qty
       FROM "Return"
-      WHERE "grupo" = ${grupo}
+      WHERE "status" != 'Cancelada'
+        AND "grupo" = ${grupo}
         AND "tamanho" IS NOT NULL
         ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
         ${filters.colecaoIn ? Prisma.sql`AND ("colecao" = ANY(${filters.colecaoIn}) OR "colecao" IS NULL)` : Prisma.empty}

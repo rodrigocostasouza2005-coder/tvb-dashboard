@@ -314,6 +314,18 @@ export class DapicClient {
     });
   }
 
+  // Mesma lista, mas filtrada por DataModificacao em vez de DataFechamento — pega venda que foi
+  // ALTERADA (ex: cancelada) dentro da janela, mesmo que o fechamento original tenha sido antes
+  // da janela. Usado só pela reconciliação de cancelamento (ver reconciliarCancelamentos,
+  // sync-runner.ts), não pelo sync normal (que continua olhando Fechamento, igual sempre foi).
+  fetchVendasPdvModificadas(dataInicial: string, dataFinal: string) {
+    return this.fetchAllPages<DapicVendaPdv>("/vendaspdv", {
+      DataInicial: dataInicial,
+      DataFinal: dataFinal,
+      FiltrarPor: "Modificacao",
+    });
+  }
+
   // Faturas (nota fiscal) — só o token cd-atacado tem acesso (as outras 3 lojas físicas retornam
   // vazio, tudo delas passa por vendaspdv mesmo). É a fonte de verdade de VENDA do canal Site +
   // Atacado (confirmado com Rodrigo em 2026-08-10) — vendaspdv desse token só tem devolução.
@@ -321,6 +333,16 @@ export class DapicClient {
     return this.fetchAllPages<DapicFatura>("/faturas", {
       DataInicial: dataInicial,
       DataFinal: dataFinal,
+    });
+  }
+
+  // Mesma lista, filtrada por DataModificacao — ver fetchVendasPdvModificadas acima, mesma lógica
+  // aplicada a fatura (cancelamento de Site+Atacado).
+  fetchFaturasModificadas(dataInicial: string, dataFinal: string) {
+    return this.fetchAllPages<DapicFatura>("/faturas", {
+      DataInicial: dataInicial,
+      DataFinal: dataFinal,
+      FiltrarPor: "Modificacao",
     });
   }
 
@@ -507,6 +529,13 @@ export type DapicVendaPdv = {
   Cliente: string | null;
   Vendedor: string | null;
   DataFechamento: string | null;
+  // Achado em 2026-10-01: a API manda esse campo mas não era mapeado — quando uma venda já
+  // fechada é cancelada, DataFechamento volta a null (não dá pra usar como sinal de mudança),
+  // mas DataModificacao sempre atualiza. `FiltrarPor: "Modificacao"` (também não documentado em
+  // comentário antes, testado e confirmado ao vivo) filtra por esse campo em vez de
+  // DataFechamento — é a base da reconciliação de cancelamento (ver reconciliarCancelamentos,
+  // sync-runner.ts).
+  DataModificacao: string;
   Cidade?: { Nome: string; Estado: string };
   Empresa: string;
   Produtos: DapicVendaPdvProduto[];

@@ -152,17 +152,25 @@ async function getPrimeiraCompraGlobalPorCliente(
 ): Promise<Map<string, Date>> {
   if (nomesNormalizados.length === 0) return new Map();
   const [saleRows, externaRows] = await Promise.all([
+    // "status" != 'Cancelada' (achado em 2026-10-02, auditoria final da reconciliação): sem esse
+    // filtro, a 1ª compra de um cliente podia ser uma venda cancelada depois do fechamento —
+    // contaminando Novo×Recorrente (getNovosERecorrentesClientes/getClientesCrmOverview) e a
+    // Segmentação (getClienteSegmentacao), os 3 consumidores desta função. Mesma regra central já
+    // usada em saleWhere()/returnWhere() (core.ts) — aqui como raw SQL porque MIN(saleDate) por
+    // GROUP BY não é expressável via Prisma.sale.groupBy sem perder a agregação em lote.
     storeIds !== undefined
       ? prisma.$queryRaw<{ norm: string; first: Date }[]>`
           SELECT UPPER(TRIM("clienteNome")) AS norm, MIN("saleDate") AS first
           FROM "Sale"
-          WHERE UPPER(TRIM("clienteNome")) = ANY(${nomesNormalizados}) AND "storeId" = ANY(${storeIds})
+          WHERE "status" != 'Cancelada'
+            AND UPPER(TRIM("clienteNome")) = ANY(${nomesNormalizados}) AND "storeId" = ANY(${storeIds})
           GROUP BY norm
         `
       : prisma.$queryRaw<{ norm: string; first: Date }[]>`
       SELECT UPPER(TRIM("clienteNome")) AS norm, MIN("saleDate") AS first
       FROM "Sale"
-      WHERE UPPER(TRIM("clienteNome")) = ANY(${nomesNormalizados})
+      WHERE "status" != 'Cancelada'
+        AND UPPER(TRIM("clienteNome")) = ANY(${nomesNormalizados})
       GROUP BY norm
     `,
     prisma.$queryRaw<{ norm: string; first: Date }[]>`
@@ -183,9 +191,13 @@ async function getPrimeiraCompraGlobalPorCliente(
 }
 
 // Data da venda mais antiga da base — só pra montar a lista de meses disponíveis no seletor de
-// período da Segmentação (2026-08-31).
+// período da Segmentação (2026-08-31). Exclui cancelada (2026-10-02, hardening) pela mesma regra
+// central de saleWhere()/returnWhere() — consistência de definição, mesmo o impacto aqui sendo
+// baixo (só decide quais meses aparecem como opção, não conta receita/quantidade).
 export async function getPrimeiraVendaData(): Promise<Date | null> {
-  const rows = await prisma.$queryRaw<{ first: Date | null }[]>`SELECT MIN("saleDate") AS first FROM "Sale"`;
+  const rows = await prisma.$queryRaw<{ first: Date | null }[]>`
+    SELECT MIN("saleDate") AS first FROM "Sale" WHERE "status" != 'Cancelada'
+  `;
   return rows[0]?.first ? new Date(rows[0].first) : null;
 }
 
@@ -660,7 +672,7 @@ export async function getProdutosLiquidosPorClientes(
   const storeIds = [...new Set(sales.map((s) => s.storeId))];
   const vendaIds = [...new Set(sales.map((s) => s.dapicVendaId))];
   const returns = await prisma.return.findMany({
-    where: { storeId: { in: storeIds }, dapicVendaId: { in: vendaIds } },
+    where: { status: { not: "Cancelada" }, storeId: { in: storeIds }, dapicVendaId: { in: vendaIds } },
     select: { storeId: true, dapicVendaId: true, produto: true, quantidade: true },
   });
   for (const r of returns) {
@@ -709,7 +721,7 @@ export async function getTamanhoEstoqueParaClientes(
   // Tamanho mais comprado por cliente+produto (todo o histórico, mesma janela de produtoFavorito).
   const vendas = await prisma.sale.groupBy({
     by: ["clienteNome", "produto", "tamanho"],
-    where: { clienteNome: { in: allVariants }, produto: { in: produtos }, tamanho: { not: null } },
+    where: { status: { not: "Cancelada" }, clienteNome: { in: allVariants }, produto: { in: produtos }, tamanho: { not: null } },
     _sum: { quantidade: true },
   });
   const tamanhoPorClienteProduto = new Map<string, Map<string, number>>();
@@ -963,7 +975,7 @@ export async function getCrossSellPorDimensao(
   const devolvidoPorGrupo = new Map<string, { unidades: number; valor: number }>();
   if (canal !== "b2b" && pedidoKeys.size > 0) {
     const returns = await prisma.return.findMany({
-      where: { storeId: { in: [...storeIdsCliente] }, dapicVendaId: { in: [...dapicVendaIdsCliente] } },
+      where: { status: { not: "Cancelada" }, storeId: { in: [...storeIdsCliente] }, dapicVendaId: { in: [...dapicVendaIdsCliente] } },
       select: { storeId: true, dapicVendaId: true, produto: true, grupo: true, quantidade: true, valorTotal: true },
     });
     for (const r of returns) {
@@ -1069,6 +1081,12 @@ export async function getProdutosPortaDeEntrada(
   canal: Canal = "todos",
   limit = 20
 ): Promise<ProdutosEntradaResult> {
+  // "status" != 'Cancelada' nas duas queries (achado em 2026-10-02, auditoria final): sem isso,
+  // a 1ª linha cronológica de um cliente podia ser uma venda cancelada depois do fechamento —
+  // creditando o produto errado como "porta de entrada" e inflando a contagem de pedidos. Mesma
+  // regra central de saleWhere()/returnWhere() (core.ts), em raw SQL porque DISTINCT ON + ORDER BY
+  // multi-coluna (pra achar a 1ª linha por cliente numa query só, sem N+1 por cliente) não é
+  // expressável via Prisma.sale.findMany/groupBy.
   const [firstRows, pedidoCounts] = await Promise.all([
     prisma.$queryRaw<
       { norm: string; produto: string; grupo: string; storeId: string; marca: string | null; tabelaPreco: string | null; saleDate: Date; quantidade: number; valorTotalLiquido: number }[]
@@ -1080,14 +1098,14 @@ export async function getProdutosPortaDeEntrada(
           UPPER(TRIM("clienteNome")) AS norm, "produto", "grupo", "storeId", "marca", "tabelaPreco",
           "saleDate", "quantidade", "valorTotalLiquido", "dapicVendaId"
         FROM "Sale"
-        WHERE "clienteNome" IS NOT NULL
+        WHERE "clienteNome" IS NOT NULL AND "status" != 'Cancelada'
       ) t
       ORDER BY norm, "saleDate" ASC, "dapicVendaId" ASC
     `,
     prisma.$queryRaw<{ norm: string; pedidos: bigint }[]>`
       SELECT UPPER(TRIM("clienteNome")) AS norm, COUNT(DISTINCT ("storeId", "dapicVendaId")) AS pedidos
       FROM "Sale"
-      WHERE "clienteNome" IS NOT NULL
+      WHERE "clienteNome" IS NOT NULL AND "status" != 'Cancelada'
       GROUP BY norm
     `,
   ]);
@@ -1364,7 +1382,7 @@ export async function getClienteFicha(
   const dapicVendaIdsCliente = [...new Set(sales.map((s) => s.dapicVendaId))];
   const returnsCliente = dapicVendaIdsCliente.length > 0
     ? await prisma.return.findMany({
-        where: { storeId: { in: storeIdsCliente }, dapicVendaId: { in: dapicVendaIdsCliente } },
+        where: { status: { not: "Cancelada" }, storeId: { in: storeIdsCliente }, dapicVendaId: { in: dapicVendaIdsCliente } },
         select: { storeId: true, dapicVendaId: true, produto: true, tamanho: true, grupo: true, quantidade: true, valorTotal: true },
       })
     : [];
@@ -1659,6 +1677,7 @@ export async function getClienteRetencaoVarejo(filters: DashboardFilters, vended
     prisma.sale.groupBy({
       by: ["clienteNome"],
       where: {
+        status: { not: "Cancelada" },
         clienteNome: { not: null },
         saleDate: { lte: filters.to },
         ...(filters.storeIds !== undefined ? { storeId: { in: filters.storeIds } } : {}),

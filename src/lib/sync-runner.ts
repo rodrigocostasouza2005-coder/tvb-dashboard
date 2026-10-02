@@ -306,7 +306,7 @@ type VendedorCorrigido = {
 // atualiza o campo "vendedor" — ver comentário acima em syncVendas. Detecta e devolve os casos
 // onde o vendedor realmente mudou (não toda venda já existente, só as que tiveram correção de
 // verdade), pra entrar no resumo do Telegram.
-async function upsertSalesComVendedorAtualizavel(saleData: Prisma.SaleCreateManyInput[]): Promise<VendedorCorrigido[]> {
+export async function upsertSalesComVendedorAtualizavel(saleData: Prisma.SaleCreateManyInput[]): Promise<VendedorCorrigido[]> {
   if (saleData.length === 0) return [];
   // storeId não é mais único no lote (cd-atacado agora espalha venda entre loja site e atacado,
   // ver resolveStoreId em syncVendas) — filtrar só pelas lojas que aparecem, senão a busca abaixo
@@ -490,6 +490,114 @@ async function syncFaturas(
   }
   if (saleData.length) await prisma.sale.createMany({ data: saleData, skipDuplicates: true });
   return { vendas: saleData.length, brindes: giftData.length };
+}
+
+// Janela de reconciliação de cancelamento — não é "quantos dias de venda processar" (isso
+// continua sendo 1, ver syncOneClient), é "quantos dias pra trás vale a pena reconferir se algo
+// que já foi sincronizado mudou de status". 7 dias: folga generosa sobre os casos reais
+// observados numa auditoria em 2026-10-01 (cancelamentos aconteceram em até ~2 dias do
+// fechamento original) — ver reconciliarCancelamentos abaixo.
+const RECONCILIACAO_DIAS = 7;
+
+// Achado em 2026-10-01 (pedido do Rodrigo, auditoria de consistência): o sync normal só processa
+// venda com Status "Fechada"/"Fechado" dentro da janela de 1 dia — se o DAPIC cancelar uma venda
+// DEPOIS dela já ter sido sincronizada, o sync nunca revisita essa linha (e pior: ao cancelar, a
+// API volta DataFechamento pra null, então nem dá pra usar "ainda tem DataFechamento" como pista).
+// Medido ao vivo: 12 faturas já canceladas no DAPIC continuavam como Sale válida, R$4.442,30.
+//
+// Reconciliação: busca de novo, numa janela mais larga (RECONCILIACAO_DIAS), só o que foi
+// MODIFICADO (`FiltrarPor: "Modificacao"`, não documentado antes — ver DataModificacao em
+// dapic.ts) — pega cancelamento de venda cujo fechamento original já saiu da janela normal de 1
+// dia. Só atualiza (nunca insere/deleta): se o item nunca foi "Fechada" pra começo de conversa,
+// nunca virou Sale, não tem o que reconciliar. status/canceladaEm usam a MESMA chave de
+// idempotência (storeId, dapicVendaId, itemIndex) já usada pelo resto do sync — recalculada com
+// stableItemIndexes() igual a inserção original, senão o updateMany nunca acha a linha certa.
+// Só marca Cancelada (não tenta reverter um cancelamento de volta pra Fechada automaticamente —
+// caso não observado nos dados reais auditados; se acontecer, precisa de correção manual).
+export function isStatusCancelada(status: string): boolean {
+  return status === "Cancelada" || status === "Cancelado";
+}
+
+export async function reconciliarCancelamentosVendas(
+  client: DapicClient,
+  storeId: string | null,
+  atacadoStoreId: string | null,
+  // Parametrizável só pro backfill único (scripts/backfill-cancelamentos.ts, histórico completo)
+  // — o sync normal sempre usa o default (RECONCILIACAO_DIAS, janela operacional de 7 dias).
+  diasAtras = RECONCILIACAO_DIAS
+): Promise<{ saleUpdates: number; returnUpdates: number }> {
+  if (!storeId) return { saleUpdates: 0, returnUpdates: 0 };
+  const storeIdsPossiveis = atacadoStoreId ? [storeId, atacadoStoreId] : [storeId];
+  const hoje = new Date();
+  const inicio = new Date(hoje);
+  inicio.setDate(inicio.getDate() - diasAtras);
+  const vendas = await client.fetchVendasPdvModificadas(toDateStr(inicio), toDateStr(hoje));
+
+  let saleUpdates = 0;
+  let returnUpdates = 0;
+  for (const venda of vendas) {
+    if (!isStatusCancelada(venda.Status)) continue;
+    const itemIndexes = stableItemIndexes(
+      venda.Produtos,
+      (p) => `${p.IdGradeProduto ?? venda.Codigo}::${p.Quantidade}::${p.ValorLiquido.toFixed(2)}::${p.Tipo}`
+    );
+    for (let pos = 0; pos < venda.Produtos.length; pos++) {
+      const item = venda.Produtos[pos];
+      const itemIndex = itemIndexes[pos];
+      if (item.Tipo === "Venda") {
+        const r = await prisma.sale.updateMany({
+          where: { storeId: { in: storeIdsPossiveis }, dapicVendaId: venda.Id, itemIndex, status: { not: "Cancelada" } },
+          data: { status: "Cancelada", canceladaEm: new Date() },
+        });
+        saleUpdates += r.count;
+      } else if (item.Tipo === "Devolução") {
+        const r = await prisma.return.updateMany({
+          where: { storeId: { in: storeIdsPossiveis }, dapicVendaId: venda.Id, itemIndex, status: { not: "Cancelada" } },
+          data: { status: "Cancelada", canceladaEm: new Date() },
+        });
+        returnUpdates += r.count;
+      }
+    }
+  }
+  return { saleUpdates, returnUpdates };
+}
+
+// Mesma lógica que reconciliarCancelamentosVendas, mas pro canal Site+Atacado (/faturas) — só
+// cd-atacado tem acesso. Faturas não têm Return (devolução desse canal vem só de /vendaspdv, ver
+// syncVendas), então só atualiza Sale.
+export async function reconciliarCancelamentosFaturas(
+  client: DapicClient,
+  storeId: string | null,
+  atacadoStoreId: string | null,
+  diasAtras = RECONCILIACAO_DIAS
+): Promise<{ saleUpdates: number }> {
+  if (!storeId || client.label !== "cd-atacado") return { saleUpdates: 0 };
+  const storeIdsPossiveis = atacadoStoreId ? [storeId, atacadoStoreId] : [storeId];
+  const hoje = new Date();
+  const inicio = new Date(hoje);
+  inicio.setDate(inicio.getDate() - diasAtras);
+  const faturas = await client.fetchFaturasModificadas(toDateStr(inicio), toDateStr(hoje));
+
+  let saleUpdates = 0;
+  for (const fatura of faturas) {
+    if (!isStatusCancelada(fatura.Status)) continue;
+    const produtos = await client.fetchFaturaProdutos(fatura.Id);
+    const itemIndexes = stableItemIndexes(
+      produtos,
+      (p) => `${p.IdGradeProduto}::${p.Quantidade}::${p.Valores.ValorTotal.toFixed(2)}::${p.Tipo}`
+    );
+    for (let pos = 0; pos < produtos.length; pos++) {
+      const item = produtos[pos];
+      if (item.Tipo !== "Venda") continue;
+      const itemIndex = itemIndexes[pos];
+      const r = await prisma.sale.updateMany({
+        where: { storeId: { in: storeIdsPossiveis }, dapicVendaId: fatura.Id, itemIndex, status: { not: "Cancelada" } },
+        data: { status: "Cancelada", canceladaEm: new Date() },
+      });
+      saleUpdates += r.count;
+    }
+  }
+  return { saleUpdates };
 }
 
 // Ordem de produção (token "matriz", separado das 4 lojas físicas — não vende nada, só dá acesso
@@ -748,12 +856,26 @@ async function doSync() {
     // SyncLog tiver mais de 5h) cobre o risco de perder dado mais velho que essa janela.
     const vendas = await syncVendas(client, primaryStoreId, atacadoStoreId, 1, priceCatalog);
     const faturas = await syncFaturas(client, primaryStoreId, atacadoStoreId, 1, priceCatalog);
+    // Não fatal: reconciliação é uma camada extra de correção, não pode derrubar o sync normal
+    // (que já processou vendas/faturas novas com sucesso acima) se a API/rede falhar aqui.
+    const canceladas = await Promise.all([
+      reconciliarCancelamentosVendas(client, primaryStoreId, atacadoStoreId).catch((e) => {
+        console.error(`[reconciliarCancelamentosVendas] ${client.label} falhou:`, e?.message ?? e);
+        return { saleUpdates: 0, returnUpdates: 0 };
+      }),
+      reconciliarCancelamentosFaturas(client, primaryStoreId, atacadoStoreId).catch((e) => {
+        console.error(`[reconciliarCancelamentosFaturas] ${client.label} falhou:`, e?.message ?? e);
+        return { saleUpdates: 0 };
+      }),
+    ]);
     return {
       estoque,
       vendas: vendas.vendas + faturas.vendas,
       devolucoes: vendas.devolucoes,
       brindes: vendas.brindes + faturas.brindes,
       vendedorCorrigido: vendas.vendedorCorrigido,
+      vendasCanceladas: canceladas[0].saleUpdates + canceladas[1].saleUpdates,
+      devolucoesCanceladas: canceladas[0].returnUpdates,
     };
   }
 
@@ -803,6 +925,8 @@ async function doSync() {
   const totalVendas = results.reduce((a, r) => a + r.vendas, 0);
   const totalDevolucoes = results.reduce((a, r) => a + r.devolucoes, 0);
   const totalBrindes = results.reduce((a, r) => a + r.brindes, 0);
+  const totalVendasCanceladas = results.reduce((a, r) => a + r.vendasCanceladas, 0);
+  const totalDevolucoesCanceladas = results.reduce((a, r) => a + r.devolucoesCanceladas, 0);
   const vendedorCorrigido = results.flatMap((r) => r.vendedorCorrigido);
 
   await prisma.syncLog.create({
@@ -828,6 +952,8 @@ async function doSync() {
     devolucoes: totalDevolucoes,
     ordensProducao: totalOrdensProducao,
     brindes: totalBrindes,
+    vendasCanceladas: totalVendasCanceladas,
+    devolucoesCanceladas: totalDevolucoesCanceladas,
     vendedorCorrigido,
     desde,
     ate,

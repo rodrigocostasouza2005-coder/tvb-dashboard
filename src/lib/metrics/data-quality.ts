@@ -12,11 +12,18 @@ export type DataQualitySummary = {
 // (auditoria de Data Quality): os valores observados numa auditoria pontual mudam assim que o
 // dado é corrigido, então essa função é o jeito de confirmar o estado real a qualquer momento,
 // não um snapshot congelado.
+//
+// Exclui venda/devolução cancelada dos dois lados (2026-10-01, hardening): regra geral do
+// projeto é "cancelamento continua no banco pra histórico, mas não contamina métrica de vendas"
+// (ver saleWhere/returnWhere, core.ts). Essa função conta linha de Sale/Return — é métrica de
+// vendas mesmo sendo sobre qualidade de dado, não sobre receita — então a mesma regra se aplica:
+// uma venda cancelada sem tabelaPreco não é um gap de qualidade que importa corrigir (ela nunca
+// vai contar em nada), só inflaria o denominador sem significado operacional.
 export async function getDataQualitySummary(): Promise<DataQualitySummary> {
   const [devolucoesSemColecao, devolucoesTotal, vendasTotal, b2bClientes] = await Promise.all([
-    prisma.return.count({ where: { colecao: null } }),
-    prisma.return.count(),
-    prisma.sale.count(),
+    prisma.return.count({ where: { status: { not: "Cancelada" }, colecao: null } }),
+    prisma.return.count({ where: { status: { not: "Cancelada" } } }),
+    prisma.sale.count({ where: { status: { not: "Cancelada" } } }),
     getB2BClienteNomes(),
   ]);
 
@@ -26,7 +33,7 @@ export async function getDataQualitySummary(): Promise<DataQualitySummary> {
   // então filtra em duas etapas: busca candidatos (tabelaPreco null) e exclui quem bate com
   // algum nome do set de B2B — mesma regra de classifySaleChannel, sem reimplementar em SQL.
   const vendasSemTabela = await prisma.sale.findMany({
-    where: { tabelaPreco: null },
+    where: { status: { not: "Cancelada" }, tabelaPreco: null },
     select: { clienteNome: true },
   });
   const vendasSemClassificacao = vendasSemTabela.filter(
