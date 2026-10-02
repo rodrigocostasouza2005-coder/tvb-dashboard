@@ -39,6 +39,7 @@ export function ModoToggle({
           <Link
             key={opt.value}
             href={buildHref(basePath, searchParams, opt.value)}
+            scroll={false}
             className={`rounded-md px-3 py-1.5 text-xs font-medium ${
               current === opt.value
                 ? "bg-[var(--series-1)] text-white"

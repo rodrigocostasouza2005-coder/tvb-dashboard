@@ -10,6 +10,7 @@ import {
 import { parseFilters, toDateInputValue, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
+import { GetForm } from "../get-form";
 import { CollapsibleFilters } from "../collapsible-filters";
 import { StatTile } from "../stat-tile";
 import { IndicatorChart } from "../indicadores/indicator-chart";
@@ -69,7 +70,7 @@ export default async function AtacadoPage({
         />
       </CollapsibleFilters>
 
-      <form method="GET" action="/dashboard/atacado" className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3 text-sm shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+      <GetForm action="/dashboard/atacado" className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3 text-sm shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
         {/* Preserva os filtros de data/coleção existentes ao trocar de cliente. */}
         <input type="hidden" name="from" value={toDateInputValue(filters.from)} />
         <input type="hidden" name="to" value={toDateInputValue(filters.to)} />
@@ -104,7 +105,7 @@ export default async function AtacadoPage({
             Ver todos os clientes
           </a>
         )}
-      </form>
+      </GetForm>
 
       {clienteSelecionado ? (
         evolucao ? (

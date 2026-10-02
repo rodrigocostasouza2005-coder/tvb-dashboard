@@ -27,6 +27,13 @@ import { PieChart } from "../pie-chart";
 import { IndicatorChart } from "../indicadores/indicator-chart";
 import { InvestimentoMetaAds, type InvestimentoRow } from "./investimento-meta-ads";
 import { FotoGaleria } from "./foto-galeria";
+import { GetForm } from "../get-form";
+
+// Em cache-miss (1x/12h, ver FOTOS_MAX_AGE_HORAS em meta-ads.ts), buscar status/foto de anúncios
+// (expansão de creative por anúncio) mediu ~15s contra a conta real em 2026-10-01 — bem acima do
+// default de função da Vercel. Mesmo padrão já usado nas rotas de sync (sync-runner.ts) pra
+// chamada que pode ser lenta por causa de uma API externa.
+export const maxDuration = 30;
 
 function formatPct(v: number | null) {
   return v != null ? `${v.toFixed(1)}%` : "—";
@@ -57,37 +64,47 @@ export default async function AnalyticsSitePage({
   let anuncios: Awaited<ReturnType<typeof getAnuncios>> = [];
   let funil: Awaited<ReturnType<typeof getFunilCompra>> = [];
 
-  try {
-    const range = { startDate: from, endDate: to };
-    [conversao, sessoesPorDia, origemTrafego, paginasMaisVistas, dispositivos, geografia, novoVsRecorrente, anuncios, funil] =
-      await Promise.all([
-        getConversoes(range),
-        getSessoesPorDia(range),
-        getOrigemTrafego(range),
-        getPaginasMaisVistas(range, 20),
-        getDispositivos(range),
-        getGeografia(range, 15),
-        getNovoVsRecorrente(range),
-        getAnuncios(range, 15),
-        getFunilCompra(range),
-      ]);
-  } catch (e) {
-    erro = e instanceof Error ? e.message : "Erro desconhecido buscando dados do Google Analytics.";
-  }
-
-  // Meta Ads (fotos + investimento) — busca separada da GA4, com try/catch próprio: se o Meta
-  // Ads falhar (token vencido, credencial faltando etc), a página continua mostrando o resto dos
-  // dados do GA4 normalmente, só sem essa parte (fallback silencioso).
+  // GA4 e Meta Insights não dependem um do outro — rodavam em sequência à toa (Meta só começava
+  // depois do GA4 terminar). Disparados juntos agora (achado em 2026-10-01, auditoria de
+  // performance): cada um mantém seu próprio try/catch, então uma falha de um lado continua sem
+  // derrubar o outro, igual já era antes.
+  const range = { startDate: from, endDate: to };
   let insightsPorConjunto = new Map<string, MetaInsight>();
   let insightsPorAnuncio = new Map<string, MetaInsight>();
-  try {
-    [insightsPorConjunto, insightsPorAnuncio] = await Promise.all([
-      getInsightsPorConjunto({ since: from, until: to }),
-      getInsightsPorAnuncio({ since: from, until: to }),
-    ]);
-  } catch {
-    // sem investimento — não quebra a página.
-  }
+
+  const ga4Promise = Promise.all([
+    getConversoes(range),
+    getSessoesPorDia(range),
+    getOrigemTrafego(range),
+    getPaginasMaisVistas(range, 20),
+    getDispositivos(range),
+    getGeografia(range, 15),
+    getNovoVsRecorrente(range),
+    getAnuncios(range, 15),
+    getFunilCompra(range),
+  ])
+    .then((r) => {
+      [conversao, sessoesPorDia, origemTrafego, paginasMaisVistas, dispositivos, geografia, novoVsRecorrente, anuncios, funil] = r;
+    })
+    .catch((e) => {
+      erro = e instanceof Error ? e.message : "Erro desconhecido buscando dados do Google Analytics.";
+    });
+
+  // Meta Ads (investimento) — busca separada da GA4, com try/catch próprio: se o Meta Ads falhar
+  // (token vencido, credencial faltando etc), a página continua mostrando o resto dos dados do
+  // GA4 normalmente, só sem essa parte (fallback silencioso).
+  const metaInsightsPromise = Promise.all([
+    getInsightsPorConjunto({ since: from, until: to }),
+    getInsightsPorAnuncio({ since: from, until: to }),
+  ])
+    .then((r) => {
+      [insightsPorConjunto, insightsPorAnuncio] = r;
+    })
+    .catch(() => {
+      // sem investimento — não quebra a página.
+    });
+
+  await Promise.all([ga4Promise, metaInsightsPromise]);
   // Top 15 conjuntos/criativos por gasto (visão de investimento, diferente do top por sessão do
   // GA4 acima). Toggle entre os dois na tela — ver investimento-meta-ads.tsx.
   const investimentoPorConjunto = [...insightsPorConjunto.entries()]
@@ -110,8 +127,8 @@ export default async function AnalyticsSitePage({
     [fotosPorConjunto, fotosPorAnuncio, statusPorConjunto, statusPorAnuncio] = await Promise.all([
       getFotosPorNomeConjunto(prisma, nomesParaFoto),
       getFotosPorNomeAnuncio(prisma, investimentoPorAnuncio.map((i) => i.anuncio)),
-      getStatusPorNomeConjunto(investimentoPorConjunto.map((i) => i.conjunto)),
-      getStatusPorNomeAnuncio(investimentoPorAnuncio.map((i) => i.anuncio)),
+      getStatusPorNomeConjunto(prisma, investimentoPorConjunto.map((i) => i.conjunto)),
+      getStatusPorNomeAnuncio(prisma, investimentoPorAnuncio.map((i) => i.anuncio)),
     ]);
   } catch {
     // sem foto/status — não quebra a página.
@@ -147,7 +164,7 @@ export default async function AnalyticsSitePage({
         vistas no período escolhido.
       </p>
 
-      <form method="GET" action="/dashboard/analytics-site" className="mb-6 flex flex-wrap items-end gap-3 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-3">
+      <GetForm action="/dashboard/analytics-site" className="mb-6 flex flex-wrap items-end gap-3 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-3">
         <div className="flex flex-col gap-1">
           <label className="text-xs font-medium text-[var(--text-muted)]" htmlFor="from">De</label>
           <input
@@ -173,7 +190,7 @@ export default async function AnalyticsSitePage({
         <button type="submit" className="rounded-md bg-[var(--series-1)] px-4 py-1.5 text-sm font-medium text-white">
           Aplicar
         </button>
-      </form>
+      </GetForm>
 
       {erro ? (
         <p className="rounded-lg border border-[var(--status-critical)] bg-[var(--surface-1)] p-4 text-sm text-[var(--text-secondary)]">

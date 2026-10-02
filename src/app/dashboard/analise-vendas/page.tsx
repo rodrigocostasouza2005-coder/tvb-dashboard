@@ -12,6 +12,7 @@ import { getGrupoRestriction, getStoreRestriction, getMarcaRestriction, getTabel
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
+import { GetForm } from "../get-form";
 import { CollapsibleFilters } from "../collapsible-filters";
 import { IndicatorChart } from "../indicadores/indicator-chart";
 
@@ -125,7 +126,7 @@ export default async function AnaliseVendasPage({
         lógica de período da seção acima).
       </p>
 
-      <form method="GET" action="/dashboard/analise-vendas" className="mb-4 flex items-center gap-2">
+      <GetForm action="/dashboard/analise-vendas" className="mb-4 flex items-center gap-2">
         {(filters.storeIds ?? []).map((id) => <input key={id} type="hidden" name="store" value={id} />)}
         {(filters.marcas ?? []).map((m) => <input key={m} type="hidden" name="marca" value={m} />)}
         {(filters.tabelasPreco ?? []).map((t) => <input key={t} type="hidden" name="tabelaPreco" value={t} />)}
@@ -144,7 +145,7 @@ export default async function AnaliseVendasPage({
         <button type="submit" className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-3 py-1.5 text-sm hover:bg-[var(--page-plane)]">
           Ver
         </button>
-      </form>
+      </GetForm>
 
       {tamanho && tamanho.rows.length > 0 ? (
         <div className="overflow-x-auto rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">

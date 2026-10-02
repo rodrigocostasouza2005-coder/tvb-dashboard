@@ -39,7 +39,7 @@ export function GrupoProdutoSelect({
       <select
         id="grupoFiltro"
         defaultValue={current ?? ""}
-        onChange={(e) => router.push(buildHref(basePath, searchParams, e.target.value))}
+        onChange={(e) => router.push(buildHref(basePath, searchParams, e.target.value), { scroll: false })}
         className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-xs text-[var(--text-primary)]"
         style={{ colorScheme: "light dark" }}
       >

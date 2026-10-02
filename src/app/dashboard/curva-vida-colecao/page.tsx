@@ -12,6 +12,7 @@ import { getGrupoRestriction, getStoreRestriction, getMarcaRestriction, getTabel
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
+import { GetForm } from "../get-form";
 import { CollapsibleFilters } from "../collapsible-filters";
 import { CohortTable, type CohortGradeRow } from "./cohort-table";
 
@@ -160,7 +161,7 @@ export default async function CurvaVidaColecaoPage({
       </p>
 
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3">
-        <form method="GET" action="/dashboard/curva-vida-colecao" className="flex flex-wrap items-center gap-2">
+        <GetForm action="/dashboard/curva-vida-colecao" className="flex flex-wrap items-center gap-2">
           {(filters.storeIds ?? []).map((id) => <input key={id} type="hidden" name="store" value={id} />)}
           {(filters.marcas ?? []).map((m) => <input key={m} type="hidden" name="marca" value={m} />)}
           {(filters.tabelasPreco ?? []).map((t) => <input key={t} type="hidden" name="tabelaPreco" value={t} />)}
@@ -176,7 +177,7 @@ export default async function CurvaVidaColecaoPage({
           <button type="submit" className="rounded-md bg-[var(--series-1)] px-3 py-1.5 text-xs font-medium text-white">
             Comparar
           </button>
-        </form>
+        </GetForm>
 
         <div className="flex overflow-hidden rounded-md border border-[var(--border)] text-xs">
           <a

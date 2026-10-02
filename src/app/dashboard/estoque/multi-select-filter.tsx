@@ -28,13 +28,13 @@ export function MultiSelectFilter({
     qs.delete(paramName);
     const next = current.includes(value) ? current.filter((k) => k !== value) : [...current, value];
     for (const k of next) qs.append(paramName, k);
-    router.push(`${pathname}?${qs.toString()}`);
+    router.push(`${pathname}?${qs.toString()}`, { scroll: false });
   }
 
   function clear() {
     const qs = new URLSearchParams(searchParams.toString());
     qs.delete(paramName);
-    router.push(`${pathname}?${qs.toString()}`);
+    router.push(`${pathname}?${qs.toString()}`, { scroll: false });
   }
 
   return (

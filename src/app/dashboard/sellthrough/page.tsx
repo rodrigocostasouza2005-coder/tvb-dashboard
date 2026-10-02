@@ -11,6 +11,7 @@ import { getGrupoRestriction, getStoreRestriction, getMarcaRestriction, getTabel
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
+import { GetForm } from "../get-form";
 import { CollapsibleFilters } from "../collapsible-filters";
 import { ColecaoSellthroughTable } from "./colecao-sellthrough-table";
 import { ColecaoDetalheChart } from "./colecao-detalhe-chart";
@@ -106,7 +107,7 @@ export default async function SellthroughPage({
       {/* Filtro de coleção + detalhe grupo→produto */}
       <div className="mt-8 mb-3 flex items-center gap-3">
         <h2 className="text-base font-semibold">Detalhe por produto</h2>
-        <form method="GET" action="/dashboard/sellthrough" className="flex items-center gap-2">
+        <GetForm action="/dashboard/sellthrough" className="flex items-center gap-2">
           <select
             name="colecaoDetalhe"
             defaultValue={colecaoParam ?? ""}
@@ -120,7 +121,7 @@ export default async function SellthroughPage({
           <button type="submit" className="rounded-md bg-[var(--series-1)] px-3 py-1.5 text-xs font-medium text-white">
             Filtrar
           </button>
-        </form>
+        </GetForm>
       </div>
 
       {detalheRows.length > 0 && (

@@ -16,7 +16,7 @@
 //   grant_type=fb_exchange_token (feito manualmente, sem helper aqui — é um passo único, não
 //   recorrente no código).
 
-import type { PrismaClient } from "@prisma/client";
+import type { PrismaClient, Prisma } from "@prisma/client";
 
 const GRAPH_API_VERSION = "v21.0";
 
@@ -53,17 +53,38 @@ async function fetchAdSets(): Promise<MetaAdSet[]> {
   return fetchAllPages<MetaAdSet>(url);
 }
 
+// Lista crua cacheada (12h, mesmo padrão/TTL de getFotosPorNomeConjunto abaixo) — achado em
+// 2026-10-01 (auditoria de performance): getStatusPorNomeConjunto e getFotosPorNomeConjunto
+// chamavam fetchAdSets() cada uma por conta própria, sem cache nenhuma pro status — toda troca de
+// filtro/F5 da Analytics batia a API do Meta 2x pra buscar a MESMA lista. Cacheando a lista crua
+// uma vez só, as duas funções reaproveitam o mesmo dado.
+const ADSETS_CACHE_LABEL = "meta-ads-adsets-raw";
+
+async function fetchAdSetsCached(prisma: PrismaClient): Promise<MetaAdSet[]> {
+  const cached = await prisma.priceCatalogCache.findUnique({ where: { clientLabel: ADSETS_CACHE_LABEL } });
+  const isFresh = cached != null && Date.now() - cached.updatedAt.getTime() < FOTOS_MAX_AGE_HORAS * 60 * 60 * 1000;
+  if (isFresh) return (cached!.data as unknown as MetaAdSet[]) ?? [];
+
+  const fresh = await fetchAdSets();
+  await prisma.priceCatalogCache.upsert({
+    where: { clientLabel: ADSETS_CACHE_LABEL },
+    create: { clientLabel: ADSETS_CACHE_LABEL, data: fresh as unknown as Prisma.InputJsonValue },
+    update: { data: fresh as unknown as Prisma.InputJsonValue },
+  });
+  return fresh;
+}
+
 // Status (ativo/pausado) pra sinalizar na tabela de Investimento — pedido do Rodrigo em
 // 2026-09-28. "status" aqui é o do CONJUNTO em si (ACTIVE/PAUSED/...), independente de ter tido
 // gasto no período do insight (um conjunto pausado hoje pode ter gastado a semana toda).
-export async function getStatusPorNomeConjunto(nomesConjuntos: string[]): Promise<Map<string, boolean>> {
-  const adsets = await fetchAdSets();
+export async function getStatusPorNomeConjunto(prisma: PrismaClient, nomesConjuntos: string[]): Promise<Map<string, boolean>> {
+  const adsets = await fetchAdSetsCached(prisma);
   const porNome = new Map(adsets.map((a) => [a.name, a.status === "ACTIVE"]));
   return new Map(nomesConjuntos.map((n) => [n, porNome.get(n) ?? false]));
 }
 
-export async function getStatusPorNomeAnuncio(nomesAnuncios: string[]): Promise<Map<string, boolean>> {
-  const ads = await fetchTodosAnuncios();
+export async function getStatusPorNomeAnuncio(prisma: PrismaClient, nomesAnuncios: string[]): Promise<Map<string, boolean>> {
+  const ads = await fetchTodosAnunciosCached(prisma);
   const porNome = new Map<string, boolean>();
   for (const a of ads) if (!porNome.has(a.name)) porNome.set(a.name, a.status === "ACTIVE");
   return new Map(nomesAnuncios.map((n) => [n, porNome.get(n) ?? false]));
@@ -101,7 +122,7 @@ export async function getFotosPorNomeConjunto(
     return new Map(nomesConjuntos.map((n) => [n, cachedData[n] ?? []]));
   }
 
-  const adsets = await fetchAdSets();
+  const adsets = await fetchAdSetsCached(prisma);
   const nomesParaBuscar = isFresh ? faltando : nomesConjuntos;
   const novosDados: Record<string, string[]> = { ...cachedData };
   for (const nome of nomesParaBuscar) {
@@ -224,13 +245,72 @@ export async function getInsightsPorAnuncio(range: { since: string; until: strin
   return map;
 }
 
-// Foto de cada anúncio/criativo individual (1 conta inteira, 1 chamada só, diferente de
-// fetchFotosAtivas que é por conjunto) — cacheado com o mesmo padrão/janela de
-// getFotosPorNomeConjunto, chave de cache separada pra não misturar os dois caches.
+// Foto de cada anúncio/criativo individual (1 conta inteira, diferente de fetchFotosAtivas que é
+// por conjunto) — cacheado com o mesmo padrão/janela de getFotosPorNomeConjunto, chave de cache
+// separada pra não misturar os dois caches.
+// `limit=500` (achado em 2026-10-01, auditoria de performance) estourava o pedido pro Graph API —
+// erro real reproduzido 2x: "Please reduce the amount of data you're asking for". Como essa
+// chamada ficava dentro do MESMO Promise.all de 4 chamadas (ver analytics-site/page.tsx), o erro
+// derrubava as outras 3 junto (capturadas pelo catch silencioso) — a seção de Anúncios por
+// criativo individual ficou sistematicamente quebrada em produção por isso. limit menor = páginas
+// mais numerosas mas cada uma pequena o suficiente pra API aceitar (fetchAllPages já pagina certo).
+// NÃO busca `creative{thumbnail_url}` aqui (achado em 2026-10-01, hardening de performance): essa
+// expansão por anúncio é o que torna a chamada lenta (~15s pros ~500 ACTIVE+PAUSED da conta, vs
+// ~3s pedindo só id/name/status) — e só getFotosPorNomeAnuncio precisa de foto, status não. Foto
+// é buscada à parte, só pros poucos anúncios que batem nomesAnuncios (ver fetchCreativesPorIds).
 async function fetchTodosAnuncios(): Promise<MetaAd[]> {
   const { accountId, accessToken } = getCredentials();
-  const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/act_${accountId}/ads?fields=id,name,status,creative{thumbnail_url}&limit=500&access_token=${accessToken}`;
+  // effective_status restringe a ACTIVE/PAUSED — testado em 2026-10-01: sem esse filtro, a conta
+  // inteira (incluindo histórico arquivado/deletado de anos) levava ~31s pra paginar só nessa 1ª
+  // chamada (cache-miss). Nada do que já é ARCHIVED/DELETED interessa aqui (status/foto exibidos
+  // na tela só fazem sentido pra anúncio que ainda existe de verdade).
+  const status = encodeURIComponent(JSON.stringify(["ACTIVE", "PAUSED"]));
+  const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/act_${accountId}/ads?fields=id,name,status&effective_status=${status}&limit=100&access_token=${accessToken}`;
   return fetchAllPages<MetaAd>(url);
+}
+
+// Busca creative só pros IDs pedidos (um GET por anúncio, não a conta inteira) — em vez de
+// expandir creative pra conta inteira (caro, ~15s) só pra usar uma fração minúscula
+// (nomesAnuncios tipicamente ~15 itens, o top por investimento). Mesmos dados exibidos de sempre
+// (thumbnail_url), buscados de forma mais barata. Tentei primeiro o endpoint de lote (`?ids=`,
+// 1 chamada só) — descoberto em 2026-10-01 que esse parâmetro está REMOVIDO pela Graph API
+// ("ids query parameter is deprecated", erro 500 confirmado ao vivo, independente da versão
+// pedida na URL). Concorrência limitada evita disparar 15 requests simultâneos de uma vez.
+async function fetchCreativesPorIds(ids: string[]): Promise<Map<string, string>> {
+  if (ids.length === 0) return new Map();
+  const { accessToken } = getCredentials();
+  const CONCORRENCIA = 5;
+  const map = new Map<string, string>();
+  let next = 0;
+  async function worker() {
+    while (next < ids.length) {
+      const id = ids[next++];
+      const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/${id}?fields=creative{thumbnail_url}&access_token=${accessToken}`;
+      const res = await fetch(url);
+      const json: { creative?: { thumbnail_url?: string }; error?: { message: string } } = await res.json();
+      if (json.creative?.thumbnail_url) map.set(id, json.creative.thumbnail_url);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(CONCORRENCIA, ids.length) }, worker));
+  return map;
+}
+
+// Mesmo racional de fetchAdSetsCached acima — getStatusPorNomeAnuncio e getFotosPorNomeAnuncio
+// chamavam fetchTodosAnuncios() cada uma por conta própria.
+const ANUNCIOS_CACHE_LABEL = "meta-ads-anuncios-raw";
+
+async function fetchTodosAnunciosCached(prisma: PrismaClient): Promise<MetaAd[]> {
+  const cached = await prisma.priceCatalogCache.findUnique({ where: { clientLabel: ANUNCIOS_CACHE_LABEL } });
+  const isFresh = cached != null && Date.now() - cached.updatedAt.getTime() < FOTOS_MAX_AGE_HORAS * 60 * 60 * 1000;
+  if (isFresh) return (cached!.data as unknown as MetaAd[]) ?? [];
+
+  const fresh = await fetchTodosAnuncios();
+  await prisma.priceCatalogCache.upsert({
+    where: { clientLabel: ANUNCIOS_CACHE_LABEL },
+    create: { clientLabel: ANUNCIOS_CACHE_LABEL, data: fresh as unknown as Prisma.InputJsonValue },
+    update: { data: fresh as unknown as Prisma.InputJsonValue },
+  });
+  return fresh;
 }
 
 const CACHE_LABEL_CRIATIVO = "meta-ads-fotos-criativo";
@@ -248,10 +328,20 @@ export async function getFotosPorNomeAnuncio(
     return new Map(nomesAnuncios.map((n) => [n, cachedData[n] ?? []]));
   }
 
-  const ads = await fetchTodosAnuncios();
+  // fetchTodosAnunciosCached não traz creative (ver comentário em fetchTodosAnuncios) — acha só
+  // o ID de cada anúncio pelo nome, depois busca creative num lote só pra essa fração pequena.
+  const ads = await fetchTodosAnunciosCached(prisma);
+  const idPorNome = new Map<string, string>();
+  for (const a of ads) if (!idPorNome.has(a.name)) idPorNome.set(a.name, a.id);
+  const idsParaBuscar = (isFresh ? faltando : nomesAnuncios)
+    .map((n) => idPorNome.get(n))
+    .filter((id): id is string => !!id);
+  const creativePorId = await fetchCreativesPorIds(idsParaBuscar);
+
   const fotoPorNome = new Map<string, string>();
-  for (const a of ads) {
-    if (a.creative?.thumbnail_url && !fotoPorNome.has(a.name)) fotoPorNome.set(a.name, a.creative.thumbnail_url);
+  for (const [nome, id] of idPorNome) {
+    const url = creativePorId.get(id);
+    if (url) fotoPorNome.set(nome, url);
   }
   const novosDados: Record<string, string[]> = { ...cachedData };
   for (const nome of nomesAnuncios) {

@@ -14,13 +14,13 @@ export function PcKeySelect({ options, current, label }: { options: string[]; cu
     qs.delete("pcKey");
     const next = current.includes(value) ? current.filter((k) => k !== value) : [...current, value];
     for (const k of next) qs.append("pcKey", k);
-    router.push(`${pathname}?${qs.toString()}`);
+    router.push(`${pathname}?${qs.toString()}`, { scroll: false });
   }
 
   function clear() {
     const qs = new URLSearchParams(searchParams.toString());
     qs.delete("pcKey");
-    router.push(`${pathname}?${qs.toString()}`);
+    router.push(`${pathname}?${qs.toString()}`, { scroll: false });
   }
 
   return (

@@ -237,8 +237,13 @@ export async function getStockVsSales(filters: DashboardFilters, dimension: Dime
   // com o filtro de data (Rodrigo notou isso em 2026-08-10) nem com o filtro de loja (achado
   // em 2026-08-12: ele quer o mesmo número não importa qual loja esteja selecionada). Só
   // "vendido no período", "estoque atual" e giro (as outras colunas) respeitam os filtros.
+  // tabelasPreco entra na mesma regra (2026-10-01, pedido do Rodrigo): quase toda página do Radar
+  // usa getTabelaPrecoRestrictionSemAtacado (exclui "Tabela atacado" do filtro por padrão, pra
+  // atacado só aparecer na área dedicada) — sem zerar esse filtro aqui também, o sell-through
+  // "empresa inteira" ficava igualmente filtrado, excluindo venda de atacado sem querer. Marcas
+  // continua respeitando o filtro de propósito (não é um canal de venda, é dimensão de produto).
   const allTimeFilters: DashboardFilters = { ...filters, from: new Date(0), to: new Date() };
-  const empresaToda: DashboardFilters = { ...allTimeFilters, storeIds: undefined };
+  const empresaToda: DashboardFilters = { ...allTimeFilters, storeIds: undefined, tabelasPreco: undefined };
 
   const [sales, salesAllTime, stock, salesEmpresaToda, stockEmpresaToda, producedByKey] = await Promise.all([
     getSalesByDimension(filters, dimension),
@@ -503,7 +508,7 @@ export async function getReplenishmentPorVendas(
 
   const saleAgg = await prisma.sale.groupBy({
     by: ["storeId", "cod"],
-    where: { storeId: { in: storeIds }, cod: { in: cods }, saleDate: { gte: from, lte: to } },
+    where: { status: { not: "Cancelada" }, storeId: { in: storeIds }, cod: { in: cods }, saleDate: { gte: from, lte: to } },
     _sum: { quantidade: true },
   });
   const vendasByKey = new Map(saleAgg.map((s) => [`${s.storeId}::${s.cod}`, s._sum.quantidade ?? 0]));
@@ -594,6 +599,7 @@ export async function getStockAging(
     prisma.sale.groupBy({
       by: ["storeId", "cod"],
       where: {
+        status: { not: "Cancelada" },
         storeId: { in: storeIds },
         cod: { in: cods },
         ...(filters.tabelasPreco !== undefined ? { tabelaPreco: { in: filters.tabelasPreco } } : {}),
@@ -602,11 +608,15 @@ export async function getStockAging(
       _max: { saleDate: true },
       _sum: { quantidade: true },
     }),
+    // Empresa toda de verdade (2026-10-01, pedido do Rodrigo): ignora tabelasPreco também, não só
+    // storeId — a maioria das páginas usa getTabelaPrecoRestrictionSemAtacado (exclui "Tabela
+    // atacado" por padrão), então filtrar por esse campo aqui vazava a mesma exclusão pro
+    // sell-through "empresa inteira", que deveria ser igual não importa o canal.
     prisma.sale.groupBy({
       by: ["cod"],
       where: {
+        status: { not: "Cancelada" },
         cod: { in: cods },
-        ...(filters.tabelasPreco !== undefined ? { tabelaPreco: { in: filters.tabelasPreco } } : {}),
       },
       _sum: { quantidade: true },
     }),
@@ -1009,13 +1019,13 @@ export async function getMapaDeComprasDetalhado(
       prisma.$queryRaw<{ grupo: string; produto: string; mes: Date; unidades: bigint; receita: number }[]>`
       SELECT "grupo", "produto", DATE_TRUNC('month', ("saleDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo') AS mes, SUM("quantidade") AS unidades, SUM("valorTotalLiquido") AS receita
       FROM "Sale"
-      WHERE "saleDate" >= ${inicioHistorico} AND "saleDate" < ${inicioMesAtual} AND "grupo" != '(sem grupo)' ${grupoFiltro}
+      WHERE "status" != 'Cancelada' AND "saleDate" >= ${inicioHistorico} AND "saleDate" < ${inicioMesAtual} AND "grupo" != '(sem grupo)' ${grupoFiltro}
       GROUP BY "grupo", "produto", mes
     `,
       prisma.$queryRaw<{ grupo: string; produto: string; mes: Date; unidades: bigint; receita: number }[]>`
       SELECT "grupo", "produto", DATE_TRUNC('month', ("returnDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo') AS mes, SUM("quantidade") AS unidades, SUM("valorTotal") AS receita
       FROM "Return"
-      WHERE "returnDate" >= ${inicioHistorico} AND "returnDate" < ${inicioMesAtual} AND "grupo" != '(sem grupo)' ${grupoFiltro}
+      WHERE "status" != 'Cancelada' AND "returnDate" >= ${inicioHistorico} AND "returnDate" < ${inicioMesAtual} AND "grupo" != '(sem grupo)' ${grupoFiltro}
       GROUP BY "grupo", "produto", mes
     `,
       prisma.$queryRaw<{ grupo: string; produto: string; mes: Date; unidades: bigint }[]>`
@@ -1034,7 +1044,7 @@ export async function getMapaDeComprasDetalhado(
       // estoque no início do mês corrente, de onde a reconstrução andando pra trás começa.
       prisma.$queryRaw<{ grupo: string; produto: string; unidades: bigint }[]>`
       SELECT "grupo", "produto", SUM("quantidade") AS unidades FROM "Sale"
-      WHERE "saleDate" >= ${inicioMesAtual} AND "saleDate" <= ${agora} AND "grupo" != '(sem grupo)' ${grupoFiltro}
+      WHERE "status" != 'Cancelada' AND "saleDate" >= ${inicioMesAtual} AND "saleDate" <= ${agora} AND "grupo" != '(sem grupo)' ${grupoFiltro}
       GROUP BY "grupo", "produto"
     `,
       prisma.$queryRaw<{ grupo: string; produto: string; unidades: bigint }[]>`
@@ -1355,6 +1365,7 @@ export async function getStockCoverage(
     prisma.sale.groupBy({
       by: ["storeId", "cod"],
       where: {
+        status: { not: "Cancelada" },
         storeId: { in: storeIds },
         cod: { in: cods },
         saleDate: { gte: thirtyDaysAgo },

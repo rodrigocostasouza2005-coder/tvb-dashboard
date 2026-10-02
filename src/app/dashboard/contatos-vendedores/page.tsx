@@ -4,6 +4,7 @@ import { getStoreRestriction } from "@/lib/permissions";
 import { brasiliaDayStart, brasiliaDayEnd, todayBrasiliaStr, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { deletarContatoAction } from "./actions";
+import { GetForm } from "../get-form";
 
 const TIPO_LABEL: Record<string, string> = { sugestao: "Sugestão de contato", followup: "Follow-up pós-compra" };
 
@@ -38,7 +39,7 @@ export default async function ContatosVendedoresPage({
         sozinha no clique do link do WhatsApp, não é confirmação de entrega de verdade.
       </p>
 
-      <form method="GET" className="mb-6 flex flex-wrap items-end gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3 text-sm shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+      <GetForm action="/dashboard/contatos-vendedores" className="mb-6 flex flex-wrap items-end gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3 text-sm shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
         <div className="flex flex-col gap-1">
           <label className="text-xs font-medium text-[var(--text-muted)]" htmlFor="from">De</label>
           <input id="from" type="date" name="from" defaultValue={toDateInputValue(from)} className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1 text-[var(--text-primary)]" style={{ colorScheme: "light dark" }} />
@@ -48,7 +49,7 @@ export default async function ContatosVendedoresPage({
           <input id="to" type="date" name="to" defaultValue={toDateInputValue(to)} className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1 text-[var(--text-primary)]" style={{ colorScheme: "light dark" }} />
         </div>
         <button type="submit" className="rounded-md bg-[var(--series-1)] px-3 py-1.5 text-sm font-medium text-white">Aplicar</button>
-      </form>
+      </GetForm>
 
       <div className="mb-6 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
         <h3 className="border-b border-[var(--gridline)] px-4 py-2.5 text-sm font-medium text-[var(--text-primary)]">Ranking no período</h3>
