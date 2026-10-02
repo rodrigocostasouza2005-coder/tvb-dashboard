@@ -1007,6 +1007,88 @@ export async function getDailySalesByProduto(
   return [...byDay.values()].sort((a, b) => a.day.localeCompare(b.day));
 }
 
+// Mesma série de getDailySalesByProduto (produto específico, dia a dia, receita líquida =
+// vendido - devolvido), só que quebrada por LOJA em vez de somada — pedido do Rodrigo em
+// 2026-10-02, pro 3º gráfico ("Receita líquida por canal") da aba Pesquisa. Mesmos filtros e
+// mesmo WHERE de getDailySalesByProduto (copiado de propósito, não chamado em cima pra não pagar
+// 2 queries redundantes) — só a dimensão de agrupamento muda (dia+loja em vez de só dia), 1 query
+// nova só (não 1 por loja), mesmo padrão de "data+series" já usado em getSalesByDayPerStore
+// (nome de série = store.displayGroup ?? store.name, mesma função de label do resto do Radar).
+export async function getDailySalesByProdutoPorLoja(
+  filters: Pick<DashboardFilters, "storeIds" | "marcas" | "tabelasPreco" | "grupoIn" | "from" | "to">,
+  produto: string
+): Promise<{ data: Record<string, string | number>[]; series: string[] }> {
+  const [salesRows, returnRows] = await Promise.all([
+    prisma.$queryRaw<{ day: Date; storeId: string; revenue: number }[]>`
+      SELECT
+        DATE_TRUNC('day', ("saleDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo') AS day,
+        "storeId",
+        SUM("valorTotalLiquido") AS revenue
+      FROM "Sale"
+      WHERE "status" != 'Cancelada'
+        AND "produto" = ${produto}
+        AND "saleDate" >= ${filters.from}
+        AND "saleDate" <= ${filters.to}
+        ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
+        ${filters.marcas !== undefined ? Prisma.sql`AND "marca" = ANY(${filters.marcas})` : Prisma.empty}
+        ${filters.tabelasPreco !== undefined ? Prisma.sql`AND ("tabelaPreco" = ANY(${filters.tabelasPreco}) OR "tabelaPreco" IS NULL)` : Prisma.empty}
+        ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
+      GROUP BY day, "storeId"
+      ORDER BY day ASC
+    `,
+    prisma.$queryRaw<{ day: Date; storeId: string; value: number }[]>`
+      SELECT
+        DATE_TRUNC('day', ("returnDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo') AS day,
+        "storeId",
+        SUM("valorTotal") AS value
+      FROM "Return"
+      WHERE "status" != 'Cancelada'
+        AND "produto" = ${produto}
+        AND "returnDate" >= ${filters.from}
+        AND "returnDate" <= ${filters.to}
+        ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
+        ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
+      GROUP BY day, "storeId"
+      ORDER BY day ASC
+    `,
+  ]);
+
+  const stores = await prisma.store.findMany({ where: { sellsProducts: true } });
+  const seriesNameByStoreId = new Map(stores.map((s) => [s.id, s.displayGroup ?? s.name]));
+
+  const byDay = new Map<string, Record<string, number>>();
+  const seriesNames = new Set<string>();
+  for (const r of salesRows) {
+    const seriesName = seriesNameByStoreId.get(r.storeId);
+    if (!seriesName) continue;
+    const day = new Date(r.day).toISOString().slice(0, 10);
+    seriesNames.add(seriesName);
+    const dayRow = byDay.get(day) ?? {};
+    dayRow[seriesName] = (dayRow[seriesName] ?? 0) + Number(r.revenue);
+    byDay.set(day, dayRow);
+  }
+  // Mesmo comportamento de getDailySalesByProduto: devolução só desconta em dia que já teve
+  // VENDA desse produto (qualquer loja) — se o dia não existe em byDay, a devolução é ignorada
+  // (mesmo "quirk" da função que esta substitui em granularidade, reproduzido de propósito aqui
+  // pra a soma das lojas bater exatamente com o total já mostrado no 1º gráfico da página).
+  const diasComVenda = new Set(byDay.keys());
+  for (const r of returnRows) {
+    const seriesName = seriesNameByStoreId.get(r.storeId);
+    if (!seriesName) continue;
+    const day = new Date(r.day).toISOString().slice(0, 10);
+    if (!diasComVenda.has(day)) continue;
+    const dayRow = byDay.get(day)!;
+    dayRow[seriesName] = (dayRow[seriesName] ?? 0) - Number(r.value);
+  }
+
+  const series = [...seriesNames].sort();
+  const data = [...byDay.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([day, values]) => ({ day, ...values }));
+
+  return { data, series };
+}
+
 // Devolução total por mês (sem quebrar por loja) — usado pra netar a tendência de receita da
 // Lâmina Mensal contra bruta. Devolução é sempre B2C (confirmado pelo Rodrigo), então quando
 // canal="b2b" o chamador nem chama isso (líquida = bruta nesse caso).

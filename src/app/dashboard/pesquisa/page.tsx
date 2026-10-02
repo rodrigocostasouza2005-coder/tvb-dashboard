@@ -1,5 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
-import { searchStockVsSalesComTamanhos, getTopClientes, getDailySalesByProduto, getStores, getMarcas, getTabelasPreco, getDistinctColecoes } from "@/lib/metrics";
+import { searchStockVsSalesComTamanhos, getTopClientes, getDailySalesByProduto, getDailySalesByProdutoPorLoja, getStores, getMarcas, getTabelasPreco, getDistinctColecoes } from "@/lib/metrics";
 import { canSeeFinancials, getGrupoRestriction, getMarcaRestriction, getTabelaPrecoRestrictionSemAtacado } from "@/lib/permissions";
 import { parseFilters, brasiliaDayStart, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
@@ -50,7 +50,7 @@ export default async function PesquisaPage({
   const dataInicioRange = brasiliaDayStart(DATA_START_MONTH + "-01");
   const dataFimRange = new Date();
 
-  const [{ rows, tamanhos }, clientes, stores, marcas, tabelasPreco, colecoes, produtoSerie] = await Promise.all([
+  const [{ rows, tamanhos }, clientes, stores, marcas, tabelasPreco, colecoes, produtoSerie, produtoSeriePorLoja] = await Promise.all([
     searchStockVsSalesComTamanhos(filters, query),
     query.trim() ? getTopClientes(filters, null, 20, "todos", true, query) : Promise.resolve([]),
     getStores(allowedStores),
@@ -63,6 +63,12 @@ export default async function PesquisaPage({
           produtoSelecionado
         )
       : Promise.resolve([]),
+    produtoSelecionado
+      ? getDailySalesByProdutoPorLoja(
+          { storeIds: filters.storeIds, marcas: filters.marcas, tabelasPreco: filters.tabelasPreco, grupoIn, from: dataInicioRange, to: dataFimRange },
+          produtoSelecionado
+        )
+      : Promise.resolve({ data: [], series: [] }),
   ]);
   const showFinancials = canSeeFinancials(user);
 
@@ -89,6 +95,33 @@ export default async function PesquisaPage({
     return [...porMes.values()].sort((a, b) => a.month.localeCompare(b.month));
   })();
   const produtoChartData = visaoProduto === "mes" ? produtoChartDataMes : produtoChartDataDia;
+
+  // 3º gráfico: receita líquida por loja (mesmo padrão de StoreCompareChart/getSalesByDayPerStore
+  // — "canal" aqui é a loja/armazenador real, não B2B/B2C). Mesma agregação dia→mês já usada
+  // acima, só que por chave dinâmica (nome da loja) em vez de campos fixos.
+  const produtoPorLojaChartDataMes = (() => {
+    const porMes = new Map<string, Record<string, string | number>>();
+    for (const row of produtoSeriePorLoja.data) {
+      const day = String(row.day);
+      const month = day.slice(0, 7);
+      const cur = porMes.get(month) ?? { month };
+      for (const serie of produtoSeriePorLoja.series) {
+        const v = row[serie];
+        if (typeof v === "number") cur[serie] = (Number(cur[serie]) || 0) + v;
+      }
+      porMes.set(month, cur);
+    }
+    return [...porMes.values()].sort((a, b) => String(a.month).localeCompare(String(b.month)));
+  })();
+  const produtoPorLojaChartData = visaoProduto === "mes" ? produtoPorLojaChartDataMes : produtoSeriePorLoja.data;
+  // Mesma paleta categórica de StoreCompareChart (var(--cat-1..8)) — consistência visual com o
+  // resto do Radar pra gráfico "por loja".
+  const CORES_CANAL = ["var(--cat-1)", "var(--cat-2)", "var(--cat-3)", "var(--cat-4)", "var(--cat-5)", "var(--cat-6)", "var(--cat-7)", "var(--cat-8)"];
+  const produtoPorLojaSeries = produtoSeriePorLoja.series.map((nome, i) => ({
+    key: nome,
+    name: nome,
+    color: CORES_CANAL[i % CORES_CANAL.length],
+  }));
 
   const baseParams = new URLSearchParams();
   if (query) baseParams.set("q", query);
@@ -263,6 +296,17 @@ export default async function PesquisaPage({
               ]}
             />
           </section>
+          {showFinancials && produtoPorLojaSeries.length > 0 && (
+            <section>
+              <h3 className="mb-3 text-xs font-medium text-[var(--text-muted)]">Receita líquida por canal ({visaoProduto === "mes" ? "mês" : "dia"})</h3>
+              <IndicatorChart
+                data={produtoPorLojaChartData}
+                format="currency"
+                granularity={visaoProduto === "mes" ? "month" : "day"}
+                series={produtoPorLojaSeries}
+              />
+            </section>
+          )}
           {produtoChartData.length === 0 && (
             <p className="text-sm text-[var(--text-muted)]">Sem vendas desse produto no período/filtro.</p>
           )}
