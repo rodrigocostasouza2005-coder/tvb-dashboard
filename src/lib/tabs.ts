@@ -41,7 +41,8 @@ export type TabKey =
   | "analise-performance"
   | "analytics-site"
   | "analises-promocao"
-  | "custo-familia";
+  | "custo-familia"
+  | "atacado-custo-familia";
 
 export type TabGroup = "visao-geral" | "resumo-dia" | "vendas" | "estoque" | "atacado" | "clientes" | "marketing" | "pesquisa" | "lamina" | "performance";
 
@@ -87,6 +88,7 @@ export const TABS: TabEntry[] = [
   { key: "atacado-cidades", label: "Por estado/cidade", href: "/dashboard/atacado-cidades", group: "atacado" },
   { key: "atacado-clientes", label: "Por cliente", href: "/dashboard/atacado-clientes", group: "atacado" },
   { key: "inadimplencia", label: "Inadimplência", href: "/dashboard/inadimplencia", group: "atacado" },
+  { key: "atacado-custo-familia", label: "Custo por Família", href: "/dashboard/atacado-custo-familia", group: "atacado" },
 
   // clientes
   { key: "clientes", label: "Visão Geral", href: "/dashboard/clientes", group: "clientes" },
