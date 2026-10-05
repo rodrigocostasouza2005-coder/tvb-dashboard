@@ -13,8 +13,9 @@ import {
   getTabelasPreco,
   getDistinctColecoes,
   type DashboardFilters,
+  type Canal,
 } from "@/lib/metrics";
-import { canSeeFinancials, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestrictionSemAtacado, getGrupoRestriction } from "@/lib/permissions";
+import { canSeeFinancials, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction, getTabelaPrecoRestrictionSemAtacado, getGrupoRestriction } from "@/lib/permissions";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { FilterBar } from "../filter-bar";
@@ -35,6 +36,17 @@ const CAT_COLORS = ["var(--cat-1)", "var(--cat-2)", "var(--cat-3)", "var(--cat-4
 // temos base pra documentar um número "oficial". Comparar contra a média é transparente,
 // reproduzível e se ajusta automaticamente ao período/filtro escolhido. Mesmas 4 categorias
 // pedidas pelo Rodrigo.
+function canalHref(rawParams: RawSearchParams, canal: Canal) {
+  const qs = new URLSearchParams();
+  for (const [key, value] of Object.entries(rawParams)) {
+    if (key === "canal" || value === undefined) continue;
+    if (Array.isArray(value)) value.forEach((v) => qs.append(key, v));
+    else qs.append(key, value);
+  }
+  qs.set("canal", canal);
+  return `/dashboard/custo-familia?${qs.toString()}`;
+}
+
 function statusFamilia(
   margemPct: number | null,
   sellThrough: number | null,
@@ -58,11 +70,16 @@ export default async function CustoFamiliaPage({ searchParams }: { searchParams:
   const rawParams = await searchParams;
   const filtrosOpen = rawParams.filtros === "1";
   const showFinancials = canSeeFinancials(user);
+  const canal: Canal = rawParams.canal === "b2b" || rawParams.canal === "b2c" ? rawParams.canal : "todos";
 
   const grupoIn = await getGrupoRestriction(user.role);
   const allowedStores = getStoreRestriction(user);
   const allowedMarcas = getMarcaRestriction(user);
-  const allowedTabelasPreco = getTabelaPrecoRestrictionSemAtacado(user);
+  // "Todos"/"B2C" continuam excluindo atacado do filtro de tabela de preço, igual sempre foi
+  // nesta página (atacado só na área dedicada) — só quando o usuário escolhe explicitamente
+  // "B2B atacado" é que a restrição abre pra incluir "Tabela atacado", senão o próprio filtro de
+  // tabelaPreco já teria zerado o canal b2b antes de canalWhere() nem entrar em ação.
+  const allowedTabelasPreco = canal === "b2b" ? getTabelaPrecoRestriction(user) : getTabelaPrecoRestrictionSemAtacado(user);
 
   const parsedFilters = parseFilters(rawParams, { allowedStoreIds: allowedStores });
   const selectedStoreIds = parsedFilters.storeIds ?? allowedStores;
@@ -108,10 +125,13 @@ export default async function CustoFamiliaPage({ searchParams }: { searchParams:
     to: parsedFilters.to,
   };
 
+  // canal === "b2b": devolução não entra (bruta = líquida), mesma regra já documentada em
+  // getMonthlySnapshotKpi/getAtacadoVendas — Return não tem como ser atribuída a um canal com
+  // confiança, então não existe "devolução líquida de atacado" nesse sentido no resto do Radar.
   const [salesByGrupo, returnsByGrupo, cmvByGrupo, stockVsSales, estoqueAtual] = await Promise.all([
-    getSalesByDimension(filters, "grupo"),
-    getReturnsByDimension(filters, "grupo"),
-    getCmvPorGrupo(filters),
+    getSalesByDimension(filters, "grupo", canal),
+    canal === "b2b" ? Promise.resolve([] as Awaited<ReturnType<typeof getReturnsByDimension>>) : getReturnsByDimension(filters, "grupo"),
+    getCmvPorGrupo(filters, canal),
     getStockVsSales(filters, "grupo"),
     getEstoqueAtual({ storeIds: filters.storeIds, grupoIn: filters.grupoIn }, "grupo"),
   ]);
@@ -187,8 +207,8 @@ export default async function CustoFamiliaPage({ searchParams }: { searchParams:
   // mesma aproximação "bruta por mês" documentada em getCmvMensalPorGrupo.
   const topFamilias = rows.filter((r) => r.receitaLiquida > 0).slice(0, MAX_SERIES_EVOLUCAO).map((r) => r.familia);
   const [monthlyRevenue, monthlyCmv] = await Promise.all([
-    getMonthlySalesByGrupo(filters),
-    getCmvMensalPorGrupo(filters, topFamilias),
+    getMonthlySalesByGrupo(filters, canal),
+    getCmvMensalPorGrupo(filters, topFamilias, canal),
   ]);
   const cmvMensalMap = new Map(monthlyCmv.map((c) => [`${c.month}\x00${c.grupo}`, c.cmv]));
   const evolucaoMargemData = monthlyRevenue.data.map((d) => {
@@ -259,8 +279,34 @@ export default async function CustoFamiliaPage({ searchParams }: { searchParams:
           colecoes={colecoes}
           showTabelaPreco
           filters={filters}
+          extraParams={{ canal }}
         />
       </CollapsibleFilters>
+
+      <div className="mb-4 flex gap-1">
+        {([
+          { value: "todos", label: "Todos" },
+          { value: "b2b", label: "B2B (atacado)" },
+          { value: "b2c", label: "B2C (varejo)" },
+        ] as const).map((opt) => (
+          <a
+            key={opt.value}
+            href={canalHref(rawParams, opt.value)}
+            className={`rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
+              canal === opt.value
+                ? "border-[var(--series-1)] bg-[var(--series-1)] text-white"
+                : "border-[var(--border)] bg-[var(--surface-1)] text-[var(--text-secondary)] hover:bg-[var(--page-plane)]"
+            }`}
+          >
+            {opt.label}
+          </a>
+        ))}
+      </div>
+      {canal === "b2b" && (
+        <p className="mb-4 text-xs text-[var(--text-muted)]">
+          Visão B2B (atacado): receita/CMV não descontam devolução (mesma regra já usada em Indicadores no Tempo — devolução não tem como ser atribuída com confiança a um canal específico).
+        </p>
+      )}
 
       <p className="mb-4 text-xs text-[var(--text-muted)]">
         CMV estimado: aplica o custo unitário ATUAL de cada SKU (StockSnapshot) às unidades vendidas líquidas do período — o Radar não guarda o custo histórico de quando cada venda aconteceu, só o custo de hoje. Não é CMV contábil.

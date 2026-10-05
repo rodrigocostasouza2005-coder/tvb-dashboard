@@ -11,6 +11,9 @@ type ClienteRow = {
   pedidos: number;
   unidades: number;
   receita: number;
+  cmv: number;
+  lucroBruto: number;
+  margemPct: number | null;
   ultimaCompra: Date | null;
   primeiraCompra: Date | null;
   isNovo: boolean;
@@ -18,6 +21,10 @@ type ClienteRow = {
 
 function formatBRL(value: number) {
   return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+
+function formatPct(value: number | null) {
+  return value === null ? "—" : `${value.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
 }
 
 function formatDate(date: Date | null) {
@@ -89,6 +96,9 @@ export function ClientesTable({
               <th className="px-4 py-2 font-medium text-right">Pedidos</th>
               <th className="px-4 py-2 font-medium text-right">Unidades brutas</th>
               {showReceita && <th className="px-4 py-2 font-medium text-right">Receita bruta</th>}
+              {showReceita && <th className="px-4 py-2 font-medium text-right">CMV estimado</th>}
+              {showReceita && <th className="px-4 py-2 font-medium text-right">Lucro bruto</th>}
+              {showReceita && <th className="px-4 py-2 font-medium text-right">Margem %</th>}
               <th className="px-4 py-2 font-medium">Última compra</th>
               <th className="px-4 py-2 font-medium">Novo?</th>
             </tr>
@@ -108,7 +118,7 @@ export function ClientesTable({
                   ))}
                 </select>
               </th>
-              <th className="px-4 py-1.5" colSpan={5}></th>
+              <th className="px-4 py-1.5" colSpan={8}></th>
             </tr>
           </thead>
           <tbody>
@@ -140,6 +150,15 @@ export function ClientesTable({
                     {formatBRL(r.receita)}
                   </td>
                 )}
+                {showReceita && (
+                  <td className="px-4 py-2 tabular-nums text-right text-[var(--text-secondary)]">{formatBRL(r.cmv)}</td>
+                )}
+                {showReceita && (
+                  <td className="px-4 py-2 tabular-nums text-right font-medium text-[var(--text-primary)]">{formatBRL(r.lucroBruto)}</td>
+                )}
+                {showReceita && (
+                  <td className="px-4 py-2 tabular-nums text-right font-semibold text-[var(--text-primary)]">{formatPct(r.margemPct)}</td>
+                )}
                 <td className="px-4 py-2 text-[var(--text-secondary)]">{formatDate(r.ultimaCompra)}</td>
                 <td className="px-4 py-2">
                   {r.isNovo ? (
@@ -154,7 +173,7 @@ export function ClientesTable({
             ))}
             {visible.length === 0 && (
               <tr>
-                <td colSpan={showReceita ? 9 : 8} className="px-4 py-6 text-center text-[var(--text-muted)]">
+                <td colSpan={showReceita ? 12 : 8} className="px-4 py-6 text-center text-[var(--text-muted)]">
                   Nenhum cliente encontrado.
                 </td>
               </tr>

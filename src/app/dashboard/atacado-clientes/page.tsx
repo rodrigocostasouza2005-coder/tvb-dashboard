@@ -1,5 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
-import { getAtacadoClientes, getClienteRetencaoPorMes, getDistinctColecoes } from "@/lib/metrics";
+import { getAtacadoClientes, getClienteRetencaoPorMes, getCmvPorCliente, getDistinctColecoes } from "@/lib/metrics";
 import {
   canSeeFinancials,
   getGrupoRestriction,
@@ -40,13 +40,30 @@ export default async function AtacadoClientesPage({
   for (const m of filters.marcas ?? []) clienteFichaParams.append("marca", m);
   for (const t of filters.tabelasPreco ?? []) clienteFichaParams.append("tabelaPreco", t);
 
-  const [data, retencao, colecoes] = await Promise.all([
+  const [data, retencao, colecoes, cmvPorCliente] = await Promise.all([
     getAtacadoClientes(filters),
     getClienteRetencaoPorMes(filters),
     getDistinctColecoes(),
+    getCmvPorCliente(filters),
   ]);
 
+  // CMV estimado (custo unitário ATUAL × unidades BRUTAS — mesma limitação de "bruta = líquida"
+  // de toda esta página: Return não tem clienteNome no schema, não dá pra descontar devolução
+  // por cliente). Junta por clienteNome, mesmo universo/filtro de getAtacadoClientes (mesma
+  // chamada de canalWhere("b2b") por baixo).
+  const cmvByCliente = new Map(cmvPorCliente.map((c) => [c.key, c]));
+  const rowsComCmv = data.rows.map((r) => {
+    const cmvInfo = cmvByCliente.get(r.clienteNome);
+    const cmv = cmvInfo?.cmv ?? 0;
+    const lucroBruto = r.receita - cmv;
+    const margemPct = r.receita > 0 ? (lucroBruto / r.receita) * 100 : null;
+    return { ...r, cmv, lucroBruto, margemPct, unidadesSemCusto: cmvInfo?.unidadesSemCusto ?? 0 };
+  });
+
   const totalReceita = data.rows.reduce((sum, r) => sum + r.receita, 0);
+  const totalCmv = rowsComCmv.reduce((sum, r) => sum + r.cmv, 0);
+  const totalLucroBruto = totalReceita - totalCmv;
+  const margemTotalPct = totalReceita > 0 ? (totalLucroBruto / totalReceita) * 100 : null;
 
   return (
     <div>
@@ -77,6 +94,24 @@ export default async function AtacadoClientesPage({
             value={totalReceita.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
           />
         )}
+        {showFinancials && (
+          <StatTile
+            label="CMV estimado"
+            value={totalCmv.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+          />
+        )}
+        {showFinancials && (
+          <StatTile
+            label="Lucro bruto"
+            value={totalLucroBruto.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+          />
+        )}
+        {showFinancials && (
+          <StatTile
+            label="Margem bruta"
+            value={margemTotalPct === null ? "—" : `${margemTotalPct.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`}
+          />
+        )}
         <StatTile label="Compraram 1x" value={String(retencao.compraram1x)} />
         <StatTile
           label="Compraram +1x"
@@ -92,7 +127,12 @@ export default async function AtacadoClientesPage({
         </section>
       )}
 
-      <ClientesTable rows={data.rows} showReceita={showFinancials} filtrosQuery={clienteFichaParams.toString()} />
+      {showFinancials && (
+        <p className="mb-3 text-xs text-[var(--text-muted)]">
+          CMV estimado: custo unitário ATUAL (StockSnapshot) × unidades brutas vendidas por cliente — sem desconto de devolução (Return não tem o nome do cliente no schema, mesma limitação de &quot;Receita bruta&quot; nesta página). Não é CMV contábil.
+        </p>
+      )}
+      <ClientesTable rows={rowsComCmv} showReceita={showFinancials} filtrosQuery={clienteFichaParams.toString()} />
     </div>
   );
 }

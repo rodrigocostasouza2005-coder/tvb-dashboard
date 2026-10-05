@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
-import { saleWhere, returnWhere, cacheAsync, FILTER_LIST_CACHE_MS, type DashboardFilters } from "./core";
+import { saleWhere, returnWhere, canalWhere, getB2BClienteNomes, getSiteAtacadoStoreIds, cacheAsync, FILTER_LIST_CACHE_MS, type DashboardFilters, type Canal } from "./core";
 
 // Custo unitário por SKU (StockSnapshot.valorCusto) — auditoria de 2026-10-05: é a ÚNICA fonte
 // de custo real no Radar. Sale.valorCustoTotal existe no schema mas NUNCA é populado pelo sync
@@ -30,10 +30,16 @@ export type CmvPorGrupoRow = { key: string; cmv: number; unidadesSemCusto: numbe
 // cada peça antes de somar por família) × custo unitário atual do SKU. SKU vendido que nunca
 // apareceu em nenhum snapshot de estoque fica de fora do CMV (não assume custo 0, que
 // subestimaria o CMV) — a quantidade correspondente volta em `unidadesSemCusto` pra UI avisar.
-export async function getCmvPorGrupo(filters: DashboardFilters): Promise<CmvPorGrupoRow[]> {
+// canal: "todos" (default) desconta devolução normalmente. "b2b" segue a MESMA regra já
+// documentada em getMonthlySnapshotKpi/getAtacadoVendas ("bruta = líquida" pro atacado — Return
+// não tem como ser atribuída a um canal com confiança) — por isso devolução não entra quando
+// canal === "b2b", em vez de inventar uma forma de "filtrar devolução por canal" que não existe
+// no resto do Radar.
+export async function getCmvPorGrupo(filters: DashboardFilters, canal: Canal = "todos"): Promise<CmvPorGrupoRow[]> {
+  const where: Prisma.SaleWhereInput = canal === "todos" ? saleWhere(filters) : { AND: [saleWhere(filters), await canalWhere(canal)] };
   const [vendidoPorCod, devolvidoPorCod, custoPorCod] = await Promise.all([
-    prisma.sale.groupBy({ by: ["cod", "grupo"], where: saleWhere(filters), _sum: { quantidade: true } }),
-    prisma.return.groupBy({ by: ["cod"], where: returnWhere(filters), _sum: { quantidade: true } }),
+    prisma.sale.groupBy({ by: ["cod", "grupo"], where, _sum: { quantidade: true } }),
+    canal === "b2b" ? Promise.resolve([] as { cod: string; _sum: { quantidade: number | null } }[]) : prisma.return.groupBy({ by: ["cod"], where: returnWhere(filters), _sum: { quantidade: true } }),
     getCustoUnitarioPorCod(),
   ]);
   const devolvidoMap = new Map(devolvidoPorCod.map((r) => [r.cod, r._sum.quantidade ?? 0]));
@@ -58,9 +64,12 @@ export async function getCmvPorGrupo(filters: DashboardFilters): Promise<CmvPorG
 // (getMonthlySalesByColuna em vendas.ts), que também não reconciliam devolução por mês na série,
 // só no total do período. O KPI/tabela/ranking desta página usam o CMV líquido de devolução
 // (getCmvPorGrupo); só esta série de evolução usa a aproximação mensal.
-export async function getCmvMensalPorGrupo(filters: DashboardFilters, gruposIn: string[]): Promise<{ month: string; grupo: string; cmv: number }[]> {
+export async function getCmvMensalPorGrupo(filters: DashboardFilters, gruposIn: string[], canal: Canal = "todos"): Promise<{ month: string; grupo: string; cmv: number }[]> {
   if (gruposIn.length === 0) return [];
   const custoPorCod = await getCustoUnitarioPorCod();
+  // Mesma lógica de canalWhere(), só que em SQL cru (DATE_TRUNC não existe no groupBy do Prisma)
+  // — mesmo padrão já usado em getMonthlySalesByColuna (vendas.ts) pros gráficos mensais.
+  const b2bClientes = canal !== "todos" ? [...(await getB2BClienteNomes())] : [];
 
   const rows = await prisma.$queryRaw<{ month: Date; cod: string; grupo: string; units: bigint }[]>`
     SELECT
@@ -76,6 +85,8 @@ export async function getCmvMensalPorGrupo(filters: DashboardFilters, gruposIn: 
       ${filters.marcas !== undefined ? Prisma.sql`AND "marca" = ANY(${filters.marcas})` : Prisma.empty}
       ${filters.tabelasPreco !== undefined ? Prisma.sql`AND ("tabelaPreco" = ANY(${filters.tabelasPreco}) OR "tabelaPreco" IS NULL)` : Prisma.empty}
       ${filters.colecaoIn ? Prisma.sql`AND "colecao" = ANY(${filters.colecaoIn})` : Prisma.empty}
+      ${canal === "b2b" ? Prisma.sql`AND ("tabelaPreco" = 'Tabela atacado' OR "clienteNome" = ANY(${b2bClientes}))` : Prisma.empty}
+      ${canal === "b2c" ? Prisma.sql`AND "tabelaPreco" IS DISTINCT FROM 'Tabela atacado' AND ("clienteNome" IS NULL OR "clienteNome" <> ALL(${b2bClientes}))` : Prisma.empty}
     GROUP BY month, "cod", "grupo"
   `;
 
@@ -92,4 +103,43 @@ export async function getCmvMensalPorGrupo(filters: DashboardFilters, gruposIn: 
     const [month, grupo] = mapKey.split("\x00");
     return { month, grupo, cmv };
   });
+}
+
+export type CmvPorClienteRow = { key: string; cmv: number; unidadesSemCusto: number };
+
+// CMV estimado por cliente de atacado — MESMO critério de "é atacado" já usado em
+// getAtacadoClientes (canalWhere("b2b") + lojas Site/Atacado + clienteNome preenchido), não um
+// recorte novo. Unidades BRUTAS (sem desconto de devolução): Return não tem clienteNome no
+// schema, então não existe como atribuir devolução a um cliente específico — mesma limitação
+// que já faz getAtacadoClientes mostrar "Receita bruta" (não líquida) por cliente.
+export async function getCmvPorCliente(filters: DashboardFilters): Promise<CmvPorClienteRow[]> {
+  const siteAtacadoIds = await getSiteAtacadoStoreIds();
+  if (siteAtacadoIds.length === 0) return [];
+  const storeIds = filters.storeIds !== undefined ? siteAtacadoIds.filter((id) => filters.storeIds!.includes(id)) : siteAtacadoIds;
+  if (storeIds.length === 0) return [];
+
+  const b2bWhere = await canalWhere("b2b");
+  const where: Prisma.SaleWhereInput = {
+    ...saleWhere(filters),
+    storeId: { in: storeIds },
+    AND: [b2bWhere],
+    clienteNome: { not: null },
+  };
+
+  const [vendidoPorCod, custoPorCod] = await Promise.all([
+    prisma.sale.groupBy({ by: ["cod", "clienteNome"], where, _sum: { quantidade: true } }),
+    getCustoUnitarioPorCod(),
+  ]);
+
+  const porCliente = new Map<string, { cmv: number; unidadesSemCusto: number }>();
+  for (const v of vendidoPorCod) {
+    const qtd = v._sum.quantidade ?? 0;
+    if (qtd <= 0 || !v.clienteNome) continue;
+    const acc = porCliente.get(v.clienteNome) ?? { cmv: 0, unidadesSemCusto: 0 };
+    const custoUnit = custoPorCod.get(v.cod);
+    if (custoUnit === undefined) acc.unidadesSemCusto += qtd;
+    else acc.cmv += qtd * custoUnit;
+    porCliente.set(v.clienteNome, acc);
+  }
+  return [...porCliente.entries()].map(([key, v]) => ({ key, cmv: v.cmv, unidadesSemCusto: v.unidadesSemCusto }));
 }
