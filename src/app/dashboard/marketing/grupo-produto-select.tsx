@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { useTransition } from "react";
 import type { RawSearchParams } from "@/lib/filters";
 
 function buildHref(basePath: string, searchParams: RawSearchParams, grupo: string) {
@@ -31,15 +32,20 @@ export function GrupoProdutoSelect({
   current?: string;
 }) {
   const router = useRouter();
+  const [isPending, startTransition] = useTransition();
   return (
-    <div className="mb-4 flex items-center gap-2">
+    <div className="mb-4 flex items-center gap-2" aria-busy={isPending} style={{ opacity: isPending ? 0.6 : 1, transition: "opacity 0.15s ease" }}>
       <label htmlFor="grupoFiltro" className="text-xs font-medium text-[var(--text-muted)]">
         Grupo de produto:
       </label>
       <select
         id="grupoFiltro"
         defaultValue={current ?? ""}
-        onChange={(e) => router.push(buildHref(basePath, searchParams, e.target.value), { scroll: false })}
+        onChange={(e) =>
+          startTransition(() => {
+            router.push(buildHref(basePath, searchParams, e.target.value), { scroll: false });
+          })
+        }
         className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-xs text-[var(--text-primary)]"
         style={{ colorScheme: "light dark" }}
       >

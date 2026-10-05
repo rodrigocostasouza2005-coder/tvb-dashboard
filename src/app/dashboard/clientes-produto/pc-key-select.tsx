@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
+import { useTransition } from "react";
 
 // Multi-seleção de produto(s)/grupo(s) (pedido do Rodrigo em 2026-08-28) — mesma UX do
 // GrupoDrillSelect do Estoque x Vendas, mas com paramName parametrizável ("pcKey").
@@ -8,23 +9,28 @@ export function PcKeySelect({ options, current, label }: { options: string[]; cu
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const [isPending, startTransition] = useTransition();
 
   function toggle(value: string) {
     const qs = new URLSearchParams(searchParams.toString());
     qs.delete("pcKey");
     const next = current.includes(value) ? current.filter((k) => k !== value) : [...current, value];
     for (const k of next) qs.append("pcKey", k);
-    router.push(`${pathname}?${qs.toString()}`, { scroll: false });
+    startTransition(() => {
+      router.push(`${pathname}?${qs.toString()}`, { scroll: false });
+    });
   }
 
   function clear() {
     const qs = new URLSearchParams(searchParams.toString());
     qs.delete("pcKey");
-    router.push(`${pathname}?${qs.toString()}`, { scroll: false });
+    startTransition(() => {
+      router.push(`${pathname}?${qs.toString()}`, { scroll: false });
+    });
   }
 
   return (
-    <div className="mb-4 flex flex-col gap-1">
+    <div className="mb-4 flex flex-col gap-1" aria-busy={isPending} style={{ opacity: isPending ? 0.6 : 1, transition: "opacity 0.15s ease" }}>
       <span className="text-xs text-[var(--text-muted)]">{label}</span>
       <details className="group relative w-fit">
         <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-3 py-1.5 text-sm text-[var(--text-primary)] hover:bg-[var(--page-plane)] [&::-webkit-details-marker]:hidden">
