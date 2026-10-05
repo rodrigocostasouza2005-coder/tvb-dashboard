@@ -283,7 +283,25 @@ export async function getStockVsSales(filters: DashboardFilters, dimension: Dime
       // Aproximação: sem série histórica de estoque ainda, usamos o snapshot atual como
       // "estoque médio" do período. Melhora sozinho conforme o /api/sync acumular snapshots.
       const inventoryTurnover = currentStock > 0 ? unitsSold / currentStock : null;
-      return { key, unitsSold, revenue, currentStock, sellThroughRate, inventoryTurnover };
+      // Expõe os 3 números que já alimentam resolveSellThrough (empresa inteira, histórico
+      // completo) — pedido do Rodrigo em 2026-10-02 pra mostrar no tooltip do sell-through da
+      // Pesquisa (Vendido/Produzido/Estoque que explicam o %). Não é um cálculo novo, só não
+      // descartar valores que já existiam aqui dentro. "produzido" vem de getProductionByDimension
+      // (ProductionOrder), mesma fonte que resolveSellThrough já usa — sem proxy novo.
+      const sellThroughVendido = soldEmpresaTodaByKey.get(key) ?? 0;
+      const sellThroughEstoque = stockEmpresaTodaByKey.get(key) ?? 0;
+      const sellThroughProduzido = producedByKey.get(key) ?? 0;
+      return {
+        key,
+        unitsSold,
+        revenue,
+        currentStock,
+        sellThroughRate,
+        inventoryTurnover,
+        sellThroughVendido,
+        sellThroughEstoque,
+        sellThroughProduzido,
+      };
     })
     .sort((a, b) => b.unitsSold - a.unitsSold);
 }

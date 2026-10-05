@@ -298,7 +298,7 @@ export default async function PesquisaPage({
           </section>
           {showFinancials && produtoPorLojaSeries.length > 0 && (
             <section>
-              <h3 className="mb-3 text-xs font-medium text-[var(--text-muted)]">Receita líquida por canal ({visaoProduto === "mes" ? "mês" : "dia"})</h3>
+              <h3 className="mb-3 text-xs font-medium text-[var(--text-muted)]">Receita líquida por loja/canal ({visaoProduto === "mes" ? "mês" : "dia"})</h3>
               <IndicatorChart
                 data={produtoPorLojaChartData}
                 format="currency"
@@ -324,6 +324,9 @@ export default async function PesquisaPage({
           unitsSold: r.unitsSold,
           currentStock: r.currentStock,
           sellThroughRate: r.sellThroughRate,
+          sellThroughVendido: r.sellThroughVendido,
+          sellThroughEstoque: r.sellThroughEstoque,
+          sellThroughProduzido: r.sellThroughProduzido,
           porTamanho: Object.fromEntries(r.porTamanho),
           porLoja: [...r.porLoja.entries()]
             .map(([loja, porTamanho]) => ({

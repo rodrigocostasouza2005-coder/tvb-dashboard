@@ -1,12 +1,16 @@
 "use client";
 
 import { Fragment, useState } from "react";
+import { formatNumber } from "@/lib/format";
 
 type Row = {
   key: string;
   unitsSold: number;
   currentStock: number;
   sellThroughRate: number | null;
+  sellThroughVendido?: number;
+  sellThroughEstoque?: number;
+  sellThroughProduzido?: number;
   porTamanho: Record<string, number>;
   porLoja: { loja: string; porTamanho: Record<string, number>; total: number }[];
 };
@@ -16,6 +20,22 @@ function statusFor(rate: number | null): { label: string; color: string } {
   if (rate >= 50) return { label: "Bom", color: "var(--status-good)" };
   if (rate >= 30) return { label: "Atenção", color: "var(--status-warning)" };
   return { label: "Crítico", color: "var(--status-critical)" };
+}
+
+// Vendido/Produzido/Estoque são sempre empresa inteira e histórico completo (mesma base que
+// resolveSellThrough já usa), por isso o rótulo "(empresa toda)" — pra não parecer que bate com
+// o "Vendido no período" da coluna ao lado, que é filtrado.
+function sellThroughTooltip(r: Row): string | undefined {
+  if (r.sellThroughVendido === undefined || r.sellThroughEstoque === undefined || r.sellThroughProduzido === undefined) {
+    return undefined;
+  }
+  const rate = r.sellThroughRate === null ? "N/D" : `${r.sellThroughRate.toFixed(0)}%`;
+  return [
+    `Sell-through: ${rate} (empresa toda, histórico completo)`,
+    `Vendido: ${formatNumber(r.sellThroughVendido)}`,
+    `Produzido: ${formatNumber(r.sellThroughProduzido)}`,
+    `Estoque: ${formatNumber(r.sellThroughEstoque)}`,
+  ].join("\n");
 }
 
 // Clicar na seta abre, embaixo da linha do produto, quanto tem em cada loja de venda (não
@@ -92,7 +112,7 @@ export function PesquisaTable({
                       </a>
                     )}
                   </td>
-                  <td className="px-4 py-2 tabular-nums">{r.unitsSold.toLocaleString("pt-BR")}</td>
+                  <td className="px-4 py-2 tabular-nums text-[var(--text-secondary)]">{r.unitsSold.toLocaleString("pt-BR")}</td>
                   {tamanhos.map((t) => {
                     const qtd = r.porTamanho[t] ?? 0;
                     return (
@@ -101,8 +121,8 @@ export function PesquisaTable({
                       </td>
                     );
                   })}
-                  <td className="px-4 py-2 tabular-nums font-medium">{r.currentStock.toLocaleString("pt-BR")}</td>
-                  <td className="px-4 py-2">
+                  <td className="px-4 py-2 tabular-nums text-[var(--text-secondary)]">{r.currentStock.toLocaleString("pt-BR")}</td>
+                  <td className="px-4 py-2" title={sellThroughTooltip(r)}>
                     {r.sellThroughRate !== null ? (
                       <div className="flex items-center gap-2">
                         <div className="h-1.5 w-16 overflow-hidden rounded-full bg-[var(--gridline)]">
@@ -111,7 +131,7 @@ export function PesquisaTable({
                             style={{ width: `${Math.min(pct, 100)}%`, backgroundColor: status.color }}
                           />
                         </div>
-                        <span className="tabular-nums text-[var(--text-secondary)]">{pct.toFixed(0)}%</span>
+                        <span className="tabular-nums font-semibold text-[var(--text-primary)]">{pct.toFixed(0)}%</span>
                       </div>
                     ) : (
                       <span className="text-[var(--text-muted)]">—</span>

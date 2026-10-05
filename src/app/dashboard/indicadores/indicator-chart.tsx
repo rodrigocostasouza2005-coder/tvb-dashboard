@@ -1,6 +1,7 @@
 "use client";
 
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
+import { formatBRLCompact, formatNumber, formatPercent } from "@/lib/format";
 
 const MONTH_NAMES = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
 
@@ -34,8 +35,14 @@ function formatMesesDesde(mesesStr: string) {
 
 function formatValue(value: number, format: "currency" | "number" | "percent") {
   if (format === "currency") return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-  if (format === "percent") return `${value.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
-  return value.toLocaleString("pt-BR");
+  if (format === "percent") return formatPercent(value);
+  return formatNumber(value);
+}
+
+function formatYAxisTick(value: number, format: "currency" | "number" | "percent") {
+  if (format === "currency") return formatBRLCompact(value);
+  if (format === "percent") return `${value.toLocaleString("pt-BR")}%`;
+  return formatNumber(value);
 }
 
 type Series = { key: string; name: string; color: string };
@@ -75,9 +82,12 @@ export function IndicatorChart({
     );
   }
 
+  const hasManySeries = series.length > 2;
+  const isDayLike = granularity === "day" || granularity === "dias";
+
   return (
-    <ResponsiveContainer width="100%" height={240}>
-      <LineChart data={data} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+    <ResponsiveContainer width="100%" height={hasManySeries ? 280 : 240}>
+      <LineChart data={data} margin={{ top: 8, right: 12, left: 0, bottom: hasManySeries ? 8 : 0 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="var(--gridline)" vertical={false} />
         <XAxis
           dataKey={xKey}
@@ -85,14 +95,15 @@ export function IndicatorChart({
           tick={{ fill: "var(--text-muted)", fontSize: 11 }}
           axisLine={{ stroke: "var(--gridline)" }}
           tickLine={false}
-          minTickGap={16}
+          minTickGap={isDayLike ? 24 : 16}
+          interval="preserveStartEnd"
         />
         <YAxis
-          tickFormatter={(v) => (format === "currency" ? `${(Number(v) / 1000).toFixed(0)}k` : format === "percent" ? `${v}%` : String(v))}
+          tickFormatter={(v) => formatYAxisTick(Number(v), format)}
           tick={{ fill: "var(--text-muted)", fontSize: 11 }}
           axisLine={false}
           tickLine={false}
-          width={44}
+          width={format === "currency" ? 64 : 44}
         />
         <Tooltip
           contentStyle={{
@@ -100,11 +111,19 @@ export function IndicatorChart({
             border: "1px solid var(--border)",
             borderRadius: 8,
             fontSize: 12,
+            padding: "8px 12px",
           }}
+          itemStyle={{ padding: "2px 0" }}
           labelFormatter={(m) => tickFormatter(String(m))}
           formatter={(value, name) => [value === null || value === undefined ? "—" : formatValue(Number(value), format), name]}
         />
-        {series.length > 1 && <Legend wrapperStyle={{ fontSize: 12 }} />}
+        {series.length > 1 && (
+          <Legend
+            wrapperStyle={{ fontSize: 12, paddingTop: hasManySeries ? 8 : 0 }}
+            iconType="circle"
+            iconSize={8}
+          />
+        )}
         {series.map((s) => (
           <Line
             key={s.key}
