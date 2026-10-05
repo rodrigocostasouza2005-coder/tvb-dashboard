@@ -40,7 +40,8 @@ export type TabKey =
   | "performance"
   | "analise-performance"
   | "analytics-site"
-  | "analises-promocao";
+  | "analises-promocao"
+  | "custo-familia";
 
 export type TabGroup = "visao-geral" | "resumo-dia" | "vendas" | "estoque" | "atacado" | "clientes" | "marketing" | "pesquisa" | "lamina" | "performance";
 
@@ -65,6 +66,7 @@ export const TABS: TabEntry[] = [
   { key: "curva-abc", label: "Curva ABC", href: "/dashboard/curva-abc", group: "vendas" },
   { key: "indicadores", label: "Indicadores no Tempo", href: "/dashboard/indicadores", group: "vendas" },
   { key: "analise-vendas", label: "Análise", href: "/dashboard/analise-vendas", group: "vendas" },
+  { key: "custo-familia", label: "Custo por Família", href: "/dashboard/custo-familia", group: "vendas" },
   { key: "analises-promocao", label: "Análises de Promoção", href: "/dashboard/analises-promocao", group: "vendas" },
   { label: "Comparativo vs. meta/ano ant.", group: "vendas", todo: true },
 
