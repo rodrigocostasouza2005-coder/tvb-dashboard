@@ -1,5 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
-import { getEstoqueAtual, getEstoqueAtualPorGrupoProduto, getEstoquePorArmazenador, getAllStores, getMarcas, getDistinctColecoes } from "@/lib/metrics";
+import { getEstoqueAtual, getEstoqueAtualPorGrupoProduto, getEstoqueAtualPorTamanhoProduto, getEstoquePorArmazenador, getAllStores, getMarcas, getDistinctColecoes } from "@/lib/metrics";
 import { getGrupoRestriction, canSeeFinancials, getStoreRestriction } from "@/lib/permissions";
 import { parseFilters, parseDimension, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
@@ -9,6 +9,7 @@ import { DimensionToggle } from "../dimension-toggle";
 import { PieChart } from "../pie-chart";
 import { MetricBarChart } from "../metric-bar-chart";
 import { ExpandableStockTable } from "./expandable-stock-table";
+import { TamanhoDetalheSelect } from "./tamanho-detalhe-select";
 
 function formatBRL(value: number) {
   return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -30,16 +31,19 @@ export default async function EstoqueAtualPage({
   const allowedStores = getStoreRestriction(user);
   const filters = { ...parseFilters(rawParams, { allowedStoreIds: allowedStores }), grupoIn };
   const q = typeof rawParams.q === "string" ? rawParams.q.trim().toLowerCase() : "";
+  const tamanhoDetalhe = typeof rawParams.tamanhoDetalhe === "string" && rawParams.tamanhoDetalhe ? rawParams.tamanhoDetalhe : null;
 
-  const [allRows, produtoRows, porArmazenador, stores, marcas, colecoes] = await Promise.all([
+  const [allRows, produtoRows, produtoPorTamanhoRows, porArmazenador, stores, marcas, colecoes] = await Promise.all([
     getEstoqueAtual(filters, dimension),
     dimension === "grupo" ? getEstoqueAtualPorGrupoProduto(filters) : Promise.resolve([] as Awaited<ReturnType<typeof getEstoqueAtualPorGrupoProduto>>),
+    dimension === "tamanho" ? getEstoqueAtualPorTamanhoProduto(filters) : Promise.resolve([] as Awaited<ReturnType<typeof getEstoqueAtualPorTamanhoProduto>>),
     getEstoquePorArmazenador(filters),
     getAllStores(allowedStores),
     getMarcas(),
     getDistinctColecoes(),
   ]);
   const rows = q ? allRows.filter((r) => r.key.toLowerCase().includes(q)) : allRows;
+  const produtosDoTamanho = tamanhoDetalhe ? produtoPorTamanhoRows.filter((p) => p.tamanho === tamanhoDetalhe) : [];
   const showFinancials = canSeeFinancials(user);
   const totalQuantidade = rows.reduce((sum, r) => sum + r.quantidade, 0);
   const totalCusto = rows.reduce((sum, r) => sum + r.valorCusto, 0);
@@ -117,6 +121,48 @@ export default async function EstoqueAtualPage({
             </a>
           )}
         </form>
+      )}
+
+      {dimension === "tamanho" && (
+        <>
+          <TamanhoDetalheSelect
+            basePath="/dashboard/estoque-atual"
+            searchParams={rawParams}
+            tamanhos={[...rows].map((r) => r.key).sort((a, b) => a.localeCompare(b, "pt-BR"))}
+            current={tamanhoDetalhe ?? undefined}
+          />
+          {tamanhoDetalhe && (
+            <div className="mb-4 overflow-x-auto overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
+                    <th className="px-4 py-2 font-medium">Produto no tamanho {tamanhoDetalhe}</th>
+                    <th className="px-4 py-2 font-medium">Quantidade</th>
+                    {showFinancials && <th className="px-4 py-2 font-medium">Valor de custo</th>}
+                    {showFinancials && <th className="px-4 py-2 font-medium">Valor de venda (varejo)</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {produtosDoTamanho.map((p) => (
+                    <tr key={p.key} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
+                      <td className="px-4 py-2 font-medium">{p.key}</td>
+                      <td className="px-4 py-2 tabular-nums">{p.quantidade.toLocaleString("pt-BR")}</td>
+                      {showFinancials && <td className="px-4 py-2 tabular-nums">{formatBRL(p.valorCusto)}</td>}
+                      {showFinancials && <td className="px-4 py-2 tabular-nums">{formatBRL(p.valorVenda)}</td>}
+                    </tr>
+                  ))}
+                  {produtosDoTamanho.length === 0 && (
+                    <tr>
+                      <td colSpan={showFinancials ? 4 : 2} className="px-4 py-6 text-center text-[var(--text-muted)]">
+                        Sem estoque desse tamanho pro filtro selecionado.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
       )}
 
       {dimension === "grupo" ? (

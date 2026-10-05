@@ -770,6 +770,27 @@ export async function getEstoqueAtualPorGrupoProduto(filters: Pick<DashboardFilt
     .sort((a, b) => b.quantidade - a.quantidade);
 }
 
+// Produtos dentro de cada tamanho — mesmo padrão de getEstoqueAtualPorGrupoProduto, só que a
+// chave de agrupamento é tamanho em vez de grupo. Pedido do Rodrigo em 2026-10-06: na visão
+// "Tamanho" da aba Estoque Atual, "42" sozinho mistura produto de várias famílias — ele quer
+// escolher um tamanho e ver quais produtos têm estoque nele.
+export async function getEstoqueAtualPorTamanhoProduto(filters: Pick<DashboardFilters, "storeIds" | "grupoIn">) {
+  const [stock, varejoPrices] = await Promise.all([latestStockSnapshots(filters), getVarejoPriceMap()]);
+  const byKey = new Map<string, { tamanho: string; produto: string; quantidade: number; valorCusto: number; valorVenda: number }>();
+  for (const s of stock) {
+    const tamanho = s.tamanho && s.tamanho.trim() ? s.tamanho : "—";
+    const mapKey = `${tamanho}\x00${s.produto}`;
+    const acc = byKey.get(mapKey) ?? { tamanho, produto: s.produto, quantidade: 0, valorCusto: 0, valorVenda: 0 };
+    acc.quantidade += s.quantidadeDisponivel;
+    acc.valorCusto += (s.valorCusto ?? 0) * s.quantidadeDisponivel;
+    acc.valorVenda += (varejoPrices.get(s.cod) ?? 0) * s.quantidadeDisponivel;
+    byKey.set(mapKey, acc);
+  }
+  return [...byKey.values()]
+    .map((v) => ({ tamanho: v.tamanho, key: v.produto, quantidade: v.quantidade, valorCusto: v.valorCusto, valorVenda: v.valorVenda }))
+    .sort((a, b) => b.quantidade - a.quantidade);
+}
+
 // Distribuição de estoque por armazenador — pra gráfico de pizza (% de peças por loja/armazém).
 // Respeita o mesmo filtro de Loja do topo da página (storeIds) — antes ignorava e sempre
 // mostrava todo mundo, mesmo filtrando a tabela abaixo.
