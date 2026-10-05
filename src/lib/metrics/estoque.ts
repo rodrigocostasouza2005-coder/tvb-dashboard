@@ -232,7 +232,27 @@ export function resolveSellThrough(unitsSoldAllTime: number, currentStock: numbe
     : null;
 }
 
+// getStockVsSales dispara 5 queries em paralelo (2x vendas, 2x estoque, 1x produção) — achado na
+// auditoria de performance de 2026-10-05 como a chamada mais cara do app, repetida a cada visita
+// a Pesquisa/Estoque/Marketing mesmo quando o dado só mudou no último sync. cacheAsync (mesmo
+// mecanismo já usado em getClienteSegmentacao/getAniversariantesDoMes) guarda o resultado por
+// HEAVY_QUERY_CACHE_MS, chaveado por filtro+dimensão — sem mudar nenhum cálculo, só evita refazer
+// o mesmo resultado dentro da janela de cache.
 export async function getStockVsSales(filters: DashboardFilters, dimension: Dimension = "grupo") {
+  const cacheKey = `estoque-vs-vendas:${dimension}:${JSON.stringify({
+    storeIds: filters.storeIds ?? null,
+    marcas: filters.marcas ?? null,
+    tabelasPreco: filters.tabelasPreco ?? null,
+    from: filters.from.toISOString(),
+    to: filters.to.toISOString(),
+    grupoIn: filters.grupoIn ?? null,
+    tamanhoIn: filters.tamanhoIn ?? null,
+    colecaoIn: filters.colecaoIn ?? null,
+  })}`;
+  return cacheAsync(cacheKey, HEAVY_QUERY_CACHE_MS, () => getStockVsSalesUncached(filters, dimension));
+}
+
+async function getStockVsSalesUncached(filters: DashboardFilters, dimension: Dimension = "grupo") {
   // Sell-through é uma métrica da EMPRESA INTEIRA, não da loja filtrada — não deve mudar nem
   // com o filtro de data (Rodrigo notou isso em 2026-08-10) nem com o filtro de loja (achado
   // em 2026-08-12: ele quer o mesmo número não importa qual loja esteja selecionada). Só

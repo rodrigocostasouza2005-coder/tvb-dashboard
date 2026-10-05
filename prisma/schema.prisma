@@ -232,6 +232,16 @@ model Sale {
   @@index([grupo])
   @@index([marca])
   @@index([status])
+  // saleDate isolado: saleWhere() sempre filtra por data, mas quando storeIds é undefined
+  // (sell-through "empresa toda" em getStockVsSales/resolveSellThrough) o índice composto
+  // [storeId, saleDate] acima não ajuda — vira scan sem índice. tabelaPreco e colecao: filtrados
+  // em saleWhere() quase em toda chamada (tabelaPreco via getTabelaPrecoRestrictionSemAtacado,
+  // praticamente universal; colecao quando o filtro de Coleção está em uso) e não tinham índice
+  // nenhum. Achado na auditoria de performance de 2026-10-05. Não compostos com saleDate de
+  // propósito — cada um cobre o próprio filtro isolado, sem apostar numa combinação específica.
+  @@index([saleDate])
+  @@index([tabelaPreco])
+  @@index([colecao])
 }
 
 model StockSnapshot {

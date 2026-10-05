@@ -257,6 +257,14 @@ export async function cacheAsync<T>(key: string, ttlMs: number, fn: () => Promis
 }
 export const HEAVY_QUERY_CACHE_MS = 15 * 60 * 1000;
 
+// Listas de opção dos dropdowns do FilterBar (lojas/marcas/tabela de preço/coleção) — mudam só
+// quando o sync roda (cadastro de loja/coleção nova), nunca "ao vivo" durante a navegação. Antes
+// eram uma query Prisma nova em TODA page.tsx que usa FilterBar (achado na auditoria de
+// performance de 2026-10-05: até 27 das 40 páginas do Radar refazendo a mesma consulta). TTL
+// curto (bem mais curto que HEAVY_QUERY_CACHE_MS) só pra cobrir o intervalo entre syncs sem
+// segurar dado errado por muito tempo se algo mudar fora do sync (ex: admin cadastra loja nova).
+export const FILTER_LIST_CACHE_MS = 5 * 60 * 1000;
+
 export async function getB2BClienteNomes(): Promise<Set<string>> {
   if (b2bClientesCache && b2bClientesCache.expiresAt > Date.now()) return b2bClientesCache.set;
   const rows = await prisma.sale.findMany({
@@ -445,21 +453,25 @@ export async function resolveLojaNome(loja: string | undefined | null): Promise<
 // allowedStoreIds: restrição por usuário (ver getStoreRestriction) — quando presente, nem
 // aparece como opção pra escolher, não é só um filtro que já vem pré-marcado.
 export async function getStores(allowedStoreIds?: string[]): Promise<StoreFilterOption[]> {
-  const stores = await prisma.store.findMany({
-    where: { sellsProducts: true, ...(allowedStoreIds ? { id: { in: allowedStoreIds } } : {}) },
-    orderBy: { name: "asc" },
+  return cacheAsync(`filtro-stores:${JSON.stringify(allowedStoreIds ?? null)}`, FILTER_LIST_CACHE_MS, async () => {
+    const stores = await prisma.store.findMany({
+      where: { sellsProducts: true, ...(allowedStoreIds ? { id: { in: allowedStoreIds } } : {}) },
+      orderBy: { name: "asc" },
+    });
+    return groupStoresForFilter(stores);
   });
-  return groupStoresForFilter(stores);
 }
 
 // Todos os armazenadores, incluindo os que não são loja de venda (Defeito, Bonificação,
 // Lixeira, Marketing/Produção) — usado no filtro da aba Estoque Atual.
 export async function getAllStores(allowedStoreIds?: string[]): Promise<StoreFilterOption[]> {
-  const stores = await prisma.store.findMany({
-    where: allowedStoreIds ? { id: { in: allowedStoreIds } } : undefined,
-    orderBy: { name: "asc" },
+  return cacheAsync(`filtro-all-stores:${JSON.stringify(allowedStoreIds ?? null)}`, FILTER_LIST_CACHE_MS, async () => {
+    const stores = await prisma.store.findMany({
+      where: allowedStoreIds ? { id: { in: allowedStoreIds } } : undefined,
+      orderBy: { name: "asc" },
+    });
+    return groupStoresForFilter(stores);
   });
-  return groupStoresForFilter(stores);
 }
 
 // Lojas "cruas" (sem agrupar CD+ATACADO) — usado na tela de estoque mínimo, onde a regra
@@ -485,12 +497,14 @@ export async function getSiteAtacadoStoreIds(): Promise<string[]> {
 // Rodrigo quer preencher via Tab, então nenhum campo pode ficar vazio/desabilitado esperando
 // outro ser escolhido primeiro.
 export async function getDistinctColecoes() {
-  const rows = await prisma.stockSnapshot.findMany({
-    distinct: ["colecao"],
-    select: { colecao: true },
-    where: { colecao: { not: null } },
+  return cacheAsync("filtro-colecoes", FILTER_LIST_CACHE_MS, async () => {
+    const rows = await prisma.stockSnapshot.findMany({
+      distinct: ["colecao"],
+      select: { colecao: true },
+      where: { colecao: { not: null } },
+    });
+    return rows.map((r) => r.colecao as string).sort();
   });
-  return rows.map((r) => r.colecao as string).sort();
 }
 
 // Filtro de Tamanho na aba Estoque x Vendas — pedido do Rodrigo em 2026-09-01.
@@ -533,21 +547,25 @@ export async function getTamanhosPorGrupo() {
 // allowedMarcas: restrição por usuário (ver getMarcaRestriction em lib/permissions.ts) —
 // mesmo padrão de getStores(allowedStoreIds), trava de verdade (nem aparece como opção).
 export async function getMarcas(allowedMarcas?: string[]) {
-  const rows = await prisma.sale.findMany({
-    distinct: ["marca"],
-    select: { marca: true },
-    where: { marca: { not: null, ...(allowedMarcas ? { in: allowedMarcas } : {}) } },
+  return cacheAsync(`filtro-marcas:${JSON.stringify(allowedMarcas ?? null)}`, FILTER_LIST_CACHE_MS, async () => {
+    const rows = await prisma.sale.findMany({
+      distinct: ["marca"],
+      select: { marca: true },
+      where: { marca: { not: null, ...(allowedMarcas ? { in: allowedMarcas } : {}) } },
+    });
+    return rows.map((r) => r.marca as string).sort();
   });
-  return rows.map((r) => r.marca as string).sort();
 }
 
 export async function getTabelasPreco(allowedTabelasPreco?: string[]) {
-  const rows = await prisma.sale.findMany({
-    distinct: ["tabelaPreco"],
-    select: { tabelaPreco: true },
-    where: { tabelaPreco: { not: null, ...(allowedTabelasPreco ? { in: allowedTabelasPreco } : {}) } },
+  return cacheAsync(`filtro-tabelas-preco:${JSON.stringify(allowedTabelasPreco ?? null)}`, FILTER_LIST_CACHE_MS, async () => {
+    const rows = await prisma.sale.findMany({
+      distinct: ["tabelaPreco"],
+      select: { tabelaPreco: true },
+      where: { tabelaPreco: { not: null, ...(allowedTabelasPreco ? { in: allowedTabelasPreco } : {}) } },
+    });
+    return rows.map((r) => r.tabelaPreco as string).sort();
   });
-  return rows.map((r) => r.tabelaPreco as string).sort();
 }
 
 // Uma linha por fonte (Estoque, Vendas, Devoluções, Produção, Brinde), sempre a mais recente
