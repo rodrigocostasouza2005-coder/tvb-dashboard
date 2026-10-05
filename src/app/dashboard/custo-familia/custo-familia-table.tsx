@@ -36,16 +36,16 @@ export function CustoFamiliaTable({ rows }: { rows: FamiliaRow[] }) {
         <thead>
           <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
             <th className="px-4 py-2 font-medium">Família</th>
-            <th className="px-3 py-2 font-medium">Receita líquida</th>
-            <th className="px-3 py-2 font-medium">CMV estimado</th>
-            <th className="px-3 py-2 font-medium">Lucro bruto</th>
-            <th className="px-3 py-2 font-medium">Margem %</th>
-            <th className="px-3 py-2 font-medium">Vendido</th>
-            <th className="px-3 py-2 font-medium">Estoque atual</th>
-            <th className="px-3 py-2 font-medium">Estoque a custo</th>
-            <th className="px-3 py-2 font-medium">Custo/peça</th>
-            <th className="px-3 py-2 font-medium">Preço médio</th>
-            <th className="px-3 py-2 font-medium">Sell-through</th>
+            <th className="px-3 py-2 text-right font-medium">Receita líquida</th>
+            <th className="px-3 py-2 text-right font-medium">CMV estimado</th>
+            <th className="px-3 py-2 text-right font-medium">Lucro bruto</th>
+            <th className="px-3 py-2 text-right font-medium">Margem %</th>
+            <th className="px-3 py-2 text-right font-medium">Vendido</th>
+            <th className="px-3 py-2 text-right font-medium">Estoque atual</th>
+            <th className="px-3 py-2 text-right font-medium">Estoque a custo</th>
+            <th className="px-3 py-2 text-right font-medium">Custo/peça</th>
+            <th className="px-3 py-2 text-right font-medium">Preço médio</th>
+            <th className="px-3 py-2 text-right font-medium">Sell-through</th>
             <th className="px-3 py-2 font-medium">Status</th>
           </tr>
         </thead>
@@ -63,16 +63,16 @@ export function CustoFamiliaTable({ rows }: { rows: FamiliaRow[] }) {
                   </span>
                 )}
               </td>
-              <td className="px-3 py-2 tabular-nums text-[var(--text-secondary)]">{cellBRL(r.receitaLiquida)}</td>
-              <td className="px-3 py-2 tabular-nums text-[var(--text-secondary)]">{cellBRL(r.cmv)}</td>
-              <td className="px-3 py-2 tabular-nums font-medium text-[var(--text-primary)]">{cellBRL(r.lucroBruto)}</td>
-              <td className="px-3 py-2 tabular-nums font-semibold text-[var(--text-primary)]">{cellPct(r.margemPct)}</td>
-              <td className="px-3 py-2 tabular-nums text-[var(--text-secondary)]">{formatNumber(r.unidadesLiquidas)}</td>
-              <td className="px-3 py-2 tabular-nums text-[var(--text-secondary)]">{formatNumber(r.estoqueAtual)}</td>
-              <td className="px-3 py-2 tabular-nums text-[var(--text-secondary)]">{cellBRL(r.valorEstoqueCusto)}</td>
-              <td className="px-3 py-2 tabular-nums text-[var(--text-secondary)]">{cellBRL(r.custoPorPeca)}</td>
-              <td className="px-3 py-2 tabular-nums text-[var(--text-secondary)]">{cellBRL(r.precoMedio)}</td>
-              <td className="px-3 py-2 tabular-nums text-[var(--text-secondary)]">{cellPct(r.sellThrough)}</td>
+              <td className="px-3 py-2 whitespace-nowrap text-right tabular-nums font-medium text-[var(--text-primary)]">{cellBRL(r.receitaLiquida)}</td>
+              <td className="px-3 py-2 whitespace-nowrap text-right tabular-nums font-medium text-[var(--text-primary)]">{cellBRL(r.cmv)}</td>
+              <td className="px-3 py-2 whitespace-nowrap text-right tabular-nums font-semibold text-[var(--text-primary)]">{cellBRL(r.lucroBruto)}</td>
+              <td className="px-3 py-2 whitespace-nowrap text-right tabular-nums font-semibold text-[var(--text-primary)]">{cellPct(r.margemPct)}</td>
+              <td className="px-3 py-2 whitespace-nowrap text-right tabular-nums text-[var(--text-secondary)]">{formatNumber(r.unidadesLiquidas)}</td>
+              <td className="px-3 py-2 whitespace-nowrap text-right tabular-nums text-[var(--text-secondary)]">{formatNumber(r.estoqueAtual)}</td>
+              <td className="px-3 py-2 whitespace-nowrap text-right tabular-nums text-[var(--text-secondary)]">{cellBRL(r.valorEstoqueCusto)}</td>
+              <td className="px-3 py-2 whitespace-nowrap text-right tabular-nums text-[var(--text-secondary)]">{cellBRL(r.custoPorPeca)}</td>
+              <td className="px-3 py-2 whitespace-nowrap text-right tabular-nums text-[var(--text-secondary)]">{cellBRL(r.precoMedio)}</td>
+              <td className="px-3 py-2 whitespace-nowrap text-right tabular-nums text-[var(--text-secondary)]">{cellPct(r.sellThrough)}</td>
               <td className="px-3 py-2">
                 <span
                   className="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium"

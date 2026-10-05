@@ -21,7 +21,7 @@ import { FilterBar } from "../filter-bar";
 import { CollapsibleFilters } from "../collapsible-filters";
 import { StatTile } from "../stat-tile";
 import { IndicatorChart } from "../indicadores/indicator-chart";
-import { formatBRL, formatNumber, formatPercent } from "@/lib/format";
+import { formatBRL, formatBRLCompact, formatNumber, formatPercent } from "@/lib/format";
 import { ReceitaCmvBarChart, MargemBarChart, EficienciaScatterChart } from "./custo-familia-charts";
 import { CustoFamiliaTable, type FamiliaRow } from "./custo-familia-table";
 
@@ -177,11 +177,11 @@ export default async function CustoFamiliaPage({ searchParams }: { searchParams:
   const totalEstoqueCusto = rows.reduce((s, r) => s + r.valorEstoqueCusto, 0);
   const totalUnidadesSemCusto = rows.reduce((s, r) => s + r.unidadesSemCusto, 0);
 
-  const barData = rows.map((r) => ({ familia: r.familia, receitaLiquida: r.receitaLiquida, cmv: r.cmv }));
+  const barData = rows.map((r) => ({ familia: r.familia, receitaLiquida: r.receitaLiquida, cmv: r.cmv, lucroBruto: r.lucroBruto, margemPct: r.margemPct }));
   const margemBarData = rows.map((r) => ({ familia: r.familia, margemPct: r.margemPct }));
   const eficienciaData = rows
     .filter((r): r is FamiliaRow & { margemPct: number; sellThrough: number } => r.margemPct !== null && r.sellThrough !== null)
-    .map((r) => ({ familia: r.familia, sellThrough: r.sellThrough, margemPct: r.margemPct, receitaLiquida: r.receitaLiquida }));
+    .map((r) => ({ familia: r.familia, sellThrough: r.sellThrough, margemPct: r.margemPct, receitaLiquida: r.receitaLiquida, cmv: r.cmv }));
 
   // Evolução de margem: só as famílias de maior receita no período (ver MAX_SERIES_EVOLUCAO) —
   // mesma aproximação "bruta por mês" documentada em getCmvMensalPorGrupo.
@@ -207,37 +207,41 @@ export default async function CustoFamiliaPage({ searchParams }: { searchParams:
   // Insights: só regras determinísticas sobre os números já calculados acima — nenhum texto
   // genérico, cada frase só aparece se a condição bater com dado real do período/filtro atual.
   const comVenda = rows.filter((r) => r.receitaLiquida > 0 && r.margemPct !== null);
-  const insights: string[] = [];
+  const insights: { titulo: string; texto: string }[] = [];
   if (comVenda.length > 0) {
     const melhor = [...comVenda].sort((a, b) => b.margemPct! - a.margemPct!)[0];
     if (melhor.margemPct! >= margemMedia && (melhor.sellThrough ?? 0) >= sellThroughMedio) {
-      insights.push(
-        `${melhor.familia} tem a maior margem do período (${formatPercent(melhor.margemPct!)}) e sell-through de ${formatPercent(melhor.sellThrough ?? 0)}, acima da média — família eficiente.`
-      );
+      insights.push({
+        titulo: `${melhor.familia} — família eficiente`,
+        texto: `Maior margem do período (${formatPercent(melhor.margemPct!)}) e sell-through de ${formatPercent(melhor.sellThrough ?? 0)}, ambos acima da média.`,
+      });
     }
     const maiorReceitaMargemBaixa = [...comVenda]
       .filter((r) => r.margemPct! < margemMedia)
       .sort((a, b) => b.receitaLiquida - a.receitaLiquida)[0];
     if (maiorReceitaMargemBaixa) {
-      insights.push(
-        `${maiorReceitaMargemBaixa.familia} tem o maior faturamento entre as famílias com margem abaixo da média (${formatBRL(maiorReceitaMargemBaixa.receitaLiquida)}, margem de ${formatPercent(maiorReceitaMargemBaixa.margemPct!)} vs média de ${formatPercent(margemMedia)}).`
-      );
+      insights.push({
+        titulo: `${maiorReceitaMargemBaixa.familia} — margem abaixo da média`,
+        texto: `Maior faturamento entre as famílias com margem abaixo da média (${formatBRL(maiorReceitaMargemBaixa.receitaLiquida)}, margem de ${formatPercent(maiorReceitaMargemBaixa.margemPct!)} vs média de ${formatPercent(margemMedia)}).`,
+      });
     }
     const margemAltaEstoqueAlto = [...comVenda]
       .filter((r) => r.margemPct! >= margemMedia && (r.sellThrough ?? 100) < sellThroughMedio)
       .sort((a, b) => b.valorEstoqueCusto - a.valorEstoqueCusto)[0];
     if (margemAltaEstoqueAlto) {
-      insights.push(
-        `${margemAltaEstoqueAlto.familia} tem margem boa (${formatPercent(margemAltaEstoqueAlto.margemPct!)}), mas ${formatBRL(margemAltaEstoqueAlto.valorEstoqueCusto)} em estoque a custo com sell-through de ${formatPercent(margemAltaEstoqueAlto.sellThrough ?? 0)} — capital parado.`
-      );
+      insights.push({
+        titulo: `${margemAltaEstoqueAlto.familia} — estoque parado`,
+        texto: `Margem boa (${formatPercent(margemAltaEstoqueAlto.margemPct!)}), mas ${formatBRL(margemAltaEstoqueAlto.valorEstoqueCusto)} em estoque a custo com sell-through de ${formatPercent(margemAltaEstoqueAlto.sellThrough ?? 0)}.`,
+      });
     }
     const prioridade = [...comVenda]
       .filter((r) => r.status.label === "Prioridade de revisão")
       .sort((a, b) => b.receitaLiquida - a.receitaLiquida)[0];
     if (prioridade) {
-      insights.push(
-        `${prioridade.familia} tem margem de ${formatPercent(prioridade.margemPct!)} e sell-through de ${formatPercent(prioridade.sellThrough ?? 0)}, ambos abaixo da média — prioridade de revisão.`
-      );
+      insights.push({
+        titulo: `${prioridade.familia} — prioridade de revisão`,
+        texto: `Margem de ${formatPercent(prioridade.margemPct!)} e sell-through de ${formatPercent(prioridade.sellThrough ?? 0)}, ambos abaixo da média.`,
+      });
     }
   }
 
@@ -264,12 +268,12 @@ export default async function CustoFamiliaPage({ searchParams }: { searchParams:
       </p>
 
       <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        <StatTile label="Receita líquida" value={formatBRL(totalReceita)} />
-        <StatTile label="CMV estimado" value={formatBRL(totalCmv)} />
-        <StatTile label="Lucro bruto" value={formatBRL(totalLucro)} />
+        <StatTile label="Receita líquida" value={formatBRLCompact(totalReceita)} />
+        <StatTile label="CMV estimado" value={formatBRLCompact(totalCmv)} />
+        <StatTile label="Lucro bruto" value={formatBRLCompact(totalLucro)} />
         <StatTile label="Margem bruta" value={margemTotalPct === null ? "—" : formatPercent(margemTotalPct)} />
         <StatTile label="Unidades vendidas" value={formatNumber(totalUnidades)} />
-        <StatTile label="Estoque a custo" value={formatBRL(totalEstoqueCusto)} />
+        <StatTile label="Estoque a custo" value={formatBRLCompact(totalEstoqueCusto)} />
       </div>
 
       <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
@@ -300,11 +304,11 @@ export default async function CustoFamiliaPage({ searchParams }: { searchParams:
       {insights.length > 0 && (
         <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
           <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Insights</h2>
-          <ul className="flex flex-col gap-2 text-sm text-[var(--text-secondary)]">
-            {insights.map((texto, i) => (
-              <li key={i} className="flex gap-2">
-                <span aria-hidden className="text-[var(--series-1)]">•</span>
-                {texto}
+          <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {insights.map((insight, i) => (
+              <li key={i} className="rounded-md border border-[var(--border)] bg-[var(--page-plane)] p-3">
+                <div className="mb-1 text-sm font-semibold text-[var(--text-primary)]">{insight.titulo}</div>
+                <div className="text-xs text-[var(--text-secondary)]">{insight.texto}</div>
               </li>
             ))}
           </ul>
@@ -319,9 +323,9 @@ export default async function CustoFamiliaPage({ searchParams }: { searchParams:
               <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
                 <th className="px-3 py-2 font-medium">#</th>
                 <th className="px-3 py-2 font-medium">Família</th>
-                <th className="px-3 py-2 font-medium">Margem bruta</th>
-                <th className="px-3 py-2 font-medium">Margem %</th>
-                <th className="px-3 py-2 font-medium">Receita líquida</th>
+                <th className="px-3 py-2 text-right font-medium">Margem bruta</th>
+                <th className="px-3 py-2 text-right font-medium">Margem %</th>
+                <th className="px-3 py-2 text-right font-medium">Receita líquida</th>
               </tr>
             </thead>
             <tbody>
@@ -329,9 +333,9 @@ export default async function CustoFamiliaPage({ searchParams }: { searchParams:
                 <tr key={r.familia} className="border-b border-[var(--gridline)] last:border-0">
                   <td className="px-3 py-2 tabular-nums text-[var(--text-muted)]">{i + 1}</td>
                   <td className="px-3 py-2 font-medium text-[var(--text-primary)]">{r.familia}</td>
-                  <td className="px-3 py-2 tabular-nums font-medium text-[var(--text-primary)]">{formatBRL(r.lucroBruto)}</td>
-                  <td className="px-3 py-2 tabular-nums text-[var(--text-secondary)]">{r.margemPct === null ? "—" : formatPercent(r.margemPct)}</td>
-                  <td className="px-3 py-2 tabular-nums text-[var(--text-secondary)]">{formatBRL(r.receitaLiquida)}</td>
+                  <td className="px-3 py-2 whitespace-nowrap text-right tabular-nums font-semibold text-[var(--text-primary)]">{formatBRL(r.lucroBruto)}</td>
+                  <td className="px-3 py-2 whitespace-nowrap text-right tabular-nums font-medium text-[var(--text-secondary)]">{r.margemPct === null ? "—" : formatPercent(r.margemPct)}</td>
+                  <td className="px-3 py-2 whitespace-nowrap text-right tabular-nums text-[var(--text-secondary)]">{formatBRL(r.receitaLiquida)}</td>
                 </tr>
               ))}
             </tbody>
