@@ -3,18 +3,23 @@
 import { Fragment, useState } from "react";
 
 type Row = { key: string; quantidade: number; valorCusto: number; valorVenda: number };
-type ProdutoRow = { grupo: string; key: string; quantidade: number; valorCusto: number; valorVenda: number };
+// groupKey = valor da dimensão pai (grupo ou tamanho) que esse produto pertence — nome genérico
+// porque este componente agora serve tanto a visão Grupo quanto a visão Tamanho (pedido do
+// Rodrigo em 2026-10-06: a mesma setinha de expandir do Grupo, só que pra Tamanho→Produto).
+type ProdutoRow = { groupKey: string; key: string; quantidade: number; valorCusto: number; valorVenda: number };
 
 function formatBRL(value: number) {
   return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
 export function ExpandableStockTable({
+  columnLabel = "Grupo",
   rows,
   produtoRows,
   totalQuantidade,
   showFinancials,
 }: {
+  columnLabel?: string;
   rows: Row[];
   produtoRows: ProdutoRow[];
   totalQuantidade: number;
@@ -36,7 +41,7 @@ export function ExpandableStockTable({
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
-            <th className="px-4 py-2 font-medium">Grupo</th>
+            <th className="px-4 py-2 font-medium">{columnLabel}</th>
             <th className="px-4 py-2 font-medium">Quantidade</th>
             <th className="px-4 py-2 font-medium">% do total</th>
             {showFinancials && <th className="px-4 py-2 font-medium">Valor de custo</th>}
@@ -46,7 +51,7 @@ export function ExpandableStockTable({
         <tbody>
           {rows.slice(0, 100).map((r) => {
             const isOpen = open.has(r.key);
-            const produtos = produtoRows.filter((p) => p.grupo === r.key);
+            const produtos = produtoRows.filter((p) => p.groupKey === r.key);
             return (
               <Fragment key={r.key}>
                 <tr className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
