@@ -10,12 +10,17 @@ import {
   type DashboardFilters,
   type Canal,
 } from "@/lib/metrics";
+import { brasiliaDayStart } from "@/lib/filters";
 import { formatBRL, formatPercent } from "@/lib/format";
 import type { FamiliaRow } from "./custo-familia-table";
 
 // Mesmo limite de séries já usado em FamiliaProdutoSection (vendas/família) — a paleta
 // categórica (--cat-1..--cat-8) tem 8 cores, mais que isso o gráfico de evolução vira sopa.
 const MAX_SERIES_EVOLUCAO = 8;
+// Mesmo início de histórico já usado em Indicadores no Tempo — "Evolução da Margem" é uma visão
+// de tendência (pedido do Rodrigo em 2026-10-06: sempre mostrar todos os meses, não só o Período
+// selecionado no filtro), não um snapshot do período escolhido.
+const DATA_START_MONTH = "2025-09";
 const CAT_COLORS = ["var(--cat-1)", "var(--cat-2)", "var(--cat-3)", "var(--cat-4)", "var(--cat-5)", "var(--cat-6)", "var(--cat-7)", "var(--cat-8)"];
 
 // "Alta/baixa" margem e sell-through são relativos à MÉDIA das famílias no período/filtro atual,
@@ -114,12 +119,17 @@ export async function buildCustoFamiliaViewModel(filters: DashboardFilters, cana
     .filter((r): r is FamiliaRow & { margemPct: number; sellThrough: number } => r.margemPct !== null && r.sellThrough !== null)
     .map((r) => ({ familia: r.familia, sellThrough: r.sellThrough, margemPct: r.margemPct, receitaLiquida: r.receitaLiquida, cmv: r.cmv }));
 
-  // Evolução de margem: só as famílias de maior receita no período (ver MAX_SERIES_EVOLUCAO) —
-  // mesma aproximação "bruta por mês" documentada em getCmvMensalPorGrupo.
+  // Evolução de margem: histórico completo (não limitado ao Período escolhido no filtro — é uma
+  // visão de tendência, igual ao gráfico mensal de Indicadores no Tempo, não um corte do
+  // período). Só as famílias de maior receita NO PERÍODO selecionado (ver MAX_SERIES_EVOLUCAO)
+  // continuam entrando, pra manter a lista relevante ao que o Rodrigo está olhando — só o EIXO
+  // DO TEMPO que passa a ser sempre completo. Mesma aproximação "bruta por mês" já documentada
+  // em getCmvMensalPorGrupo.
   const topFamilias = rows.filter((r) => r.receitaLiquida > 0).slice(0, MAX_SERIES_EVOLUCAO).map((r) => r.familia);
+  const allTimeFilters: DashboardFilters = { ...filters, from: brasiliaDayStart(`${DATA_START_MONTH}-01`), to: new Date() };
   const [monthlyRevenue, monthlyCmv] = await Promise.all([
-    getMonthlySalesByGrupo(filters, canal),
-    getCmvMensalPorGrupo(filters, topFamilias, canal),
+    getMonthlySalesByGrupo(allTimeFilters, canal),
+    getCmvMensalPorGrupo(allTimeFilters, topFamilias, canal),
   ]);
   const cmvMensalMap = new Map(monthlyCmv.map((c) => [`${c.month}\x00${c.grupo}`, c.cmv]));
   const evolucaoMargemData = monthlyRevenue.data.map((d) => {
