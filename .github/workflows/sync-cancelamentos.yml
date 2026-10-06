@@ -7,7 +7,9 @@ name: Sync rápido de cancelamentos
 # sem contratar nenhum agendador externo (cron-job.org etc.) nem fazer upgrade de plano.
 on:
   schedule:
-    - cron: "*/5 * * * *"
+    # Offset pra fora do minuto 00 — GitHub concentra schedules "*/N" no início de cada hora,
+    # gerando fila/atraso extra bem nesse instante. "2-59/5" mantém a cadência de 5 em 5min.
+    - cron: "2-59/5 * * * *"
   workflow_dispatch: {}
 
 permissions:
