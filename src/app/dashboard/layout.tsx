@@ -4,10 +4,12 @@ import { Suspense } from "react";
 import Image from "next/image";
 import { getSessionUser } from "@/lib/auth";
 import { scheduleCatchupSyncIfStale } from "@/lib/self-heal-sync";
+import { getLastSyncAt } from "@/lib/sync-runner";
 import { logoutAction } from "./actions";
 import { TabNav } from "./tab-nav";
 import { TABS, defaultAllowedTabs } from "@/lib/tabs";
 import { PhoneModeProvider, PhoneModeToggle } from "./phone-mode";
+import { SyncStatusIndicator } from "./sync-status-indicator";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const user = await getSessionUser();
@@ -16,6 +18,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // Best-effort: se o cron da Vercel falhar (ex: deploy em cima do horário), quem abrir o
   // dashboard dispara a sync sozinho — depois de responder a página, não trava a navegação.
   after(() => scheduleCatchupSyncIfStale());
+
+  const { at: lastSyncAt } = await getLastSyncAt();
 
   const allowed = user.allowedTabs.length > 0 ? user.allowedTabs : defaultAllowedTabs(user.role);
   const visibleKeys = TABS.filter(
@@ -44,6 +48,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
               {/* Formato de exibição de telefone (Celular/Computador) — global, vale pra
                   qualquer aba que mostre contato de cliente. Ver phone-mode.tsx. */}
               <PhoneModeToggle compact />
+              <SyncStatusIndicator initialLastSyncAt={lastSyncAt} />
               <span className="hidden text-xs text-[var(--text-secondary)] sm:inline">
                 {user.name} · {user.role}
               </span>

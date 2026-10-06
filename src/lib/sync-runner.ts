@@ -1058,6 +1058,31 @@ export async function runCancelamentosRapidos() {
   }
 }
 
+// Etapa 2 do plano de atualização rápida (2026-10-06): "Atualizado: HH:mm" no cabeçalho global —
+// usado pelo layout.tsx (render inicial) E por /api/sync-status (polling do client), pra não
+// duplicar a mesma consulta em dois lugares. Combina as DUAS fontes de atualização real que já
+// existem, sem criar nenhuma nova:
+// - SyncLog com status "SUCCESS" (gravado só ao FIM do doSync() completo, depois de todo passo
+//   ter terminado sem lançar — ver final de doSync() acima) = última sync completa que realmente
+//   terminou certo, não só "tentou".
+// - SyncLock id="cancelamentos" (finishedAt já é setado em todo fim de runCancelamentosRapidos,
+//   sucesso ou com falhas parciais — mesmo nível de confiança que o lock "sync" já tinha antes
+//   desta tarefa) = última execução da reconciliação rápida.
+// Pega o mais recente dos dois. 2 queries pequenas (1 por chave primária, 1 findFirst numa
+// tabela que só cresce ~5 linhas por sync completo) — nada pesado.
+export async function getLastSyncAt(): Promise<{ at: string | null; source: "full" | "cancelamentos" | null }> {
+  const [lastFullSync, cancelamentosLock] = await Promise.all([
+    prisma.syncLog.findFirst({ where: { status: "SUCCESS" }, orderBy: { finishedAt: "desc" }, select: { finishedAt: true } }),
+    prisma.syncLock.findUnique({ where: { id: CANCELAMENTOS_LOCK_ID }, select: { finishedAt: true } }),
+  ]);
+  const candidatos: { at: Date; source: "full" | "cancelamentos" }[] = [];
+  if (lastFullSync?.finishedAt) candidatos.push({ at: lastFullSync.finishedAt, source: "full" });
+  if (cancelamentosLock?.finishedAt) candidatos.push({ at: cancelamentosLock.finishedAt, source: "cancelamentos" });
+  if (candidatos.length === 0) return { at: null, source: null };
+  candidatos.sort((a, b) => b.at.getTime() - a.at.getTime());
+  return { at: candidatos[0].at.toISOString(), source: candidatos[0].source };
+}
+
 export async function runSync(options: { silent?: boolean; retryBudgetMs?: number; checkDuplicates?: boolean } = {}) {
   const { silent = false, retryBudgetMs = 0, checkDuplicates = false } = options;
 
