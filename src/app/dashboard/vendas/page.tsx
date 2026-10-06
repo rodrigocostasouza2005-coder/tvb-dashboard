@@ -123,7 +123,7 @@ export default async function VendasPage({
     getMarcas(allowedMarcas),
     getTabelasPreco(allowedTabelasPreco),
     getDistinctColecoes(),
-    canSeeSiteMap ? getSiteVarejoCidades({ ...filters, tabelasPreco: ["Tabela varejo"] }) : Promise.resolve(emptyAtacadoCidades),
+    canSeeSiteMap ? getSiteVarejoCidades({ ...filters, tabelasPreco: allowedTabelasPreco }) : Promise.resolve(emptyAtacadoCidades),
     showFinancials ? getTopClientes(filters, null, 5, "todos", true) : Promise.resolve([]),
   ]);
   const totalUnits = rows.reduce((sum, r) => sum + r.unitsSold, 0);
