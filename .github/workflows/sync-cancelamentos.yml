@@ -6,6 +6,10 @@ name: Sync rápido de cancelamentos
 # com os 5 crons diários do sync completo, intocados. Mantém a infra só em GitHub + Vercel + Neon,
 # sem contratar nenhum agendador externo (cron-job.org etc.) nem fazer upgrade de plano.
 on:
+  # Touch sem efeito funcional (2026-10-06, ~45min sem nenhum disparo por schedule desde o
+  # offset do cron) — força o GitHub a reprocessar/re-registrar o schedule deste workflow.
+  # Caso documentado pela comunidade: GitHub pode levar de 15min a mais de 1h pra reconhecer um
+  # cron novo/alterado, e às vezes só "destrava" depois de um commit novo no arquivo.
   schedule:
     # Offset pra fora do minuto 00 — GitHub concentra schedules "*/N" no início de cada hora,
     # gerando fila/atraso extra bem nesse instante. "2-59/5" mantém a cadência de 5 em 5min.
