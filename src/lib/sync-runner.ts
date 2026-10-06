@@ -973,25 +973,89 @@ const SYNC_LOCK_STALE_MIN = 6;
 // Evita 2 sincronizações completas rodando ao mesmo tempo — virou risco real depois do
 // agendador externo de 10 em 10 min (2026-09-11), já que uma sync completa pode levar até ~4min
 // e meio num dia lento do DAPIC. "Travado" = já tem lock com finishedAt nulo E startedAt recente
-// (dentro de SYNC_LOCK_STALE_MIN); depois disso considera stale (processo deve ter morrido sem
+// (dentro do staleMin informado); depois disso considera stale (processo deve ter morrido sem
 // atualizar finishedAt) e libera sozinho, pra nunca ficar preso pra sempre.
-async function acquireSyncLock(): Promise<boolean> {
+// Parametrizado por lockId/staleMin (2026-10-06, Etapa 1 da atualização rápida de cancelamento)
+// pra reaproveitar a MESMA tabela SyncLock com uma linha própria pra reconciliação isolada
+// (id="cancelamentos") — assim ela nunca disputa/bloqueia o lock da sync completa (id="sync") e
+// vice-versa, cada uma só protege contra duas execuções DELA MESMA ao mesmo tempo.
+async function acquireSyncLock(lockId: string = SYNC_LOCK_ID, staleMin: number = SYNC_LOCK_STALE_MIN): Promise<boolean> {
   const now = new Date();
-  const staleCutoff = new Date(now.getTime() - SYNC_LOCK_STALE_MIN * 60_000);
-  const existing = await prisma.syncLock.findUnique({ where: { id: SYNC_LOCK_ID } });
+  const staleCutoff = new Date(now.getTime() - staleMin * 60_000);
+  const existing = await prisma.syncLock.findUnique({ where: { id: lockId } });
   if (existing && existing.finishedAt === null && existing.startedAt > staleCutoff) {
     return false;
   }
   await prisma.syncLock.upsert({
-    where: { id: SYNC_LOCK_ID },
-    create: { id: SYNC_LOCK_ID, startedAt: now, finishedAt: null },
+    where: { id: lockId },
+    create: { id: lockId, startedAt: now, finishedAt: null },
     update: { startedAt: now, finishedAt: null },
   });
   return true;
 }
 
-async function releaseSyncLock() {
-  await prisma.syncLock.update({ where: { id: SYNC_LOCK_ID }, data: { finishedAt: new Date() } }).catch(() => {});
+async function releaseSyncLock(lockId: string = SYNC_LOCK_ID) {
+  await prisma.syncLock.update({ where: { id: lockId }, data: { finishedAt: new Date() } }).catch(() => {});
+}
+
+// Etapa 1 do plano de atualização rápida (2026-10-06): cancelamento hoje só chega ao Radar no
+// próximo /api/sync-frequent (~10 min, pior caso) porque a reconciliação vive dentro do
+// doSync() completo. Esta função chama SOMENTE reconciliarCancelamentosVendas/Faturas pra cada
+// cliente DAPIC — nunca syncEstoque/syncVendas/syncFaturas/produção/brindes — pra poder rodar
+// bem mais frequente (2-5 min) sem herdar o custo/duração do sync completo. Mesma lógica de
+// identificação, status="Cancelada", canceladaEm, idempotência (updateMany com status != já
+// idempotente) e janela de segurança (RECONCILIACAO_DIAS) das funções já existentes — nenhuma
+// regra nova, só uma orquestração mais magra em volta delas (mesmo par syncArmazenadores +
+// reconciliarCancelamentosVendas/Faturas que syncOneClient já chama dentro do doSync()).
+const CANCELAMENTOS_LOCK_ID = "cancelamentos";
+const CANCELAMENTOS_LOCK_STALE_MIN = 3;
+
+export async function runCancelamentosRapidos() {
+  if (!(await acquireSyncLock(CANCELAMENTOS_LOCK_ID, CANCELAMENTOS_LOCK_STALE_MIN))) {
+    return NextResponse.json({ ok: true, skipped: true, reason: "outra reconciliação de cancelamento já em andamento" });
+  }
+  try {
+    const allClients = createDapicClients();
+    const clients = allClients.filter((c) => c.label !== "matriz"); // matriz não vende nada, nunca tem cancelamento
+
+    let saleUpdates = 0;
+    let returnUpdates = 0;
+    const falhas: string[] = [];
+
+    for (const client of clients) {
+      try {
+        const { primaryStoreId, atacadoStoreId } = await syncArmazenadores(client);
+        const [vendas, faturas] = await Promise.all([
+          reconciliarCancelamentosVendas(client, primaryStoreId, atacadoStoreId).catch((e) => {
+            console.error(`[runCancelamentosRapidos] reconciliarCancelamentosVendas ${client.label} falhou:`, e?.message ?? e);
+            falhas.push(`${client.label} (vendas): ${e?.message ?? e}`);
+            return { saleUpdates: 0, returnUpdates: 0 };
+          }),
+          reconciliarCancelamentosFaturas(client, primaryStoreId, atacadoStoreId).catch((e) => {
+            console.error(`[runCancelamentosRapidos] reconciliarCancelamentosFaturas ${client.label} falhou:`, e?.message ?? e);
+            falhas.push(`${client.label} (faturas): ${e?.message ?? e}`);
+            return { saleUpdates: 0 };
+          }),
+        ]);
+        saleUpdates += vendas.saleUpdates + faturas.saleUpdates;
+        returnUpdates += vendas.returnUpdates;
+      } catch (e) {
+        // syncArmazenadores falhou pra esse cliente — não fatal pros outros clientes.
+        console.error(`[runCancelamentosRapidos] syncArmazenadores ${client.label} falhou:`, (e as Error)?.message ?? e);
+        falhas.push(`${client.label} (armazenadores): ${(e as Error)?.message ?? e}`);
+      }
+    }
+
+    // Silencioso em sucesso (igual sync-frequent, pra não gerar aviso no Telegram a cada poucos
+    // minutos) — só avisa o admin se algo falhou de verdade.
+    if (falhas.length > 0) {
+      await sendTelegramMessage(`⚠️ Reconciliação rápida de cancelamento com falhas parciais:\n${falhas.join("\n")}`, { adminOnly: true });
+    }
+
+    return NextResponse.json({ ok: true, saleUpdates, returnUpdates, falhas });
+  } finally {
+    await releaseSyncLock(CANCELAMENTOS_LOCK_ID);
+  }
 }
 
 export async function runSync(options: { silent?: boolean; retryBudgetMs?: number; checkDuplicates?: boolean } = {}) {
