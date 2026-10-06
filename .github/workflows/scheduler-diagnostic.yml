@@ -1,0 +1,25 @@
+name: Scheduler diagnostic (temporário)
+
+# Workflow temporário e independente (2026-10-06) só pra testar se o scheduler de `schedule` do
+# GitHub Actions dispara QUALQUER coisa neste repositório — o workflow principal
+# (sync-cancelamentos.yml) está ativo, com cron reconhecido, mas zero execuções event=schedule
+# depois de >2h. Não toca em secrets/endpoints/banco, só imprime contexto. Remover depois que
+# servir de evidência (ver instruções do diagnóstico).
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: Imprimir contexto
+        run: |
+          echo "UTC agora: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "Workflow: ${{ github.workflow }}"
+          echo "SHA do commit: ${{ github.sha }}"
