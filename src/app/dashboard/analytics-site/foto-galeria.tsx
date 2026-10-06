@@ -13,7 +13,7 @@ export function FotoGaleria({ fotos, label }: { fotos: string[]; label: string }
 
   return (
     <>
-      <div className="flex gap-1.5">
+      <div className="flex max-w-xs flex-wrap gap-1.5">
         {fotos.map((url, idx) => (
           <button
             key={idx}

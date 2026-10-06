@@ -99,14 +99,16 @@ export async function getStatusPorNomeAnuncio(prisma: PrismaClient, nomesAnuncio
 // Prioriza anúncios ACTIVE do conjunto ("o que tá no ar agora") — só cai pra PAUSED (com foto)
 // quando não sobra nenhum ativo com criativo, pra não mostrar "sem foto" num conjunto que já tem
 // imagem disponível, só porque a campanha específica que gerou aquele anúncio já acabou.
-async function fetchFotosAtivas(adsetId: string, limit = 5): Promise<string[]> {
+// Sem limite de quantidade (pedido do Rodrigo em 2026-10-06) — mostra TODOS os anúncios com foto
+// nessa categoria (ativos, ou pausados no fallback), não só os 5 primeiros.
+async function fetchFotosAtivas(adsetId: string): Promise<string[]> {
   const { accessToken } = getCredentials();
   const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/${adsetId}/ads?fields=id,status,creative{thumbnail_url}&limit=50&access_token=${accessToken}`;
   const ads = await fetchAllPages<MetaAd>(url);
   const comFoto = ads.filter((a) => a.creative?.thumbnail_url);
   const ativosComFoto = comFoto.filter((a) => a.status === "ACTIVE");
   const escolhidos = ativosComFoto.length > 0 ? ativosComFoto : comFoto;
-  return escolhidos.slice(0, limit).map((a) => a.creative!.thumbnail_url!);
+  return escolhidos.map((a) => a.creative!.thumbnail_url!);
 }
 
 const FOTOS_MAX_AGE_HORAS = 12;
