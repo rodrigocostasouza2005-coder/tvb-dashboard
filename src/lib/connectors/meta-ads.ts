@@ -8,6 +8,12 @@
 // diferentes dentro, a maioria pausada. Por isso a foto mostrada é uma mini-galeria dos anúncios
 // ATIVOS daquele conjunto (Rodrigo escolheu essa opção em 2026-09-15), não uma foto única.
 //
+// Correção em 2026-10-06: "ativos" era um filtro estrito — conjunto com TODOS os anúncios
+// pausados (comum pra campanha já encerrada, mas que ainda aparece no Top por gasto de um período
+// passado) ficava sem nenhuma foto, mesmo tendo criativo de verdade disponível. fetchFotosAtivas
+// agora prioriza anúncio ACTIVE com foto, e só cai pra PAUSED com foto quando não existe nenhum
+// ativo — nunca mostra menos foto do que antes, só preenche o que ficava vazio à toa.
+//
 // Precisa de duas env vars:
 // - META_AD_ACCOUNT_ID: id da conta de anúncios, sem o prefixo "act_" (ex: "460450997927928").
 // - META_ACCESS_TOKEN: token de usuário com permissão ads_read, de preferência de longa duração
@@ -90,15 +96,17 @@ export async function getStatusPorNomeAnuncio(prisma: PrismaClient, nomesAnuncio
   return new Map(nomesAnuncios.map((n) => [n, porNome.get(n) ?? false]));
 }
 
-// Só os anúncios ATIVOS do conjunto — anúncio pausado não é relevante pra "o que tá no ar agora".
+// Prioriza anúncios ACTIVE do conjunto ("o que tá no ar agora") — só cai pra PAUSED (com foto)
+// quando não sobra nenhum ativo com criativo, pra não mostrar "sem foto" num conjunto que já tem
+// imagem disponível, só porque a campanha específica que gerou aquele anúncio já acabou.
 async function fetchFotosAtivas(adsetId: string, limit = 5): Promise<string[]> {
   const { accessToken } = getCredentials();
   const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/${adsetId}/ads?fields=id,status,creative{thumbnail_url}&limit=50&access_token=${accessToken}`;
   const ads = await fetchAllPages<MetaAd>(url);
-  return ads
-    .filter((a) => a.status === "ACTIVE" && a.creative?.thumbnail_url)
-    .slice(0, limit)
-    .map((a) => a.creative!.thumbnail_url!);
+  const comFoto = ads.filter((a) => a.creative?.thumbnail_url);
+  const ativosComFoto = comFoto.filter((a) => a.status === "ACTIVE");
+  const escolhidos = ativosComFoto.length > 0 ? ativosComFoto : comFoto;
+  return escolhidos.slice(0, limit).map((a) => a.creative!.thumbnail_url!);
 }
 
 const FOTOS_MAX_AGE_HORAS = 12;
