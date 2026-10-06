@@ -1,0 +1,57 @@
+name: Sync rápido de cancelamentos
+
+# Dispara /api/sync-cancelamentos a cada ~5min (best-effort — o schedule do GitHub Actions não
+# garante pontualidade exata, pode atrasar em picos de carga da plataforma). Existe porque o
+# Vercel Cron (plano Hobby) não aceita intervalo menor que 1x/dia — ver vercel.json, que continua
+# com os 5 crons diários do sync completo, intocados. Mantém a infra só em GitHub + Vercel + Neon,
+# sem contratar nenhum agendador externo (cron-job.org etc.) nem fazer upgrade de plano.
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+env:
+  VERCEL_APP_URL: https://tvb-dashboard.vercel.app
+
+jobs:
+  sync-cancelamentos:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Chamar /api/sync-cancelamentos
+        env:
+          EXTERNAL_SYNC_SECRET: ${{ secrets.EXTERNAL_SYNC_SECRET }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${EXTERNAL_SYNC_SECRET:-}" ]; then
+            echo "EXTERNAL_SYNC_SECRET não está configurado nos Secrets do repositório."
+            exit 1
+          fi
+
+          start_ts=$(date +%s)
+          http_status=$(curl -sS -o response.json -w "%{http_code}" \
+            --max-time 55 \
+            -X POST \
+            -H "x-sync-secret: ${EXTERNAL_SYNC_SECRET}" \
+            "${VERCEL_APP_URL}/api/sync-cancelamentos")
+          end_ts=$(date +%s)
+          duration=$((end_ts - start_ts))
+
+          echo "HTTP status: ${http_status}"
+          echo "Duração: ${duration}s"
+
+          # Log sanitizado — só os campos de resultado, nunca o segredo nem o corpo cru.
+          if command -v jq >/dev/null 2>&1 && jq -e . response.json >/dev/null 2>&1; then
+            jq '{ok, skipped, reason, saleUpdates, returnUpdates, falhas: (.falhas | length)}' response.json
+          else
+            echo "(resposta não-JSON ou vazia, omitida do log)"
+          fi
+
+          if [ "${http_status}" -lt 200 ] || [ "${http_status}" -ge 300 ]; then
+            echo "Endpoint retornou erro HTTP ${http_status} — falhando o job."
+            exit 1
+          fi
