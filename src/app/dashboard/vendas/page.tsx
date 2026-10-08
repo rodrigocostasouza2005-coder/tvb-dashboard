@@ -42,6 +42,7 @@ import { ReturnsTrendChart } from "../returns-trend-chart";
 import { TopBarChart } from "../top-bar-chart";
 import { StoreCompareChart } from "../store-compare-chart";
 import { BrazilMap } from "../brazil-map";
+import { StatTile } from "../stat-tile";
 import { ExpandableSalesTable } from "./expandable-sales-table";
 import { ExpandableReturnsTable } from "./expandable-returns-table";
 import { FamiliaProdutoSection } from "./familia-produto-section";
@@ -78,7 +79,7 @@ export default async function VendasPage({
   // com cobertura de cidade praticamente completa (lojas físicas só tem ~50%, cliente avulso
   // sem cadastro não tem endereço). Respeita a mesma restrição de tabela de preço do usuário.
   const canSeeSiteMap = showFinancials && allowedTabelasPreco.includes("Tabela varejo");
-  const emptyAtacadoCidades: Awaited<ReturnType<typeof getSiteVarejoCidades>> = { rows: [], totalCidades: 0, totalEstados: 0 };
+  const emptyAtacadoCidades: Awaited<ReturnType<typeof getSiteVarejoCidades>> = { rows: [], totalCidades: 0, totalEstados: 0, totalDevolucao: 0 };
 
   const emptySalesSubRows: Awaited<ReturnType<typeof getSalesByGrupoProduto>> = [];
   const emptyReturnSubRows: Awaited<ReturnType<typeof getReturnsByGrupoProduto>> = [];
@@ -141,6 +142,9 @@ export default async function VendasPage({
     citiesByState.set(r.estado, cidades);
   }
   const siteEstadoRows = [...siteEstadoMap.entries()].map(([estado, v]) => ({ estado, ...v }));
+  const siteTotalBruto = siteEstadoRows.reduce((sum, r) => sum + r.receita, 0);
+  const siteTotalDevolucao = siteCidades.totalDevolucao;
+  const siteTotalLiquido = siteTotalBruto - siteTotalDevolucao;
 
   function clienteHref(nome: string) {
     const p = new URLSearchParams();
@@ -191,6 +195,11 @@ export default async function VendasPage({
           <p className="mb-3 text-xs text-[var(--text-muted)]">
             Só o canal varejo do site (endereço de entrega). Lojas físicas não entram — a maior parte da venda avulsa não tem cidade cadastrada.
           </p>
+          <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <StatTile label="Total bruto (Site)" value={siteTotalBruto.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })} />
+            <StatTile label="Devolução (Site)" value={siteTotalDevolucao.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })} />
+            <StatTile label="Total líquido (Site)" value={siteTotalLiquido.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })} />
+          </div>
           <BrazilMap rows={siteEstadoRows} citiesByState={citiesByState} />
         </section>
       )}

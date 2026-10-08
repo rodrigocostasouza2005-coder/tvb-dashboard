@@ -1216,11 +1216,25 @@ export async function getTopParaIncentivar(dias = 30, limit = 10, storeIds?: str
 // 2026-09-02, específico da aba Atacado-Cidades) — cruzar "é atacado" com "é varejo" ao mesmo
 // tempo sobrava quase nada (só RJ no teste real, deveria ter ~16 estados). Essa versão não tem
 // noção de canal nenhuma, só filtra por loja/tabela de preço/marca normal (saleWhere).
+// Where-clause da devolução no mesmo recorte do mapa Site (loja CD + mesmas tabelas de preço já
+// filtradas em `tabelasPreco` — igual saleWhere, null passa junto já que registro antigo sem
+// tabela inferida não é "tabela proibida"). Extraída pra ser testável sem precisar de banco —
+// ver __tests__/getSiteVarejoCidades.test.ts.
+export function siteVarejoReturnWhere(filters: DashboardFilters, cdStoreId: string): Prisma.ReturnWhereInput {
+  return {
+    ...returnWhere(filters),
+    storeId: cdStoreId,
+    ...(filters.tabelasPreco !== undefined
+      ? { OR: [{ tabelaPreco: { in: filters.tabelasPreco } }, { tabelaPreco: null }] }
+      : {}),
+  };
+}
+
 export async function getSiteVarejoCidades(filters: DashboardFilters) {
   const cdStore = await prisma.store.findFirst({ where: { code: "CD" } });
-  if (!cdStore) return { rows: [], totalCidades: 0, totalEstados: 0 };
+  if (!cdStore) return { rows: [], totalCidades: 0, totalEstados: 0, totalDevolucao: 0 };
   if (filters.storeIds !== undefined && !filters.storeIds.includes(cdStore.id)) {
-    return { rows: [], totalCidades: 0, totalEstados: 0 };
+    return { rows: [], totalCidades: 0, totalEstados: 0, totalDevolucao: 0 };
   }
 
   const where: Prisma.SaleWhereInput = {
@@ -1229,13 +1243,22 @@ export async function getSiteVarejoCidades(filters: DashboardFilters) {
     cidade: { not: null },
   };
 
-  const rows = await prisma.sale.groupBy({
-    by: ["cidade", "estado"],
-    where,
-    _sum: { quantidade: true, valorTotalLiquido: true },
-    _count: { dapicVendaId: true },
-    orderBy: { _sum: { valorTotalLiquido: "desc" } },
-  });
+  // Devolução no mesmo recorte do mapa — pedido do Rodrigo em 2026-10-06 pra mostrar o total
+  // líquido do Site ao lado do bruto. Só o TOTAL, não por estado: Return não tem campo
+  // estado/cidade (limitação de schema, não dá pra ratear a devolução no mapa por UF).
+  const [rows, devolucao] = await Promise.all([
+    prisma.sale.groupBy({
+      by: ["cidade", "estado"],
+      where,
+      _sum: { quantidade: true, valorTotalLiquido: true },
+      _count: { dapicVendaId: true },
+      orderBy: { _sum: { valorTotalLiquido: "desc" } },
+    }),
+    prisma.return.aggregate({
+      where: siteVarejoReturnWhere(filters, cdStore.id),
+      _sum: { valorTotal: true },
+    }),
+  ]);
 
   const mapped = rows.map(r => ({
     cidade: r.cidade ?? "—",
@@ -1249,6 +1272,7 @@ export async function getSiteVarejoCidades(filters: DashboardFilters) {
     rows: mapped,
     totalCidades: new Set(mapped.map(r => r.cidade)).size,
     totalEstados: new Set(mapped.map(r => r.estado)).size,
+    totalDevolucao: devolucao._sum.valorTotal ?? 0,
   };
 }
 
