@@ -77,9 +77,26 @@ export async function selecionarVendedorAction(nome: string) {
   revalidatePath("/dashboard/clientes-sugestoes-contato");
 }
 
+// Correção em 2026-10-08 (auditoria geral): essa action não validava NADA além de "tem sessão" —
+// qualquer vendedor logado (mesmo de outra loja) conseguia desmarcar o contato de QUALQUER outro
+// cliente/vendedor só sabendo tipo+cliente+chave (nem precisa adivinhar — os 3 vêm expostos no
+// próprio HTML do botão de desmarcar). Mesma checagem de posse já usada em marcarContatadoAction
+// (ownership por ClienteVendedorAtribuicao) — login multi-loja (ADMIN/GESTÃO) continua sem essa
+// restrição extra, igual sempre foi lá.
 export async function desmarcarContatadoAction(tipo: ContatoTipo, cliente: string, chave: string) {
   const user = await getSessionUser();
   if (!user) throw new Error("Não autenticado.");
+  const { storeId, vendedorValidado } = await resolverContatadoPor(user);
+
+  if (vendedorValidado && storeId) {
+    const atribuicao = await prisma.clienteVendedorAtribuicao.findUnique({
+      where: { storeId_clienteNorm: { storeId, clienteNorm: cliente.trim().toUpperCase() } },
+      include: { vendedorAtual: true },
+    });
+    if (atribuicao?.vendedorAtual.nome !== vendedorValidado) {
+      throw new Error("Esse cliente não está atribuído a você.");
+    }
+  }
 
   await prisma.contatoMarcado.deleteMany({ where: { tipo, cliente, chave } });
   revalidatePath("/dashboard/clientes-sugestoes-contato");
