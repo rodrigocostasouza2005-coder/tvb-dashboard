@@ -261,12 +261,18 @@ const ESFRIANDO_DIAS_MAX = 90;
 // tempo do cliente responder antes de reaparecer. Vale pra qualquer motivo — se já contatei essa
 // pessoa esse mês por QUALQUER motivo de sugestão, não preciso ver ela de novo, mesmo que o
 // segmento dela tenha mudado nesse meio tempo.
+//
+// Correção em 2026-10-08 (auditoria pedida pelo Rodrigo): o cooldown só olhava tipo="sugestao",
+// ignorando contato tipo="followup" — cliente que recebia um follow-up pós-compra podia reaparecer
+// em Sugestão de Contato poucos dias depois, já que o followup não contava pro cooldown de 30 dias.
+// A regra pedida é genérica ("qualquer mensagem/contato registrado"), não só "sugestao" — agora
+// qualquer linha de ContatoMarcado (sugestao OU followup) dentro da janela bloqueia a sugestão.
 const COOLDOWN_CONTATO_DIAS = 30;
 
-async function getClientesContatadosRecente(): Promise<Set<string>> {
+export async function getClientesContatadosRecente(): Promise<Set<string>> {
   const cutoff = new Date(Date.now() - COOLDOWN_CONTATO_DIAS * 86400000);
   const rows = await prisma.contatoMarcado.findMany({
-    where: { tipo: "sugestao", contatadoEm: { gte: cutoff } },
+    where: { contatadoEm: { gte: cutoff } },
     select: { cliente: true },
   });
   return new Set(rows.map((r) => r.cliente.trim().toUpperCase()));
