@@ -1,7 +1,7 @@
 import { getSessionUser } from "@/lib/auth";
 import { getContatosPorVendedor } from "@/lib/metrics";
 import { getStoreRestriction } from "@/lib/permissions";
-import { brasiliaDayStart, brasiliaDayEnd, todayBrasiliaStr, type RawSearchParams } from "@/lib/filters";
+import { brasiliaDayStart, brasiliaDayEnd, defaultRecentRangeStr, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
 import { deletarContatoAction } from "./actions";
 import { GetForm } from "../get-form";
@@ -22,9 +22,9 @@ export default async function ContatosVendedoresPage({
   requireTabAccess(user, user.role, "contatos-vendedores");
 
   const rawParams = await searchParams;
-  const defaultFromStr = todayBrasiliaStr(new Date(Date.now() - 30 * 86400000));
-  const fromStr = typeof rawParams.from === "string" && rawParams.from ? rawParams.from : defaultFromStr;
-  const toStr = typeof rawParams.to === "string" && rawParams.to ? rawParams.to : todayBrasiliaStr(new Date());
+  const defaults = defaultRecentRangeStr(30);
+  const fromStr = typeof rawParams.from === "string" && rawParams.from ? rawParams.from : defaults.from;
+  const toStr = typeof rawParams.to === "string" && rawParams.to ? rawParams.to : defaults.to;
   const from = brasiliaDayStart(fromStr);
   const to = brasiliaDayEnd(toStr);
 
