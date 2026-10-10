@@ -169,13 +169,24 @@ export async function getVendedoresAtivos(storeId: string): Promise<string[]> {
   return rows.map((v) => v.nome);
 }
 
-// Garante que todo cliente da lista já tenha uma linha em ClienteVendedorAtribuicao — fallback
-// de segurança (round-robin simples entre os vendedores ativos da loja) pro cliente que surgiu
-// DEPOIS do backfill (scripts/backfill-vendedor-atribuicao.ts, que usa um critério melhor:
-// ClienteCadastro.vendedorResponsavel, senão a venda mais recente do cliente). Não repete
-// trabalho: só cria pra quem realmente ainda não tem.
+// Garante que todo cliente da lista já tenha uma linha em ClienteVendedorAtribuicao pro cliente
+// que surgiu DEPOIS do backfill único (scripts/backfill-vendedor-atribuicao.ts, 2026-09-21).
+//
+// Correção em 2026-10-09 (caso real: cliente comprou atendido pelo Matheus, mas a Sugestão de
+// Contato/Follow-up mandava a mensagem em nome do Caio) — essa função ia direto pro round-robin
+// pra QUALQUER cliente novo, ignorando que já existia o mesmo sinal de dono que o backfill original
+// usa (ClienteCadastro.vendedorResponsavel, senão o vendedor da venda mais recente do cliente
+// naquela loja). Resultado: todo cliente cuja 1ª venda aconteceu depois do backfill único recaía em
+// round-robin puro, sem nenhuma relação com quem realmente atendeu/vendeu — confirmado em produção
+// (achado em 2026-10-09: dezenas de clientes atendidos pelo Matheus apareciam com carteira em outro
+// vendedor, só porque a atribuição foi criada por sorteio de rodízio na hora que alguém abriu a
+// tela, não na hora da venda). Agora segue a MESMA prioridade documentada no backfill — nenhuma
+// regra nova, só aplicada de forma contínua em vez de só uma vez. Só cria pra quem ainda não tem;
+// nunca sobrescreve atribuição existente (histórico/carteira já atribuída continua intocado).
 async function garantirAtribuicoes(storeId: string, clientesNomes: string[]): Promise<void> {
-  const norms = [...new Set(clientesNomes.map((n) => n.trim().toUpperCase()))];
+  const nomeOriginalPorNorm = new Map<string, string>();
+  for (const n of clientesNomes) nomeOriginalPorNorm.set(n.trim().toUpperCase(), n);
+  const norms = [...nomeOriginalPorNorm.keys()];
   if (norms.length === 0) return;
   const existentes = await prisma.clienteVendedorAtribuicao.findMany({
     where: { storeId, clienteNorm: { in: norms } },
@@ -185,14 +196,44 @@ async function garantirAtribuicoes(storeId: string, clientesNomes: string[]): Pr
   const faltando = norms.filter((n) => !jaTem.has(n));
   if (faltando.length === 0) return;
 
-  const vendedoresAtivos = await prisma.vendedor.findMany({ where: { storeId, ativo: true }, orderBy: { nome: "asc" }, select: { id: true } });
+  const vendedoresAtivos = await prisma.vendedor.findMany({ where: { storeId, ativo: true }, orderBy: { nome: "asc" } });
   if (vendedoresAtivos.length === 0) return; // loja sem nenhum vendedor ativo — não dá pra atribuir
+  const vendedorIdPorNome = new Map(vendedoresAtivos.map((v) => [v.nome.trim().toUpperCase(), v.id]));
 
-  const data = faltando.map((clienteNorm, i) => ({
-    storeId,
-    clienteNorm,
-    vendedorAtualId: vendedoresAtivos[i % vendedoresAtivos.length].id,
-  }));
+  const nomesOriginaisFaltando = faltando.map((n) => nomeOriginalPorNorm.get(n)!);
+  const [cadastros, vendasRecentes] = await Promise.all([
+    prisma.clienteCadastro.findMany({
+      where: { nome: { in: nomesOriginaisFaltando } },
+      select: { nome: true, vendedorResponsavel: true },
+    }),
+    prisma.sale.findMany({
+      where: { storeId, clienteNome: { in: nomesOriginaisFaltando }, vendedor: { not: null } },
+      select: { clienteNome: true, vendedor: true },
+      orderBy: { saleDate: "desc" },
+    }),
+  ]);
+  const respPorNorm = new Map(cadastros.map((c) => [c.nome.trim().toUpperCase(), c.vendedorResponsavel]));
+  // orderBy saleDate desc + primeira ocorrência por cliente = vendedor da venda mais recente.
+  const ultimaVendaPorNorm = new Map<string, string>();
+  for (const v of vendasRecentes) {
+    const norm = (v.clienteNome as string).trim().toUpperCase();
+    if (!ultimaVendaPorNorm.has(norm)) ultimaVendaPorNorm.set(norm, v.vendedor as string);
+  }
+
+  let rrIndex = 0;
+  const data = faltando.map((clienteNorm) => {
+    const respNome = respPorNorm.get(clienteNorm);
+    let vendedorAtualId = respNome ? vendedorIdPorNome.get(respNome.trim().toUpperCase()) : undefined;
+    if (!vendedorAtualId) {
+      const vendaNome = ultimaVendaPorNorm.get(clienteNorm);
+      if (vendaNome) vendedorAtualId = vendedorIdPorNome.get(vendaNome.trim().toUpperCase());
+    }
+    if (!vendedorAtualId) {
+      vendedorAtualId = vendedoresAtivos[rrIndex % vendedoresAtivos.length].id;
+      rrIndex++;
+    }
+    return { storeId, clienteNorm, vendedorAtualId };
+  });
   await prisma.clienteVendedorAtribuicao.createMany({ data, skipDuplicates: true });
 }
 
@@ -202,7 +243,7 @@ export type AtribuicaoInfo = { vendedorAtual: string; vendedorOriginal: string |
 // atribuição pra quem ainda não tinha (garantirAtribuicoes) antes de ler, pra nunca devolver
 // vazio à toa. Batch (1 findMany, sem N+1) — chamado com a lista inteira de candidatos do dia,
 // nunca 1 por cliente.
-async function getAtribuicoesPorCliente(storeId: string, clientesNomes: string[]): Promise<Map<string, AtribuicaoInfo>> {
+export async function getAtribuicoesPorCliente(storeId: string, clientesNomes: string[]): Promise<Map<string, AtribuicaoInfo>> {
   await garantirAtribuicoes(storeId, clientesNomes);
   const norms = [...new Set(clientesNomes.map((n) => n.trim().toUpperCase()))];
   if (norms.length === 0) return new Map();
