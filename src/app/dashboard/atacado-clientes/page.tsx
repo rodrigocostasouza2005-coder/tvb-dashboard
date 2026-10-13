@@ -1,5 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
-import { getAtacadoClientes, getClienteRetencaoPorMes, getCmvPorCliente, getDistinctColecoes } from "@/lib/metrics";
+import { getAtacadoClientes, getClienteRetencaoPorMes, getCmvPorCliente, getDistinctColecoes, chaveClienteCidadeEstado } from "@/lib/metrics";
 import {
   canSeeFinancials,
   getGrupoRestriction,
@@ -49,11 +49,12 @@ export default async function AtacadoClientesPage({
 
   // CMV estimado (custo unitário ATUAL × unidades BRUTAS — mesma limitação de "bruta = líquida"
   // de toda esta página: Return não tem clienteNome no schema, não dá pra descontar devolução
-  // por cliente). Junta por clienteNome, mesmo universo/filtro de getAtacadoClientes (mesma
-  // chamada de canalWhere("b2b") por baixo).
+  // por cliente). Junta por cliente+cidade+estado (mesma granularidade de getAtacadoClientes) —
+  // juntar só por clienteNome inflava o CMV de cada linha quando o mesmo cliente tinha >1
+  // combinação de cidade/estado no período (ver comentário em getCmvPorCliente, custo.ts).
   const cmvByCliente = new Map(cmvPorCliente.map((c) => [c.key, c]));
   const rowsComCmv = data.rows.map((r) => {
-    const cmvInfo = cmvByCliente.get(r.clienteNome);
+    const cmvInfo = cmvByCliente.get(chaveClienteCidadeEstado(r.clienteNome, r.cidade, r.estado));
     const cmv = cmvInfo?.cmv ?? 0;
     const lucroBruto = r.receita - cmv;
     const margemPct = r.receita > 0 ? (lucroBruto / r.receita) * 100 : null;

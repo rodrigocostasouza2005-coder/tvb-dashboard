@@ -107,11 +107,31 @@ export async function getCmvMensalPorGrupo(filters: DashboardFilters, gruposIn: 
 
 export type CmvPorClienteRow = { key: string; cmv: number; unidadesSemCusto: number };
 
+// Mesma composição de chave usada em atacado-clientes/page.tsx pra casar cada linha (cliente +
+// cidade + estado, a granularidade real de getAtacadoClientes) com o CMV correto dela. Fallback
+// "—" pro null tem que bater com o mesmo fallback que getAtacadoClientes já aplica em cidade/
+// estado (atacado.ts) — senão uma linha com cidade null vira chave "cliente::—::—" na página mas
+// "cliente::::" aqui, e a busca nunca casa (cmv some, não cmv dobrado — bug diferente, mas
+// silencioso da mesma forma).
+export function chaveClienteCidadeEstado(clienteNome: string, cidade: string | null, estado: string | null): string {
+  return `${clienteNome}::${cidade ?? "—"}::${estado ?? "—"}`;
+}
+
 // CMV estimado por cliente de atacado — MESMO critério de "é atacado" já usado em
 // getAtacadoClientes (canalWhere("b2b") + lojas Site/Atacado + clienteNome preenchido), não um
 // recorte novo. Unidades BRUTAS (sem desconto de devolução): Return não tem clienteNome no
 // schema, então não existe como atribuir devolução a um cliente específico — mesma limitação
 // que já faz getAtacadoClientes mostrar "Receita bruta" (não líquida) por cliente.
+//
+// Correção em 2026-10-13 (caso real: SEADI COMERCIO DE PRODUTOS LTDA, 2 pedidos no mesmo dia pra
+// cidades diferentes — Touros e São Miguel do Gostoso/RN — reportados como "CMV muito alto" nos
+// dois): essa função agrupava só por clienteNome, mas getAtacadoClientes (a tela que a usa) agrupa
+// por cliente+cidade+estado — um cliente com >1 combinação de cidade/estado no período (comum em
+// atacado: mesma empresa entregando em lojas/cidades diferentes) tinha o CMV COMBINADO de todos os
+// pedidos aplicado INTEIRO em CADA linha fragmentada (não uma fração proporcional), inflando o CMV
+// exibido em cada linha em até ~2x (confirmado com dados reais: SEADI mostrava R$4.895,58 de CMV
+// em CADA uma das 2 linhas — o valor certo seria a MESMA fração do custo total proporcional às
+// unidades de cada linha, não o total duas vezes). Agora agrupa na MESMA granularidade da tela.
 export async function getCmvPorCliente(filters: DashboardFilters): Promise<CmvPorClienteRow[]> {
   const siteAtacadoIds = await getSiteAtacadoStoreIds();
   if (siteAtacadoIds.length === 0) return [];
@@ -127,7 +147,7 @@ export async function getCmvPorCliente(filters: DashboardFilters): Promise<CmvPo
   };
 
   const [vendidoPorCod, custoPorCod] = await Promise.all([
-    prisma.sale.groupBy({ by: ["cod", "clienteNome"], where, _sum: { quantidade: true } }),
+    prisma.sale.groupBy({ by: ["cod", "clienteNome", "cidade", "estado"], where, _sum: { quantidade: true } }),
     getCustoUnitarioPorCod(),
   ]);
 
@@ -135,11 +155,12 @@ export async function getCmvPorCliente(filters: DashboardFilters): Promise<CmvPo
   for (const v of vendidoPorCod) {
     const qtd = v._sum.quantidade ?? 0;
     if (qtd <= 0 || !v.clienteNome) continue;
-    const acc = porCliente.get(v.clienteNome) ?? { cmv: 0, unidadesSemCusto: 0 };
+    const key = chaveClienteCidadeEstado(v.clienteNome, v.cidade, v.estado);
+    const acc = porCliente.get(key) ?? { cmv: 0, unidadesSemCusto: 0 };
     const custoUnit = custoPorCod.get(v.cod);
     if (custoUnit === undefined) acc.unidadesSemCusto += qtd;
     else acc.cmv += qtd * custoUnit;
-    porCliente.set(v.clienteNome, acc);
+    porCliente.set(key, acc);
   }
   return [...porCliente.entries()].map(([key, v]) => ({ key, cmv: v.cmv, unidadesSemCusto: v.unidadesSemCusto }));
 }
