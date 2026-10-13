@@ -265,15 +265,17 @@ export async function getAtacadoClientes(filters: DashboardFilters) {
     clienteNome: { not: null },
   };
 
-  const [rows, primeiraVendaGeral] = await Promise.all([
+  const [porPedido, primeiraVendaGeral] = await Promise.all([
+    // Grão de PEDIDO (inclui dapicVendaId no group) — "pedidos" tem que contar pedidos distintos,
+    // não linhas/itens. Corrigido em 2026-10-13: _count:{dapicVendaId:true} do groupBy anterior
+    // (by: clienteNome+cidade+estado) contava toda LINHA com dapicVendaId não-nulo, não o número
+    // de pedidos distintos — um pedido com 5 itens aparecia como "5 pedidos" na coluna da tela.
     prisma.sale.groupBy({
-      by: ["clienteNome", "cidade", "estado"],
+      by: ["clienteNome", "cidade", "estado", "dapicVendaId"],
       where,
       _sum: { quantidade: true, valorTotalLiquido: true },
-      _count: { dapicVendaId: true },
       _max: { saleDate: true },
       _min: { saleDate: true },
-      orderBy: { _sum: { valorTotalLiquido: "desc" } },
     }),
     prisma.sale.groupBy({
       by: ["clienteNome"],
@@ -282,24 +284,50 @@ export async function getAtacadoClientes(filters: DashboardFilters) {
     }),
   ]);
 
-  const clientesAntigos = new Set(primeiraVendaGeral.map(r => r.clienteNome));
+  // "Novo" robusto a variação de capitalização do mesmo cliente entre a consulta de histórico e a
+  // do período (corrigido em 2026-10-13 — mesmo cuidado já documentado alhures no Radar pra
+  // "Gringo"/"GRINGO" não contarem como 2 clientes diferentes). Não normaliza o nome EXIBIDO na
+  // tela (clienteNome abaixo continua cru) — só a comparação interna de "já comprou antes".
+  const clientesAntigos = new Set(primeiraVendaGeral.map(r => (r.clienteNome ?? "").trim().toUpperCase()));
+
+  // Colapsa o grão de pedido pra cliente+cidade+estado (mesma granularidade que a tela exibe),
+  // somando valores e contando PEDIDOS distintos (nº de dapicVendaId únicos no grupo).
+  const porClienteCidadeEstado = new Map<string, {
+    clienteNome: string; cidade: string | null; estado: string | null;
+    pedidos: number; unidades: number; receita: number;
+    ultimaCompra: Date | null; primeiraCompra: Date | null;
+  }>();
+  for (const r of porPedido) {
+    const key = `${r.clienteNome}::${r.cidade}::${r.estado}`;
+    const cur = porClienteCidadeEstado.get(key) ?? {
+      clienteNome: r.clienteNome ?? "—", cidade: r.cidade, estado: r.estado,
+      pedidos: 0, unidades: 0, receita: 0, ultimaCompra: null, primeiraCompra: null,
+    };
+    cur.pedidos += 1;
+    cur.unidades += r._sum.quantidade ?? 0;
+    cur.receita += r._sum.valorTotalLiquido ?? 0;
+    if (r._max.saleDate && (!cur.ultimaCompra || r._max.saleDate > cur.ultimaCompra)) cur.ultimaCompra = r._max.saleDate;
+    if (r._min.saleDate && (!cur.primeiraCompra || r._min.saleDate < cur.primeiraCompra)) cur.primeiraCompra = r._min.saleDate;
+    porClienteCidadeEstado.set(key, cur);
+  }
+  const rows = [...porClienteCidadeEstado.values()].sort((a, b) => b.receita - a.receita);
 
   // Telefone — pedido do Rodrigo em 2026-08-28: telefone em toda visão que lista cliente.
-  const nomes = [...new Set(rows.map((r) => r.clienteNome).filter((n): n is string => n !== null))];
+  const nomes = [...new Set(rows.map((r) => r.clienteNome).filter((n) => n !== "—"))];
   const cadastros = await prisma.clienteCadastro.findMany({ where: { nome: { in: nomes } } });
   const cadastroByNome = new Map(cadastros.map((c) => [c.nome, c]));
 
   const mapped = rows.map(r => ({
-    clienteNome: r.clienteNome ?? "—",
-    telefone: (r.clienteNome && (cadastroByNome.get(r.clienteNome)?.telefone ?? cadastroByNome.get(r.clienteNome)?.celular)) || null,
+    clienteNome: r.clienteNome,
+    telefone: (cadastroByNome.get(r.clienteNome)?.telefone ?? cadastroByNome.get(r.clienteNome)?.celular) || null,
     cidade: r.cidade ?? "—",
     estado: r.estado ?? "—",
-    pedidos: r._count.dapicVendaId,
-    unidades: r._sum.quantidade ?? 0,
-    receita: r._sum.valorTotalLiquido ?? 0,
-    ultimaCompra: r._max.saleDate,
-    primeiraCompra: r._min.saleDate,
-    isNovo: !clientesAntigos.has(r.clienteNome),
+    pedidos: r.pedidos,
+    unidades: r.unidades,
+    receita: r.receita,
+    ultimaCompra: r.ultimaCompra,
+    primeiraCompra: r.primeiraCompra,
+    isNovo: !clientesAntigos.has(r.clienteNome.trim().toUpperCase()),
   }));
 
   const novosNoPeriodo = mapped.filter(r => r.isNovo).length;

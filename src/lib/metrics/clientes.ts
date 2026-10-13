@@ -1592,7 +1592,7 @@ export async function getClienteRetencaoPorMes(filters: DashboardFilters) {
         AND: [b2bWhere],
         clienteNome: { not: null },
       },
-      select: { clienteNome: true, saleDate: true, dapicVendaId: true },
+      select: { clienteNome: true, saleDate: true, dapicVendaId: true, storeId: true },
     }),
     prisma.sale.groupBy({
       by: ["clienteNome"],
@@ -1606,21 +1606,31 @@ export async function getClienteRetencaoPorMes(filters: DashboardFilters) {
       _min: { saleDate: true },
     }),
   ]);
+  const norm = (n: string) => n.trim().toUpperCase();
 
+  // Nome normalizado (corrigido em 2026-10-13 — antes usava clienteNome cru como chave, então o
+  // mesmo cliente com capitalização diferente entre a venda que definiu a 1ª compra e a venda do
+  // mês corrente virava "novo" por engano, mesmo já tendo comprado antes).
   const firstPurchaseMonth = new Map<string, string>();
   for (const r of allTimeFirst) {
     if (r.clienteNome && r._min.saleDate) {
-      firstPurchaseMonth.set(r.clienteNome, r._min.saleDate.toISOString().slice(0, 7));
+      firstPurchaseMonth.set(norm(r.clienteNome), r._min.saleDate.toISOString().slice(0, 7));
     }
   }
 
-  // Cards: quantos clientes compraram exatamente 1x vs +1x no período
-  const pedidosPorCliente = new Map<string, Set<number>>();
+  // Cards: quantos clientes compraram exatamente 1x vs +1x no período. Chave do pedido qualificada
+  // por loja (corrigido em 2026-10-13): dapicVendaId só é único DENTRO de uma loja (cada loja tem
+  // conta/token DAPIC própria com sequência independente — confirmado em auditoria de 2026-10-13,
+  // milhares de ids coincidentes entre lojas diferentes apontando pra vendas totalmente distintas).
+  // Sem o storeId, um cliente que comprou 1x no CD e 1x no Atacado com o MESMO número de pedido
+  // por coincidência contava como 1 pedido só, não 2 — subestimando recompra.
+  const pedidosPorCliente = new Map<string, Set<string>>();
   for (const s of salesInPeriod) {
     if (!s.clienteNome) continue;
-    const set = pedidosPorCliente.get(s.clienteNome) ?? new Set();
-    set.add(s.dapicVendaId);
-    pedidosPorCliente.set(s.clienteNome, set);
+    const k = norm(s.clienteNome);
+    const set = pedidosPorCliente.get(k) ?? new Set<string>();
+    set.add(`${s.storeId}::${s.dapicVendaId}`);
+    pedidosPorCliente.set(k, set);
   }
   let compraram1x = 0;
   let compraramMaisde1x = 0;
@@ -1635,7 +1645,7 @@ export async function getClienteRetencaoPorMes(filters: DashboardFilters) {
     if (!s.clienteNome) continue;
     const monthKey = s.saleDate.toISOString().slice(0, 7);
     const set = monthClientMap.get(monthKey) ?? new Set();
-    set.add(s.clienteNome);
+    set.add(norm(s.clienteNome));
     monthClientMap.set(monthKey, set);
   }
 
@@ -1672,7 +1682,7 @@ export async function getClienteRetencaoVarejo(filters: DashboardFilters, vended
   const [salesInPeriod, allTimeFirstSale, historicoInPeriod, historicoAllTimeFirst] = await Promise.all([
     prisma.sale.findMany({
       where: { ...baseWhere, clienteNome: { not: null }, ...(vendedor ? { vendedor } : {}) },
-      select: { clienteNome: true, saleDate: true, dapicVendaId: true },
+      select: { clienteNome: true, saleDate: true, dapicVendaId: true, storeId: true },
     }),
     prisma.sale.groupBy({
       by: ["clienteNome"],
@@ -1710,12 +1720,16 @@ export async function getClienteRetencaoVarejo(filters: DashboardFilters, vended
   for (const r of allTimeFirstSale) if (r.clienteNome && r._min.saleDate) trackFirst(r.clienteNome, r._min.saleDate);
   for (const r of historicoAllTimeFirst) if (r._min.saleDate) trackFirst(r.clienteNome, r._min.saleDate);
 
+  // Chave do pedido qualificada por loja (corrigido em 2026-10-13 — mesmo motivo documentado em
+  // getClienteRetencaoPorMes: dapicVendaId só é único DENTRO de uma loja, cada loja tem sua
+  // própria sequência no DAPIC. Sem o storeId, pedidos de lojas diferentes do mesmo cliente com
+  // id coincidente colapsavam num só, subestimando recompra).
   const pedidosPorCliente = new Map<string, Set<string>>();
   for (const s of salesInPeriod) {
     if (!s.clienteNome) continue;
     const k = norm(s.clienteNome);
     const set = pedidosPorCliente.get(k) ?? new Set<string>();
-    set.add(String(s.dapicVendaId));
+    set.add(`${s.storeId}::${s.dapicVendaId}`);
     pedidosPorCliente.set(k, set);
   }
   for (const h of historicoInPeriod) {
