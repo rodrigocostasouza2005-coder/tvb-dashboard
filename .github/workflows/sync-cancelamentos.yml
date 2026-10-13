@@ -1,19 +1,25 @@
 name: Sync rápido de cancelamentos
 
-# Dispara /api/sync-cancelamentos a cada ~5min (best-effort — o schedule do GitHub Actions não
-# garante pontualidade exata, pode atrasar em picos de carga da plataforma). Existe porque o
-# Vercel Cron (plano Hobby) não aceita intervalo menor que 1x/dia — ver vercel.json, que continua
-# com os 5 crons diários do sync completo, intocados. Mantém a infra só em GitHub + Vercel + Neon,
-# sem contratar nenhum agendador externo (cron-job.org etc.) nem fazer upgrade de plano.
+# Deveria disparar /api/sync-cancelamentos a cada ~5min, mas o schedule do GitHub Actions NÃO
+# entrega essa cadência neste repo — medido em 2026-10-13 via `gh run list`: os disparos
+# event=schedule realmente acontecem (não está "morto"), só que espaçados de ~3 a ~9 HORAS, não
+# minutos, mesmo com cron "*/5". Confirmado com um 2º workflow independente (scheduler-diagnostic,
+# removido depois de servir de evidência) rodando o mesmo cron e mostrando o MESMO padrão de gaps
+# — ou seja, é throttling da plataforma GitHub Actions pra schedules de alta frequência em repos
+# de baixa atividade, não um defeito deste YAML. Na prática esse workflow hoje não entrega cadência
+# melhor que os 5 crons diários do sync completo (vercel.json) — é só um fallback ocasional.
+#
+# Correção real: este MESMO repositório já resolve exatamente esse problema pra /api/sync-frequent
+# (sync completo a cada 10min) usando cron-job.org, um agendador externo gratuito — ver
+# src/app/api/sync-frequent/route.ts. /api/sync-cancelamentos usa o MESMO EXTERNAL_SYNC_SECRET e
+# o mesmo contrato (POST/GET + header x-sync-secret), então o passo que falta é só o Rodrigo
+# cadastrar um 2º monitor em cron-job.org apontando pra
+# https://tvb-dashboard.vercel.app/api/sync-cancelamentos a cada ~5min (mesma credencial que ele já
+# tem salva lá pro sync-frequent) — nenhuma mudança de código é necessária pro endpoint em si.
+# Mantemos este workflow como fallback best-effort (gratuito, sem risco) até isso ser configurado.
 on:
-  # Touch sem efeito funcional (2026-10-06, ~45min sem nenhum disparo por schedule desde o
-  # offset do cron) — força o GitHub a reprocessar/re-registrar o schedule deste workflow.
-  # Caso documentado pela comunidade: GitHub pode levar de 15min a mais de 1h pra reconhecer um
-  # cron novo/alterado, e às vezes só "destrava" depois de um commit novo no arquivo.
   schedule:
-    # Offset pra fora do minuto 00 — GitHub concentra schedules "*/N" no início de cada hora,
-    # gerando fila/atraso extra bem nesse instante. "2-59/5" mantém a cadência de 5 em 5min.
-    - cron: "2-59/5 * * * *"
+    - cron: "*/15 * * * *"
   workflow_dispatch: {}
 
 permissions:
