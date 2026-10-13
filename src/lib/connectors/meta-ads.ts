@@ -51,7 +51,32 @@ async function fetchAllPages<T>(url: string): Promise<T[]> {
 }
 
 type MetaAdSet = { id: string; name: string; status: string };
-type MetaAd = { id: string; name: string; status: string; creative?: { thumbnail_url?: string } };
+// thumbnail_url cobre a esmagadora maioria dos criativos (confirmado em 2026-10-13: amostra de 40
+// anúncios ativos/pausados da conta real, incluindo vídeo/Reels/carrossel dinâmico, 0 sem
+// thumbnail_url) — o Meta já renderiza essa miniatura server-side pra praticamente todo tipo de
+// criativo. Os campos abaixo são só fallback defensivo pro caso raro de vir vazio mesmo assim:
+// video_data.image_url (post de vídeo/Reels), link_data.picture (anúncio de link legado) e a
+// primeira imagem de asset_feed_spec (carrossel dinâmico/Advantage+ sem thumbnail renderizado).
+type MetaCreative = {
+  thumbnail_url?: string;
+  object_story_spec?: {
+    video_data?: { image_url?: string };
+    link_data?: { picture?: string };
+  };
+  asset_feed_spec?: { images?: { url?: string }[] };
+};
+type MetaAd = { id: string; name: string; status: string; creative?: MetaCreative };
+
+export function extrairFoto(creative: MetaCreative | undefined): string | undefined {
+  if (!creative) return undefined;
+  return (
+    creative.thumbnail_url ||
+    creative.object_story_spec?.video_data?.image_url ||
+    creative.object_story_spec?.link_data?.picture ||
+    creative.asset_feed_spec?.images?.find((img) => img.url)?.url ||
+    undefined
+  );
+}
 
 async function fetchAdSets(): Promise<MetaAdSet[]> {
   const { accountId, accessToken } = getCredentials();
@@ -103,12 +128,15 @@ export async function getStatusPorNomeAnuncio(prisma: PrismaClient, nomesAnuncio
 // nessa categoria (ativos, ou pausados no fallback), não só os 5 primeiros.
 async function fetchFotosAtivas(adsetId: string): Promise<string[]> {
   const { accessToken } = getCredentials();
-  const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/${adsetId}/ads?fields=id,status,creative{thumbnail_url}&limit=50&access_token=${accessToken}`;
+  const fields = "id,status,creative{thumbnail_url,object_story_spec{video_data{image_url},link_data{picture}},asset_feed_spec{images}}";
+  const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/${adsetId}/ads?fields=${fields}&limit=50&access_token=${accessToken}`;
   const ads = await fetchAllPages<MetaAd>(url);
-  const comFoto = ads.filter((a) => a.creative?.thumbnail_url);
+  const comFoto = ads
+    .map((a) => ({ status: a.status, foto: extrairFoto(a.creative) }))
+    .filter((a): a is { status: string; foto: string } => !!a.foto);
   const ativosComFoto = comFoto.filter((a) => a.status === "ACTIVE");
   const escolhidos = ativosComFoto.length > 0 ? ativosComFoto : comFoto;
-  return escolhidos.map((a) => a.creative!.thumbnail_url!);
+  return escolhidos.map((a) => a.foto);
 }
 
 const FOTOS_MAX_AGE_HORAS = 12;
@@ -290,15 +318,17 @@ async function fetchCreativesPorIds(ids: string[]): Promise<Map<string, string>>
   if (ids.length === 0) return new Map();
   const { accessToken } = getCredentials();
   const CONCORRENCIA = 5;
+  const fields = "creative{thumbnail_url,object_story_spec{video_data{image_url},link_data{picture}},asset_feed_spec{images}}";
   const map = new Map<string, string>();
   let next = 0;
   async function worker() {
     while (next < ids.length) {
       const id = ids[next++];
-      const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/${id}?fields=creative{thumbnail_url}&access_token=${accessToken}`;
+      const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/${id}?fields=${fields}&access_token=${accessToken}`;
       const res = await fetch(url);
-      const json: { creative?: { thumbnail_url?: string }; error?: { message: string } } = await res.json();
-      if (json.creative?.thumbnail_url) map.set(id, json.creative.thumbnail_url);
+      const json: { creative?: MetaCreative; error?: { message: string } } = await res.json();
+      const foto = extrairFoto(json.creative);
+      if (foto) map.set(id, foto);
     }
   }
   await Promise.all(Array.from({ length: Math.min(CONCORRENCIA, ids.length) }, worker));
@@ -343,19 +373,26 @@ export async function getFotosPorNomeAnuncio(
   const ads = await fetchTodosAnunciosCached(prisma);
   const idPorNome = new Map<string, string>();
   for (const a of ads) if (!idPorNome.has(a.name)) idPorNome.set(a.name, a.id);
-  const idsParaBuscar = (isFresh ? faltando : nomesAnuncios)
+  const nomesParaBuscar = isFresh ? faltando : nomesAnuncios;
+  const idsParaBuscar = nomesParaBuscar
     .map((n) => idPorNome.get(n))
     .filter((id): id is string => !!id);
   const creativePorId = await fetchCreativesPorIds(idsParaBuscar);
 
-  const fotoPorNome = new Map<string, string>();
-  for (const [nome, id] of idPorNome) {
-    const url = creativePorId.get(id);
-    if (url) fotoPorNome.set(nome, url);
-  }
+  // Bug corrigido em 2026-10-13 (achado real em produção: Carrossel_Dinamico, Loja_Reels_Mai24 e
+  // outros 5 apareciam "sem foto" mesmo a API do Meta devolvendo thumbnail_url válido pra eles).
+  // A versão anterior escrevia em novosDados[nome] pra TODO nome em nomesAnuncios (a lista inteira
+  // pedida nesta chamada, não só nomesParaBuscar/faltando) — como o Top 15 por gasto muda de
+  // página em página (ranking desloca, novo criativo entra), toda vez que um nome NOVO entrava na
+  // lista e caía no "isFresh && faltando não-vazio", o loop final zerava a foto de TODOS os outros
+  // 14 nomes já corretos no cache (fotoPorNome só tinha dado pro nome novo, os outros viravam []).
+  // Agora só escreve em novosDados pros nomes REALMENTE buscados agora — os demais mantêm o valor
+  // já existente em cachedData (spread inicial), nunca voltam a [] só por terem ficado de fora do
+  // lote desta chamada.
   const novosDados: Record<string, string[]> = { ...cachedData };
-  for (const nome of nomesAnuncios) {
-    const url = fotoPorNome.get(nome);
+  for (const nome of nomesParaBuscar) {
+    const id = idPorNome.get(nome);
+    const url = id ? creativePorId.get(id) : undefined;
     novosDados[nome] = url ? [url] : [];
   }
 
