@@ -30,6 +30,18 @@
   --seq-5: #1a4f96;
   --map-empty: #e5e4de;
 
+  /* Paleta fixa do gráfico divergente de grupos (Visão Geral) — visual de terminal financeiro,
+     deliberadamente igual nos dois temas do site (não entra nos blocos claro/escuro abaixo). */
+  --vg-bg: #050505;
+  --vg-text: #e4e4e0;
+  --vg-muted: #8a8a85;
+  --vg-up: #22c55e;
+  --vg-down: #ef4444;
+  --vg-neutral: #8a8a85;
+  --vg-axis: #4a4a46;
+  --vg-grid: #22221f;
+  --vg-tooltip-bg: #121210;
+
   --background: var(--page-plane);
   --foreground: var(--text-primary);
 }

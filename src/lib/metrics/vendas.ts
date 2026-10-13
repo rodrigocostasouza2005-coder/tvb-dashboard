@@ -114,6 +114,7 @@ import {
   AtacadoClienteEvolucaoProduto,
   AtacadoClienteEvolucao,
 } from "./atacado";
+import { getCmvPorGrupo } from "./custo";
 
 
 export async function getKpiSummary(filters: DashboardFilters) {
@@ -682,6 +683,112 @@ export async function getReturnsByDimension(filters: DashboardFilters, dimension
       value: (r._sum?.valorTotal ?? 0),
     }))
     .sort((a, b) => b.unitsReturned - a.unitsReturned);
+}
+
+export type VariacaoGrupoStatus = "normal" | "novo" | "sem_base";
+export type VariacaoGrupoRow = {
+  grupo: string;
+  receitaAtual: number;
+  receitaAnterior: number;
+  unidadesAtual: number;
+  unidadesAnterior: number;
+  variacaoAbsoluta: number;
+  variacaoPercentual: number | null;
+  status: VariacaoGrupoStatus;
+  margemAtual: number | null;
+  margemAnterior: number | null;
+};
+
+// Variação de receita líquida por grupo de produto vs o período IMEDIATAMENTE anterior de duração
+// igual — gráfico divergente da Visão Geral (pedido do Rodrigo em 2026-10-13). Receita líquida =
+// MESMA definição já usada em outras telas (netByReturns: bruta - devolução pela mesma chave, ver
+// core.ts) — nunca uma fórmula nova. Período anterior: [from - duração, from - 1ms], não-sobreposto
+// com o período atual. Respeita TODOS os filtros já aplicados (loja/marca/tabela/grupo — inclusive
+// a restrição de grupo por permissão de vendedor, carregada em ambos os períodos).
+//
+// "Sem base": o período anterior cai (parcial ou totalmente) ANTES da venda mais antiga da base —
+// não dá pra confiar na comparação pra NENHUM grupo nesse caso (não é "grupo não vendeu", é "não
+// temos esse histórico"). "Novo": o período anterior TEM histórico confiável, mas esse grupo
+// específico teve receita líquida anterior = 0 (grupo realmente não existia/não vendeu naquela
+// janela). Em ambos os casos não calcula percentual (divisão por zero ou comparação não confiável)
+// — nunca inventa um número.
+//
+// margemAtual/margemAnterior: null quando a receita do período é <= 0 (CMV% sobre receita negativa
+// ou zero não tem leitura útil) — calculado com o mesmo CMV estimado por SKU já usado no resto do
+// Radar (getCmvPorGrupo, custo.ts), mesma limitação documentada lá (custo ATUAL aplicado a vendas
+// de qualquer data do período, nunca custo histórico real).
+export async function getVariacaoReceitaLiquidaPorGrupo(filters: DashboardFilters): Promise<VariacaoGrupoRow[]> {
+  const duracaoMs = filters.to.getTime() - filters.from.getTime();
+  const prevTo = new Date(filters.from.getTime() - 1);
+  const prevFrom = new Date(prevTo.getTime() - duracaoMs);
+  const filtrosAnterior: DashboardFilters = { ...filters, from: prevFrom, to: prevTo };
+
+  const [vendidoAtual, devolvidoAtual, cmvAtual, vendidoAnterior, devolvidoAnterior, cmvAnterior, primeiraVendaAgg] = await Promise.all([
+    getSalesByDimension(filters, "grupo"),
+    getReturnsByDimension(filters, "grupo"),
+    getCmvPorGrupo(filters),
+    getSalesByDimension(filtrosAnterior, "grupo"),
+    getReturnsByDimension(filtrosAnterior, "grupo"),
+    getCmvPorGrupo(filtrosAnterior),
+    prisma.sale.aggregate({ where: { status: { not: "Cancelada" } }, _min: { saleDate: true } }),
+  ]);
+
+  const liquidoAtual = netByReturns(vendidoAtual, devolvidoAtual);
+  const liquidoAnterior = netByReturns(vendidoAnterior, devolvidoAnterior);
+  const cmvAtualPorGrupo = new Map(cmvAtual.map((c) => [c.key, c.cmv]));
+  const cmvAnteriorPorGrupo = new Map(cmvAnterior.map((c) => [c.key, c.cmv]));
+
+  const primeiraVenda = primeiraVendaAgg._min.saleDate;
+  const temBaseComparavel = primeiraVenda !== null && prevFrom >= primeiraVenda;
+
+  const porGrupo = new Map<string, { atual: number; anterior: number; unidAtual: number; unidAnterior: number }>();
+  for (const r of liquidoAtual) {
+    const cur = porGrupo.get(r.key) ?? { atual: 0, anterior: 0, unidAtual: 0, unidAnterior: 0 };
+    cur.atual += r.revenue;
+    cur.unidAtual += r.unitsSold;
+    porGrupo.set(r.key, cur);
+  }
+  for (const r of liquidoAnterior) {
+    const cur = porGrupo.get(r.key) ?? { atual: 0, anterior: 0, unidAtual: 0, unidAnterior: 0 };
+    cur.anterior += r.revenue;
+    cur.unidAnterior += r.unitsSold;
+    porGrupo.set(r.key, cur);
+  }
+
+  const rows: VariacaoGrupoRow[] = [...porGrupo.entries()].map(([grupo, v]) => {
+    const variacaoAbsoluta = v.atual - v.anterior;
+    let status: VariacaoGrupoStatus = "normal";
+    let variacaoPercentual: number | null = null;
+    if (!temBaseComparavel) {
+      status = "sem_base";
+    } else if (v.anterior === 0) {
+      status = "novo";
+    } else {
+      variacaoPercentual = (variacaoAbsoluta / Math.abs(v.anterior)) * 100;
+    }
+    const cmvA = cmvAtualPorGrupo.get(grupo);
+    const cmvP = cmvAnteriorPorGrupo.get(grupo);
+    return {
+      grupo: grupo || "—",
+      receitaAtual: v.atual,
+      receitaAnterior: v.anterior,
+      unidadesAtual: v.unidAtual,
+      unidadesAnterior: v.unidAnterior,
+      variacaoAbsoluta,
+      variacaoPercentual,
+      status,
+      margemAtual: v.atual > 0 && cmvA !== undefined ? ((v.atual - cmvA) / v.atual) * 100 : null,
+      margemAnterior: v.anterior > 0 && cmvP !== undefined ? ((v.anterior - cmvP) / v.anterior) * 100 : null,
+    };
+  });
+
+  // Maior crescimento -> maior queda. "Novo" (sem percentual, mas claramente um crescimento do
+  // zero) ordena como se fosse o topo; "Sem base" (não dá pra afirmar nada) vai pro fim.
+  return rows.sort((a, b) => {
+    const chaveA = a.status === "sem_base" ? -Infinity : a.variacaoPercentual ?? Infinity;
+    const chaveB = b.status === "sem_base" ? -Infinity : b.variacaoPercentual ?? Infinity;
+    return chaveB - chaveA;
+  });
 }
 
 // Devoluções agrupadas por dia — usado no gráfico de tendência de devoluções na aba Vendas.

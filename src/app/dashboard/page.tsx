@@ -12,6 +12,7 @@ import {
   getDistinctColecoes,
   getLastSyncs,
   getNovosERecorrentesClientes,
+  getVariacaoReceitaLiquidaPorGrupo,
 } from "@/lib/metrics";
 import {
   canSeeFinancials,
@@ -28,6 +29,7 @@ import { DimensionToggle } from "./dimension-toggle";
 import { SalesTrendChart } from "./sales-trend-chart";
 import { TopBarChart } from "./top-bar-chart";
 import { StoreCompareChart } from "./store-compare-chart";
+import { VariacaoGrupoChart } from "./variacao-grupo-chart";
 
 function formatBRL(value: number) {
   return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -71,7 +73,7 @@ export default async function OverviewPage({
     grupoIn,
   };
   const dimension = parseDimension(rawParams);
-  const [kpi, salesByDimension, salesByColecao, salesByDayPerColecao, salesByDay, salesByDayPerStore, stores, marcas, tabelasPreco, colecoes, syncs, clientesNovosRecorrentes] =
+  const [kpi, salesByDimension, salesByColecao, salesByDayPerColecao, salesByDay, salesByDayPerStore, stores, marcas, tabelasPreco, colecoes, syncs, clientesNovosRecorrentes, variacaoGrupo] =
     await Promise.all([
       getKpiSummary(filters),
       getSalesByDimension(filters, dimension),
@@ -85,6 +87,7 @@ export default async function OverviewPage({
       getDistinctColecoes(),
       getLastSyncs(),
       getNovosERecorrentesClientes(filters),
+      getVariacaoReceitaLiquidaPorGrupo(filters),
     ]);
 
   const showFinancials = canSeeFinancials(user);
@@ -189,6 +192,18 @@ export default async function OverviewPage({
           </div>
         </div>
       </section>
+
+      {showFinancials && (
+        <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
+          <h2 className="mb-1 text-sm font-medium text-[var(--text-secondary)]">
+            Variação de receita líquida por grupo
+          </h2>
+          <p className="mb-3 text-xs text-[var(--text-muted)]">
+            Vs. o período imediatamente anterior, de mesma duração. Receita líquida = bruta − devoluções (mesma regra do resto do Radar).
+          </p>
+          <VariacaoGrupoChart rows={variacaoGrupo} />
+        </section>
+      )}
 
       <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
         <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Comparativo por coleção (unidades líquidas)</h2>
