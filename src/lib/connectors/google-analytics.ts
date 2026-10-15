@@ -61,6 +61,30 @@ export async function getSessoesPorDia(range: Ga4DateRange): Promise<Ga4Sessao[]
   }));
 }
 
+// Sessões por hora do dia (0h-23h), somando TODO o período do range — pedido do Rodrigo em
+// 2026-10-15, pra ver em que horário as pessoas mais entram no site. Dimensão "hour" do GA4 já
+// devolve só a hora ("00".."23", no fuso configurado na propriedade), sem data — soma automática
+// entre todos os dias do range, não precisa agregar manualmente aqui.
+export type Ga4SessaoPorHora = { hora: string; sessoes: number };
+
+export async function getSessoesPorHora(range: Ga4DateRange): Promise<Ga4SessaoPorHora[]> {
+  const [response] = await getClient().runReport({
+    property: getPropertyPath(),
+    dateRanges: [range],
+    dimensions: [{ name: "hour" }],
+    metrics: [{ name: "sessions" }],
+  });
+
+  const sessoesPorHora = new Map<string, number>();
+  for (const r of response.rows ?? []) {
+    sessoesPorHora.set(r.dimensionValues?.[0].value ?? "", Number(r.metricValues?.[0].value ?? 0));
+  }
+  return Array.from({ length: 24 }, (_, h) => ({
+    hora: String(h),
+    sessoes: sessoesPorHora.get(String(h).padStart(2, "0")) ?? 0,
+  }));
+}
+
 export type Ga4Conversao = {
   sessoes: number;
   usuarios: number;

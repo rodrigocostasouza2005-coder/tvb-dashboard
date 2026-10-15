@@ -7,6 +7,7 @@ import {
   getSalesByProdutoTamanho,
   getSalesByDay,
   getSalesByDayPerStore,
+  getSalesByHourPerStore,
   getSalesByDayPerColecao,
   getMonthlySalesByGrupo,
   getMonthlySalesByProduto,
@@ -91,7 +92,7 @@ export default async function VendasPage({
   // faixa, Mix de tamanho em Análise). Continua respeitando loja/marca/tabelaPreco/grupo.
   const historicoFilters: DashboardFilters = { ...filters, from: new Date("2020-01-01"), to: new Date() };
 
-  const [rows, salesByColecao, salesByDayPerColecao, porFamilia, salesSubRows, salesTamanhoRows, salesByDay, salesByDayPerStore, returnRows, returnSubRows, returnTamanhoRows, returnsByDay, stores, marcas, tabelasPreco, colecoes, siteCidades, topClientes] = await Promise.all([
+  const [rows, salesByColecao, salesByDayPerColecao, porFamilia, salesSubRows, salesTamanhoRows, salesByDay, salesByDayPerStore, salesByHourPerStore, returnRows, returnSubRows, returnTamanhoRows, returnsByDay, stores, marcas, tabelasPreco, colecoes, siteCidades, topClientes] = await Promise.all([
     getSalesByDimension(filters, dimension),
     getSalesByDimension(filters, "colecao"),
     getSalesByDayPerColecao(filters),
@@ -108,6 +109,7 @@ export default async function VendasPage({
       : Promise.resolve(emptyTamanhoSalesRows),
     getSalesByDay(filters),
     getSalesByDayPerStore(filters),
+    getSalesByHourPerStore(filters),
     getReturnsByDimension(filters, dimension),
     dimension === "grupo"
       ? getReturnsByGrupoProduto(filters)
@@ -187,6 +189,23 @@ export default async function VendasPage({
           <h2 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Comparativo entre lojas</h2>
           <StoreCompareChart data={salesByDayPerStore.data} series={salesByDayPerStore.series} />
         </div>
+      </section>
+
+      <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
+        <h2 className="mb-1 text-sm font-medium text-[var(--text-secondary)]">Hora de compra por loja</h2>
+        <p className="mb-3 text-xs text-[var(--text-muted)]">
+          Soma de todo o período filtrado, por hora do dia (horário de Brasília) — use o filtro de
+          Grupo acima pra ver o horário de compra de uma família de produto específica.
+        </p>
+        <StoreCompareChart
+          data={salesByHourPerStore.data}
+          series={salesByHourPerStore.series}
+          xKey="hora"
+          tickFormatter={(h) => `${h}h`}
+          labelPrefix=""
+          minPoints={1}
+          emptyMessage="Sem venda no período selecionado."
+        />
       </section>
 
       {canSeeSiteMap && siteEstadoRows.length > 0 && (

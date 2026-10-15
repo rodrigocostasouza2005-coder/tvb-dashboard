@@ -1,5 +1,6 @@
 import {
   getSessoesPorDia,
+  getSessoesPorHora,
   getConversoes,
   getOrigemTrafego,
   getPaginasMaisVistas,
@@ -28,6 +29,7 @@ import { IndicatorChart } from "../indicadores/indicator-chart";
 import { InvestimentoMetaAds, type InvestimentoRow } from "./investimento-meta-ads";
 import { FotoGaleria } from "./foto-galeria";
 import { GetForm } from "../get-form";
+import { SessoesPorHoraChart } from "./sessoes-por-hora-chart";
 
 // Em cache-miss (1x/12h, ver FOTOS_MAX_AGE_HORAS em meta-ads.ts), buscar status/foto de anúncios
 // (expansão de creative por anúncio) mediu ~15s contra a conta real em 2026-10-01 — bem acima do
@@ -56,6 +58,7 @@ export default async function AnalyticsSitePage({
   let erro: string | null = null;
   let conversao: Awaited<ReturnType<typeof getConversoes>> | null = null;
   let sessoesPorDia: Awaited<ReturnType<typeof getSessoesPorDia>> = [];
+  let sessoesPorHora: Awaited<ReturnType<typeof getSessoesPorHora>> = [];
   let origemTrafego: Awaited<ReturnType<typeof getOrigemTrafego>> = [];
   let paginasMaisVistas: Awaited<ReturnType<typeof getPaginasMaisVistas>> = [];
   let dispositivos: Awaited<ReturnType<typeof getDispositivos>> = [];
@@ -75,6 +78,7 @@ export default async function AnalyticsSitePage({
   const ga4Promise = Promise.all([
     getConversoes(range),
     getSessoesPorDia(range),
+    getSessoesPorHora(range),
     getOrigemTrafego(range),
     getPaginasMaisVistas(range, 20),
     getDispositivos(range),
@@ -84,7 +88,7 @@ export default async function AnalyticsSitePage({
     getFunilCompra(range),
   ])
     .then((r) => {
-      [conversao, sessoesPorDia, origemTrafego, paginasMaisVistas, dispositivos, geografia, novoVsRecorrente, anuncios, funil] = r;
+      [conversao, sessoesPorDia, sessoesPorHora, origemTrafego, paginasMaisVistas, dispositivos, geografia, novoVsRecorrente, anuncios, funil] = r;
     })
     .catch((e) => {
       erro = e instanceof Error ? e.message : "Erro desconhecido buscando dados do Google Analytics.";
@@ -206,14 +210,21 @@ export default async function AnalyticsSitePage({
             <StatTile label="Taxa de conversão" value={formatPct(conversao!.taxaConversaoPct)} />
           </section>
 
-          <section className="mb-10 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
-            <h3 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Sessões por dia</h3>
-            <IndicatorChart
-              data={sessoesChartData}
-              format="number"
-              granularity="day"
-              series={[{ key: "sessoes", name: "Sessões", color: "var(--series-1)" }]}
-            />
+          <section className="mb-10 grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
+              <h3 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Sessões por dia</h3>
+              <IndicatorChart
+                data={sessoesChartData}
+                format="number"
+                granularity="day"
+                series={[{ key: "sessoes", name: "Sessões", color: "var(--series-1)" }]}
+              />
+            </div>
+            <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
+              <h3 className="mb-1 text-sm font-medium text-[var(--text-secondary)]">Sessões por hora do dia</h3>
+              <p className="mb-3 text-xs text-[var(--text-muted)]">Soma de todo o período filtrado, por hora (horário configurado na propriedade do GA4).</p>
+              <SessoesPorHoraChart data={sessoesPorHora} />
+            </div>
           </section>
 
           {/* ── Aquisição: de onde vem o tráfego ── */}

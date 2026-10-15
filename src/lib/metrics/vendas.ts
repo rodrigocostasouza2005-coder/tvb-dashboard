@@ -311,6 +311,54 @@ export async function getSalesByDayPerStore(filters: DashboardFilters) {
   return { data, series };
 }
 
+// "Hora de compra por loja" — pedido do Rodrigo em 2026-10-15, mesmo gráfico de linha de
+// getSalesByDayPerStore (StoreCompareChart), só que o eixo X é hora do dia (0h-23h, somada o
+// período inteiro do filtro) em vez de dia a dia — pra ver se uma loja vende mais de manhã e
+// outra de tarde, por exemplo. Respeita os mesmos filtros da tela (inclusive grupo/família, se
+// escolhido). Bruto (sem desconto de devolução): "a que hora a pessoa compra" é sobre o momento
+// da venda em si, devolução não tem uma "hora de compra" própria pra descontar daqui.
+export async function getSalesByHourPerStore(filters: DashboardFilters) {
+  const salesRows = await prisma.$queryRaw<{ hora: number; storeId: string; units: bigint }[]>`
+    SELECT
+      EXTRACT(HOUR FROM (("saleDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo'))::int AS hora,
+      "storeId",
+      SUM("quantidade") AS units
+    FROM "Sale"
+    WHERE "status" != 'Cancelada'
+      AND "saleDate" >= ${filters.from}
+      AND "saleDate" <= ${filters.to}
+      ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
+      ${filters.marcas !== undefined ? Prisma.sql`AND "marca" = ANY(${filters.marcas})` : Prisma.empty}
+      ${filters.tabelasPreco !== undefined ? Prisma.sql`AND ("tabelaPreco" = ANY(${filters.tabelasPreco}) OR "tabelaPreco" IS NULL)` : Prisma.empty}
+      ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
+      ${filters.colecaoIn ? Prisma.sql`AND "colecao" = ANY(${filters.colecaoIn})` : Prisma.empty}
+    GROUP BY hora, "storeId"
+    ORDER BY hora ASC
+  `;
+
+  const stores = await prisma.store.findMany({ where: { sellsProducts: true } });
+  const seriesNameByStoreId = new Map(stores.map((s) => [s.id, s.displayGroup ?? s.name]));
+
+  const byHora = new Map<number, Record<string, number>>();
+  const seriesNames = new Set<string>();
+  for (const r of salesRows) {
+    const seriesName = seriesNameByStoreId.get(r.storeId);
+    if (!seriesName) continue;
+    seriesNames.add(seriesName);
+    const horaRow = byHora.get(r.hora) ?? {};
+    horaRow[seriesName] = (horaRow[seriesName] ?? 0) + Number(r.units);
+    byHora.set(r.hora, horaRow);
+  }
+
+  const series = [...seriesNames].sort();
+  // Sempre as 24 horas, mesmo sem venda numa hora específica (ex: loja fechada de madrugada) —
+  // diferente de getSalesByDayPerStore (que só tem os dias que de fato existem no período), aqui
+  // o eixo é fixo (0h-23h) pra sempre mostrar o dia completo, não só as horas com dado.
+  const data = Array.from({ length: 24 }, (_, hora) => ({ hora: String(hora), ...(byHora.get(hora) ?? {}) }));
+
+  return { data, series };
+}
+
 // Mesma ideia de getSalesByDayPerStore, mas quebrado por coleção em vez de loja — pedido do
 // Rodrigo em 2026-09-14: o comparativo de coleção virar linha do tempo (StoreCompareChart), não
 // só um ranking de barra do total do período. Líquido (desconta devolução por dia+coleção).

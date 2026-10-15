@@ -18,17 +18,31 @@ function formatDay(day: string) {
   return `${d}/${m}`;
 }
 
+// xKey/tickFormatter/labelPrefix/minPoints: generalizados em 2026-10-15 (pedido do Rodrigo —
+// "hora de compra por loja", parecido com esse gráfico só que no eixo X em vez de dia) pra
+// reaproveitar o mesmo componente em vez de duplicar. Comportamento padrão (sem passar nada)
+// continua idêntico ao original: eixo "day" formatado dd/mm.
 export function StoreCompareChart({
   data,
   series,
+  xKey = "day",
+  tickFormatter = formatDay,
+  labelPrefix = "Dia ",
+  minPoints = 2,
+  emptyMessage = "Poucos dias no período selecionado pra comparar lojas.",
 }: {
   data: Record<string, string | number>[];
   series: string[];
+  xKey?: string;
+  tickFormatter?: (v: string) => string;
+  labelPrefix?: string;
+  minPoints?: number;
+  emptyMessage?: string;
 }) {
-  if (data.length < 2 || series.length === 0) {
+  if (data.length < minPoints || series.length === 0) {
     return (
       <div className="flex h-64 items-center justify-center text-sm text-[var(--text-muted)]">
-        Poucos dias no período selecionado pra comparar lojas.
+        {emptyMessage}
       </div>
     );
   }
@@ -38,8 +52,8 @@ export function StoreCompareChart({
       <LineChart data={data} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="var(--gridline)" vertical={false} />
         <XAxis
-          dataKey="day"
-          tickFormatter={formatDay}
+          dataKey={xKey}
+          tickFormatter={tickFormatter}
           tick={{ fill: "var(--text-muted)", fontSize: 11 }}
           axisLine={{ stroke: "var(--gridline)" }}
           tickLine={false}
@@ -53,7 +67,7 @@ export function StoreCompareChart({
             borderRadius: 8,
             fontSize: 12,
           }}
-          labelFormatter={(day) => `Dia ${formatDay(String(day))}`}
+          labelFormatter={(v) => `${labelPrefix}${tickFormatter(String(v))}`}
           formatter={(value) => Number(value ?? 0).toLocaleString("pt-BR")}
         />
         <Legend wrapperStyle={{ fontSize: 12 }} />
