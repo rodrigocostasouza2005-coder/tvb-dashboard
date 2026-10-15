@@ -200,11 +200,8 @@ export default async function VendasPage({
         <StoreCompareChart
           data={salesByHourPerStore.data}
           series={salesByHourPerStore.series}
-          xKey="hora"
-          tickFormatter={(h) => `${h}h`}
-          labelPrefix=""
+          variant="hora"
           minPoints={1}
-          emptyMessage="Sem venda no período selecionado."
         />
       </section>
 

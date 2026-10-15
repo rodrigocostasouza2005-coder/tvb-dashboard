@@ -18,27 +18,36 @@ function formatDay(day: string) {
   return `${d}/${m}`;
 }
 
-// xKey/tickFormatter/labelPrefix/minPoints: generalizados em 2026-10-15 (pedido do Rodrigo —
-// "hora de compra por loja", parecido com esse gráfico só que no eixo X em vez de dia) pra
-// reaproveitar o mesmo componente em vez de duplicar. Comportamento padrão (sem passar nada)
-// continua idêntico ao original: eixo "day" formatado dd/mm.
+function formatHora(h: string) {
+  return `${h}h`;
+}
+
+// variant: adicionado em 2026-10-15 (pedido do Rodrigo — "hora de compra por loja", parecido com
+// esse gráfico só que no eixo X em vez de dia) pra reaproveitar o mesmo componente em vez de
+// duplicar. String fixa em vez de aceitar função: este é um Client Component ("use client") e
+// StoreCompareChart é renderizado a partir de Server Components (as páginas) — passar uma função
+// (tickFormatter) de um Server Component pra um Client Component quebra a página inteira ("Functions
+// cannot be passed directly to Client Components"), achado ao vivo rodando local depois do Rodrigo
+// reportar a aba de Vendas inteira fora do ar. Mesmo padrão já usado em IndicatorChart
+// (granularity: string, nunca uma função recebida de fora).
+const VARIANTS = {
+  day: { xKey: "day", tickFormatter: formatDay, labelPrefix: "Dia ", emptyMessage: "Poucos dias no período selecionado pra comparar lojas." },
+  hora: { xKey: "hora", tickFormatter: formatHora, labelPrefix: "", emptyMessage: "Sem venda no período selecionado." },
+} as const;
+
 export function StoreCompareChart({
   data,
   series,
-  xKey = "day",
-  tickFormatter = formatDay,
-  labelPrefix = "Dia ",
+  variant = "day",
   minPoints = 2,
-  emptyMessage = "Poucos dias no período selecionado pra comparar lojas.",
 }: {
   data: Record<string, string | number>[];
   series: string[];
-  xKey?: string;
-  tickFormatter?: (v: string) => string;
-  labelPrefix?: string;
+  variant?: keyof typeof VARIANTS;
   minPoints?: number;
-  emptyMessage?: string;
 }) {
+  const { xKey, tickFormatter, labelPrefix, emptyMessage } = VARIANTS[variant];
+
   if (data.length < minPoints || series.length === 0) {
     return (
       <div className="flex h-64 items-center justify-center text-sm text-[var(--text-muted)]">
