@@ -237,12 +237,107 @@ async function garantirAtribuicoes(storeId: string, clientesNomes: string[]): Pr
   await prisma.clienteVendedorAtribuicao.createMany({ data, skipDuplicates: true });
 }
 
+// Mantém ClienteVendedorAtribuicao sempre alinhada com quem vendeu por último de verdade pro
+// cliente naquela loja — roda pra TODAS as lojas a cada sync (ver sync-runner.ts), não só sob
+// demanda na tela. Antes disso, garantirAtribuicoes só criava a atribuição 1x (pela venda mais
+// recente NO MOMENTO da criação) e nunca corrigia depois, mesmo quando um vendedor diferente
+// passasse a atender o cliente de verdade — auditoria real em 2026-10-15 (pedido do Rodrigo,
+// "aparece o mesmo cliente pra vendedor diferente de quem vendeu") achou 3019 de 8287 atribuições
+// (36%) divergentes da venda real mais recente. Só ATUALIZA quem já tem atribuição (criação de
+// quem ainda não tem continua por garantirAtribuicoes, que roda na tela) — nunca sobrescreve pra
+// um vendedor que não está mais ativo nessa loja (então uma venda antiga de alguém que já saiu,
+// reprocessada por engano, nunca rouba a carteira de volta pra ele).
+export async function sincronizarAtribuicoesComVendaReal(storeId: string): Promise<number> {
+  const vendedoresAtivos = await prisma.vendedor.findMany({ where: { storeId, ativo: true } });
+  if (vendedoresAtivos.length === 0) return 0;
+  const vendedorIdPorNome = new Map(vendedoresAtivos.map((v) => [v.nome.trim().toUpperCase(), v.id]));
+
+  const vendas = await prisma.sale.findMany({
+    where: { storeId, status: { not: "Cancelada" }, clienteNome: { not: null }, vendedor: { not: null } },
+    select: { clienteNome: true, vendedor: true, saleDate: true },
+    orderBy: { saleDate: "desc" },
+  });
+  const ultimaVendaPorNorm = new Map<string, string>();
+  for (const v of vendas) {
+    const norm = (v.clienteNome as string).trim().toUpperCase();
+    if (!ultimaVendaPorNorm.has(norm)) ultimaVendaPorNorm.set(norm, v.vendedor as string);
+  }
+  if (ultimaVendaPorNorm.size === 0) return 0;
+
+  const atuais = await prisma.clienteVendedorAtribuicao.findMany({
+    where: { storeId, clienteNorm: { in: [...ultimaVendaPorNorm.keys()] } },
+  });
+
+  // 1 updateMany por vendedor de destino (não 1 update por cliente) — mesmo padrão de
+  // desativarVendedorAction: na 1ª rodada depois de deployado, dá pra ter milhares de linhas pra
+  // corrigir de uma vez (achado real: 3019 na auditoria de 2026-10-15), e 1 update por linha
+  // estourava o tempo da sync (maxDuration 300s) rodando sequencial.
+  const idsPorVendedorDestino = new Map<string, string[]>();
+  for (const atual of atuais) {
+    const vendedorNomeReal = ultimaVendaPorNorm.get(atual.clienteNorm);
+    if (!vendedorNomeReal) continue;
+    const vendedorIdReal = vendedorIdPorNome.get(vendedorNomeReal.trim().toUpperCase());
+    if (!vendedorIdReal || vendedorIdReal === atual.vendedorAtualId) continue;
+    const ids = idsPorVendedorDestino.get(vendedorIdReal) ?? [];
+    ids.push(atual.id);
+    idsPorVendedorDestino.set(vendedorIdReal, ids);
+  }
+  let atualizados = 0;
+  for (const [vendedorIdReal, ids] of idsPorVendedorDestino) {
+    const r = await prisma.clienteVendedorAtribuicao.updateMany({
+      where: { id: { in: ids } },
+      data: { vendedorAtualId: vendedorIdReal },
+    });
+    atualizados += r.count;
+  }
+  return atualizados;
+}
+
 export type AtribuicaoInfo = { vendedorAtual: string; vendedorOriginal: string | null };
 
 // Cruza uma lista de clientes com quem é o "dono" atual deles numa loja específica — cria
 // atribuição pra quem ainda não tinha (garantirAtribuicoes) antes de ler, pra nunca devolver
 // vazio à toa. Batch (1 findMany, sem N+1) — chamado com a lista inteira de candidatos do dia,
 // nunca 1 por cliente.
+// Loja GLOBAL onde o cliente mais compra (empate = compra mais recente) — cruza TODAS as lojas,
+// diferente do `lojaPrincipal` de getClienteSegmentacao (que só olha a loja do filtro atual,
+// sempre 1 loja só quando vem de login de loja única — por isso não servia pra decidir "em qual
+// loja esse cliente pertence de verdade"). Achado real em 2026-10-15 (pedido do Rodrigo): 427
+// clientes tinham atribuição em mais de 1 loja ao mesmo tempo (compraram em Leblon e Rio Sul, por
+// exemplo) e cada loja mandava mensagem pra ele por conta própria, sem saber da outra. Usado pra
+// restringir Sugestão de Contato/Follow-up/Aniversário: o cliente só aparece na loja que é
+// realmente a dele, mesmo que tenha comprado alguma vez numa loja diferente.
+export async function getLojaPrincipalGlobalPorCliente(clientesNomes: string[]): Promise<Map<string, string>> {
+  if (clientesNomes.length === 0) return new Map();
+  const rows = await prisma.sale.findMany({
+    where: {
+      status: { not: "Cancelada" },
+      clienteNome: { in: clientesNomes },
+      AND: [await canalWhere("b2c")],
+    },
+    select: { clienteNome: true, quantidade: true, saleDate: true, store: { select: { name: true, displayGroup: true } } },
+  });
+  const porCliente = new Map<string, { porLoja: Map<string, number>; ultimaDataPorLoja: Map<string, Date> }>();
+  for (const r of rows) {
+    const norm = (r.clienteNome as string).trim().toUpperCase();
+    const loja = r.store.displayGroup ?? r.store.name;
+    const cur = porCliente.get(norm) ?? { porLoja: new Map(), ultimaDataPorLoja: new Map() };
+    cur.porLoja.set(loja, (cur.porLoja.get(loja) ?? 0) + r.quantidade);
+    const last = cur.ultimaDataPorLoja.get(loja);
+    if (!last || r.saleDate > last) cur.ultimaDataPorLoja.set(loja, r.saleDate);
+    porCliente.set(norm, cur);
+  }
+  const resultado = new Map<string, string>();
+  for (const [norm, c] of porCliente) {
+    const ordenado = [...c.porLoja.entries()].sort((a, b) => {
+      if (b[1] !== a[1]) return b[1] - a[1];
+      return (c.ultimaDataPorLoja.get(b[0])?.getTime() ?? 0) - (c.ultimaDataPorLoja.get(a[0])?.getTime() ?? 0);
+    });
+    if (ordenado[0]) resultado.set(norm, ordenado[0][0]);
+  }
+  return resultado;
+}
+
 export async function getAtribuicoesPorCliente(storeId: string, clientesNomes: string[]): Promise<Map<string, AtribuicaoInfo>> {
   await garantirAtribuicoes(storeId, clientesNomes);
   const norms = [...new Set(clientesNomes.map((n) => n.trim().toUpperCase()))];
@@ -423,8 +518,22 @@ export async function getSugestoesDeContato(filters: DashboardFilters, vendedor?
     return comTamanho.map((s) => ({ ...s, vendedorAtual: null, vendedorOriginal: null }));
   }
 
-  const atribuicoes = await getAtribuicoesPorCliente(storeIdUnico, comTamanho.map((s) => s.cliente));
-  const comVendedor = comTamanho.map((s) => {
+  // Só a loja que é de verdade a principal do cliente (globalmente, não só nesse filtro) — ver
+  // getLojaPrincipalGlobalPorCliente. Sem isso, cliente que comprou em 2 lojas físicas aparecia
+  // pra vendedores das duas ao mesmo tempo (pedido do Rodrigo em 2026-10-15). Sem sinal nenhum de
+  // venda em loja física (ex: aniversariante achado só pelo cadastro) mantém, não derruba à toa.
+  const nomeLojaAtual = (await getRawStores()).find((st) => st.id === storeIdUnico);
+  const lojaAtualDisplay = nomeLojaAtual ? nomeLojaAtual.displayGroup ?? nomeLojaAtual.name : null;
+  const lojaGlobalPorCliente = lojaAtualDisplay
+    ? await getLojaPrincipalGlobalPorCliente(comTamanho.map((s) => s.cliente))
+    : new Map<string, string>();
+  const soDaLojaPrincipal = comTamanho.filter((s) => {
+    const lojaGlobal = lojaGlobalPorCliente.get(s.cliente.trim().toUpperCase());
+    return !lojaGlobal || lojaGlobal === lojaAtualDisplay;
+  });
+
+  const atribuicoes = await getAtribuicoesPorCliente(storeIdUnico, soDaLojaPrincipal.map((s) => s.cliente));
+  const comVendedor = soDaLojaPrincipal.map((s) => {
     const info = atribuicoes.get(s.cliente.trim().toUpperCase());
     return { ...s, vendedorAtual: info?.vendedorAtual ?? null, vendedorOriginal: info?.vendedorOriginal ?? null };
   });
@@ -539,8 +648,23 @@ export async function getFollowUpPosCompra(filters: DashboardFilters, vendedor?:
   if (!storeIdUnico) {
     return base.map((f) => ({ ...f, vendedorAtual: null, vendedorOriginal: null }));
   }
-  const atribuicoes = await getAtribuicoesPorCliente(storeIdUnico, base.map((f) => f.cliente));
-  const comVendedor = base.map((f) => {
+
+  // Mesma regra de getSugestoesDeContato: só a loja que é de verdade a principal do cliente,
+  // mesmo que ESSA compra específica (a que gerou o follow-up) tenha acontecido numa loja
+  // diferente — pedido explícito do Rodrigo em 2026-10-15 ("mesmo tendo venda registrada" ali
+  // não conta, só a loja principal manda follow-up).
+  const nomeLojaAtual = (await getRawStores()).find((st) => st.id === storeIdUnico);
+  const lojaAtualDisplay = nomeLojaAtual ? nomeLojaAtual.displayGroup ?? nomeLojaAtual.name : null;
+  const lojaGlobalPorCliente = lojaAtualDisplay
+    ? await getLojaPrincipalGlobalPorCliente(base.map((f) => f.cliente))
+    : new Map<string, string>();
+  const soDaLojaPrincipal = base.filter((f) => {
+    const lojaGlobal = lojaGlobalPorCliente.get(f.cliente.trim().toUpperCase());
+    return !lojaGlobal || lojaGlobal === lojaAtualDisplay;
+  });
+
+  const atribuicoes = await getAtribuicoesPorCliente(storeIdUnico, soDaLojaPrincipal.map((f) => f.cliente));
+  const comVendedor = soDaLojaPrincipal.map((f) => {
     const info = atribuicoes.get(f.cliente.trim().toUpperCase());
     return { ...f, vendedorAtual: info?.vendedorAtual ?? null, vendedorOriginal: info?.vendedorOriginal ?? null };
   });

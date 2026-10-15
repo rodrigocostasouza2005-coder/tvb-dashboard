@@ -10,7 +10,7 @@ import { upsertStockSnapshots, type StockSnapshotRow } from "@/lib/connectors/up
 import { upsertProductionOrders, type ProductionOrderRow } from "@/lib/connectors/upsert-production-order";
 import { fetchPriceCatalogCached, inferTabelaPreco, type PriceCatalog } from "@/lib/connectors/tabela-preco";
 import { sendTelegramMessage } from "@/lib/telegram";
-import { getTopParaIncentivar, getTopVendidosPorLoja, getPromotionRows, getB2BClienteNomes, classifySaleChannel } from "@/lib/metrics";
+import { getTopParaIncentivar, getTopVendidosPorLoja, getPromotionRows, getB2BClienteNomes, classifySaleChannel, sincronizarAtribuicoesComVendaReal } from "@/lib/metrics";
 import { brasiliaDayStart, brasiliaDayEnd, todayBrasiliaStr } from "@/lib/filters";
 
 // Lógica compartilhada pelas duas rotas de sync (/api/sync e /api/sync-evening) — precisam ser
@@ -928,6 +928,16 @@ async function doSync() {
   const totalVendasCanceladas = results.reduce((a, r) => a + r.vendasCanceladas, 0);
   const totalDevolucoesCanceladas = results.reduce((a, r) => a + r.devolucoesCanceladas, 0);
   const vendedorCorrigido = results.flatMap((r) => r.vendedorCorrigido);
+
+  // Mantém a "dona" (ClienteVendedorAtribuicao) de cada cliente sempre alinhada com quem vendeu
+  // de verdade por último pra ele em cada loja — ver sincronizarAtribuicoesComVendaReal. Não
+  // fatal: é uma correção contínua por cima da sync normal, não pode derrubar o sync se falhar.
+  try {
+    const todasAsLojas = await prisma.store.findMany({ where: { sellsProducts: true } });
+    await Promise.all(todasAsLojas.map((s) => sincronizarAtribuicoesComVendaReal(s.id)));
+  } catch (e) {
+    console.error("[sincronizarAtribuicoesComVendaReal] falhou:", (e as Error)?.message ?? e);
+  }
 
   await prisma.syncLog.create({
     data: { source: "STOCK", status: "SUCCESS", recordsSynced: totalEstoque, finishedAt: new Date() },
