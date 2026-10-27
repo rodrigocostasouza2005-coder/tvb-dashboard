@@ -1022,6 +1022,62 @@ async function releaseSyncLock(lockId: string = SYNC_LOCK_ID) {
 // + fetchFaturaDetalhe sequenciais), então uma janela grande arrisca passar dos 300s de
 // maxDuration da Vercel. Pode ser chamada de novo com outro valor se precisar cobrir mais tempo —
 // idempotente, não duplica mesmo rodando várias vezes sobre a mesma janela.
+// Repara o dado já gravado errado pelo bug do armazenador "Conserto" (ver NAO_VENDE em
+// armazenadores.ts) — antes do fix, syncArmazenadores() atribuía esse armazém como primaryStoreId
+// do token cd-atacado, então toda venda/devolução real do Site desde ~22/10 foi gravada com o
+// storeId do "Conserto" em vez do CD. Move cada linha pro storeId correto (CD); se já existir uma
+// linha lá com a mesma chave (storeId, dapicVendaId, itemIndex) — sync antiga, de antes do bug —
+// a linha do Conserto é um duplicado puro e é descartada (não é perda de dado real, é a MESMA
+// venda que já está correta). Roda ANTES do resync normal pra não competir com os dados que o
+// resync está prestes a gravar no storeId certo.
+async function corrigirStoreIdConserto(): Promise<{ movidas: number; duplicadasDescartadas: number }> {
+  const consertoStore = await prisma.store.findFirst({ where: { code: { contains: "Conserto", mode: "insensitive" } } });
+  const cdStore = await prisma.store.findFirst({ where: { code: "CD" } });
+  if (!consertoStore || !cdStore) return { movidas: 0, duplicadasDescartadas: 0 };
+
+  let movidas = 0;
+  let duplicadasDescartadas = 0;
+  const consertoStoreId = consertoStore.id;
+  const cdStoreId = cdStore.id;
+
+  async function moverLinhas<T extends { id: string }>(
+    findMany: (args: { where: { storeId: string }; select: { id: true } }) => Promise<T[]>,
+    update: (args: { where: { id: string }; data: { storeId: string } }) => Promise<unknown>,
+    del: (args: { where: { id: string } }) => Promise<unknown>
+  ) {
+    const linhas = await findMany({ where: { storeId: consertoStoreId }, select: { id: true } });
+    for (const linha of linhas) {
+      try {
+        await update({ where: { id: linha.id }, data: { storeId: cdStoreId } });
+        movidas++;
+      } catch {
+        // Conflito de unique (storeId, dapicVendaId, itemIndex) — já existe a linha certa no CD
+        // (de antes do bug, ou de uma recuperação anterior). A do Conserto é duplicado puro.
+        await del({ where: { id: linha.id } }).catch(() => {});
+        duplicadasDescartadas++;
+      }
+    }
+  }
+
+  await moverLinhas(
+    (args) => prisma.sale.findMany(args),
+    (args) => prisma.sale.update(args),
+    (args) => prisma.sale.delete(args)
+  );
+  await moverLinhas(
+    (args) => prisma.return.findMany(args),
+    (args) => prisma.return.update(args),
+    (args) => prisma.return.delete(args)
+  );
+  await moverLinhas(
+    (args) => prisma.gift.findMany(args),
+    (args) => prisma.gift.update(args),
+    (args) => prisma.gift.delete(args)
+  );
+
+  return { movidas, duplicadasDescartadas };
+}
+
 export async function recuperarVendasRecentes(dias: number = 10) {
   if (!(await acquireSyncLock("recovery", 20))) {
     return { ok: false as const, message: "Já existe uma recuperação em andamento." };
@@ -1045,6 +1101,7 @@ export async function recuperarVendasRecentes(dias: number = 10) {
   }
 
   try {
+    const correcaoConserto = await corrigirStoreIdConserto();
     const antes = await contarPorLoja();
 
     const allClients = createDapicClients();
@@ -1093,7 +1150,7 @@ export async function recuperarVendasRecentes(dias: number = 10) {
       .join("\n");
     await sendTelegramMessage(`🔧 Recuperação de vendas (${dias} dias) concluída:\n${resumo}`, { adminOnly: true });
 
-    return { ok: true as const, dias, antes, depois, resultadosPorLoja };
+    return { ok: true as const, dias, correcaoConserto, antes, depois, resultadosPorLoja };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await sendTelegramMessage(`⚠️ Recuperação de vendas falhou: ${message}`, { adminOnly: true });
