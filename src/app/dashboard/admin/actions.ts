@@ -7,6 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { hashPassword, getSessionUser } from "@/lib/auth";
 import { TABS, type TabKey } from "@/lib/tabs";
 import { generateApiToken, getApiToken } from "@/lib/api-token";
+import { runSync } from "@/lib/sync-runner";
 import type { Role } from "@prisma/client";
 
 async function requireAdmin() {
@@ -117,34 +118,30 @@ export async function deleteUserAction(formData: FormData) {
   revalidatePath("/dashboard/admin");
 }
 
-// Fire-and-forget: dispara a sync via POST /api/sync (que tem maxDuration=300 próprio) e
-// retorna imediatamente — o botão não trava mais a página. O Telegram avisa quando terminar.
+// Dispara a sync direto em processo (sem round-trip de rede) e retorna imediatamente — o botão
+// não trava a página. runSync() nunca lança (sempre captura e grava SyncLog + Telegram), então
+// não precisa de try/catch aqui; after() só garante que essa chamada continua rodando depois da
+// resposta já ter voltado pro navegador (mesmo mecanismo de self-heal-sync.ts).
 //
-// Achado em 2026-08-31 (Rodrigo reportou "botão não funciona"): o fetch() sem await rodava fora
-// de qualquer garantia de execução da Server Action — a Vercel pode encerrar o ambiente da função
-// assim que a resposta é enviada, matando o fetch em voo antes de ele sequer chegar no /api/sync
-// (mesma classe de problema documentada em self-heal-sync.ts, que já usa after() por causa disso).
-// Sem log de erro nenhum (o .catch() engolia silenciosamente), então parecia "não faz nada" — o
-// botão sempre respondia "Sincronização iniciada!" mesmo quando o fetch nunca completava.
+// Achado em 2026-08-31 (Rodrigo reportou "botão não funciona") e READACHADO em 2026-10-27
+// (nenhuma venda de 22/10 a 27/10 aparecia, nem clicando no botão): a versão antiga disparava um
+// fetch() HTTP pra /api/sync (POST, mesma instância se chamando por rede) dentro do after() — na
+// prática, nenhuma invocação de /api/sync aparecia nos logs de produção depois do clique,
+// confirmado comparando o log do POST /dashboard/admin com a ausência total de POST /api/sync no
+// mesmo intervalo. O fetch morria antes de completar (DNS/TLS/cold start da invocação de rede
+// pra si mesmo, mesma classe de risco que o comentário original já suspeitava, só que o after()
+// sozinho não cobria esse tipo de falha — só evitava o corte da RESPOSTA, não garantia a entrega
+// da requisição em si). Chamar runSync() direto, no mesmo processo, elimina esse salto de rede
+// inteiro (sem DNS/TLS/nova invocação) — é a mesma função que /api/sync chama por baixo.
 export async function forceSyncAction(): Promise<{ ok: boolean; message: string }> {
   await requireAdmin();
 
-  const secret = process.env.CRON_SECRET;
-  if (!secret) return { ok: false, message: "CRON_SECRET não configurado." };
-
-  // Determina a URL base: em produção usa VERCEL_URL, localmente usa localhost.
-  const host = process.env.VERCEL_URL
-    ? `https://${process.env.VERCEL_URL}`
-    : "http://localhost:3000";
-
-  // after() garante que isso roda até completar (ou falhar) mesmo depois da resposta já ter
-  // voltado pro navegador — sem isso o fetch podia ser cortado no meio.
   after(() =>
-    fetch(`${host}/api/sync`, {
-      method: "POST",
-      headers: { "x-cron-secret": secret },
-    }).catch((e) => {
-      console.error("[forceSyncAction] fetch pro /api/sync falhou:", e);
+    runSync({ checkDuplicates: true }).catch((e) => {
+      // runSync() já captura e reporta (SyncLog + Telegram) toda falha interna — esse catch é
+      // só rede de segurança pra erro inesperado FORA do try/catch dela (ex: acquireSyncLock
+      // falhando antes mesmo de entrar no try).
+      console.error("[forceSyncAction] runSync falhou:", e);
     })
   );
 
