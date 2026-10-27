@@ -1061,10 +1061,25 @@ export async function recuperarVendasRecentes(dias: number = 10) {
         client.label === "cd-atacado"
           ? await syncFaturas(client, primaryStoreId, atacadoStoreId, dias, priceCatalog)
           : { vendas: 0, brindes: 0 };
+      const diagnostico =
+        client.label === "cd-atacado"
+          ? {
+              primaryStoreId,
+              atacadoStoreId,
+              porStoreIdNaJanela: await Promise.all(
+                [primaryStoreId, atacadoStoreId].filter((id): id is string => !!id).map(async (id) => ({
+                  storeId: id,
+                  totalNaJanela: await prisma.sale.count({ where: { storeId: id, saleDate: janela } }),
+                  maxSaleDate: (await prisma.sale.findFirst({ where: { storeId: id }, orderBy: { saleDate: "desc" }, select: { saleDate: true } }))?.saleDate ?? null,
+                }))
+              ),
+            }
+          : undefined;
       resultadosPorLoja[client.label] = {
         vendasPdv: vendasPdv.vendas,
         devolucoes: vendasPdv.devolucoes,
         faturas: faturas.vendas,
+        diagnostico,
       };
     }
 
