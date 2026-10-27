@@ -1,0 +1,57 @@
+name: Recuperação manual de vendas (histórico)
+
+# Dispara /api/recuperar-vendas sob demanda (workflow_dispatch) — recuperação pontual do gap de
+# vendas de 22-27/10/2026 (ver recuperarVendasRecentes, sync-runner.ts). Mesmo secret/contrato do
+# sync-cancelamentos.yml (EXTERNAL_SYNC_SECRET, header x-sync-secret) — nunca o CRON_SECRET, que é
+# "Sensitive" na Vercel e não pode ser lido de volta por ninguém.
+on:
+  workflow_dispatch:
+    inputs:
+      dias:
+        description: "Quantos dias pra trás reprocessar"
+        required: false
+        default: "10"
+
+permissions:
+  contents: read
+
+env:
+  VERCEL_APP_URL: https://tvb-dashboard.vercel.app
+
+jobs:
+  recuperar-vendas:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Chamar /api/recuperar-vendas
+        env:
+          EXTERNAL_SYNC_SECRET: ${{ secrets.EXTERNAL_SYNC_SECRET }}
+          DIAS: ${{ github.event.inputs.dias }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${EXTERNAL_SYNC_SECRET:-}" ]; then
+            echo "EXTERNAL_SYNC_SECRET não está configurado nos Secrets do repositório."
+            exit 1
+          fi
+
+          http_status=$(curl -sS -o response.json -w "%{http_code}" \
+            --max-time 290 \
+            -X POST \
+            -H "x-sync-secret: ${EXTERNAL_SYNC_SECRET}" \
+            "${VERCEL_APP_URL}/api/recuperar-vendas?dias=${DIAS:-10}")
+
+          echo "HTTP status: ${http_status}"
+
+          # Log sanitizado — resultado completo é só contagens/datas, nunca segredo.
+          if command -v jq >/dev/null 2>&1 && jq -e . response.json >/dev/null 2>&1; then
+            cat response.json | jq .
+          else
+            echo "(resposta não-JSON ou vazia)"
+            cat response.json || true
+          fi
+
+          if [ "${http_status}" -lt 200 ] || [ "${http_status}" -ge 300 ]; then
+            echo "Endpoint retornou erro HTTP ${http_status} — falhando o job."
+            exit 1
+          fi
