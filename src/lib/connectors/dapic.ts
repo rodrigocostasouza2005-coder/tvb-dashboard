@@ -53,17 +53,29 @@ export function parseDapicDateTime(raw: string): Date {
 // Mantém DAPIC_TOKEN_INTEGRACAO (um token só) funcionando como fallback pra não quebrar nada.
 export function getCredentials(): DapicCredential[] {
   const raw = process.env.DAPIC_CREDENTIALS;
+  let creds: DapicCredential[] = [];
   if (raw) {
     try {
-      return JSON.parse(raw) as DapicCredential[];
+      creds = JSON.parse(raw) as DapicCredential[];
     } catch {
       throw new Error("DAPIC_CREDENTIALS não é um JSON válido.");
     }
+  } else if (process.env.DAPIC_TOKEN_INTEGRACAO) {
+    creds = [{ label: "default", tokenIntegracao: process.env.DAPIC_TOKEN_INTEGRACAO }];
   }
-  if (process.env.DAPIC_TOKEN_INTEGRACAO) {
-    return [{ label: "default", tokenIntegracao: process.env.DAPIC_TOKEN_INTEGRACAO }];
+
+  // Override pontual por loja (2026-10-27, token do Site rotacionado): DAPIC_CREDENTIALS é uma
+  // variável "Sensitive" no Vercel — não dá pra ler o valor atual de volta pra reescrever só a
+  // entrada "cd-atacado" preservando as outras 4 sem risco de corromper o JSON pra todas de uma
+  // vez. Se DAPIC_TOKEN_CD_ATACADO existir, substitui (ou adiciona) só essa entrada; as outras
+  // vêm intactas do DAPIC_CREDENTIALS original. Reversível: remover essa env var volta ao
+  // comportamento de antes.
+  const overrideCdAtacado = process.env.DAPIC_TOKEN_CD_ATACADO;
+  if (overrideCdAtacado) {
+    creds = [...creds.filter((c) => c.label !== "cd-atacado"), { label: "cd-atacado", tokenIntegracao: overrideCdAtacado }];
   }
-  return [];
+
+  return creds;
 }
 
 type LoginResponse = {
