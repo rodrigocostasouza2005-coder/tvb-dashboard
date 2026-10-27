@@ -1008,6 +1008,86 @@ async function releaseSyncLock(lockId: string = SYNC_LOCK_ID) {
   await prisma.syncLock.update({ where: { id: lockId }, data: { finishedAt: new Date() } }).catch(() => {});
 }
 
+// Recuperação retroativa (2026-10-27): achado real que o botão "Forçar sincronização" nunca
+// executava de verdade (fetch de rede pra si mesmo morrendo em silêncio — ver forceSyncAction,
+// admin/actions.ts) — gap real de vendas sem chegar no banco entre ~22/10 e 27/10. Em vez de criar
+// um mecanismo novo de importação, reaproveita syncVendas/syncFaturas (mesma lógica/idempotência
+// da sync normal — upsert por (storeId, dapicVendaId, itemIndex), nunca duplica, preserva
+// devolução/cancelamento/vendedor corrigido como já é) só com uma janela (`dias`) maior que o 1
+// dia do cron normal. Lock próprio ("recovery", não "sync") pra não brigar com um cron normal
+// rodando ao mesmo tempo nem travar os crons enquanto a recuperação roda.
+//
+// `dias` default=10 é deliberadamente pequeno (margem segura sobre o gap confirmado de ~5-6
+// dias, não meses) — syncFaturas processa 1 fatura por vez sem concorrência (fetchFaturaProdutos
+// + fetchFaturaDetalhe sequenciais), então uma janela grande arrisca passar dos 300s de
+// maxDuration da Vercel. Pode ser chamada de novo com outro valor se precisar cobrir mais tempo —
+// idempotente, não duplica mesmo rodando várias vezes sobre a mesma janela.
+export async function recuperarVendasRecentes(dias: number = 10) {
+  if (!(await acquireSyncLock("recovery", 20))) {
+    return { ok: false as const, message: "Já existe uma recuperação em andamento." };
+  }
+
+  const inicio = new Date();
+  inicio.setDate(inicio.getDate() - dias);
+  const janela = { gte: inicio, lte: new Date() };
+
+  async function contarPorLoja() {
+    const stores = await prisma.store.findMany({ where: { sellsProducts: true } });
+    return Promise.all(
+      stores.map(async (s) => {
+        const [totalNaJanela, ultima] = await Promise.all([
+          prisma.sale.count({ where: { storeId: s.id, saleDate: janela } }),
+          prisma.sale.findFirst({ where: { storeId: s.id }, orderBy: { saleDate: "desc" }, select: { saleDate: true } }),
+        ]);
+        return { loja: s.name, totalNaJanela, ultimaVendaProcessada: ultima?.saleDate ?? null };
+      })
+    );
+  }
+
+  try {
+    const antes = await contarPorLoja();
+
+    const allClients = createDapicClients();
+    const clients = allClients.filter((c) => c.label !== "matriz");
+    const cdAtacadoClient = clients.find((c) => c.label === "cd-atacado");
+    const outrasLojas = clients.filter((c) => c.label !== "cd-atacado");
+
+    const resultadosPorLoja: Record<string, unknown> = {};
+    for (const client of [...outrasLojas, ...(cdAtacadoClient ? [cdAtacadoClient] : [])]) {
+      const { primaryStoreId, atacadoStoreId } = await syncArmazenadores(client);
+      const priceCatalog = await fetchPriceCatalogCached(prisma, client);
+      const vendasPdv = await syncVendas(client, primaryStoreId, atacadoStoreId, dias, priceCatalog);
+      const faturas =
+        client.label === "cd-atacado"
+          ? await syncFaturas(client, primaryStoreId, atacadoStoreId, dias, priceCatalog)
+          : { vendas: 0, brindes: 0 };
+      resultadosPorLoja[client.label] = {
+        vendasPdv: vendasPdv.vendas,
+        devolucoes: vendasPdv.devolucoes,
+        faturas: faturas.vendas,
+      };
+    }
+
+    const depois = await contarPorLoja();
+
+    const resumo = depois
+      .map((d) => {
+        const a = antes.find((x) => x.loja === d.loja);
+        return `• ${d.loja}: ${a?.totalNaJanela ?? 0} → ${d.totalNaJanela} na janela (última venda: ${d.ultimaVendaProcessada?.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" }) ?? "nunca"})`;
+      })
+      .join("\n");
+    await sendTelegramMessage(`🔧 Recuperação de vendas (${dias} dias) concluída:\n${resumo}`, { adminOnly: true });
+
+    return { ok: true as const, dias, antes, depois, resultadosPorLoja };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await sendTelegramMessage(`⚠️ Recuperação de vendas falhou: ${message}`, { adminOnly: true });
+    return { ok: false as const, message };
+  } finally {
+    await releaseSyncLock("recovery");
+  }
+}
+
 // Etapa 1 do plano de atualização rápida (2026-10-06): cancelamento hoje só chega ao Radar no
 // próximo /api/sync-frequent (~10 min, pior caso) porque a reconciliação vive dentro do
 // doSync() completo. Esta função chama SOMENTE reconciliarCancelamentosVendas/Faturas pra cada
