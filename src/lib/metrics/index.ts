@@ -8,3 +8,4 @@ export * from "./contato-vendedor";
 export * from "./atacado";
 export * from "./promocao";
 export * from "./custo";
+export * from "./compras-inteligencia";

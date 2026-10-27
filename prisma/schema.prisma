@@ -134,17 +134,6 @@ model StockMinimumRule {
   @@unique([storeId, grupo, tamanho, colecao])
 }
 
-// Mapa de Compras — meta de cobertura (quantos meses de venda projetada você quer sempre ter em
-// estoque) por grupo de produto. Configurável na própria tela, não por loja (compra é decisão da
-// empresa toda, não por ponto de venda) — pedido do Rodrigo em 2026-09-02, baseado numa planilha
-// de planejamento de compra que ele já usa.
-model CoberturaMeta {
-  id             String   @id @default(cuid())
-  grupo          String   @unique
-  mesesCobertura Float
-  updatedAt      DateTime @updatedAt
-}
-
 // Mapa de Compras — % de crescimento de receita esperado que o Rodrigo escolhe (ele mesmo, não
 // calculado), aplicado sobre a receita do mesmo mês do ano anterior pra projetar cada mês futuro
 // — mesma lógica da linha "Crescimento do Ticket" da planilha dele. Uma linha só (id fixo
@@ -152,6 +141,24 @@ model CoberturaMeta {
 model MapaComprasConfig {
   id             String @id
   crescimentoPct Float
+  // Verba total planejada pra visão consolidada de compras (seção 7 do pedido do Rodrigo de
+  // 2026-10-27: BEST SELLER vs DROP) — nullable porque é opcional configurar; sem valor, a
+  // priorização de orçamento (priorizarOrcamentoCompras) não tem limite pra aplicar, só ordena.
+  orcamentoTotalPlanejado Float?
+}
+
+// Parâmetros de compra Best Seller por grupo (seção 4 do pedido do Rodrigo de 2026-10-27) —
+// reaproveita o modelo já existente de meta por grupo (CoberturaMeta já guarda mesesCobertura)
+// em vez de criar uma tabela nova: estoque de segurança e prazo de entrega do fornecedor também
+// são decisão por grupo, não por produto nem por loja. Ambos nullable — sem valor cadastrado, o
+// motor de cálculo assume 0 e sinaliza a premissa como não confirmada (não inventa um número).
+model CoberturaMeta {
+  id             String   @id @default(cuid())
+  grupo          String   @unique
+  mesesCobertura Float
+  estoqueSegurancaUnidades Int?
+  leadTimeDias             Int?
+  updatedAt      DateTime @updatedAt
 }
 
 // Matriz de desconto por Coleção × faixa de sell-through da Análises de Promoção — o "quadrinho"
@@ -165,6 +172,99 @@ model PromotionRulesConfig {
   descontoBestseller Float
   descontoPadrao     Float
   updatedAt          DateTime @updatedAt
+}
+
+enum TipoCompraProduto {
+  BEST_SELLER
+  DROP
+}
+
+enum StatusComercialProduto {
+  ATIVO
+  EM_LANCAMENTO
+  EM_REPOSICAO
+  EM_ENCERRAMENTO
+  DESCONTINUADO
+}
+
+enum PossibilidadeReposicao {
+  SIM
+  NAO
+  A_CONFIRMAR
+}
+
+// Classificação de compra por produto — pedido do Rodrigo em 2026-10-27: separar reposição
+// recorrente (BEST SELLER) de coleção limitada (DROP) pro Mapa de Compras recomendar quantidade
+// de forma diferente em cada caso. Chave é "cod" (= IdGradeProduto do DAPIC, mesmo identificador
+// de Sale/StockSnapshot/ProductionOrder) — não existe tabela mestre de Produto hoje (decisão
+// documentada acima, em Sale), então essa é a primeira tabela "cadastral" de produto do Radar, e
+// só carrega os campos que ESSA funcionalidade precisa, não um cadastro geral. Produto sem linha
+// aqui = classificação desconhecida (cai na fila de revisão, ver getFilaRevisaoClassificacao) —
+// nunca herda BEST_SELLER só por vender muito, nem DROP só por ser coleção nova (pedido explícito
+// do Rodrigo, seção 2 do pedido original).
+model ClassificacaoProduto {
+  id                       String                 @id @default(cuid())
+  cod                      String                 @unique
+  produto                  String
+  grupo                    String
+  colecao                  String?
+  tipoCompra               TipoCompraProduto
+  statusComercial          StatusComercialProduto
+  possibilidadeReposicao   PossibilidadeReposicao
+  dataLancamento           DateTime?
+  dataEncerramentoPrevista DateTime?
+  // Verba destinada a ESSE drop especificamente (seção 5 do pedido) — só faz sentido pra
+  // tipoCompra = DROP, nullable pros dois casos (Best Seller não usa, Drop pode não ter ainda).
+  orcamentoDrop            Float?
+  observacoes              String?
+  createdAt                DateTime               @default(now())
+  updatedAt                DateTime               @updatedAt
+
+  historico ClassificacaoProdutoHistorico[]
+
+  @@index([grupo])
+  @@index([tipoCompra])
+  @@index([colecao])
+}
+
+// Histórico de alteração de classificação (seção 2 do pedido: "histórico de alterações quando
+// viável"). Guarda só o campo/de/para que mudou, não um snapshot completo da linha — suficiente
+// pra auditar reclassificação Drop↔Best Seller e mudança de possibilidadeReposicao sem duplicar
+// a tabela inteira a cada edição.
+model ClassificacaoProdutoHistorico {
+  id              String   @id @default(cuid())
+  classificacaoId String
+  campo           String
+  valorAnterior   String?
+  valorNovo       String?
+  alteradoEm      DateTime @default(now())
+  alteradoPor     String?
+
+  classificacao ClassificacaoProduto @relation(fields: [classificacaoId], references: [id])
+
+  @@index([classificacaoId])
+}
+
+// Decisão humana sobre uma recomendação de compra (seção 9 do pedido: simulação não grava nada —
+// calcularSugestaoBestSeller/calcularSugestaoDrop em src/lib/metrics/compras-inteligencia.ts são
+// funções puras, sem efeito em banco — só grava quando o Rodrigo CONFIRMA uma decisão).
+// "premissas" guarda as premissas/avisos que o motor de cálculo retornou NO MOMENTO da decisão
+// (Json, não normalizado), pra auditar depois por que a sugestão daquele dia foi aquele número,
+// mesmo que os dados de venda/estoque mudem depois.
+model DecisaoCompra {
+  id                  String            @id @default(cuid())
+  cod                 String?
+  grupo               String
+  tipoCompra          TipoCompraProduto
+  quantidadeSugerida  Int
+  quantidadeAprovada  Int
+  justificativaAjuste String?
+  premissas           Json
+  decididoEm          DateTime          @default(now())
+  decididoPor         String?
+
+  @@index([grupo])
+  @@index([cod])
 }
 
 // Token pra conectar o Radar num Custom GPT (ChatGPT) ou Conector MCP (Claude) — pedido do
