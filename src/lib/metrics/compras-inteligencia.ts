@@ -993,6 +993,18 @@ export async function setParametrosBestSellerGrupo(
   });
 }
 
+// Pra tela montar o Map<grupo, parâmetros> usado no formulário inline por grupo (ParametrosGrupoForm)
+// sem a página precisar chamar prisma diretamente (convenção do resto do app: página só chama
+// lib/metrics).
+export async function getParametrosBestSellerPorGrupo(): Promise<
+  { grupo: string; estoqueSegurancaUnidades: number | null; leadTimeDias: number | null }[]
+> {
+  const rows = await prisma.coberturaMeta.findMany({
+    select: { grupo: true, estoqueSegurancaUnidades: true, leadTimeDias: true },
+  });
+  return rows;
+}
+
 export async function setOrcamentoTotalPlanejado(valor: number | null) {
   return prisma.mapaComprasConfig.upsert({
     where: { id: "global" },

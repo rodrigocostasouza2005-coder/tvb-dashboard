@@ -1,11 +1,29 @@
 import { getSessionUser } from "@/lib/auth";
-import { getMapaDeComprasDetalhado, getCrescimentoEsperado } from "@/lib/metrics";
+import {
+  getMapaDeComprasDetalhado,
+  getCrescimentoEsperado,
+  getClassificacaoFilterOptions,
+  getParametrosBestSellerPorGrupo,
+  getVisaoConsolidadaCompras,
+  getRecomendacoesBestSeller,
+  getRecomendacoesDrop,
+  getFilaRevisaoClassificacao,
+} from "@/lib/metrics";
+import { StatusComercialProduto } from "@prisma/client";
 import { getGrupoRestriction } from "@/lib/permissions";
 import { requireTabAccess } from "@/lib/tabs";
+import { toArray, type RawSearchParams } from "@/lib/filters";
 import { MapaComprasGrid } from "./mapa-compras-grid";
 import { updateCrescimentoAction } from "./actions";
+import { ModoToggle, type Modo } from "./inteligencia/modo-toggle";
+import { InteligenciaFiltros } from "./inteligencia/filtros";
+import { ConsolidadoView } from "./inteligencia/consolidado-view";
+import { AlertasView } from "./inteligencia/alertas-view";
+import { TabelaBestSeller, TabelaDrop, TabelaPorGrupo, TabelaPorProduto } from "./inteligencia/tabelas";
 
-export default async function MapaComprasPage() {
+const MODOS_VALIDOS: Modo[] = ["consolidado", "best-seller", "drop", "grupo", "produto", "alertas"];
+
+export default async function MapaComprasPage({ searchParams }: { searchParams: Promise<RawSearchParams> }) {
   const user = await getSessionUser();
   if (!user) return null;
   requireTabAccess(user, user.role, "mapa-compras");
@@ -104,6 +122,119 @@ export default async function MapaComprasPage() {
       </p>
 
       <MapaComprasGrid grupos={grupos} canEdit={canEdit} />
+
+      <hr className="my-6 border-[var(--border)]" />
+
+      <h2 className="mb-1 text-base font-semibold text-[var(--text-primary)]">
+        Inteligência de Compras: Best Seller vs. Drop
+      </h2>
+      <p className="mb-4 text-xs text-[var(--text-muted)]">
+        Separa reposição recorrente (<strong>Best Seller</strong>) de coleção limitada (
+        <strong>Drop</strong>): cada uma tem uma lógica de recomendação diferente — Drop nunca
+        sugere recompra automática. Produto sem classificação não aparece como nenhum dos dois,
+        fica na fila de revisão (aba "Alertas e prioridades").
+      </p>
+
+      <MapaComprasInteligencia canEdit={canEdit} grupoRestricao={grupoIn} searchParams={await searchParams} />
     </div>
   );
+}
+
+async function MapaComprasInteligencia({
+  canEdit,
+  grupoRestricao,
+  searchParams,
+}: {
+  canEdit: boolean;
+  grupoRestricao: string[] | undefined;
+  searchParams: RawSearchParams;
+}) {
+  const modoRaw = typeof searchParams.modo === "string" ? searchParams.modo : "consolidado";
+  const modo: Modo = (MODOS_VALIDOS as string[]).includes(modoRaw) ? (modoRaw as Modo) : "consolidado";
+
+  const grupoFiltro = toArray(searchParams.grupo);
+  const colecaoFiltro = toArray(searchParams.colecao);
+  const statusFiltro = toArray(searchParams.status).filter((s): s is StatusComercialProduto =>
+    Object.values(StatusComercialProduto).includes(s as StatusComercialProduto)
+  );
+  const horizonteDias = Number(searchParams.horizonte) || 30;
+
+  // Restrição de grupo por permissão (mesma regra do resto da página) combinada com o filtro
+  // explícito escolhido na tela — se o usuário tem restrição E não escolheu nada, usa a
+  // restrição; se escolheu um subconjunto, a interseção vale.
+  const grupoIn =
+    grupoFiltro.length > 0 ? grupoFiltro.filter((g) => !grupoRestricao || grupoRestricao.includes(g)) : grupoRestricao;
+
+  const filtro = {
+    grupoIn,
+    colecaoIn: colecaoFiltro.length > 0 ? colecaoFiltro : undefined,
+    statusComercialIn: statusFiltro.length > 0 ? statusFiltro : undefined,
+    horizonteDiasOverride: horizonteDias,
+  };
+
+  const [filtroOpcoes] = await Promise.all([getClassificacaoFilterOptions()]);
+
+  const filtrosUi = (
+    <InteligenciaFiltros
+      basePath="/dashboard/mapa-compras"
+      grupos={filtroOpcoes.grupos}
+      colecoes={filtroOpcoes.colecoes}
+      statusComercialDisponiveis={filtroOpcoes.statusComercialEmUso}
+      value={{ modo, grupoIn: grupoFiltro, colecaoIn: colecaoFiltro, statusComercialIn: statusFiltro, horizonteDias }}
+    />
+  );
+
+  return (
+    <div>
+      <ModoToggle basePath="/dashboard/mapa-compras" searchParams={searchParams} current={modo} />
+      {filtrosUi}
+
+      {modo === "consolidado" && (
+        <ConsolidadoView visao={await getVisaoConsolidadaCompras(filtro)} canEdit={canEdit} />
+      )}
+
+      {modo === "best-seller" && <TabelaBestSeller rows={await getRecomendacoesBestSeller(filtro)} />}
+
+      {modo === "drop" && <TabelaDrop rows={await getRecomendacoesDrop(filtro)} />}
+
+      {modo === "grupo" && (
+        <TabelaPorGrupoAsync filtro={filtro} canEdit={canEdit} />
+      )}
+
+      {modo === "produto" && <TabelaPorProdutoAsync filtro={filtro} />}
+
+      {modo === "alertas" && <AlertasAsync filtro={filtro} />}
+    </div>
+  );
+}
+
+async function TabelaPorGrupoAsync({
+  filtro,
+  canEdit,
+}: {
+  filtro: Parameters<typeof getVisaoConsolidadaCompras>[0];
+  canEdit: boolean;
+}) {
+  const [visao, bsRows, dropRows, parametros] = await Promise.all([
+    getVisaoConsolidadaCompras(filtro),
+    getRecomendacoesBestSeller(filtro),
+    getRecomendacoesDrop(filtro),
+    getParametrosBestSellerPorGrupo(),
+  ]);
+  const coberturaMetaPorGrupo = new Map(parametros.map((p) => [p.grupo, p]));
+  return <TabelaPorGrupo porGrupo={visao.porGrupo} bsRows={bsRows} dropRows={dropRows} canEdit={canEdit} coberturaMetaPorGrupo={coberturaMetaPorGrupo} />;
+}
+
+async function TabelaPorProdutoAsync({ filtro }: { filtro: Parameters<typeof getRecomendacoesBestSeller>[0] }) {
+  const [bsRows, dropRows] = await Promise.all([getRecomendacoesBestSeller(filtro), getRecomendacoesDrop(filtro)]);
+  return <TabelaPorProduto bsRows={bsRows} dropRows={dropRows} />;
+}
+
+async function AlertasAsync({ filtro }: { filtro: Parameters<typeof getRecomendacoesBestSeller>[0] }) {
+  const [bsRows, dropRows, filaRevisao] = await Promise.all([
+    getRecomendacoesBestSeller(filtro),
+    getRecomendacoesDrop(filtro),
+    getFilaRevisaoClassificacao(),
+  ]);
+  return <AlertasView bsRows={bsRows} dropRows={dropRows} filaRevisao={filaRevisao} />;
 }
