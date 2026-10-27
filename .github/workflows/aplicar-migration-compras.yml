@@ -1,0 +1,52 @@
+name: Aplicar migration do Mapa de Compras
+
+# Dispara /api/aplicar-migration-compras sob demanda — aplica (idempotente) a migration
+# 20261027150000_add_classificacao_compras no banco de produção. Mesmo secret/contrato de
+# sync-cancelamentos.yml e recuperar-vendas-manual.yml (EXTERNAL_SYNC_SECRET, header
+# x-sync-secret) — nunca DATABASE_URL, que não existe como secret do GitHub (a conexão real
+# acontece dentro da própria função na Vercel, usando a env var que ela já tem).
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+env:
+  VERCEL_APP_URL: https://tvb-dashboard.vercel.app
+
+jobs:
+  aplicar-migration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Chamar /api/aplicar-migration-compras
+        env:
+          EXTERNAL_SYNC_SECRET: ${{ secrets.EXTERNAL_SYNC_SECRET }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${EXTERNAL_SYNC_SECRET:-}" ]; then
+            echo "EXTERNAL_SYNC_SECRET não está configurado nos Secrets do repositório."
+            exit 1
+          fi
+
+          http_status=$(curl -sS -o response.json -w "%{http_code}" \
+            --max-time 55 \
+            -X POST \
+            -H "x-sync-secret: ${EXTERNAL_SYNC_SECRET}" \
+            "${VERCEL_APP_URL}/api/aplicar-migration-compras")
+
+          echo "HTTP status: ${http_status}"
+
+          # Log sanitizado — host (nome, nunca a connection string) + resultado, nunca segredo.
+          if command -v jq >/dev/null 2>&1 && jq -e . response.json >/dev/null 2>&1; then
+            cat response.json | jq .
+          else
+            echo "(resposta não-JSON ou vazia)"
+            cat response.json || true
+          fi
+
+          if [ "${http_status}" -lt 200 ] || [ "${http_status}" -ge 300 ]; then
+            echo "Endpoint retornou erro HTTP ${http_status} — falhando o job."
+            exit 1
+          fi
