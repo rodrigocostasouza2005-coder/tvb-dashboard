@@ -5,6 +5,7 @@ import { getRawStores, getMarcas, getTabelasPreco } from "@/lib/metrics";
 import { TABS, defaultAllowedTabs } from "@/lib/tabs";
 import { createUserAction, updateUserAction, resetPasswordAction, deleteUserAction } from "./actions";
 import { ForceSyncButton } from "./force-sync-button";
+import { RecuperarVendasButton } from "./recuperar-vendas-button";
 import { SuccessBanner } from "./success-banner";
 import { ApiTokenSection } from "./api-token-section";
 import { VendedorToggle } from "./vendedor-toggle";
@@ -128,6 +129,13 @@ export default async function AdminPage({
           mesmo jeito.
         </p>
         <ForceSyncButton />
+        <div className="mt-4 border-t border-[var(--border)] pt-4">
+          <p className="mb-3 text-xs text-[var(--text-muted)]">
+            Reprocessa os últimos 10 dias de vendas (todas as lojas) pra repor venda que não foi
+            gravada por falha de sincronização. Seguro clicar mais de uma vez — não duplica.
+          </p>
+          <RecuperarVendasButton />
+        </div>
       </section>
 
       <ApiTokenSection

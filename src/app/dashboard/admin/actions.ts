@@ -7,7 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { hashPassword, getSessionUser } from "@/lib/auth";
 import { TABS, type TabKey } from "@/lib/tabs";
 import { generateApiToken, getApiToken } from "@/lib/api-token";
-import { runSync } from "@/lib/sync-runner";
+import { runSync, recuperarVendasRecentes } from "@/lib/sync-runner";
 import type { Role } from "@prisma/client";
 
 async function requireAdmin() {
@@ -148,6 +148,33 @@ export async function forceSyncAction(): Promise<{ ok: boolean; message: string 
   return {
     ok: true,
     message: "Sincronização iniciada! Você vai receber um aviso no Telegram quando terminar.",
+  };
+}
+
+// Recuperação pontual do gap real achado em 2026-10-27 (forceSyncAction nunca executava de
+// verdade — ver fix acima). Roda SÍNCRONO (sem after()) de propósito: queremos o resultado
+// (quantas vendas entraram, antes/depois por loja) de volta na tela agora, não só um aviso de
+// "iniciado". Idempotente (reaproveita syncVendas/syncFaturas) — pode clicar de novo sem medo.
+export async function recuperarVendasFaltantesAction(): Promise<{
+  ok: boolean;
+  message: string;
+  detalhe?: Awaited<ReturnType<typeof recuperarVendasRecentes>>;
+}> {
+  await requireAdmin();
+
+  const resultado = await recuperarVendasRecentes(10);
+  if (!resultado.ok) {
+    return { ok: false, message: resultado.message };
+  }
+
+  const linhas = resultado.depois.map((d) => {
+    const a = resultado.antes.find((x) => x.loja === d.loja);
+    return `${d.loja}: ${a?.totalNaJanela ?? 0} → ${d.totalNaJanela}`;
+  });
+  return {
+    ok: true,
+    message: `Recuperação concluída (janela de ${resultado.dias} dias). ${linhas.join(" | ")}`,
+    detalhe: resultado,
   };
 }
 
