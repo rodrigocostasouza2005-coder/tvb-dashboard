@@ -48,6 +48,10 @@ export type InputBestSeller = {
   recebimentosPrevistos?: RecebimentoPrevisto[];
   sazonalidadeFator?: number | null;
   custoUnitario?: number | null;
+  // true = estoque vendável zerado hoje mas com venda na janela: a média observada pode estar
+  // subestimada pelos dias sem peça (não há histórico diário de estoque pra corrigir). Só gera
+  // aviso — a demanda NÃO é inflada pra "compensar" venda perdida.
+  rupturaAtual?: boolean;
 };
 
 export type SugestaoBestSeller = {
@@ -60,6 +64,7 @@ export type SugestaoBestSeller = {
   quantidadeSugerida: number;
   valorEstimado: number | null;
   confiavel: boolean;
+  rupturaAtual: boolean;
   premissas: string[];
   avisos: string[];
 };
@@ -137,8 +142,18 @@ export function calcularSugestaoBestSeller(input: InputBestSeller): SugestaoBest
     avisos.push("Quantidade sugerida zerada por falta de dado confiável — não interpretar como \"não precisa comprar\", é \"não dá para calcular com segurança\".");
   }
 
+  const rupturaAtual = input.rupturaAtual ?? false;
+  if (rupturaAtual) {
+    avisos.push("Estoque vendável zerado: a venda média observada pode estar subestimada pelos dias sem peça — a sugestão usa só a venda observada (não estima venda perdida); revisar manualmente.");
+  }
+
   const coberturaAtualDias = input.vendaMediaDiaria > 0 ? estoqueDisponivelUtilizavel / input.vendaMediaDiaria : null;
-  const valorEstimado = input.custoUnitario != null ? quantidadeSugerida * input.custoUnitario : null;
+  // Custo só entra quando é confiável (> 0): custo 0/negativo no DAPIC = não cadastrado.
+  const custoConfiavel = input.custoUnitario != null && input.custoUnitario > 0 ? input.custoUnitario : null;
+  if (custoConfiavel == null && quantidadeSugerida > 0) {
+    avisos.push("Sem custo unitário confiável cadastrado — valor estimado da compra não calculado (planejamento financeiro incompleto para este item).");
+  }
+  const valorEstimado = custoConfiavel != null ? quantidadeSugerida * custoConfiavel : null;
 
   return {
     cod: input.cod,
@@ -150,6 +165,7 @@ export function calcularSugestaoBestSeller(input: InputBestSeller): SugestaoBest
     quantidadeSugerida,
     valorEstimado,
     confiavel,
+    rupturaAtual,
     premissas,
     avisos,
   };
@@ -165,7 +181,14 @@ export type InputDrop = {
   vendasAcumuladas: number;
   velocidadeVendaDiaria: number;
   diasDesdeLancamento: number | null;
-  diasRestantesJanela: number;
+  // null = sem data prevista de encerramento cadastrada: janela comercial desconhecida. Nesse
+  // caso não há previsão até o fim da janela, nem risco de sobra/ruptura calculável, nem
+  // quantidade sugerida — antes era tratado como 0 dias, o que marcava "risco de sobra" em TODO
+  // Drop sem data só por ter estoque.
+  diasRestantesJanela: number | null;
+  // Texto explicando o denominador usado em quantidadeCompradaOriginal (ex: "produção finalizada
+  // registrada" ou "vendido + estoque atual") — vira premissa, pra o sell-through ser auditável.
+  origemQuantidadeOriginal?: string;
   custoUnitario?: number | null;
   precoUnitario?: number | null;
   orcamentoDisponivelDrop?: number | null;
@@ -189,6 +212,7 @@ export type SugestaoDrop = {
   valorEstimado: number | null;
   bloqueadoRecompra: boolean;
   precisaConfirmacaoHumana: boolean;
+  janelaConhecida: boolean;
   premissas: string[];
   avisos: string[];
 };
@@ -203,7 +227,12 @@ export function calcularSugestaoDrop(input: InputDrop): SugestaoDrop {
   const premissas: string[] = [];
   const avisos: string[] = [];
 
-  const semHistoricoDeVenda = input.diasDesdeLancamento == null || input.diasDesdeLancamento <= 0;
+  // Sem histórico = nenhuma venda acumulada E sem data de lançamento passada. Antes bastava não ter
+  // dataLancamento cadastrada pra cair aqui — um Drop vendendo havia meses, sem data cadastrada,
+  // era tratado como "recém-lançado" e (com reposição SIM + orçamento) recebia sugestão de compra
+  // inicial pelo orçamento, ignorando toda a venda real.
+  const semHistoricoDeVenda =
+    input.vendasAcumuladas <= 0 && (input.diasDesdeLancamento == null || input.diasDesdeLancamento <= 0);
   if (semHistoricoDeVenda) {
     avisos.push("Drop sem histórico de venda (ainda não lançado ou lançado há 0 dias) — sell-through e previsão não são calculáveis a partir de venda; use apenas para decisão de compra/produção inicial.");
   }
@@ -212,17 +241,27 @@ export function calcularSugestaoDrop(input: InputDrop): SugestaoDrop {
     input.quantidadeCompradaOriginal > 0 ? (input.vendasAcumuladas / input.quantidadeCompradaOriginal) * 100 : null;
   if (input.quantidadeCompradaOriginal === 0) {
     premissas.push("Sem quantidade comprada/produzida original cadastrada — sell-through não calculado.");
+  } else {
+    premissas.push(
+      `Sell-through = vendas líquidas acumuladas (${input.vendasAcumuladas}) ÷ ${input.origemQuantidadeOriginal ?? "quantidade comprada/produzida original"} (${input.quantidadeCompradaOriginal}).`
+    );
   }
 
-  const previsaoVendaAteFimJanela = Math.max(input.velocidadeVendaDiaria * input.diasRestantesJanela, 0);
-  premissas.push(
-    `Previsão linear: velocidade de venda atual (${input.velocidadeVendaDiaria.toFixed(2)} un/dia) × dias restantes de janela (${input.diasRestantesJanela}) — não considera desaceleração natural de fim de coleção.`
-  );
+  const janelaConhecida = input.diasRestantesJanela != null;
+  const diasJanela = input.diasRestantesJanela ?? 0;
+  const previsaoVendaAteFimJanela = janelaConhecida ? Math.max(input.velocidadeVendaDiaria * diasJanela, 0) : 0;
+  if (janelaConhecida) {
+    premissas.push(
+      `Previsão linear: velocidade de venda atual (${input.velocidadeVendaDiaria.toFixed(2)} un/dia) × dias restantes de janela (${diasJanela}) — não considera desaceleração natural de fim de coleção.`
+    );
+  } else {
+    avisos.push("Sem data prevista de encerramento cadastrada — janela comercial desconhecida: previsão, risco de sobra/ruptura e quantidade sugerida não são calculados. Cadastre a data para o motor avaliar.");
+  }
 
-  const riscoSobra = input.estoqueDisponivel > previsaoVendaAteFimJanela * MARGEM_RISCO_SOBRA_DROP;
+  const riscoSobra = janelaConhecida && input.estoqueDisponivel > previsaoVendaAteFimJanela * MARGEM_RISCO_SOBRA_DROP;
   const excedenteEstimado = riscoSobra ? Math.round(input.estoqueDisponivel - previsaoVendaAteFimJanela) : 0;
 
-  const riscoRuptura = previsaoVendaAteFimJanela > input.estoqueDisponivel;
+  const riscoRuptura = janelaConhecida && previsaoVendaAteFimJanela > input.estoqueDisponivel;
   const faltanteEstimado = riscoRuptura ? Math.round(previsaoVendaAteFimJanela - input.estoqueDisponivel) : 0;
 
   let pedidosAbertoUtilizaveis = 0;
@@ -256,6 +295,9 @@ export function calcularSugestaoDrop(input: InputDrop): SugestaoDrop {
         precisaConfirmacaoHumana = true;
         avisos.push("Sem orçamento/custo unitário cadastrados para estimar quantidade inicial — decisão totalmente humana.");
       }
+    } else if (!janelaConhecida) {
+      quantidadeSugerida = null;
+      precisaConfirmacaoHumana = true;
     } else {
       quantidadeSugerida = Math.max(0, faltanteEstimado - pedidosAbertoUtilizaveis);
       if (input.orcamentoDisponivelDrop != null && input.custoUnitario != null && input.custoUnitario > 0) {
@@ -269,7 +311,9 @@ export function calcularSugestaoDrop(input: InputDrop): SugestaoDrop {
   }
 
   const valorEstimado =
-    quantidadeSugerida != null && input.custoUnitario != null ? quantidadeSugerida * input.custoUnitario : null;
+    quantidadeSugerida != null && input.custoUnitario != null && input.custoUnitario > 0
+      ? quantidadeSugerida * input.custoUnitario
+      : null;
 
   return {
     cod: input.cod,
@@ -286,6 +330,7 @@ export function calcularSugestaoDrop(input: InputDrop): SugestaoDrop {
     valorEstimado,
     bloqueadoRecompra,
     precisaConfirmacaoHumana,
+    janelaConhecida,
     premissas,
     avisos,
   };
@@ -299,6 +344,8 @@ export type ItemPriorizavel = {
   id: string;
   tipoCompra: TipoCompraProduto;
   grupo: string;
+  // Produto · cor · tamanho — só exibição (a priorização não usa).
+  rotulo?: string;
   quantidadeSugerida: number;
   valorEstimado: number;
   riscoRuptura: boolean;
@@ -523,12 +570,14 @@ export async function getFilaRevisaoClassificacao(limite = 200) {
 
 const HORIZONTE_PADRAO_DIAS = 30;
 const JANELA_VELOCIDADE_VENDA_DIAS = 56; // mesma janela de 8 semanas já usada em getReplenishmentPorVendas
+const DIA_MS = 86_400_000;
 
 // Filtro comum às três visões de dado (Best Seller, Drop, consolidada) — grupo/coleção/status
 // espelham os filtros pedidos na seção 8 ("Inclua filtros por grupo, coleção, status comercial e
 // horizonte de planejamento"). horizonteDiasOverride existe só pra SIMULAÇÃO (seção 9): quando
 // informado, substitui o horizonte derivado de CoberturaMeta sem gravar nada no banco — a tela
-// manda esse valor via query string, não via action.
+// manda esse valor via query string, não via action. Sem override, cada grupo usa a própria meta
+// (CoberturaMeta.mesesCobertura × 30) ou o padrão de 30 dias.
 export type ComprasFiltro = {
   grupoIn?: string[];
   colecaoIn?: string[];
@@ -558,12 +607,16 @@ export async function getClassificacaoFilterOptions() {
   };
 }
 
-async function getVendaMediaDiariaPorCod(cods: string[]): Promise<Map<string, { mediaDiaria: number; diasComDado: number }>> {
+// Velocidade = venda LÍQUIDA (vendas válidas − devoluções válidas) na janela de 56 dias ÷ dias com
+// dado. Antes não descontava devolução: produto com muita troca parecia vender mais do que vende.
+async function getVendaMediaDiariaPorCod(
+  cods: string[]
+): Promise<Map<string, { mediaDiaria: number; diasComDado: number; primeiraVenda: Date | null }>> {
   if (cods.length === 0) return new Map();
   const to = new Date();
-  const from = new Date(to.getTime() - JANELA_VELOCIDADE_VENDA_DIAS * 86_400_000);
+  const from = new Date(to.getTime() - JANELA_VELOCIDADE_VENDA_DIAS * DIA_MS);
 
-  const [vendasRecentes, primeiraVenda] = await Promise.all([
+  const [vendasRecentes, primeiraVenda, devolucoesRecentes] = await Promise.all([
     prisma.sale.groupBy({
       by: ["cod"],
       where: { status: { not: "Cancelada" }, cod: { in: cods }, saleDate: { gte: from, lte: to } },
@@ -574,33 +627,72 @@ async function getVendaMediaDiariaPorCod(cods: string[]): Promise<Map<string, { 
       where: { status: { not: "Cancelada" }, cod: { in: cods } },
       _min: { saleDate: true },
     }),
+    prisma.return.groupBy({
+      by: ["cod"],
+      where: { status: { not: "Cancelada" }, cod: { in: cods }, returnDate: { gte: from, lte: to } },
+      _sum: { quantidade: true },
+    }),
   ]);
 
   const vendasByCod = new Map(vendasRecentes.map((v) => [v.cod, v._sum.quantidade ?? 0]));
+  const devolucoesByCod = new Map(devolucoesRecentes.map((v) => [v.cod, v._sum.quantidade ?? 0]));
   const primeiraVendaByCod = new Map(primeiraVenda.map((v) => [v.cod, v._min.saleDate]));
 
-  const resultado = new Map<string, { mediaDiaria: number; diasComDado: number }>();
+  const resultado = new Map<string, { mediaDiaria: number; diasComDado: number; primeiraVenda: Date | null }>();
   for (const cod of cods) {
-    const primeira = primeiraVendaByCod.get(cod);
-    const diasDesdePrimeira = primeira ? Math.floor((to.getTime() - primeira.getTime()) / 86_400_000) : 0;
+    const primeira = primeiraVendaByCod.get(cod) ?? null;
+    const diasDesdePrimeira = primeira ? Math.floor((to.getTime() - primeira.getTime()) / DIA_MS) : 0;
     const diasComDado = Math.min(diasDesdePrimeira, JANELA_VELOCIDADE_VENDA_DIAS);
-    const totalVendido = vendasByCod.get(cod) ?? 0;
+    const liquido = Math.max((vendasByCod.get(cod) ?? 0) - (devolucoesByCod.get(cod) ?? 0), 0);
     resultado.set(cod, {
-      mediaDiaria: diasComDado > 0 ? totalVendido / diasComDado : 0,
+      mediaDiaria: diasComDado > 0 ? liquido / diasComDado : 0,
       diasComDado,
+      primeiraVenda: primeira,
     });
   }
   return resultado;
 }
 
+export type VendasLiquidasJanelas = { d30: number; d60: number; d90: number };
+
+// Vendas líquidas de 30/60/90 dias por cod (só exibição/justificativa — a velocidade usada na
+// conta continua sendo a de 56 dias acima). Uma leitura de linhas por tabela, sem N+1.
+async function getVendasLiquidasJanelasPorCod(cods: string[]): Promise<Map<string, VendasLiquidasJanelas>> {
+  const map = new Map<string, VendasLiquidasJanelas>();
+  if (cods.length === 0) return map;
+  const agora = Date.now();
+  const d90 = new Date(agora - 90 * DIA_MS);
+  const [vendas, devolucoes] = await Promise.all([
+    prisma.sale.findMany({
+      where: { status: { not: "Cancelada" }, cod: { in: cods }, saleDate: { gte: d90 } },
+      select: { cod: true, quantidade: true, saleDate: true },
+    }),
+    prisma.return.findMany({
+      where: { status: { not: "Cancelada" }, cod: { in: cods }, returnDate: { gte: d90 } },
+      select: { cod: true, quantidade: true, returnDate: true },
+    }),
+  ]);
+  function soma(cod: string, data: Date, q: number) {
+    const cur = map.get(cod) ?? { d30: 0, d60: 0, d90: 0 };
+    const dias = (agora - data.getTime()) / DIA_MS;
+    cur.d90 += q;
+    if (dias <= 60) cur.d60 += q;
+    if (dias <= 30) cur.d30 += q;
+    map.set(cod, cur);
+  }
+  for (const v of vendas ?? []) soma(v.cod, v.saleDate, v.quantidade);
+  for (const d of devolucoes ?? []) soma(d.cod, d.returnDate, -d.quantidade);
+  return map;
+}
+
 // Pedidos em aberto / recebimentos previstos a partir de ProductionOrder — TVB produz
 // internamente, não compra pronto de terceiro na maioria dos grupos (ver comentário em
 // getStockVsSales), então "pedido em aberto" = ordem de produção sem dataFinalizacaoProducao
-// ainda. IMPORTANTE (pendência real, ver relatório final item 4/5): o schema não tem campo de
-// "data PREVISTA de finalização", só dataEntradaCelula (quando entrou na célula) e
-// dataFinalizacaoProducao (quando terminou, null enquanto aberta) — por isso todo recebimento
-// vindo daqui entra como confiavel=false até a TVB cadastrar uma previsão real. Sem isso, o motor
-// de Best Seller nunca teria uma data pra comparar com o horizonte.
+// ainda. IMPORTANTE (pendência real): o schema não tem campo de "data PREVISTA de finalização",
+// só dataEntradaCelula (quando entrou na célula) e dataFinalizacaoProducao (quando terminou, null
+// enquanto aberta) — por isso todo recebimento vindo daqui entra como confiavel=false até a TVB
+// cadastrar uma previsão real. Sem isso, o motor de Best Seller nunca teria uma data pra comparar
+// com o horizonte.
 async function getPedidosEmAbertoPorCod(cods: string[]): Promise<Map<string, RecebimentoPrevisto[]>> {
   if (cods.length === 0) return new Map();
   const rows = await prisma.productionOrder.groupBy({
@@ -619,27 +711,57 @@ async function getPedidosEmAbertoPorCod(cods: string[]): Promise<Map<string, Rec
 }
 
 // Custo unitário médio por cod a partir de StockSnapshot.valorCusto (mesmo campo que
-// getEstoqueAtual já usa pro valor de estoque) — é o único custo por SKU que o Radar já tem;
-// sem isso, "valor estimado da compra"/"verba sugerida" (seções 4, 5, 6 e 7) ficaria sempre nulo.
-// Average, não o mais recente: valorCusto varia por loja/sync, e aqui queremos uma estimativa
-// única por produto, não por linha de estoque. null quando nenhuma loja tem custo cadastrado pra
-// aquele cod — propagado como pendência (ver avisos/premissas de quem consome).
+// getEstoqueAtual já usa pro valor de estoque). Só custo > 0 conta como confiável: 0 no DAPIC é
+// "não cadastrado", e antes entrava na média puxando o custo pra baixo (e o valor da compra pra
+// R$ 0 quando era o único). null = nenhuma loja tem custo confiável — vira pendência.
 async function getCustoUnitarioPorCod(cods: string[]): Promise<Map<string, number | null>> {
   const map = new Map<string, number | null>();
   if (cods.length === 0) return map;
   for (const cod of cods) map.set(cod, null);
   const rows = await prisma.stockSnapshot.groupBy({
     by: ["cod"],
-    where: { cod: { in: cods }, valorCusto: { not: null } },
+    where: { cod: { in: cods }, valorCusto: { gt: 0 } },
     _avg: { valorCusto: true },
   });
   for (const r of rows) map.set(r.cod, r._avg.valorCusto ?? null);
   return map;
 }
 
+// Estoque VENDÁVEL por cod: só armazenadores que vendem (Store.sellsProducts). Antes somava todos
+// os armazenadores — Defeito, Lixeira, Bonificação, Conserto, Extraviados — como se fosse estoque
+// disponível, o que reduzia (às vezes zerava) a sugestão de compra de Best Seller. É o mesmo
+// conjunto de locais que a Distribuição de Estoque trata como disponível (pontos de venda +
+// depósitos), então os dois módulos partem do mesmo total.
+async function getEstoqueVendavelPorCod(cods: string[]): Promise<Map<string, number>> {
+  if (cods.length === 0) return new Map();
+  const rows = await prisma.stockSnapshot.groupBy({
+    by: ["cod"],
+    where: { cod: { in: cods }, store: { sellsProducts: true } },
+    _sum: { quantidadeDisponivel: true },
+  });
+  return new Map(rows.map((e) => [e.cod, Math.max(e._sum.quantidadeDisponivel ?? 0, 0)]));
+}
+
+// Cor e tamanho de cada cod (cod = IdGradeProduto = 1 variante) — pra mostrar a recomendação no
+// nível de cor/tamanho. Vem da linha de estoque (Cor/Tamanho do /armazenadores/produtos).
+async function getAtributosVariantePorCod(cods: string[]): Promise<Map<string, { cor: string | null; tamanho: string | null }>> {
+  if (cods.length === 0) return new Map();
+  const rows = await prisma.stockSnapshot.findMany({
+    where: { cod: { in: cods } },
+    distinct: ["cod"],
+    select: { cod: true, cor: true, tamanho: true },
+  });
+  return new Map((rows ?? []).map((r) => [r.cod, { cor: r.cor ?? null, tamanho: r.tamanho ?? null }]));
+}
+
 export type RecomendacaoBestSellerPorProduto = SugestaoBestSeller & {
   produto: string;
   cod: string;
+  cor: string | null;
+  tamanho: string | null;
+  vendaMediaDiaria: number;
+  horizonteDias: number;
+  vendasLiquidas: VendasLiquidasJanelas;
 };
 
 // Monta o input real e calcula a sugestão de compra Best Seller por produto (seção 4 e 6: visão
@@ -658,48 +780,74 @@ export async function getRecomendacoesBestSeller(filters: ComprasFiltro = {}): P
   if (classificados.length === 0) return [];
 
   const cods = classificados.map((c) => c.cod);
-  const [velocidade, pedidosAberto, estoqueRows, coberturaMetas, custoPorCod] = await Promise.all([
+  const [velocidade, pedidosAberto, estoqueByCod, coberturaMetas, custoPorCod, atributos, janelas] = await Promise.all([
     getVendaMediaDiariaPorCod(cods),
     getPedidosEmAbertoPorCod(cods),
-    prisma.stockSnapshot.groupBy({ by: ["cod"], where: { cod: { in: cods } }, _sum: { quantidadeDisponivel: true } }),
+    getEstoqueVendavelPorCod(cods),
     prisma.coberturaMeta.findMany(),
     getCustoUnitarioPorCod(cods),
+    getAtributosVariantePorCod(cods),
+    getVendasLiquidasJanelasPorCod(cods),
   ]);
 
-  const estoqueByCod = new Map(estoqueRows.map((e) => [e.cod, e._sum.quantidadeDisponivel ?? 0]));
   const metaByGrupo = new Map(coberturaMetas.map((m) => [m.grupo, m]));
 
   return classificados.map((c) => {
     const meta = metaByGrupo.get(c.grupo);
     const horizonteCoberturaDias =
       filters.horizonteDiasOverride ?? (meta ? Math.round(meta.mesesCobertura * 30) : HORIZONTE_PADRAO_DIAS);
-    const v = velocidade.get(c.cod) ?? { mediaDiaria: 0, diasComDado: 0 };
+    const v = velocidade.get(c.cod) ?? { mediaDiaria: 0, diasComDado: 0, primeiraVenda: null };
+    const estoque = estoqueByCod.get(c.cod) ?? 0;
     const sugestao = calcularSugestaoBestSeller({
       cod: c.cod,
       grupo: c.grupo,
       horizonteCoberturaDias,
       vendaMediaDiaria: v.mediaDiaria,
       diasHistoricoDisponivel: v.diasComDado,
-      estoqueDisponivel: estoqueByCod.get(c.cod) ?? 0,
+      estoqueDisponivel: estoque,
       estoqueSegurancaUnidades: meta?.estoqueSegurancaUnidades ?? null,
       leadTimeDias: meta?.leadTimeDias ?? null,
       recebimentosPrevistos: pedidosAberto.get(c.cod) ?? [],
       custoUnitario: custoPorCod.get(c.cod) ?? null,
+      rupturaAtual: estoque === 0 && v.mediaDiaria > 0,
     });
-    return { ...sugestao, produto: c.produto, cod: c.cod };
+    if (filters.horizonteDiasOverride == null) {
+      sugestao.premissas.push(
+        meta
+          ? `Horizonte de cobertura = meta do grupo (${meta.mesesCobertura} mês(es) = ${horizonteCoberturaDias} dias).`
+          : `Grupo sem meta de cobertura cadastrada — horizonte padrão de ${HORIZONTE_PADRAO_DIAS} dias.`
+      );
+    } else {
+      sugestao.premissas.push(`Horizonte de simulação escolhido na tela: ${horizonteCoberturaDias} dias.`);
+    }
+    sugestao.premissas.push("Estoque considerado = soma dos armazenadores que vendem (defeito, lixeira, bonificação e similares ficam fora).");
+    const at = atributos.get(c.cod) ?? { cor: null, tamanho: null };
+    return {
+      ...sugestao,
+      produto: c.produto,
+      cod: c.cod,
+      cor: at.cor,
+      tamanho: at.tamanho,
+      vendaMediaDiaria: v.mediaDiaria,
+      horizonteDias: horizonteCoberturaDias + (meta?.leadTimeDias ?? 0),
+      vendasLiquidas: janelas.get(c.cod) ?? { d30: 0, d60: 0, d90: 0 },
+    };
   });
 }
 
 export type RecomendacaoDropPorProduto = SugestaoDrop & {
   produto: string;
   cod: string;
-  diasRestantesJanela: number;
+  cor: string | null;
+  tamanho: string | null;
+  diasRestantesJanela: number | null;
+  diasDesdeLancamento: number | null;
 };
 
 // Monta o input real e calcula a sugestão/risco de Drop por produto classificado como DROP.
-// diasRestantesJanela vem de dataEncerramentoPrevista quando cadastrada; sem data, não há como
-// saber quanto falta de janela — fica null e a função pura recebe 0 (sem previsão futura), com
-// aviso explícito (não assume janela infinita nem fecha arbitrariamente).
+// diasRestantesJanela vem de dataEncerramentoPrevista quando cadastrada; sem data, a janela é
+// desconhecida (null) e o motor não calcula previsão/risco/quantidade — nunca assume 0 dias nem
+// janela infinita.
 export async function getRecomendacoesDrop(filters: ComprasFiltro = {}): Promise<RecomendacaoDropPorProduto[]> {
   const classificados = await prisma.classificacaoProduto.findMany({
     where: {
@@ -712,35 +860,50 @@ export async function getRecomendacoesDrop(filters: ComprasFiltro = {}): Promise
   if (classificados.length === 0) return [];
 
   const cods = classificados.map((c) => c.cod);
-  const [velocidade, pedidosAberto, estoqueRows, vendasAcumuladasRows, custoPorCod] = await Promise.all([
-    getVendaMediaDiariaPorCod(cods),
-    getPedidosEmAbertoPorCod(cods),
-    prisma.stockSnapshot.groupBy({ by: ["cod"], where: { cod: { in: cods } }, _sum: { quantidadeDisponivel: true } }),
-    prisma.sale.groupBy({ by: ["cod"], where: { status: { not: "Cancelada" }, cod: { in: cods } }, _sum: { quantidade: true } }),
-    getCustoUnitarioPorCod(cods),
-  ]);
+  const [velocidade, pedidosAberto, estoqueByCod, vendasAcumuladasRows, devolucoesAcumuladasRows, producaoRows, custoPorCod, atributos] =
+    await Promise.all([
+      getVendaMediaDiariaPorCod(cods),
+      getPedidosEmAbertoPorCod(cods),
+      getEstoqueVendavelPorCod(cods),
+      prisma.sale.groupBy({ by: ["cod"], where: { status: { not: "Cancelada" }, cod: { in: cods } }, _sum: { quantidade: true } }),
+      prisma.return.groupBy({ by: ["cod"], where: { status: { not: "Cancelada" }, cod: { in: cods } }, _sum: { quantidade: true } }),
+      prisma.productionOrder.groupBy({ by: ["cod"], where: { cod: { in: cods }, dataFinalizacaoProducao: { not: null } }, _sum: { quantidade: true } }),
+      getCustoUnitarioPorCod(cods),
+      getAtributosVariantePorCod(cods),
+    ]);
 
-  const estoqueByCod = new Map(estoqueRows.map((e) => [e.cod, e._sum.quantidadeDisponivel ?? 0]));
   const vendasAcumuladasByCod = new Map(vendasAcumuladasRows.map((v) => [v.cod, v._sum.quantidade ?? 0]));
+  const devolucoesAcumuladasByCod = new Map((devolucoesAcumuladasRows ?? []).map((v) => [v.cod, v._sum.quantidade ?? 0]));
+  const producaoByCod = new Map((producaoRows ?? []).map((p) => [p.cod, p._sum.quantidade ?? 0]));
   const hoje = new Date();
 
   return classificados.map((c) => {
-    const v = velocidade.get(c.cod) ?? { mediaDiaria: 0, diasComDado: 0 };
-    const diasDesdeLancamento = c.dataLancamento
-      ? Math.floor((hoje.getTime() - c.dataLancamento.getTime()) / 86_400_000)
-      : null;
+    const v = velocidade.get(c.cod) ?? { mediaDiaria: 0, diasComDado: 0, primeiraVenda: null };
+    // Sem dataLancamento cadastrada, a 1ª venda registrada é a melhor evidência de quando o Drop
+    // começou a vender (premissa explícita, não um valor inventado).
+    const inicio = c.dataLancamento ?? v.primeiraVenda;
+    const diasDesdeLancamento = inicio ? Math.floor((hoje.getTime() - inicio.getTime()) / DIA_MS) : null;
     const diasRestantesJanela = c.dataEncerramentoPrevista
-      ? Math.max(Math.floor((c.dataEncerramentoPrevista.getTime() - hoje.getTime()) / 86_400_000), 0)
-      : 0;
+      ? Math.max(Math.floor((c.dataEncerramentoPrevista.getTime() - hoje.getTime()) / DIA_MS), 0)
+      : null;
+    const vendasAcumuladas = Math.max((vendasAcumuladasByCod.get(c.cod) ?? 0) - (devolucoesAcumuladasByCod.get(c.cod) ?? 0), 0);
+    const estoque = estoqueByCod.get(c.cod) ?? 0;
+    // Denominador do sell-through (mesma regra de resolveSellThrough em estoque.ts): produção
+    // finalizada registrada quando ela é ≥ vendido (histórico de OP só existe desde 2025-08); senão
+    // vendido + estoque vendável atual (aproximação do que entrou no ciclo comercial).
+    const produzido = producaoByCod.get(c.cod) ?? 0;
+    const usaProducao = produzido > 0 && produzido >= vendasAcumuladas;
+    const quantidadeOriginal = usaProducao ? produzido : vendasAcumuladas + estoque;
 
     const sugestao = calcularSugestaoDrop({
       cod: c.cod,
       colecao: c.colecao ?? c.produto,
       grupo: c.grupo,
       possibilidadeReposicao: c.possibilidadeReposicao,
-      quantidadeCompradaOriginal: 0, // ver pendência no relatório final: não há campo de "quantidade original comprada/produzida" separado do que já foi vendido+estoque hoje
-      estoqueDisponivel: estoqueByCod.get(c.cod) ?? 0,
-      vendasAcumuladas: vendasAcumuladasByCod.get(c.cod) ?? 0,
+      quantidadeCompradaOriginal: quantidadeOriginal,
+      origemQuantidadeOriginal: usaProducao ? "produção finalizada registrada" : "vendido líquido + estoque vendável atual",
+      estoqueDisponivel: estoque,
+      vendasAcumuladas,
       velocidadeVendaDiaria: v.mediaDiaria,
       custoUnitario: custoPorCod.get(c.cod) ?? null,
       diasDesdeLancamento,
@@ -748,10 +911,11 @@ export async function getRecomendacoesDrop(filters: ComprasFiltro = {}): Promise
       orcamentoDisponivelDrop: c.orcamentoDrop,
       pedidosEmAberto: pedidosAberto.get(c.cod) ?? [],
     });
-    if (!c.dataEncerramentoPrevista) {
-      sugestao.avisos.unshift("Sem data prevista de encerramento cadastrada para este Drop — janela comercial restante assumida como 0 (tratar faltante/excedente abaixo como indicativo, não final).");
+    if (!c.dataLancamento && v.primeiraVenda) {
+      sugestao.premissas.push("Sem data de lançamento cadastrada — idade do Drop contada a partir da 1ª venda registrada.");
     }
-    return { ...sugestao, produto: c.produto, cod: c.cod, diasRestantesJanela };
+    const at = atributos.get(c.cod) ?? { cor: null, tamanho: null };
+    return { ...sugestao, produto: c.produto, cod: c.cod, cor: at.cor, tamanho: at.tamanho, diasRestantesJanela, diasDesdeLancamento };
   });
 }
 
@@ -775,6 +939,7 @@ export type LinhaConsolidadaGrupo = {
     coberturaDias: number | null;
     quantidadeSugerida: number;
     valorEstimado: number;
+    produtosSemCusto: number;
   };
   drop: {
     estoqueAtual: number;
@@ -783,6 +948,7 @@ export type LinhaConsolidadaGrupo = {
     valorEstimado: number;
     riscoRupturaCount: number;
     riscoSobraCount: number;
+    janelaDesconhecidaCount: number;
   };
   quantidadeSugeridaTotal: number;
   valorEstimadoTotal: number;
@@ -792,18 +958,38 @@ export type LinhaConsolidadaGrupo = {
   participacaoVerbaSugeridaPct: number | null;
   diferencaDemandaEstoque: number;
   indicador: IndicadorCobertura;
+  produtosBestSeller: number;
+  produtosDrop: number;
+};
+
+export type NecessidadeSemCusto = {
+  id: string;
+  cod: string;
+  produto: string;
+  grupo: string;
+  tipoCompra: TipoCompraProduto;
+  quantidadeSugerida: number;
 };
 
 export type VisaoConsolidadaCompras = {
-  horizonteDias: number;
+  // null = sem simulação: cada grupo usa a própria meta de cobertura.
+  horizonteDias: number | null;
   orcamentoTotalPlanejado: number | null;
   verbaSugeridaBestSeller: number;
   verbaSugeridaDrop: number;
   verbaSugeridaTotal: number;
   quantidadeTotalSugerida: number;
+  valorAtendidoNoOrcamento: number;
+  valorForaDoOrcamento: number;
+  // Necessidade calculada (qtd > 0) sem custo confiável: entra na quantidade, mas não na verba nem
+  // na priorização por orçamento — listada à parte pra não sumir.
+  necessidadesSemCusto: NecessidadeSemCusto[];
+  planejamentoFinanceiroIncompleto: boolean;
   porGrupo: LinhaConsolidadaGrupo[];
   itensPriorizados: ItemPriorizado[];
   produtosFilaRevisaoCount: number;
+  bestSeller: RecomendacaoBestSellerPorProduto[];
+  drops: RecomendacaoDropPorProduto[];
 };
 
 function indicadorPara(estoqueAtual: number, demandaPrevista: number): IndicadorCobertura {
@@ -814,35 +1000,28 @@ function indicadorPara(estoqueAtual: number, demandaPrevista: number): Indicador
   return "equilibrio";
 }
 
-// Junta getRecomendacoesBestSeller + getRecomendacoesDrop, agrega por grupo (seção 6: "enxergar a
-// necessidade de compra por grupo de produto, separando Best Seller e Drop") e prioriza o
-// orçamento configurado (MapaComprasConfig.orcamentoTotalPlanejado) entre TODOS os itens com
-// quantidade sugerida > 0 (seção 7). Não persiste nada — é a mesma leitura que alimenta a
-// simulação (seção 9): a tela passa horizonteDiasOverride via query string, sem gravar nada até o
-// usuário confirmar uma decisão individual (ver registrarDecisaoCompra).
-export async function getVisaoConsolidadaCompras(filters: ComprasFiltro = {}): Promise<VisaoConsolidadaCompras> {
-  const horizonteDias = filters.horizonteDiasOverride ?? HORIZONTE_PADRAO_DIAS;
-
-  const [bsRows, dropRows, orcamentoTotalPlanejado, filaRevisao] = await Promise.all([
-    getRecomendacoesBestSeller(filters),
-    getRecomendacoesDrop(filters),
-    getOrcamentoTotalPlanejado(),
-    getFilaRevisaoClassificacao(2000),
-  ]);
-
-  const porGrupoMap = new Map<string, LinhaConsolidadaGrupo>();
-  function grupoEntry(grupo: string): LinhaConsolidadaGrupo {
+// Agregação PURA por grupo — o total de cada grupo é exatamente a soma dos seus produtos (sem
+// arredondamento intermediário), o que torna grupo ↔ produto reconciliável (testado).
+export function agregarRecomendacoesPorGrupo(
+  bsRows: Pick<RecomendacaoBestSellerPorProduto, "grupo" | "estoqueDisponivelUtilizavel" | "demandaProjetadaHorizonte" | "quantidadeSugerida" | "valorEstimado" | "vendaMediaDiaria">[],
+  dropRows: Pick<RecomendacaoDropPorProduto, "grupo" | "estoqueDisponivel" | "previsaoVendaAteFimJanela" | "quantidadeSugerida" | "valorEstimado" | "riscoRuptura" | "riscoSobra" | "janelaConhecida">[]
+): LinhaConsolidadaGrupo[] {
+  const porGrupoMap = new Map<string, LinhaConsolidadaGrupo & { velocidadeBS: number }>();
+  function grupoEntry(grupo: string) {
     let g = porGrupoMap.get(grupo);
     if (!g) {
       g = {
         grupo,
-        bestSeller: { estoqueAtual: 0, demandaPrevista: 0, coberturaDias: null, quantidadeSugerida: 0, valorEstimado: 0 },
-        drop: { estoqueAtual: 0, demandaPrevista: 0, quantidadeSugerida: 0, valorEstimado: 0, riscoRupturaCount: 0, riscoSobraCount: 0 },
+        bestSeller: { estoqueAtual: 0, demandaPrevista: 0, coberturaDias: null, quantidadeSugerida: 0, valorEstimado: 0, produtosSemCusto: 0 },
+        drop: { estoqueAtual: 0, demandaPrevista: 0, quantidadeSugerida: 0, valorEstimado: 0, riscoRupturaCount: 0, riscoSobraCount: 0, janelaDesconhecidaCount: 0 },
         quantidadeSugeridaTotal: 0,
         valorEstimadoTotal: 0,
         participacaoVerbaSugeridaPct: null,
         diferencaDemandaEstoque: 0,
         indicador: "equilibrio",
+        produtosBestSeller: 0,
+        produtosDrop: 0,
+        velocidadeBS: 0,
       };
       porGrupoMap.set(grupo, g);
     }
@@ -851,20 +1030,123 @@ export async function getVisaoConsolidadaCompras(filters: ComprasFiltro = {}): P
 
   for (const r of bsRows) {
     const g = grupoEntry(r.grupo);
+    g.produtosBestSeller += 1;
     g.bestSeller.estoqueAtual += r.estoqueDisponivelUtilizavel;
     g.bestSeller.demandaPrevista += r.demandaProjetadaHorizonte;
     g.bestSeller.quantidadeSugerida += r.quantidadeSugerida;
     g.bestSeller.valorEstimado += r.valorEstimado ?? 0;
+    if (r.quantidadeSugerida > 0 && r.valorEstimado == null) g.bestSeller.produtosSemCusto += 1;
+    g.velocidadeBS += r.vendaMediaDiaria;
   }
   for (const r of dropRows) {
     const g = grupoEntry(r.grupo);
+    g.produtosDrop += 1;
     g.drop.estoqueAtual += r.estoqueDisponivel;
     g.drop.demandaPrevista += r.previsaoVendaAteFimJanela;
     g.drop.quantidadeSugerida += r.quantidadeSugerida ?? 0;
     g.drop.valorEstimado += r.valorEstimado ?? 0;
     if (r.riscoRuptura) g.drop.riscoRupturaCount += 1;
     if (r.riscoSobra) g.drop.riscoSobraCount += 1;
+    if (!r.janelaConhecida) g.drop.janelaDesconhecidaCount += 1;
   }
+
+  const linhas = [...porGrupoMap.values()];
+  const verbaTotal = linhas.reduce((s, g) => s + g.bestSeller.valorEstimado + g.drop.valorEstimado, 0);
+  for (const g of linhas) {
+    g.quantidadeSugeridaTotal = g.bestSeller.quantidadeSugerida + g.drop.quantidadeSugerida;
+    g.valorEstimadoTotal = g.bestSeller.valorEstimado + g.drop.valorEstimado;
+    // Cobertura do grupo = estoque ÷ soma das velocidades diárias dos produtos — independe do
+    // horizonte de cada produto (antes dividia pela demanda e multiplicava por um horizonte único,
+    // o que errava quando grupos/produtos tinham horizontes diferentes).
+    g.bestSeller.coberturaDias = g.velocidadeBS > 0 ? g.bestSeller.estoqueAtual / g.velocidadeBS : null;
+    const estoqueAtualTotal = g.bestSeller.estoqueAtual + g.drop.estoqueAtual;
+    const demandaPrevistaTotal = g.bestSeller.demandaPrevista + g.drop.demandaPrevista;
+    g.diferencaDemandaEstoque = demandaPrevistaTotal - estoqueAtualTotal;
+    g.indicador = indicadorPara(estoqueAtualTotal, demandaPrevistaTotal);
+    g.participacaoVerbaSugeridaPct = verbaTotal > 0 ? (g.valorEstimadoTotal / verbaTotal) * 100 : null;
+  }
+  return linhas
+    .map((g): LinhaConsolidadaGrupo => {
+      const { velocidadeBS, ...linha } = g;
+      void velocidadeBS; // só serviu pra cobertura acima, não sai na linha
+      return linha;
+    })
+    .sort((a, b) => b.valorEstimadoTotal - a.valorEstimadoTotal || b.quantidadeSugeridaTotal - a.quantidadeSugeridaTotal);
+}
+
+export type LinhaPorProduto = {
+  chave: string;
+  produto: string;
+  grupo: string;
+  tipoCompra: TipoCompraProduto;
+  colecao: string | null;
+  quantidadeSugerida: number;
+  valorEstimado: number;
+  variantesSemCusto: number;
+  estoque: number;
+  variantes: {
+    cod: string;
+    cor: string | null;
+    tamanho: string | null;
+    quantidadeSugerida: number | null;
+    valorEstimado: number | null;
+    estoque: number;
+  }[];
+};
+
+// Por produto (nome) com o detalhe por cor/tamanho (cod) — a soma das variantes é o total do
+// produto, e o total dos produtos de um grupo bate com o total do grupo.
+export function agregarPorProduto(
+  bsRows: Pick<RecomendacaoBestSellerPorProduto, "cod" | "produto" | "grupo" | "cor" | "tamanho" | "quantidadeSugerida" | "valorEstimado" | "estoqueDisponivelUtilizavel">[],
+  dropRows: Pick<RecomendacaoDropPorProduto, "cod" | "produto" | "grupo" | "colecao" | "cor" | "tamanho" | "quantidadeSugerida" | "valorEstimado" | "estoqueDisponivel">[]
+): LinhaPorProduto[] {
+  const map = new Map<string, LinhaPorProduto>();
+  function entry(tipo: TipoCompraProduto, produto: string, grupo: string, colecao: string | null) {
+    const chave = `${tipo}::${grupo}::${produto}`;
+    let e = map.get(chave);
+    if (!e) {
+      e = { chave, produto, grupo, tipoCompra: tipo, colecao, quantidadeSugerida: 0, valorEstimado: 0, variantesSemCusto: 0, estoque: 0, variantes: [] };
+      map.set(chave, e);
+    }
+    return e;
+  }
+  for (const r of bsRows) {
+    const e = entry(TipoCompraProduto.BEST_SELLER, r.produto, r.grupo, null);
+    e.quantidadeSugerida += r.quantidadeSugerida;
+    e.valorEstimado += r.valorEstimado ?? 0;
+    e.estoque += r.estoqueDisponivelUtilizavel;
+    if (r.quantidadeSugerida > 0 && r.valorEstimado == null) e.variantesSemCusto += 1;
+    e.variantes.push({ cod: r.cod, cor: r.cor, tamanho: r.tamanho, quantidadeSugerida: r.quantidadeSugerida, valorEstimado: r.valorEstimado, estoque: r.estoqueDisponivelUtilizavel });
+  }
+  for (const r of dropRows) {
+    const e = entry(TipoCompraProduto.DROP, r.produto, r.grupo, r.colecao);
+    e.quantidadeSugerida += r.quantidadeSugerida ?? 0;
+    e.valorEstimado += r.valorEstimado ?? 0;
+    e.estoque += r.estoqueDisponivel;
+    if ((r.quantidadeSugerida ?? 0) > 0 && r.valorEstimado == null) e.variantesSemCusto += 1;
+    e.variantes.push({ cod: r.cod, cor: r.cor, tamanho: r.tamanho, quantidadeSugerida: r.quantidadeSugerida, valorEstimado: r.valorEstimado, estoque: r.estoqueDisponivel });
+  }
+  return [...map.values()].sort((a, b) => b.valorEstimado - a.valorEstimado || b.quantidadeSugerida - a.quantidadeSugerida);
+}
+
+function rotuloVariante(r: { produto: string; cor: string | null; tamanho: string | null }): string {
+  return [r.produto, r.cor && !r.produto.includes(r.cor) ? r.cor : null, r.tamanho ? `tam. ${r.tamanho}` : null].filter(Boolean).join(" · ");
+}
+
+// Junta getRecomendacoesBestSeller + getRecomendacoesDrop, agrega por grupo (seção 6: "enxergar a
+// necessidade de compra por grupo de produto, separando Best Seller e Drop") e prioriza o
+// orçamento configurado (MapaComprasConfig.orcamentoTotalPlanejado) entre TODOS os itens com
+// quantidade sugerida > 0 e custo confiável (seção 7). Os que têm necessidade mas não têm custo
+// ficam em necessidadesSemCusto, nunca somem. Não persiste nada.
+export async function getVisaoConsolidadaCompras(filters: ComprasFiltro = {}): Promise<VisaoConsolidadaCompras> {
+  const [bsRows, dropRows, orcamentoTotalPlanejado, filaRevisao] = await Promise.all([
+    getRecomendacoesBestSeller(filters),
+    getRecomendacoesDrop(filters),
+    getOrcamentoTotalPlanejado(),
+    getFilaRevisaoClassificacao(2000),
+  ]);
+
+  const porGrupo = agregarRecomendacoesPorGrupo(bsRows, dropRows);
 
   const verbaSugeridaBestSeller = bsRows.reduce((s, r) => s + (r.valorEstimado ?? 0), 0);
   const verbaSugeridaDrop = dropRows.reduce((s, r) => s + (r.valorEstimado ?? 0), 0);
@@ -872,40 +1154,41 @@ export async function getVisaoConsolidadaCompras(filters: ComprasFiltro = {}): P
   const quantidadeTotalSugerida =
     bsRows.reduce((s, r) => s + r.quantidadeSugerida, 0) + dropRows.reduce((s, r) => s + (r.quantidadeSugerida ?? 0), 0);
 
-  for (const g of porGrupoMap.values()) {
-    g.quantidadeSugeridaTotal = g.bestSeller.quantidadeSugerida + g.drop.quantidadeSugerida;
-    g.valorEstimadoTotal = g.bestSeller.valorEstimado + g.drop.valorEstimado;
-    g.bestSeller.coberturaDias =
-      g.bestSeller.demandaPrevista > 0 ? (g.bestSeller.estoqueAtual / g.bestSeller.demandaPrevista) * horizonteDias : null;
-    const estoqueAtualTotal = g.bestSeller.estoqueAtual + g.drop.estoqueAtual;
-    const demandaPrevistaTotal = g.bestSeller.demandaPrevista + g.drop.demandaPrevista;
-    g.diferencaDemandaEstoque = demandaPrevistaTotal - estoqueAtualTotal;
-    g.indicador = indicadorPara(estoqueAtualTotal, demandaPrevistaTotal);
-    g.participacaoVerbaSugeridaPct = verbaSugeridaTotal > 0 ? (g.valorEstimadoTotal / verbaSugeridaTotal) * 100 : null;
-  }
-
   const itensPriorizaveis: ItemPriorizavel[] = [];
+  const necessidadesSemCusto: NecessidadeSemCusto[] = [];
   for (const r of bsRows) {
-    if (r.quantidadeSugerida <= 0 || r.valorEstimado == null) continue;
+    if (r.quantidadeSugerida <= 0) continue;
+    if (r.valorEstimado == null) {
+      necessidadesSemCusto.push({ id: `bs:${r.cod}`, cod: r.cod, produto: rotuloVariante(r), grupo: r.grupo, tipoCompra: TipoCompraProduto.BEST_SELLER, quantidadeSugerida: r.quantidadeSugerida });
+      continue;
+    }
     itensPriorizaveis.push({
       id: `bs:${r.cod}`,
       tipoCompra: TipoCompraProduto.BEST_SELLER,
       grupo: r.grupo,
+      rotulo: rotuloVariante(r),
       quantidadeSugerida: r.quantidadeSugerida,
       valorEstimado: r.valorEstimado,
       // Ruptura iminente = cobertura atual menor que 1 semana — regra simples e explícita (não é
       // um score), documentada aqui pra quem for ler o resultado, não só no código.
       riscoRuptura: r.coberturaAtualDias != null && r.coberturaAtualDias < 7,
       demandaComprovada: r.confiavel && r.demandaProjetadaHorizonte > 0,
+      // Impacto = custo da reposição (não é faturamento nem margem: o Radar não tem margem por SKU
+      // confiável pra usar aqui).
       impactoComercial: r.valorEstimado,
     });
   }
   for (const r of dropRows) {
-    if (!r.quantidadeSugerida || r.quantidadeSugerida <= 0 || r.valorEstimado == null) continue;
+    if (!r.quantidadeSugerida || r.quantidadeSugerida <= 0) continue;
+    if (r.valorEstimado == null) {
+      necessidadesSemCusto.push({ id: `drop:${r.cod}`, cod: r.cod, produto: rotuloVariante(r), grupo: r.grupo, tipoCompra: TipoCompraProduto.DROP, quantidadeSugerida: r.quantidadeSugerida });
+      continue;
+    }
     itensPriorizaveis.push({
       id: `drop:${r.cod}`,
       tipoCompra: TipoCompraProduto.DROP,
       grupo: r.grupo,
+      rotulo: rotuloVariante(r),
       quantidadeSugerida: r.quantidadeSugerida,
       valorEstimado: r.valorEstimado,
       riscoRuptura: r.riscoRuptura,
@@ -916,18 +1199,59 @@ export async function getVisaoConsolidadaCompras(filters: ComprasFiltro = {}): P
   }
 
   const itensPriorizados = priorizarOrcamentoCompras(itensPriorizaveis, orcamentoTotalPlanejado);
+  const valorAtendidoNoOrcamento = itensPriorizados.filter((i) => i.atendido).reduce((s, i) => s + i.valorEstimado, 0);
+  const valorForaDoOrcamento = itensPriorizados.filter((i) => !i.atendido).reduce((s, i) => s + i.valorEstimado, 0);
 
   return {
-    horizonteDias,
+    horizonteDias: filters.horizonteDiasOverride ?? null,
     orcamentoTotalPlanejado,
     verbaSugeridaBestSeller,
     verbaSugeridaDrop,
     verbaSugeridaTotal,
     quantidadeTotalSugerida,
-    porGrupo: [...porGrupoMap.values()].sort((a, b) => b.valorEstimadoTotal - a.valorEstimadoTotal),
+    valorAtendidoNoOrcamento,
+    valorForaDoOrcamento,
+    necessidadesSemCusto,
+    planejamentoFinanceiroIncompleto: orcamentoTotalPlanejado == null || necessidadesSemCusto.length > 0,
+    porGrupo,
     itensPriorizados,
     produtosFilaRevisaoCount: filaRevisao.length,
+    bestSeller: bsRows,
+    drops: dropRows,
   };
+}
+
+// ---------------------------------------------------------------------------
+// COERÊNCIA COM A DISTRIBUIÇÃO DE ESTOQUE (seção 12 do pedido)
+// ---------------------------------------------------------------------------
+
+export type InfoRedistribuicao = {
+  diagnostico: string;
+  unidadesTransferiveis: number;
+  transferencias: number;
+  estoqueTotalInsuficiente: boolean;
+};
+
+// Cruza as recomendações de compra com o resultado da Distribuição de Estoque pelo cod. Não altera
+// NENHUMA quantidade de compra: a necessidade de compra já usa o estoque vendável total (que uma
+// transferência interna não muda). Só anota "antes de comprar, dá pra remanejar X un entre lojas"
+// — redistribuição e compra são decisões separadas, com o mesmo fato de estoque por trás.
+export function cruzarComDistribuicao(
+  cods: string[],
+  variantesDistribuicao: { cod: string; diagnostico: string; unidadesTransferiveis: number; transferencias: unknown[] }[]
+): Map<string, InfoRedistribuicao> {
+  const alvo = new Set(cods);
+  const map = new Map<string, InfoRedistribuicao>();
+  for (const v of variantesDistribuicao) {
+    if (!alvo.has(v.cod)) continue;
+    map.set(v.cod, {
+      diagnostico: v.diagnostico,
+      unidadesTransferiveis: v.unidadesTransferiveis,
+      transferencias: v.transferencias.length,
+      estoqueTotalInsuficiente: v.diagnostico === "ESTOQUE_TOTAL_INSUFICIENTE",
+    });
+  }
+  return map;
 }
 
 // ---------------------------------------------------------------------------

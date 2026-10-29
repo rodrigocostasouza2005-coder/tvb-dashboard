@@ -5,9 +5,11 @@ import {
   getClassificacaoFilterOptions,
   getParametrosBestSellerPorGrupo,
   getVisaoConsolidadaCompras,
-  getRecomendacoesBestSeller,
-  getRecomendacoesDrop,
   getFilaRevisaoClassificacao,
+  getAnaliseDistribuicaoEstoque,
+  cruzarComDistribuicao,
+  agregarPorProduto,
+  type ComprasFiltro,
 } from "@/lib/metrics";
 import { StatusComercialProduto } from "@prisma/client";
 import { getGrupoRestriction } from "@/lib/permissions";
@@ -15,13 +17,12 @@ import { requireTabAccess } from "@/lib/tabs";
 import { toArray, type RawSearchParams } from "@/lib/filters";
 import { MapaComprasGrid } from "./mapa-compras-grid";
 import { updateCrescimentoAction } from "./actions";
-import { ModoToggle, type Modo } from "./inteligencia/modo-toggle";
+import { ModoToggle } from "./inteligencia/modo-toggle";
+import { parseModo } from "./inteligencia/modos";
 import { InteligenciaFiltros } from "./inteligencia/filtros";
 import { ConsolidadoView } from "./inteligencia/consolidado-view";
 import { AlertasView } from "./inteligencia/alertas-view";
 import { TabelaBestSeller, TabelaDrop, TabelaPorGrupo, TabelaPorProduto } from "./inteligencia/tabelas";
-
-const MODOS_VALIDOS: Modo[] = ["consolidado", "best-seller", "drop", "grupo", "produto", "alertas"];
 
 export default async function MapaComprasPage({ searchParams }: { searchParams: Promise<RawSearchParams> }) {
   const user = await getSessionUser();
@@ -149,15 +150,16 @@ async function MapaComprasInteligencia({
   grupoRestricao: string[] | undefined;
   searchParams: RawSearchParams;
 }) {
-  const modoRaw = typeof searchParams.modo === "string" ? searchParams.modo : "consolidado";
-  const modo: Modo = (MODOS_VALIDOS as string[]).includes(modoRaw) ? (modoRaw as Modo) : "consolidado";
+  const modo = parseModo(searchParams.modo);
 
   const grupoFiltro = toArray(searchParams.grupo);
   const colecaoFiltro = toArray(searchParams.colecao);
   const statusFiltro = toArray(searchParams.status).filter((s): s is StatusComercialProduto =>
     Object.values(StatusComercialProduto).includes(s as StatusComercialProduto)
   );
-  const horizonteDias = Number(searchParams.horizonte) || 30;
+  // Sem ?horizonte= na URL, cada grupo usa a própria meta de cobertura (CoberturaMeta). Antes a
+  // página sempre mandava 30 como override, então a meta por grupo nunca era usada de verdade.
+  const horizonteDias = Number(searchParams.horizonte) > 0 ? Number(searchParams.horizonte) : undefined;
 
   // Restrição de grupo por permissão (mesma regra do resto da página) combinada com o filtro
   // explícito escolhido na tela — se o usuário tem restrição E não escolheu nada, usa a
@@ -165,14 +167,24 @@ async function MapaComprasInteligencia({
   const grupoIn =
     grupoFiltro.length > 0 ? grupoFiltro.filter((g) => !grupoRestricao || grupoRestricao.includes(g)) : grupoRestricao;
 
-  const filtro = {
+  const filtro: ComprasFiltro = {
     grupoIn,
     colecaoIn: colecaoFiltro.length > 0 ? colecaoFiltro : undefined,
     statusComercialIn: statusFiltro.length > 0 ? statusFiltro : undefined,
     horizonteDiasOverride: horizonteDias,
   };
 
-  const [filtroOpcoes] = await Promise.all([getClassificacaoFilterOptions()]);
+  // Modos que não são "consolidado" também partem da visão consolidada: as linhas de Best Seller e
+  // Drop já vêm nela, então cada tela calcula o motor UMA vez (antes "Por grupo" rodava os dois
+  // motores duas vezes). A distribuição de estoque é cacheada por versão de sync.
+  const [filtroOpcoes, visao, distribuicao] = await Promise.all([
+    getClassificacaoFilterOptions(),
+    getVisaoConsolidadaCompras(filtro),
+    modo === "best-seller" || modo === "drop" || modo === "alertas" ? getAnaliseDistribuicaoEstoque() : Promise.resolve(null),
+  ]);
+  const redistribuicao = distribuicao
+    ? cruzarComDistribuicao([...visao.bestSeller.map((r) => r.cod), ...visao.drops.map((r) => r.cod)], distribuicao.variantes)
+    : new Map();
 
   const filtrosUi = (
     <InteligenciaFiltros
@@ -180,7 +192,7 @@ async function MapaComprasInteligencia({
       grupos={filtroOpcoes.grupos}
       colecoes={filtroOpcoes.colecoes}
       statusComercialDisponiveis={filtroOpcoes.statusComercialEmUso}
-      value={{ modo, grupoIn: grupoFiltro, colecaoIn: colecaoFiltro, statusComercialIn: statusFiltro, horizonteDias }}
+      value={{ modo, grupoIn: grupoFiltro, colecaoIn: colecaoFiltro, statusComercialIn: statusFiltro, horizonteDias: horizonteDias ?? null }}
     />
   );
 
@@ -189,52 +201,74 @@ async function MapaComprasInteligencia({
       <ModoToggle basePath="/dashboard/mapa-compras" searchParams={searchParams} current={modo} />
       {filtrosUi}
 
-      {modo === "consolidado" && (
-        <ConsolidadoView visao={await getVisaoConsolidadaCompras(filtro)} canEdit={canEdit} />
+      {modo === "consolidado" && <ConsolidadoView visao={visao} canEdit={canEdit} />}
+
+      {modo === "best-seller" && <TabelaBestSeller rows={visao.bestSeller} redistribuicao={redistribuicao} />}
+
+      {modo === "drop" && <TabelaDrop rows={visao.drops} redistribuicao={redistribuicao} />}
+
+      {modo === "grupo" && <TabelaPorGrupoAsync visao={visao} canEdit={canEdit} />}
+
+      {modo === "produto" && <TabelaPorProduto linhas={agregarPorProduto(visao.bestSeller, visao.drops)} />}
+
+      {modo === "alertas" && (
+        <AlertasAsync
+          visao={visao}
+          redistribuicao={redistribuicao}
+          distribuicaoResumo={
+            distribuicao
+              ? {
+                  status: distribuicao.execucao.status,
+                  transferencias: distribuicao.contagens.transferenciasSugeridas,
+                  unidades: distribuicao.contagens.unidadesTransferiveis,
+                  insuficienciaGlobal: distribuicao.contagens.porDiagnostico.ESTOQUE_TOTAL_INSUFICIENTE,
+                }
+              : null
+          }
+        />
       )}
-
-      {modo === "best-seller" && <TabelaBestSeller rows={await getRecomendacoesBestSeller(filtro)} />}
-
-      {modo === "drop" && <TabelaDrop rows={await getRecomendacoesDrop(filtro)} />}
-
-      {modo === "grupo" && (
-        <TabelaPorGrupoAsync filtro={filtro} canEdit={canEdit} />
-      )}
-
-      {modo === "produto" && <TabelaPorProdutoAsync filtro={filtro} />}
-
-      {modo === "alertas" && <AlertasAsync filtro={filtro} />}
     </div>
   );
 }
 
 async function TabelaPorGrupoAsync({
-  filtro,
+  visao,
   canEdit,
 }: {
-  filtro: Parameters<typeof getVisaoConsolidadaCompras>[0];
+  visao: Awaited<ReturnType<typeof getVisaoConsolidadaCompras>>;
   canEdit: boolean;
 }) {
-  const [visao, bsRows, dropRows, parametros] = await Promise.all([
-    getVisaoConsolidadaCompras(filtro),
-    getRecomendacoesBestSeller(filtro),
-    getRecomendacoesDrop(filtro),
-    getParametrosBestSellerPorGrupo(),
-  ]);
+  const parametros = await getParametrosBestSellerPorGrupo();
   const coberturaMetaPorGrupo = new Map(parametros.map((p) => [p.grupo, p]));
-  return <TabelaPorGrupo porGrupo={visao.porGrupo} bsRows={bsRows} dropRows={dropRows} canEdit={canEdit} coberturaMetaPorGrupo={coberturaMetaPorGrupo} />;
+  return (
+    <TabelaPorGrupo
+      porGrupo={visao.porGrupo}
+      bsRows={visao.bestSeller}
+      dropRows={visao.drops}
+      canEdit={canEdit}
+      coberturaMetaPorGrupo={coberturaMetaPorGrupo}
+    />
+  );
 }
 
-async function TabelaPorProdutoAsync({ filtro }: { filtro: Parameters<typeof getRecomendacoesBestSeller>[0] }) {
-  const [bsRows, dropRows] = await Promise.all([getRecomendacoesBestSeller(filtro), getRecomendacoesDrop(filtro)]);
-  return <TabelaPorProduto bsRows={bsRows} dropRows={dropRows} />;
-}
-
-async function AlertasAsync({ filtro }: { filtro: Parameters<typeof getRecomendacoesBestSeller>[0] }) {
-  const [bsRows, dropRows, filaRevisao] = await Promise.all([
-    getRecomendacoesBestSeller(filtro),
-    getRecomendacoesDrop(filtro),
-    getFilaRevisaoClassificacao(),
-  ]);
-  return <AlertasView bsRows={bsRows} dropRows={dropRows} filaRevisao={filaRevisao} />;
+async function AlertasAsync({
+  visao,
+  redistribuicao,
+  distribuicaoResumo,
+}: {
+  visao: Awaited<ReturnType<typeof getVisaoConsolidadaCompras>>;
+  redistribuicao: ReturnType<typeof cruzarComDistribuicao>;
+  distribuicaoResumo: { status: string; transferencias: number; unidades: number; insuficienciaGlobal: number } | null;
+}) {
+  const filaRevisao = await getFilaRevisaoClassificacao();
+  return (
+    <AlertasView
+      bsRows={visao.bestSeller}
+      dropRows={visao.drops}
+      filaRevisao={filaRevisao}
+      necessidadesSemCusto={visao.necessidadesSemCusto}
+      redistribuicao={redistribuicao}
+      distribuicaoResumo={distribuicaoResumo}
+    />
+  );
 }

@@ -9,6 +9,10 @@ const coberturaMetaFindMany = vi.fn();
 const mapaComprasConfigFindUnique = vi.fn();
 const saleFindMany = vi.fn();
 const stockSnapshotFindMany = vi.fn();
+// Devoluções (venda líquida = vendas − devoluções, adicionado em 2026-10-29). Neste cenário não há
+// devolução nenhuma, então os números esperados abaixo não mudam.
+const returnGroupBy = vi.fn().mockResolvedValue([]);
+const returnFindMany = vi.fn().mockResolvedValue([]);
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -20,6 +24,10 @@ vi.mock("@/lib/prisma", () => ({
     sale: {
       groupBy: (...a: unknown[]) => saleGroupBy(...a),
       findMany: (...a: unknown[]) => saleFindMany(...a),
+    },
+    return: {
+      groupBy: (...a: unknown[]) => returnGroupBy(...a),
+      findMany: (...a: unknown[]) => returnFindMany(...a),
     },
     productionOrder: { groupBy: (...a: unknown[]) => productionOrderGroupBy(...a) },
     coberturaMeta: { findMany: (...a: unknown[]) => coberturaMetaFindMany(...a) },

@@ -23,11 +23,38 @@ export function ConsolidadoView({ visao, canEdit }: { visao: VisaoConsolidadaCom
         <OrcamentoTotalForm valorAtual={visao.orcamentoTotalPlanejado} canEdit={canEdit} />
       </div>
 
+      {visao.planejamentoFinanceiroIncompleto && (
+        <p className="rounded-md border border-[var(--gridline)] p-2 text-xs" style={{ color: "var(--status-warning)" }}>
+          Planejamento financeiro incompleto:{" "}
+          {visao.orcamentoTotalPlanejado == null ? "orçamento total não definido (a lista abaixo só ordena prioridades)" : null}
+          {visao.orcamentoTotalPlanejado == null && visao.necessidadesSemCusto.length > 0 ? "; " : null}
+          {visao.necessidadesSemCusto.length > 0
+            ? `${visao.necessidadesSemCusto.length} necessidade(s) de compra sem custo unitário confiável (${formatNumero(visao.necessidadesSemCusto.reduce((s, n) => s + n.quantidadeSugerida, 0))} un) ficam fora da verba — ver Alertas`
+            : null}
+          .
+        </p>
+      )}
+
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatTile label="Verba sugerida total" value={formatMoeda(visao.verbaSugeridaTotal)} />
         <StatTile label="Verba sugerida — Best Seller" value={formatMoeda(visao.verbaSugeridaBestSeller)} />
         <StatTile label="Verba sugerida — Drop" value={formatMoeda(visao.verbaSugeridaDrop)} />
         <StatTile label="Quantidade total sugerida" value={formatNumero(visao.quantidadeTotalSugerida)} />
+        {visao.orcamentoTotalPlanejado != null && (
+          <>
+            <StatTile label="Cabe no orçamento" value={formatMoeda(visao.valorAtendidoNoOrcamento)} status="good" />
+            <StatTile
+              label="Fora do orçamento"
+              value={formatMoeda(visao.valorForaDoOrcamento)}
+              status={visao.valorForaDoOrcamento > 0 ? "critical" : undefined}
+            />
+          </>
+        )}
+        <StatTile
+          label="Horizonte"
+          value={visao.horizonteDias == null ? "Meta por grupo" : `${visao.horizonteDias} dias`}
+          subValue={visao.horizonteDias == null ? "cobertura cadastrada em cada grupo (padrão 30 dias)" : "simulação — nada é gravado"}
+        />
       </div>
 
       {visao.produtosFilaRevisaoCount > 0 && (
@@ -54,7 +81,7 @@ export function ConsolidadoView({ visao, canEdit }: { visao: VisaoConsolidadaCom
               <li key={item.id} className="rounded-md border border-[var(--gridline)] p-2 text-xs">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span>
-                    <strong>{item.grupo}</strong> — {item.tipoCompra === TipoCompraProduto.BEST_SELLER ? "Best Seller" : "Drop"} · {formatNumero(item.quantidadeSugerida)} un · {formatMoeda(item.valorEstimado)}
+                    <strong>{item.rotulo ?? item.grupo}</strong> ({item.grupo}) — {item.tipoCompra === TipoCompraProduto.BEST_SELLER ? "Best Seller" : "Drop"} · {formatNumero(item.quantidadeSugerida)} un · {formatMoeda(item.valorEstimado)}
                   </span>
                   <span className="text-[var(--text-muted)]">{item.motivoNaoAtendido}</span>
                 </div>
@@ -76,7 +103,7 @@ export function ConsolidadoView({ visao, canEdit }: { visao: VisaoConsolidadaCom
             <thead>
               <tr>
                 <th className="border-b border-[var(--border)] px-3 py-2 text-left font-medium text-[var(--text-secondary)]">#</th>
-                <th className="border-b border-[var(--border)] px-3 py-2 text-left font-medium text-[var(--text-secondary)]">Grupo</th>
+                <th className="border-b border-[var(--border)] px-3 py-2 text-left font-medium text-[var(--text-secondary)]">Produto · grupo</th>
                 <th className="border-b border-[var(--border)] px-3 py-2 text-left font-medium text-[var(--text-secondary)]">Tipo</th>
                 <th className="border-b border-[var(--border)] px-3 py-2 text-right font-medium text-[var(--text-secondary)]">Valor</th>
                 <th className="border-b border-[var(--border)] px-3 py-2 text-left font-medium text-[var(--text-secondary)]">Status</th>
@@ -87,7 +114,10 @@ export function ConsolidadoView({ visao, canEdit }: { visao: VisaoConsolidadaCom
               {visao.itensPriorizados.map((item) => (
                 <tr key={item.id} className="hover:bg-[var(--page-plane)]">
                   <td className="border-b border-[var(--gridline)] px-3 py-2 tabular-nums text-[var(--text-muted)]">{item.prioridade}</td>
-                  <td className="border-b border-[var(--gridline)] px-3 py-2">{item.grupo}</td>
+                  <td className="border-b border-[var(--gridline)] px-3 py-2">
+                    <div>{item.rotulo ?? item.grupo}</div>
+                    <div className="text-[10px] text-[var(--text-muted)]">{item.grupo}</div>
+                  </td>
                   <td className="border-b border-[var(--gridline)] px-3 py-2">{item.tipoCompra === TipoCompraProduto.BEST_SELLER ? "Best Seller" : "Drop"}</td>
                   <td className="border-b border-[var(--gridline)] px-3 py-2 text-right tabular-nums">{formatMoeda(item.valorEstimado)}</td>
                   <td className="border-b border-[var(--gridline)] px-3 py-2">

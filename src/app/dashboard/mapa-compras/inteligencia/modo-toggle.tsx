@@ -1,16 +1,9 @@
 import Link from "next/link";
 import type { RawSearchParams } from "@/lib/filters";
 
-export type Modo = "consolidado" | "best-seller" | "drop" | "grupo" | "produto" | "alertas";
+import { MODOS, type Modo } from "./modos";
 
-const OPTIONS: { value: Modo; label: string }[] = [
-  { value: "consolidado", label: "Visão consolidada" },
-  { value: "best-seller", label: "Best Seller" },
-  { value: "drop", label: "Drops" },
-  { value: "grupo", label: "Por grupo" },
-  { value: "produto", label: "Por produto" },
-  { value: "alertas", label: "Alertas e prioridades" },
-];
+export type { Modo };
 
 // Mesmo padrão de dimension-toggle.tsx: Link server-rendered trocando 1 param da URL, mantendo
 // os demais (filtros de grupo/coleção/status/horizonte sobrevivem à troca de modo).
@@ -36,7 +29,7 @@ export function ModoToggle({
 }) {
   return (
     <div className="mb-4 flex flex-wrap gap-1">
-      {OPTIONS.map((opt) => (
+      {MODOS.map((opt) => (
         <Link
           key={opt.value}
           href={buildHref(basePath, searchParams, opt.value)}

@@ -9,7 +9,8 @@ export type InteligenciaFiltrosValue = {
   grupoIn: string[];
   colecaoIn: string[];
   statusComercialIn: string[];
-  horizonteDias: number;
+  // null = sem simulação: cada grupo usa a própria meta de cobertura.
+  horizonteDias: number | null;
 };
 
 // Filtros da seção "Inteligência de Compras" (seção 8 do pedido: grupo, coleção, status
@@ -58,9 +59,10 @@ export function InteligenciaFiltros({
         Horizonte de planejamento
         <select
           name="horizonte"
-          defaultValue={String(value.horizonteDias)}
+          defaultValue={value.horizonteDias == null ? "" : String(value.horizonteDias)}
           className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-xs text-[var(--text-primary)]"
         >
+          <option value="">Meta de cobertura do grupo</option>
           {HORIZONTE_OPCOES.map((h) => (
             <option key={h} value={h}>
               {h} dias

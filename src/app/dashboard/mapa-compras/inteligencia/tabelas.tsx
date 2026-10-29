@@ -6,6 +6,8 @@ import type {
   RecomendacaoBestSellerPorProduto,
   RecomendacaoDropPorProduto,
   LinhaConsolidadaGrupo,
+  LinhaPorProduto,
+  InfoRedistribuicao,
 } from "@/lib/metrics";
 import { formatMoeda, formatNumero, indicadorInfo } from "./format";
 import { ConfirmarDecisaoForm, ParametrosGrupoForm } from "./forms";
@@ -23,8 +25,31 @@ function TipoBadge({ tipo }: { tipo: TipoCompraProduto }) {
         color: bestSeller ? "var(--series-1)" : "var(--series-2)",
       }}
     >
-      {bestSeller ? "Best Seller" : "Drop"}
+      {bestSeller ? "Best Seller · reposição recorrente" : "Drop · compra de coleção"}
     </span>
+  );
+}
+
+// Terceiro tipo visual (pedido de 2026-10-29): redistribuição interna NÃO é compra — badge só com
+// contorno (sem preenchimento), pra nunca ser confundida com as duas de compra acima.
+export function RedistribuicaoBadge({ info }: { info: InfoRedistribuicao | undefined }) {
+  if (!info || info.unidadesTransferiveis <= 0) return null;
+  return (
+    <a
+      href="/dashboard/distribuicao-estoque?aba=transferencias"
+      title="Sugestão de remanejamento entre lojas (Distribuição de Estoque). Não altera a quantidade de compra: o estoque total continua o mesmo."
+      className="mt-1 inline-block whitespace-nowrap rounded-full border border-dashed border-[var(--text-muted)] px-2 py-0.5 text-[10px] font-medium text-[var(--text-secondary)] hover:bg-[var(--page-plane)]"
+    >
+      ↔ Redistribuição interna: {info.unidadesTransferiveis} un entre lojas
+    </a>
+  );
+}
+
+function rotuloVariante(r: { cod: string; cor: string | null; tamanho: string | null }) {
+  return (
+    <div className="text-[10px] text-[var(--text-muted)]">
+      SKU {r.cod} · {r.cor ?? "cor —"} · tam. {r.tamanho ?? "—"}
+    </div>
   );
 }
 
@@ -64,18 +89,25 @@ function Premissas({ premissas, avisos }: { premissas: string[]; avisos: string[
 const th = "border-b border-[var(--border)] px-3 py-2 text-left text-xs font-medium text-[var(--text-secondary)]";
 const td = "border-b border-[var(--gridline)] px-3 py-2 text-xs";
 
-export function TabelaBestSeller({ rows }: { rows: RecomendacaoBestSellerPorProduto[] }) {
+export function TabelaBestSeller({
+  rows,
+  redistribuicao,
+}: {
+  rows: RecomendacaoBestSellerPorProduto[];
+  redistribuicao?: Map<string, InfoRedistribuicao>;
+}) {
   if (rows.length === 0) {
     return <p className="text-sm text-[var(--text-muted)]">Nenhum produto classificado como Best Seller no filtro atual.</p>;
   }
   const ordenadas = [...rows].sort((a, b) => b.quantidadeSugerida - a.quantidadeSugerida);
   return (
     <div className="overflow-x-auto rounded-lg border border-[var(--border)] bg-[var(--surface-1)]">
-      <table className="w-full min-w-[920px] border-collapse">
+      <table className="w-full min-w-[1080px] border-collapse">
         <thead>
           <tr>
             <th className={th}>Produto</th>
             <th className={th}>Grupo</th>
+            <th className={`${th} text-right`}>Vendas líq. 30/60/90d</th>
             <th className={`${th} text-right`}>Estoque disp.</th>
             <th className={`${th} text-right`}>Demanda projetada</th>
             <th className={`${th} text-right`}>Cobertura</th>
@@ -89,10 +121,16 @@ export function TabelaBestSeller({ rows }: { rows: RecomendacaoBestSellerPorProd
             <tr key={r.cod} className="hover:bg-[var(--page-plane)]">
               <td className={td}>
                 <div className="font-medium text-[var(--text-primary)]">{r.produto}</div>
+                {rotuloVariante(r)}
                 {!r.confiavel && <RiscoBadge label="Baixa confiança" tom="warning" />}
+                {r.rupturaAtual && <RiscoBadge label="Zerado: venda pode estar subestimada" tom="warning" />}
+                <RedistribuicaoBadge info={redistribuicao?.get(r.cod)} />
                 <Premissas premissas={r.premissas} avisos={r.avisos} />
               </td>
               <td className={`${td} text-[var(--text-secondary)]`}>{r.grupo}</td>
+              <td className={`${td} text-right tabular-nums`}>
+                {formatNumero(r.vendasLiquidas.d30)}/{formatNumero(r.vendasLiquidas.d60)}/{formatNumero(r.vendasLiquidas.d90)}
+              </td>
               <td className={`${td} text-right tabular-nums`}>{formatNumero(r.estoqueDisponivelUtilizavel)}</td>
               <td className={`${td} text-right tabular-nums`}>{formatNumero(r.demandaProjetadaHorizonte, 1)}</td>
               <td className={`${td} text-right tabular-nums`}>
@@ -124,7 +162,13 @@ export function TabelaBestSeller({ rows }: { rows: RecomendacaoBestSellerPorProd
   );
 }
 
-export function TabelaDrop({ rows }: { rows: RecomendacaoDropPorProduto[] }) {
+export function TabelaDrop({
+  rows,
+  redistribuicao,
+}: {
+  rows: RecomendacaoDropPorProduto[];
+  redistribuicao?: Map<string, InfoRedistribuicao>;
+}) {
   if (rows.length === 0) {
     return <p className="text-sm text-[var(--text-muted)]">Nenhum produto classificado como Drop no filtro atual.</p>;
   }
@@ -151,6 +195,8 @@ export function TabelaDrop({ rows }: { rows: RecomendacaoDropPorProduto[] }) {
             <tr key={r.cod} className="hover:bg-[var(--page-plane)]">
               <td className={td}>
                 <div className="font-medium text-[var(--text-primary)]">{r.produto}</div>
+                {rotuloVariante(r)}
+                <RedistribuicaoBadge info={redistribuicao?.get(r.cod)} />
                 {r.bloqueadoRecompra && <RiscoBadge label="Recompra bloqueada" tom="warning" />}
                 {r.precisaConfirmacaoHumana && <RiscoBadge label="Precisa confirmação" tom="warning" />}
                 <Premissas premissas={r.premissas} avisos={r.avisos} />
@@ -159,11 +205,12 @@ export function TabelaDrop({ rows }: { rows: RecomendacaoDropPorProduto[] }) {
               <td className={`${td} text-right tabular-nums`}>{formatNumero(r.estoqueDisponivel)}</td>
               <td className={`${td} text-right tabular-nums`}>{r.sellThroughAtual != null ? `${formatNumero(r.sellThroughAtual, 1)}%` : "—"}</td>
               <td className={`${td} text-right tabular-nums`}>{formatNumero(r.previsaoVendaAteFimJanela, 1)}</td>
-              <td className={`${td} text-right tabular-nums`}>{r.diasRestantesJanela}</td>
+              <td className={`${td} text-right tabular-nums`}>{r.diasRestantesJanela ?? "sem data"}</td>
               <td className={td}>
+                {!r.janelaConhecida && <RiscoBadge label="Janela desconhecida" tom="warning" />}
                 {r.riscoRuptura && <RiscoBadge label="Ruptura" tom="critical" />}
                 {r.riscoSobra && <RiscoBadge label="Sobra" tom="warning" />}
-                {!r.riscoRuptura && !r.riscoSobra && <RiscoBadge label="Equilíbrio" tom="good" />}
+                {r.janelaConhecida && !r.riscoRuptura && !r.riscoSobra && <RiscoBadge label="Equilíbrio" tom="good" />}
               </td>
               <td className={`${td} text-right font-semibold tabular-nums text-[var(--text-primary)]`}>
                 {r.quantidadeSugerida != null ? formatNumero(r.quantidadeSugerida) : "—"}
@@ -303,48 +350,71 @@ export function TabelaPorGrupo({
   );
 }
 
-// Visão por produto (seção 6: "detalhar... até chegar ao produto") — lista plana Best
-// Seller + Drop combinados, ordenada por valor estimado (maior impacto financeiro primeiro).
-export function TabelaPorProduto({
-  bsRows,
-  dropRows,
-}: {
-  bsRows: RecomendacaoBestSellerPorProduto[];
-  dropRows: RecomendacaoDropPorProduto[];
-}) {
-  const linhas = [
-    ...bsRows.map((r) => ({ tipo: TipoCompraProduto.BEST_SELLER, produto: r.produto, grupo: r.grupo, colecao: null as string | null, quantidadeSugerida: r.quantidadeSugerida, valorEstimado: r.valorEstimado })),
-    ...dropRows.map((r) => ({ tipo: TipoCompraProduto.DROP, produto: r.produto, grupo: r.grupo, colecao: r.colecao as string | null, quantidadeSugerida: r.quantidadeSugerida ?? 0, valorEstimado: r.valorEstimado })),
-  ].sort((a, b) => (b.valorEstimado ?? 0) - (a.valorEstimado ?? 0));
-
+// Visão por produto (seção 6: "detalhar... até chegar ao produto") — produto (nome) com o detalhe
+// por cor/tamanho (cod) num <details>. A soma das variantes é o total do produto, e a soma dos
+// produtos de um grupo bate com o total do grupo no modo "Por grupo" (agregarPorProduto).
+export function TabelaPorProduto({ linhas }: { linhas: LinhaPorProduto[] }) {
   if (linhas.length === 0) {
     return <p className="text-sm text-[var(--text-muted)]">Nenhum produto classificado no filtro atual.</p>;
   }
 
   return (
     <div className="overflow-x-auto rounded-lg border border-[var(--border)] bg-[var(--surface-1)]">
-      <table className="w-full min-w-[780px] border-collapse">
+      <table className="w-full min-w-[860px] border-collapse">
         <thead>
           <tr>
             <th className={th}>Produto</th>
             <th className={th}>Tipo</th>
             <th className={th}>Grupo</th>
             <th className={th}>Coleção</th>
+            <th className={`${th} text-right`}>Estoque</th>
             <th className={`${th} text-right`}>Qtd. sugerida</th>
             <th className={`${th} text-right`}>Valor estimado</th>
           </tr>
         </thead>
         <tbody>
-          {linhas.map((l, i) => (
-            <tr key={`${l.produto}-${i}`} className="hover:bg-[var(--page-plane)]">
-              <td className={`${td} font-medium text-[var(--text-primary)]`}>{l.produto}</td>
+          {linhas.map((l) => (
+            <tr key={l.chave} className="hover:bg-[var(--page-plane)]">
               <td className={td}>
-                <TipoBadge tipo={l.tipo} />
+                <details>
+                  <summary className="cursor-pointer font-medium text-[var(--text-primary)]">
+                    {l.produto} <span className="text-[10px] text-[var(--text-muted)]">({l.variantes.length} variante(s))</span>
+                  </summary>
+                  <table className="mt-1 w-full border-collapse">
+                    <thead>
+                      <tr>
+                        <th className="px-2 py-1 text-left text-[10px] font-medium text-[var(--text-muted)]">SKU · cor · tamanho</th>
+                        <th className="px-2 py-1 text-right text-[10px] font-medium text-[var(--text-muted)]">Estoque</th>
+                        <th className="px-2 py-1 text-right text-[10px] font-medium text-[var(--text-muted)]">Qtd.</th>
+                        <th className="px-2 py-1 text-right text-[10px] font-medium text-[var(--text-muted)]">Valor</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {l.variantes.map((v) => (
+                        <tr key={v.cod}>
+                          <td className="px-2 py-0.5 text-[10px] text-[var(--text-secondary)]">
+                            {v.cod} · {v.cor ?? "—"} · {v.tamanho ?? "—"}
+                          </td>
+                          <td className="px-2 py-0.5 text-right text-[10px] tabular-nums">{formatNumero(v.estoque)}</td>
+                          <td className="px-2 py-0.5 text-right text-[10px] tabular-nums">{v.quantidadeSugerida == null ? "—" : formatNumero(v.quantidadeSugerida)}</td>
+                          <td className="px-2 py-0.5 text-right text-[10px] tabular-nums">{formatMoeda(v.valorEstimado)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </details>
+              </td>
+              <td className={td}>
+                <TipoBadge tipo={l.tipoCompra} />
               </td>
               <td className={`${td} text-[var(--text-secondary)]`}>{l.grupo}</td>
               <td className={`${td} text-[var(--text-secondary)]`}>{l.colecao ?? "—"}</td>
+              <td className={`${td} text-right tabular-nums`}>{formatNumero(l.estoque)}</td>
               <td className={`${td} text-right tabular-nums`}>{formatNumero(l.quantidadeSugerida)}</td>
-              <td className={`${td} text-right tabular-nums`}>{formatMoeda(l.valorEstimado)}</td>
+              <td className={`${td} text-right tabular-nums`}>
+                {formatMoeda(l.valorEstimado)}
+                {l.variantesSemCusto > 0 && <div className="text-[10px]" style={{ color: "var(--status-warning)" }}>{l.variantesSemCusto} variante(s) sem custo</div>}
+              </td>
             </tr>
           ))}
         </tbody>
