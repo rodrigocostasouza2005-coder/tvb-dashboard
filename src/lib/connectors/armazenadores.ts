@@ -28,3 +28,14 @@ export function displayGroupFor(descricao: string): string | null {
 export function sellsProducts(descricao: string): boolean {
   return !NAO_VENDE.test(descricao);
 }
+
+// Âncora pra primaryStoreId (ver syncArmazenadores em sync-runner.ts) — achado em 2026-10-30,
+// causa raiz real do incidente do armazém "Conserto": a regra antiga escolhia "o primeiro
+// armazenador que vende, na ordem que a API devolveu", não especificamente o CD. Quando um
+// armazém novo não reconhecido pelo NAO_VENDE veio antes de "CD" na resposta, ele roubou o
+// primaryStoreId e toda venda real do Site foi gravada no lugar errado por 5 dias, sem erro
+// nenhum. Daqui pra frente, pros tokens listados aqui, primaryStoreId é sempre o Store cujo code
+// bate com o valor configurado — nunca "o primeiro que vende" por acidente de ordenação.
+export const PRIMARY_STORE_CODE_BY_CLIENT_LABEL: Record<string, string> = {
+  "cd-atacado": "CD",
+};

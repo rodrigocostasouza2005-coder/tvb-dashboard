@@ -5,7 +5,7 @@ import { Prisma } from "@prisma/client";
 import { randomUUID } from "crypto";
 import { createDapicClients, stripReferenciaPrefix, parseDapicDateTime, stableItemIndexes, isGarrafaBrinde, waitMsFromDapicError, sleep, mapWithConcurrency, parseTabelaPrecosLabel, type DapicClient } from "@/lib/connectors/dapic";
 // (import type { Prisma } removido abaixo — já importado acima como valor+tipo)
-import { displayGroupFor, sellsProducts } from "@/lib/connectors/armazenadores";
+import { displayGroupFor, sellsProducts, PRIMARY_STORE_CODE_BY_CLIENT_LABEL } from "@/lib/connectors/armazenadores";
 import { upsertStockSnapshots, type StockSnapshotRow } from "@/lib/connectors/upsert-stock";
 import { upsertProductionOrders, type ProductionOrderRow } from "@/lib/connectors/upsert-production-order";
 import { fetchPriceCatalogCached, inferTabelaPreco, type PriceCatalog } from "@/lib/connectors/tabela-preco";
@@ -28,7 +28,20 @@ export async function syncArmazenadores(client: DapicClient) {
   let primaryStoreId: string | null = null;
   let atacadoStoreId: string | null = null;
 
+  // Achado em 2026-10-30: nunca houve aviso automático quando um armazenador novo aparece — o
+  // incidente do "Conserto" só foi notado 5 dias depois, por inspeção visual do número errado.
+  // Captura os códigos já conhecidos ANTES do loop pra poder apontar exatamente quais são novos
+  // nesta chamada (depois do loop todos já estariam gravados, perdendo a distinção).
+  const codesConhecidos = new Set(
+    (await prisma.store.findMany({ select: { code: true } })).map((s) => s.code)
+  );
+  const armazensNovos: { descricao: string; dapicId: number; sells: boolean }[] = [];
+  const expectedPrimaryCode = PRIMARY_STORE_CODE_BY_CLIENT_LABEL[client.label];
+
   for (const a of armazenadores) {
+    if (!codesConhecidos.has(a.Descricao)) {
+      armazensNovos.push({ descricao: a.Descricao, dapicId: a.Id, sells: sellsProducts(a.Descricao) });
+    }
     const existing = await prisma.store.findFirst({
       where: { OR: [{ code: a.Descricao }, { dapicArmazenadorId: a.Id }] },
     });
@@ -53,8 +66,55 @@ export async function syncArmazenadores(client: DapicClient) {
           },
         });
     storeByDapicId.set(a.Id, store.id);
-    if (sells && !primaryStoreId) primaryStoreId = store.id;
+
+    // Achado em 2026-10-30, causa raiz do incidente "Conserto": "o primeiro que vende, na ordem
+    // que a API devolveu" não é o mesmo que "o CD" — um armazém novo mal-classificado que venha
+    // antes do CD na resposta roubava o primaryStoreId silenciosamente. Pros tokens com âncora
+    // configurada (PRIMARY_STORE_CODE_BY_CLIENT_LABEL), só o code esperado pode virar primário;
+    // os demais tokens mantêm o comportamento antigo (nunca tiveram esse incidente, não vale
+    // mudar comportamento sem necessidade).
+    if (sells) {
+      if (expectedPrimaryCode) {
+        if (a.Descricao === expectedPrimaryCode) primaryStoreId = store.id;
+      } else if (!primaryStoreId) {
+        primaryStoreId = store.id;
+      }
+    }
     if (a.Descricao === "ATACADO") atacadoStoreId = store.id;
+  }
+
+  if (expectedPrimaryCode && !primaryStoreId) {
+    // O armazém âncora não veio nesta resposta da API (ou veio com sells=false por algum motivo)
+    // — tenta o registro já conhecido no banco antes de desistir, pra não perder sync à toa por
+    // uma falha pontual da API em listar tudo.
+    const fallback = await prisma.store.findFirst({ where: { code: expectedPrimaryCode } });
+    if (fallback) {
+      primaryStoreId = fallback.id;
+      // .catch() em todo envio de alerta a partir daqui — achado na validação de 2026-10-30:
+      // sem isso, uma falha do Telegram (rede, token inválido) propagava daqui pra fora de
+      // syncArmazenadores, e por mais que syncOneClient isole a falha (item 4), isso reportaria
+      // "falha total" pra loja inteira (estoque/vendas nem tentados) só por causa do ALERTA ter
+      // falhado, não do dado. Alerta é melhor-esforço, nunca pode ser mais crítico que o sync.
+      await sendTelegramMessage(
+        `⚠️ syncArmazenadores (${client.label}): armazém "${expectedPrimaryCode}" não veio na resposta da API — usando registro já conhecido no banco. Verificar DAPIC.`,
+        { adminOnly: true }
+      ).catch((e) => console.error(`[syncArmazenadores] Telegram falhou (${client.label}):`, e?.message ?? e));
+    } else {
+      await sendTelegramMessage(
+        `🚨 syncArmazenadores (${client.label}): armazém "${expectedPrimaryCode}" não encontrado (nem na API, nem no banco) — vendas/faturas deste token NÃO serão sincronizadas até resolver manualmente.`,
+        { adminOnly: true }
+      ).catch((e) => console.error(`[syncArmazenadores] Telegram falhou (${client.label}):`, e?.message ?? e));
+    }
+  }
+
+  if (armazensNovos.length) {
+    const linhas = armazensNovos
+      .map((n) => `• "${n.descricao}" (Id DAPIC ${n.dapicId}) — classificado como ${n.sells ? "VENDE" : "não vende"} pela regra atual`)
+      .join("\n");
+    await sendTelegramMessage(
+      `🆕 Armazém novo encontrado no DAPIC (token ${client.label}):\n${linhas}\nConfirme a classificação antes de confiar nos números dessa loja/canal.`,
+      { adminOnly: true }
+    ).catch((e) => console.error(`[syncArmazenadores] Telegram falhou (${client.label}):`, e?.message ?? e));
   }
 
   return { storeByDapicId, primaryStoreId, atacadoStoreId };
@@ -113,14 +173,14 @@ function inferTabelaPrecoComFallbackCliente(
   return classificacao.channel === "B2B" ? "Tabela atacado" : null;
 }
 
-async function syncVendas(
+export async function syncVendas(
   client: DapicClient,
   storeId: string | null,
   atacadoStoreId: string | null,
   dias: number,
   priceCatalog: PriceCatalog
 ) {
-  if (!storeId) return { vendas: 0, devolucoes: 0, brindes: 0, vendedorCorrigido: [] as VendedorCorrigido[] };
+  if (!storeId) return { vendas: 0, devolucoes: 0, brindes: 0, vendedorCorrigido: [] as VendedorCorrigido[], divergencias: [] as DivergenciaReconciliacao[] };
   const siteStoreId: string = storeId;
   const contaVendaDoPdv = client.label !== "cd-atacado";
   const b2bClientes = atacadoStoreId ? await getB2BClienteNomes() : new Set<string>();
@@ -253,8 +313,38 @@ async function syncVendas(
 
   const vendedorCorrigido = await upsertSalesComVendedorAtualizavel(saleData);
   await upsertReturnsComColecaoAtualizavel(returnData);
-  if (giftData.length) await prisma.gift.createMany({ data: giftData, skipDuplicates: true });
-  return { vendas: saleData.length, devolucoes: returnData.length, brindes: giftData.length, vendedorCorrigido };
+  await upsertGiftsComColecaoAtualizavel(giftData);
+
+  const divergencias = (
+    await Promise.all([
+      reconciliarLotePersistido(
+        "Sale",
+        saleData.map((s) => ({ storeId: s.storeId as string, dapicVendaId: s.dapicVendaId as number, itemIndex: s.itemIndex as number, valor: s.valorTotalLiquido as number })),
+        (args) =>
+          prisma.sale
+            .findMany({ ...args, select: { storeId: true, dapicVendaId: true, itemIndex: true, valorTotalLiquido: true } })
+            .then((rows) => rows.map((r) => ({ storeId: r.storeId, dapicVendaId: r.dapicVendaId, itemIndex: r.itemIndex, valor: r.valorTotalLiquido })))
+      ).catch((e) => { console.error(`[reconciliarLotePersistido] Sale (${client.label}) falhou:`, e?.message ?? e); return null; }),
+      reconciliarLotePersistido(
+        "Return",
+        returnData.map((r) => ({ storeId: r.storeId as string, dapicVendaId: r.dapicVendaId as number, itemIndex: r.itemIndex as number, valor: r.valorTotal as number })),
+        (args) =>
+          prisma.return
+            .findMany({ ...args, select: { storeId: true, dapicVendaId: true, itemIndex: true, valorTotal: true } })
+            .then((rows) => rows.map((r) => ({ storeId: r.storeId, dapicVendaId: r.dapicVendaId as number, itemIndex: r.itemIndex as number, valor: r.valorTotal })))
+      ).catch((e) => { console.error(`[reconciliarLotePersistido] Return (${client.label}) falhou:`, e?.message ?? e); return null; }),
+      reconciliarLotePersistido(
+        "Gift",
+        giftData.map((g) => ({ storeId: g.storeId as string, dapicVendaId: g.dapicVendaId as number, itemIndex: g.itemIndex as number, valor: g.valorTotalLiquido as number })),
+        (args) =>
+          prisma.gift
+            .findMany({ ...args, select: { storeId: true, dapicVendaId: true, itemIndex: true, valorTotalLiquido: true } })
+            .then((rows) => rows.map((r) => ({ storeId: r.storeId, dapicVendaId: r.dapicVendaId, itemIndex: r.itemIndex, valor: r.valorTotalLiquido })))
+      ).catch((e) => { console.error(`[reconciliarLotePersistido] Gift (${client.label}) falhou:`, e?.message ?? e); return null; }),
+    ])
+  ).filter((d): d is DivergenciaReconciliacao => d !== null);
+
+  return { vendas: saleData.length, devolucoes: returnData.length, brindes: giftData.length, vendedorCorrigido, divergencias };
 }
 
 // Preserva o storeId já gravado pra um item (dapicVendaId+itemIndex) já visto antes, mesmo que a
@@ -292,6 +382,55 @@ async function resolveStoreIdsEstaveis<T extends { dapicVendaId: number; itemInd
     const existente = storeIdExistente.get(`${item.dapicVendaId}::${item.itemIndex}`);
     if (existente) item.storeId = existente;
   }
+}
+
+export type DivergenciaReconciliacao = {
+  tabela: "Sale" | "Return" | "Gift";
+  faltando: number;
+  divergente: number;
+  total: number;
+  exemplos: string[];
+};
+
+// Achado em 2026-10-30: nunca existiu reconciliação origem(DAPIC)×destino(Neon) em lugar nenhum
+// do pipeline — checkForDuplicateSales (mais abaixo) só compara duplicata DENTRO do próprio
+// banco, nunca contra o que a API realmente devolveu. Reconcilia por LOTE (as chaves que ESTA
+// chamada acabou de processar, não a janela inteira — evita misturar com syncs anteriores) logo
+// depois do upsert: reconsulta do Neon exatamente essas chaves e compara o valor esperado (já
+// computado em memória, sem round-trip extra à API) contra o que foi persistido de verdade.
+// "faltando" é sempre bug real (upsert idempotente sempre deveria bater); divergência de valor
+// tolera R$0,01 (arredondamento float). Nunca pode ser fatal — é auditoria por cima do sync que
+// já rodou com sucesso, não uma segunda chance de gravar.
+export async function reconciliarLotePersistido(
+  tabela: DivergenciaReconciliacao["tabela"],
+  esperado: { storeId: string; dapicVendaId: number; itemIndex: number; valor: number }[],
+  buscarPersistido: (args: {
+    where: { storeId: { in: string[] }; dapicVendaId: { in: number[] } };
+  }) => Promise<{ storeId: string; dapicVendaId: number; itemIndex: number; valor: number }[]>
+): Promise<DivergenciaReconciliacao | null> {
+  if (esperado.length === 0) return null;
+  const chave = (d: { storeId: string; dapicVendaId: number; itemIndex: number }) =>
+    `${d.storeId}::${d.dapicVendaId}::${d.itemIndex}`;
+  const storeIds = [...new Set(esperado.map((d) => d.storeId))];
+  const dapicVendaIds = [...new Set(esperado.map((d) => d.dapicVendaId))];
+  const persistidos = await buscarPersistido({ where: { storeId: { in: storeIds }, dapicVendaId: { in: dapicVendaIds } } });
+  const persistidoPorChave = new Map(persistidos.map((p) => [chave(p), p.valor]));
+
+  let faltando = 0;
+  let divergente = 0;
+  const exemplos: string[] = [];
+  for (const d of esperado) {
+    const real = persistidoPorChave.get(chave(d));
+    if (real === undefined) {
+      faltando++;
+      if (exemplos.length < 5) exemplos.push(`${chave(d)} (faltando)`);
+    } else if (Math.abs(real - d.valor) > 0.01) {
+      divergente++;
+      if (exemplos.length < 5) exemplos.push(`${chave(d)} (esperado ${d.valor}, real ${real})`);
+    }
+  }
+  if (faltando === 0 && divergente === 0) return null;
+  return { tabela, faltando, divergente, total: esperado.length, exemplos };
 }
 
 type VendedorCorrigido = {
@@ -368,7 +507,7 @@ export async function upsertSalesComVendedorAtualizavel(saleData: Prisma.SaleCre
 // API corrigir. Mesmo padrão de upsert já usado pra "vendedor" em Sale (ver função acima) —
 // atualiza colecao no conflito, mas só quando o valor novo não é null (nunca regride um dado bom
 // pra null se uma sync futura vier com o campo vazio por qualquer motivo transiente).
-async function upsertReturnsComColecaoAtualizavel(returnData: Prisma.ReturnCreateManyInput[]): Promise<void> {
+export async function upsertReturnsComColecaoAtualizavel(returnData: Prisma.ReturnCreateManyInput[]): Promise<void> {
   if (returnData.length === 0) return;
   const values = returnData.map(
     (r) => Prisma.sql`(
@@ -390,6 +529,34 @@ async function upsertReturnsComColecaoAtualizavel(returnData: Prisma.ReturnCreat
   `;
 }
 
+// Achado em 2026-10-30: Gift (nos dois caminhos, vendaspdv e faturas) nunca atualizava em
+// conflito (createMany+skipDuplicates puro) — a premissa de "sem campo conhecido que precise de
+// correção depois" era suposição, não garantia (o mesmo tipo de suposição já causou o bug de
+// Return.colecao acima, corrigido só pra Return na época). Mesmo padrão: só "colecao" é
+// atualizável via COALESCE (nunca regride um dado bom pra null), demais campos ficam congelados —
+// sem evidência de precisarem de correção, ao contrário de colecao.
+export async function upsertGiftsComColecaoAtualizavel(giftData: Prisma.GiftCreateManyInput[]): Promise<void> {
+  if (giftData.length === 0) return;
+  const values = giftData.map(
+    (g) => Prisma.sql`(
+      ${randomUUID()}, ${g.storeId}, ${g.cod}, ${g.produto}, ${g.grupo}, ${g.cor ?? null}, ${g.tamanho ?? null},
+      ${g.colecao ?? null}, ${g.marca ?? null}, ${g.clienteNome ?? null}, ${g.quantidade}, ${g.valorTotalLiquido},
+      ${g.giftDate}, ${g.dapicVendaId}, ${g.itemIndex}
+    )`
+  );
+
+  await prisma.$executeRaw`
+    INSERT INTO "Gift" (
+      "id", "storeId", "cod", "produto", "grupo", "cor", "tamanho",
+      "colecao", "marca", "clienteNome", "quantidade", "valorTotalLiquido",
+      "giftDate", "dapicVendaId", "itemIndex"
+    )
+    VALUES ${Prisma.join(values)}
+    ON CONFLICT ("storeId", "dapicVendaId", "itemIndex") DO UPDATE SET
+      "colecao" = COALESCE(EXCLUDED."colecao", "Gift"."colecao")
+  `;
+}
+
 // Venda de verdade do canal Site+Atacado (só cd-atacado tem acesso a /faturas). Mesma chave de
 // idempotência (storeId, dapicVendaId=Id da fatura, itemIndex) — nunca colide com vendaspdv
 // porque esse token não grava mais Sale via vendaspdv (ver syncVendas).
@@ -397,14 +564,14 @@ async function upsertReturnsComColecaoAtualizavel(returnData: Prisma.ReturnCreat
 // Bug real achado em 2026-09-23: toda fatura (site E atacado) caía sempre na loja "site" — ver
 // comentário em syncVendas. Mesma correção aqui: fatura com tabelaPreco="Tabela atacado" vai pra
 // loja ATACADO.
-async function syncFaturas(
+export async function syncFaturas(
   client: DapicClient,
   storeId: string | null,
   atacadoStoreId: string | null,
   dias: number,
   priceCatalog: PriceCatalog
 ) {
-  if (!storeId || client.label !== "cd-atacado") return { vendas: 0, brindes: 0 };
+  if (!storeId || client.label !== "cd-atacado") return { vendas: 0, brindes: 0, divergencias: [] as DivergenciaReconciliacao[] };
   const b2bClientes = atacadoStoreId ? await getB2BClienteNomes() : new Set<string>();
   const hoje = new Date();
   const inicio = new Date(hoje);
@@ -483,13 +650,39 @@ async function syncFaturas(
       });
     });
   }
-  if (giftData.length) await prisma.gift.createMany({ data: giftData, skipDuplicates: true });
+  await upsertGiftsComColecaoAtualizavel(giftData);
 
   if (atacadoStoreId) {
     await resolveStoreIdsEstaveis(prisma.sale, saleData as { dapicVendaId: number; itemIndex: number; storeId: string }[], [storeId, atacadoStoreId]);
   }
-  if (saleData.length) await prisma.sale.createMany({ data: saleData, skipDuplicates: true });
-  return { vendas: saleData.length, brindes: giftData.length };
+  // Achado em 2026-10-30: era createMany+skipDuplicates puro — nunca corrigia se o DAPIC mudasse
+  // algo depois (ex: reclassificação de tabela de preço). Mesmo padrão de upsert já usado pro
+  // canal vendaspdv (ver upsertSalesComVendedorAtualizavel) — fatura não tem vendedor, mas
+  // reaproveitar a mesma função evita uma segunda versão só pra "não atualizar nada".
+  await upsertSalesComVendedorAtualizavel(saleData);
+
+  const divergencias = (
+    await Promise.all([
+      reconciliarLotePersistido(
+        "Sale",
+        saleData.map((s) => ({ storeId: s.storeId as string, dapicVendaId: s.dapicVendaId as number, itemIndex: s.itemIndex as number, valor: s.valorTotalLiquido as number })),
+        (args) =>
+          prisma.sale
+            .findMany({ ...args, select: { storeId: true, dapicVendaId: true, itemIndex: true, valorTotalLiquido: true } })
+            .then((rows) => rows.map((r) => ({ storeId: r.storeId, dapicVendaId: r.dapicVendaId, itemIndex: r.itemIndex, valor: r.valorTotalLiquido })))
+      ).catch((e) => { console.error(`[reconciliarLotePersistido] Sale/faturas (${client.label}) falhou:`, e?.message ?? e); return null; }),
+      reconciliarLotePersistido(
+        "Gift",
+        giftData.map((g) => ({ storeId: g.storeId as string, dapicVendaId: g.dapicVendaId as number, itemIndex: g.itemIndex as number, valor: g.valorTotalLiquido as number })),
+        (args) =>
+          prisma.gift
+            .findMany({ ...args, select: { storeId: true, dapicVendaId: true, itemIndex: true, valorTotalLiquido: true } })
+            .then((rows) => rows.map((r) => ({ storeId: r.storeId, dapicVendaId: r.dapicVendaId, itemIndex: r.itemIndex, valor: r.valorTotalLiquido })))
+      ).catch((e) => { console.error(`[reconciliarLotePersistido] Gift/faturas (${client.label}) falhou:`, e?.message ?? e); return null; }),
+    ])
+  ).filter((d): d is DivergenciaReconciliacao => d !== null);
+
+  return { vendas: saleData.length, brindes: giftData.length, divergencias };
 }
 
 // Janela de reconciliação de cancelamento — não é "quantos dias de venda processar" (isso
@@ -642,12 +835,9 @@ async function syncClientes(client: DapicClient) {
   return count;
 }
 
-async function syncParcelas(client: DapicClient) {
+export async function syncParcelas(client: DapicClient) {
   // Busca só Status=Aberta desde 2024 — cobre inadimplência ativa sem histórico longo.
-  // Trunca a tabela antes de reinserir: snapshot atual, não acúmulo histórico.
   const parcelas = await client.fetchParcelas("2024-01-01", toDateStr(new Date()), "Aberta");
-  await prisma.parcela.deleteMany({});
-  if (parcelas.length === 0) return 0;
 
   // Achado em 2026-09-14: a Inadimplência ficou zerada meses porque /contas/parcelas às vezes
   // manda data sem hora ("2025-09-22"), e uma linha assim derrubava o createMany do lote inteiro
@@ -664,33 +854,47 @@ async function syncParcelas(client: DapicClient) {
     console.error(`[syncParcelas] ${parcelas.length - rowsValidas.length} parcela(s) com data inválida, ignoradas.`);
   }
 
+  // Achado em 2026-10-30: delete+insert sem transação deixava uma janela real em que a tabela
+  // ficava vazia (entre o deleteMany e o fim do createMany em lote) pra qualquer leitura
+  // concorrente da aba Inadimplência, e uma falha no meio de um lote (não só data inválida, que
+  // já tem o filtro acima — qualquer erro de conexão/timeout numa página) deixava a tabela
+  // truncada/parcial sem nenhum traço (Parcela nem tem SyncSource próprio, ver comentário acima).
+  // Envolver tudo numa única transação: MVCC do Postgres garante que leituras concorrentes veem
+  // o snapshot ANTERIOR completo até o commit — nunca vazio, nunca parcial. timeout maior que o
+  // default (5s) porque o volume de parcelas pode passar disso em vários lotes de 500.
   const BATCH = 500;
   let count = 0;
-  for (let i = 0; i < rowsValidas.length; i += BATCH) {
-    const batch = rowsValidas.slice(i, i + BATCH);
-    const r = await prisma.parcela.createMany({
-      data: batch.map((p) => ({
-        idParcela: p.IdParcela,
-        idConta: p.IdConta,
-        status: p.Status,
-        dataEmissao: parseDapicDateTime(p.DataEmissao),
-        dataVencimento: parseDapicDateTime(p.DataVencimento),
-        conta: p.Conta,
-        formaPagamento: p.FormaPagamento,
-        pessoa: p.Pessoa,
-        numeroParcela: p.Parcela,
-        valor: p.Valor,
-        valorPago: p.ValorPago,
-        valorAberto: p.ValorAberto,
-        valorMulta: p.ValorMulta,
-        valorJuros: p.ValorJuros,
-        nossoNumeroBoleto: p.NossoNumeroBoleto ?? null,
-        planoConta: p.PlanoConta ?? null,
-      })),
-      skipDuplicates: true,
-    });
-    count += r.count;
-  }
+  await prisma.$transaction(
+    async (tx) => {
+      await tx.parcela.deleteMany({});
+      for (let i = 0; i < rowsValidas.length; i += BATCH) {
+        const batch = rowsValidas.slice(i, i + BATCH);
+        const r = await tx.parcela.createMany({
+          data: batch.map((p) => ({
+            idParcela: p.IdParcela,
+            idConta: p.IdConta,
+            status: p.Status,
+            dataEmissao: parseDapicDateTime(p.DataEmissao),
+            dataVencimento: parseDapicDateTime(p.DataVencimento),
+            conta: p.Conta,
+            formaPagamento: p.FormaPagamento,
+            pessoa: p.Pessoa,
+            numeroParcela: p.Parcela,
+            valor: p.Valor,
+            valorPago: p.ValorPago,
+            valorAberto: p.ValorAberto,
+            valorMulta: p.ValorMulta,
+            valorJuros: p.ValorJuros,
+            nossoNumeroBoleto: p.NossoNumeroBoleto ?? null,
+            planoConta: p.PlanoConta ?? null,
+          })),
+          skipDuplicates: true,
+        });
+        count += r.count;
+      }
+    },
+    { timeout: 30_000 }
+  );
   return count;
 }
 
@@ -821,6 +1025,53 @@ async function buildAlertaEstoqueParadoSemanal(): Promise<string | null> {
   );
 }
 
+type EstagioSync = "armazenadores" | "estoque" | "vendas" | "faturas";
+
+type ResultadoLoja = {
+  ok: boolean;
+  storeLabel: string;
+  primaryStoreId: string | null;
+  estoque: number;
+  vendas: number;
+  devolucoes: number;
+  brindes: number;
+  vendedorCorrigido: VendedorCorrigido[];
+  vendasCanceladas: number;
+  devolucoesCanceladas: number;
+  divergencias: DivergenciaReconciliacao[];
+  falha?: { estagio: EstagioSync; mensagem: string };
+};
+
+// Achado em 2026-10-30: antes, se 1 loja falhasse depois de outras já terem tido sucesso, o
+// Promise.all inteiro rejeitava e NENHUM SyncLog SUCCESS era gravado — mesmo com o dado das
+// lojas boas já commitado no Neon (upsert não é revertido). Isolar a falha por loja aqui permite
+// reportar sucesso parcial como sucesso parcial, não como falha total mascarando o que funcionou.
+async function falhaDeLoja(
+  client: DapicClient,
+  storeId: string | null,
+  estagio: EstagioSync,
+  e: unknown,
+  parcial: Partial<ResultadoLoja> = {}
+): Promise<ResultadoLoja> {
+  const mensagem = e instanceof Error ? e.message : String(e);
+  console.error(`[syncOneClient] ${client.label} falhou em "${estagio}":`, mensagem);
+  return {
+    ok: false,
+    storeLabel: client.label,
+    primaryStoreId: storeId,
+    estoque: 0,
+    vendas: 0,
+    devolucoes: 0,
+    brindes: 0,
+    vendedorCorrigido: [],
+    vendasCanceladas: 0,
+    devolucoesCanceladas: 0,
+    divergencias: [],
+    falha: { estagio, mensagem },
+    ...parcial,
+  };
+}
+
 // Um "attempt" da sync inteira — devolve o resumo em caso de sucesso, ou lança em caso de erro.
 // Separado de runSync() pra permitir tentar de novo (retryBudgetMs) sem duplicar a lógica de
 // notificação/log, que só acontece uma vez, no fim, em runSync().
@@ -844,39 +1095,76 @@ async function doSync() {
   const clients = allClients.filter((c) => c.label !== "matriz");
   const matrizClient = allClients.find((c) => c.label === "matriz");
 
-  async function syncOneClient(client: DapicClient) {
-    const { storeByDapicId, primaryStoreId, atacadoStoreId } = await syncArmazenadores(client);
-    const [estoque, priceCatalog] = await Promise.all([
-      syncEstoque(client, storeByDapicId),
-      fetchPriceCatalogCached(prisma, client),
-    ]);
-    // Janela de 1 dia (24h) — cobre com folga o intervalo entre os 2 syncs diários (12h) e
-    // reduz o volume processado (menos chamadas de /faturas, que é 1 por fatura pro
-    // Site+Atacado). Se um sync falhar, o self-heal-sync.ts (dispara sozinho se o último
-    // SyncLog tiver mais de 5h) cobre o risco de perder dado mais velho que essa janela.
-    const vendas = await syncVendas(client, primaryStoreId, atacadoStoreId, 1, priceCatalog);
-    const faturas = await syncFaturas(client, primaryStoreId, atacadoStoreId, 1, priceCatalog);
-    // Não fatal: reconciliação é uma camada extra de correção, não pode derrubar o sync normal
-    // (que já processou vendas/faturas novas com sucesso acima) se a API/rede falhar aqui.
-    const canceladas = await Promise.all([
-      reconciliarCancelamentosVendas(client, primaryStoreId, atacadoStoreId).catch((e) => {
-        console.error(`[reconciliarCancelamentosVendas] ${client.label} falhou:`, e?.message ?? e);
-        return { saleUpdates: 0, returnUpdates: 0 };
-      }),
-      reconciliarCancelamentosFaturas(client, primaryStoreId, atacadoStoreId).catch((e) => {
-        console.error(`[reconciliarCancelamentosFaturas] ${client.label} falhou:`, e?.message ?? e);
-        return { saleUpdates: 0 };
-      }),
-    ]);
-    return {
-      estoque,
-      vendas: vendas.vendas + faturas.vendas,
-      devolucoes: vendas.devolucoes,
-      brindes: vendas.brindes + faturas.brindes,
-      vendedorCorrigido: vendas.vendedorCorrigido,
-      vendasCanceladas: canceladas[0].saleUpdates + canceladas[1].saleUpdates,
-      devolucoesCanceladas: canceladas[0].returnUpdates,
-    };
+  async function syncOneClient(client: DapicClient): Promise<ResultadoLoja> {
+    let primaryStoreId: string | null = null;
+    try {
+      const armazenadores = await syncArmazenadores(client);
+      primaryStoreId = armazenadores.primaryStoreId;
+      const { storeByDapicId, atacadoStoreId } = armazenadores;
+
+      let estoque: number;
+      let priceCatalog: PriceCatalog;
+      try {
+        [estoque, priceCatalog] = await Promise.all([
+          syncEstoque(client, storeByDapicId),
+          fetchPriceCatalogCached(prisma, client),
+        ]);
+      } catch (e) {
+        return falhaDeLoja(client, primaryStoreId, "estoque", e);
+      }
+
+      // Janela de 1 dia (24h) — cobre com folga o intervalo entre os 2 syncs diários (12h) e
+      // reduz o volume processado (menos chamadas de /faturas, que é 1 por fatura pro
+      // Site+Atacado). Se um sync falhar, o self-heal-sync.ts (dispara sozinho se o último
+      // SyncLog tiver mais de 5h) cobre o risco de perder dado mais velho que essa janela.
+      let vendas;
+      try {
+        vendas = await syncVendas(client, primaryStoreId, atacadoStoreId, 1, priceCatalog);
+      } catch (e) {
+        return falhaDeLoja(client, primaryStoreId, "vendas", e, { estoque });
+      }
+
+      let faturas;
+      try {
+        faturas = await syncFaturas(client, primaryStoreId, atacadoStoreId, 1, priceCatalog);
+      } catch (e) {
+        return falhaDeLoja(client, primaryStoreId, "faturas", e, {
+          estoque,
+          vendas: vendas.vendas,
+          devolucoes: vendas.devolucoes,
+          brindes: vendas.brindes,
+          vendedorCorrigido: vendas.vendedorCorrigido,
+        });
+      }
+
+      // Não fatal: reconciliação é uma camada extra de correção, não pode derrubar o sync normal
+      // (que já processou vendas/faturas novas com sucesso acima) se a API/rede falhar aqui.
+      const canceladas = await Promise.all([
+        reconciliarCancelamentosVendas(client, primaryStoreId, atacadoStoreId).catch((e) => {
+          console.error(`[reconciliarCancelamentosVendas] ${client.label} falhou:`, e?.message ?? e);
+          return { saleUpdates: 0, returnUpdates: 0 };
+        }),
+        reconciliarCancelamentosFaturas(client, primaryStoreId, atacadoStoreId).catch((e) => {
+          console.error(`[reconciliarCancelamentosFaturas] ${client.label} falhou:`, e?.message ?? e);
+          return { saleUpdates: 0 };
+        }),
+      ]);
+      return {
+        ok: true,
+        storeLabel: client.label,
+        primaryStoreId,
+        estoque,
+        vendas: vendas.vendas + faturas.vendas,
+        devolucoes: vendas.devolucoes,
+        brindes: vendas.brindes + faturas.brindes,
+        vendedorCorrigido: vendas.vendedorCorrigido,
+        vendasCanceladas: canceladas[0].saleUpdates + canceladas[1].saleUpdates,
+        devolucoesCanceladas: canceladas[0].returnUpdates,
+        divergencias: [...vendas.divergencias, ...faturas.divergencias],
+      };
+    } catch (e) {
+      return falhaDeLoja(client, primaryStoreId, "armazenadores", e);
+    }
   }
 
   // cd-atacado (Site+Atacado, ~14k linhas de estoque, 3x maior que cada loja física) rodava em
@@ -929,6 +1217,28 @@ async function doSync() {
   const totalDevolucoesCanceladas = results.reduce((a, r) => a + r.devolucoesCanceladas, 0);
   const vendedorCorrigido = results.flatMap((r) => r.vendedorCorrigido);
 
+  // Falha isolada por loja (ver falhaDeLoja) — reportada por fonte, sem mascarar o que as outras
+  // lojas sincronizaram com sucesso (que já está commitado no Neon, upsert não é revertido).
+  const falhas = results.filter((r) => !r.ok) as (ResultadoLoja & { falha: NonNullable<ResultadoLoja["falha"]> })[];
+  const falhasEstoque = falhas.filter((f) => f.falha.estagio === "estoque");
+  const falhasVendas = falhas.filter((f) => ["vendas", "faturas", "armazenadores"].includes(f.falha.estagio));
+  const mensagemFalhas = (lista: typeof falhas) =>
+    lista.map((f) => `${f.storeLabel} (${f.falha.estagio}): ${f.falha.mensagem}`).join(" | ");
+
+  // Reconciliação origem(DAPIC)×destino(Neon) — ver reconciliarLotePersistido. Agrega as
+  // divergências de todas as lojas desta rodada e alerta direto (não espera o fim de
+  // runSyncLocked) — isso é auditoria independente do sucesso/falha do resto da sync.
+  const divergencias = results.flatMap((r) => r.divergencias);
+  if (divergencias.length > 0) {
+    const linhas = divergencias
+      .map((d) => `• ${d.tabela}: ${d.faltando} faltando, ${d.divergente} divergente(s) de ${d.total} esperado(s) — ex: ${d.exemplos.join("; ")}`)
+      .join("\n");
+    await sendTelegramMessage(
+      `🚨 Reconciliação origem×destino achou divergência real neste sync:\n${linhas}\nInvestigar — dado persistido não bate com o que o sync computou.`,
+      { adminOnly: true }
+    ).catch(() => {});
+  }
+
   // Mantém a "dona" (ClienteVendedorAtribuicao) de cada cliente sempre alinhada com quem vendeu
   // de verdade por último pra ele em cada loja — ver sincronizarAtribuicoesComVendaReal. Não
   // fatal: é uma correção contínua por cima da sync normal, não pode derrubar o sync se falhar.
@@ -939,20 +1249,52 @@ async function doSync() {
     console.error("[sincronizarAtribuicoesComVendaReal] falhou:", (e as Error)?.message ?? e);
   }
 
+  // storeId só faz sentido quando a falha foi de uma única loja — com mais de uma, o registro
+  // fica sem loja específica (não dava pra escolher uma só) mas a mensagem lista todas.
+  const storeIdUnico = (lista: typeof falhas) => (lista.length === 1 ? lista[0].primaryStoreId : null);
+
   await prisma.syncLog.create({
-    data: { source: "STOCK", status: "SUCCESS", recordsSynced: totalEstoque, finishedAt: new Date() },
+    data: {
+      source: "STOCK",
+      status: falhasEstoque.length ? "FAILED" : "SUCCESS",
+      storeId: storeIdUnico(falhasEstoque),
+      recordsSynced: totalEstoque,
+      message: falhasEstoque.length ? `Falha parcial: ${mensagemFalhas(falhasEstoque)}` : null,
+      finishedAt: new Date(),
+    },
   });
   await prisma.syncLog.create({
-    data: { source: "SALES", status: "SUCCESS", recordsSynced: totalVendas, finishedAt: new Date() },
+    data: {
+      source: "SALES",
+      status: falhasVendas.length ? "FAILED" : "SUCCESS",
+      storeId: storeIdUnico(falhasVendas),
+      recordsSynced: totalVendas,
+      message: falhasVendas.length ? `Falha parcial: ${mensagemFalhas(falhasVendas)}` : null,
+      finishedAt: new Date(),
+    },
   });
   await prisma.syncLog.create({
-    data: { source: "RETURNS", status: "SUCCESS", recordsSynced: totalDevolucoes, finishedAt: new Date() },
+    data: {
+      source: "RETURNS",
+      status: falhasVendas.length ? "FAILED" : "SUCCESS",
+      storeId: storeIdUnico(falhasVendas),
+      recordsSynced: totalDevolucoes,
+      message: falhasVendas.length ? `Falha parcial: ${mensagemFalhas(falhasVendas)}` : null,
+      finishedAt: new Date(),
+    },
   });
   await prisma.syncLog.create({
     data: { source: "PRODUCTION", status: "SUCCESS", recordsSynced: totalOrdensProducao, finishedAt: new Date() },
   });
   await prisma.syncLog.create({
-    data: { source: "GIFTS", status: "SUCCESS", recordsSynced: totalBrindes, finishedAt: new Date() },
+    data: {
+      source: "GIFTS",
+      status: falhasVendas.length ? "FAILED" : "SUCCESS",
+      storeId: storeIdUnico(falhasVendas),
+      recordsSynced: totalBrindes,
+      message: falhasVendas.length ? `Falha parcial: ${mensagemFalhas(falhasVendas)}` : null,
+      finishedAt: new Date(),
+    },
   });
 
   return {
@@ -965,6 +1307,7 @@ async function doSync() {
     vendasCanceladas: totalVendasCanceladas,
     devolucoesCanceladas: totalDevolucoesCanceladas,
     vendedorCorrigido,
+    falhasParciais: falhas.map((f) => `${f.storeLabel} (${f.falha.estagio}): ${f.falha.mensagem}`),
     desde,
     ate,
   };
@@ -977,34 +1320,60 @@ async function doSync() {
 // retryBudgetMs: se a 1ª tentativa falhar, tenta de novo até esse tempo total passar (uma sync
 // completa já leva ~130-280s sozinha — maxDuration é 300s — então normalmente cabe só mais 1-2
 // tentativas, não um número fixo; por isso o retry é por orçamento de tempo, não por contagem).
-const SYNC_LOCK_ID = "sync";
+export const SYNC_LOCK_ID = "sync";
 const SYNC_LOCK_STALE_MIN = 6;
+export const RECOVERY_LOCK_ID = "recovery";
+const RECOVERY_LOCK_STALE_MIN = 20;
+export const CANCELAMENTOS_LOCK_ID = "cancelamentos";
+const CANCELAMENTOS_LOCK_STALE_MIN = 3;
 
-// Evita 2 sincronizações completas rodando ao mesmo tempo — virou risco real depois do
-// agendador externo de 10 em 10 min (2026-09-11), já que uma sync completa pode levar até ~4min
-// e meio num dia lento do DAPIC. "Travado" = já tem lock com finishedAt nulo E startedAt recente
-// (dentro do staleMin informado); depois disso considera stale (processo deve ter morrido sem
-// atualizar finishedAt) e libera sozinho, pra nunca ficar preso pra sempre.
-// Parametrizado por lockId/staleMin (2026-10-06, Etapa 1 da atualização rápida de cancelamento)
-// pra reaproveitar a MESMA tabela SyncLock com uma linha própria pra reconciliação isolada
-// (id="cancelamentos") — assim ela nunca disputa/bloqueia o lock da sync completa (id="sync") e
-// vice-versa, cada uma só protege contra duas execuções DELA MESMA ao mesmo tempo.
-async function acquireSyncLock(lockId: string = SYNC_LOCK_ID, staleMin: number = SYNC_LOCK_STALE_MIN): Promise<boolean> {
-  const now = new Date();
-  const staleCutoff = new Date(now.getTime() - staleMin * 60_000);
-  const existing = await prisma.syncLock.findUnique({ where: { id: lockId } });
-  if (existing && existing.finishedAt === null && existing.startedAt > staleCutoff) {
-    return false;
-  }
-  await prisma.syncLock.upsert({
-    where: { id: lockId },
-    create: { id: lockId, startedAt: now, finishedAt: null },
-    update: { startedAt: now, finishedAt: null },
+// Achado em 2026-10-30: antes, cada um desses 3 locks só protegia contra OUTRA execução DELE
+// MESMO ("sync" x "sync", "recovery" x "recovery", "cancelamentos" x "cancelamentos") — "sync" e
+// "recovery" podiam rodar ao mesmo tempo sobre a MESMA loja/item sem bloqueio mútuo nenhum. Se
+// os dois calculassem um storeId diferente pro mesmo item (ex: catálogo de preço mudou entre as
+// duas leituras concorrentes, ver resolveStoreIdsEstaveis), o resultado seria a mesma venda
+// duplicada sob dois storeId — o mesmo mecanismo do incidente de R$20k já ocorrido, só que via
+// gap de lock em vez de defasagem temporal. Agora os 3 se bloqueiam mutuamente.
+const TODOS_OS_LOCKS: { id: string; staleMin: number }[] = [
+  { id: SYNC_LOCK_ID, staleMin: SYNC_LOCK_STALE_MIN },
+  { id: RECOVERY_LOCK_ID, staleMin: RECOVERY_LOCK_STALE_MIN },
+  { id: CANCELAMENTOS_LOCK_ID, staleMin: CANCELAMENTOS_LOCK_STALE_MIN },
+];
+
+// Evita 2 sincronizações (de qualquer um dos 3 tipos) rodando ao mesmo tempo sobre o mesmo dado —
+// virou risco real depois do agendador externo de 10 em 10 min (2026-09-11), já que uma sync
+// completa pode levar até ~4min e meio num dia lento do DAPIC. "Travado" = já tem lock com
+// finishedAt nulo E startedAt recente (dentro do staleMin daquele lock); depois disso considera
+// stale (processo deve ter morrido sem atualizar finishedAt) e libera sozinho, pra nunca ficar
+// preso pra sempre. A checagem+aquisição roda dentro de uma transação com pg_advisory_xact_lock
+// (escopo da transação, liberado sozinho no commit/rollback — seguro mesmo com connection pooling
+// do Neon) só pra serializar a decisão "posso adquirir?" entre chamadas concorrentes; a transação
+// dura só os poucos ms dessa checagem, nunca o sync inteiro.
+export async function acquireSyncLock(lockId: string = SYNC_LOCK_ID, staleMin: number = SYNC_LOCK_STALE_MIN): Promise<boolean> {
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('tvb-sync-lock-coordination'))`;
+    const now = new Date();
+    const rows = await tx.syncLock.findMany({ where: { id: { in: TODOS_OS_LOCKS.map((l) => l.id) } } });
+
+    for (const outroLock of TODOS_OS_LOCKS) {
+      const staleMinDesseLock = outroLock.id === lockId ? staleMin : outroLock.staleMin;
+      const row = rows.find((r) => r.id === outroLock.id);
+      const staleCutoff = new Date(now.getTime() - staleMinDesseLock * 60_000);
+      if (row && row.finishedAt === null && row.startedAt > staleCutoff) {
+        return false; // qualquer um dos 3 travado (inclusive o próprio) bloqueia a aquisição
+      }
+    }
+
+    await tx.syncLock.upsert({
+      where: { id: lockId },
+      create: { id: lockId, startedAt: now, finishedAt: null },
+      update: { startedAt: now, finishedAt: null },
+    });
+    return true;
   });
-  return true;
 }
 
-async function releaseSyncLock(lockId: string = SYNC_LOCK_ID) {
+export async function releaseSyncLock(lockId: string = SYNC_LOCK_ID) {
   await prisma.syncLock.update({ where: { id: lockId }, data: { finishedAt: new Date() } }).catch(() => {});
 }
 
@@ -1079,7 +1448,7 @@ async function corrigirStoreIdConserto(): Promise<{ movidas: number; duplicadasD
 }
 
 export async function recuperarVendasRecentes(dias: number = 10) {
-  if (!(await acquireSyncLock("recovery", 20))) {
+  if (!(await acquireSyncLock(RECOVERY_LOCK_ID, RECOVERY_LOCK_STALE_MIN))) {
     return { ok: false as const, message: "Já existe uma recuperação em andamento." };
   }
 
@@ -1156,7 +1525,7 @@ export async function recuperarVendasRecentes(dias: number = 10) {
     await sendTelegramMessage(`⚠️ Recuperação de vendas falhou: ${message}`, { adminOnly: true });
     return { ok: false as const, message };
   } finally {
-    await releaseSyncLock("recovery");
+    await releaseSyncLock(RECOVERY_LOCK_ID);
   }
 }
 
@@ -1169,8 +1538,7 @@ export async function recuperarVendasRecentes(dias: number = 10) {
 // idempotente) e janela de segurança (RECONCILIACAO_DIAS) das funções já existentes — nenhuma
 // regra nova, só uma orquestração mais magra em volta delas (mesmo par syncArmazenadores +
 // reconciliarCancelamentosVendas/Faturas que syncOneClient já chama dentro do doSync()).
-const CANCELAMENTOS_LOCK_ID = "cancelamentos";
-const CANCELAMENTOS_LOCK_STALE_MIN = 3;
+// (CANCELAMENTOS_LOCK_ID/STALE_MIN já declarados acima, perto de TODOS_OS_LOCKS.)
 
 export async function runCancelamentosRapidos() {
   if (!(await acquireSyncLock(CANCELAMENTOS_LOCK_ID, CANCELAMENTOS_LOCK_STALE_MIN))) {
@@ -1289,6 +1657,16 @@ async function runSyncLocked(silent: boolean, retryBudgetMs: number, checkDuplic
           `🔄 Vendedor corrigido em ${result.vendedorCorrigido.length} venda(s) já sincronizada(s):\n${linhas}`,
           { adminOnly: true }
         );
+      }
+
+      // Falha isolada por loja (ver falhaDeLoja/syncOneClient) — a sync como um todo é reportada
+      // como sucesso (as outras lojas sincronizaram certo), mas o admin precisa saber que alguma
+      // loja específica não atualizou nesta rodada.
+      if (result.falhasParciais.length > 0) {
+        await sendTelegramMessage(
+          `⚠️ Sync concluída com falha parcial em ${result.falhasParciais.length} loja(s):\n${result.falhasParciais.map((f) => `• ${f}`).join("\n")}`,
+          { adminOnly: true }
+        ).catch(() => {}); // alerta é melhor-esforço — não pode fazer o attempt inteiro ser tratado como falho
       }
 
       // Checagens periódicas (só na sync das 8h — ver checkDuplicates em /api/sync/route.ts —

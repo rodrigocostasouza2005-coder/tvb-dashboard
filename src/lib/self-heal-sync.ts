@@ -8,8 +8,13 @@ import { runSync } from "@/lib/sync-runner";
 const STALE_HOURS = 5;
 
 export async function scheduleCatchupSyncIfStale() {
+  // Achado em 2026-10-30: sem filtrar por status, uma sequência de syncs que FALHAM também grava
+  // um SyncLog STOCK recente (ver catch em runSyncLocked) — isso mantinha esse registro sempre
+  // "parecendo recente" e o self-heal nunca disparava, justamente no cenário em que mais seria
+  // necessário. Não reaproveitar getLastSyncAt() aqui: ele também aceita o lock "cancelamentos"
+  // como sinal de sync recente, mas a reconciliação de cancelamento nunca toca estoque.
   const last = await prisma.syncLog.findFirst({
-    where: { source: "STOCK" },
+    where: { source: "STOCK", status: "SUCCESS" },
     orderBy: { startedAt: "desc" },
   });
   const staleMs = STALE_HOURS * 60 * 60 * 1000;
