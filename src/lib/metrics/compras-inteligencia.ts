@@ -648,10 +648,20 @@ async function getVendaMediaDiariaPorCod(cods: string[]): Promise<Map<string, { 
   const to = new Date();
   const from = new Date(to.getTime() - JANELA_VELOCIDADE_VENDA_DIAS * 86_400_000);
 
-  const [vendasRecentes, primeiraVenda] = await Promise.all([
+  // Achado na auditoria de 2026-10-31: venda aqui era sempre BRUTA (nunca descontava Return) —
+  // medido no dev, 33,6% dos cods vendidos nos últimos 90 dias têm alguma devolução (9,6% da
+  // unidade bruta total), inflando a velocidade e, por consequência, a quantidade sugerida de
+  // compra. "Vendido" no resto do app sempre significa líquido (ver getMapaDeComprasDetalhado,
+  // getStockVsSales) — esta função só não seguia a convenção ainda.
+  const [vendasRecentes, devolucoesRecentes, primeiraVenda] = await Promise.all([
     prisma.sale.groupBy({
       by: ["cod"],
       where: { status: { not: "Cancelada" }, cod: { in: cods }, saleDate: { gte: from, lte: to } },
+      _sum: { quantidade: true },
+    }),
+    prisma.return.groupBy({
+      by: ["cod"],
+      where: { status: { not: "Cancelada" }, cod: { in: cods }, returnDate: { gte: from, lte: to } },
       _sum: { quantidade: true },
     }),
     prisma.sale.groupBy({
@@ -662,6 +672,7 @@ async function getVendaMediaDiariaPorCod(cods: string[]): Promise<Map<string, { 
   ]);
 
   const vendasByCod = new Map(vendasRecentes.map((v) => [v.cod, v._sum.quantidade ?? 0]));
+  const devolucoesByCod = new Map(devolucoesRecentes.map((d) => [d.cod, d._sum.quantidade ?? 0]));
   const primeiraVendaByCod = new Map(primeiraVenda.map((v) => [v.cod, v._min.saleDate]));
 
   const resultado = new Map<string, { mediaDiaria: number; diasComDado: number }>();
@@ -669,9 +680,11 @@ async function getVendaMediaDiariaPorCod(cods: string[]): Promise<Map<string, { 
     const primeira = primeiraVendaByCod.get(cod);
     const diasDesdePrimeira = primeira ? Math.floor((to.getTime() - primeira.getTime()) / 86_400_000) : 0;
     const diasComDado = Math.min(diasDesdePrimeira, JANELA_VELOCIDADE_VENDA_DIAS);
-    const totalVendido = vendasByCod.get(cod) ?? 0;
+    // Nunca negativo — devolução de uma venda de fora da janela (ex: comprou há 100 dias,
+    // devolveu agora) não pode fazer a "venda líquida da janela" virar negativa.
+    const totalVendidoLiquido = Math.max(0, (vendasByCod.get(cod) ?? 0) - (devolucoesByCod.get(cod) ?? 0));
     resultado.set(cod, {
-      mediaDiaria: diasComDado > 0 ? totalVendido / diasComDado : 0,
+      mediaDiaria: diasComDado > 0 ? totalVendidoLiquido / diasComDado : 0,
       diasComDado,
     });
   }
@@ -813,17 +826,24 @@ export async function getRecomendacoesDrop(filters: ComprasFiltro = {}): Promise
   if (classificados.length === 0) return [];
 
   const cods = classificados.map((c) => c.cod);
-  const [velocidade, pedidosAberto, estoqueRows, vendasAcumuladasRows, custoPorCod, quantidadeOriginalPorCod] = await Promise.all([
+  const [velocidade, pedidosAberto, estoqueRows, vendasAcumuladasRows, devolucoesAcumuladasRows, custoPorCod, quantidadeOriginalPorCod] = await Promise.all([
     getVendaMediaDiariaPorCod(cods),
     getPedidosEmAbertoPorCod(cods),
     prisma.stockSnapshot.groupBy({ by: ["cod"], where: { cod: { in: cods } }, _sum: { quantidadeDisponivel: true } }),
     prisma.sale.groupBy({ by: ["cod"], where: { status: { not: "Cancelada" }, cod: { in: cods } }, _sum: { quantidade: true } }),
+    // Mesma correção da auditoria de 2026-10-31 (ver getVendaMediaDiariaPorCod): sell-through
+    // de Drop usa "vendasAcumuladas" como numerador — sem descontar devolução, um Drop com
+    // trocas/devoluções altas aparecia com sell-through inflado.
+    prisma.return.groupBy({ by: ["cod"], where: { status: { not: "Cancelada" }, cod: { in: cods } }, _sum: { quantidade: true } }),
     getCustoUnitarioPorCod(cods),
     getQuantidadeOriginalProduzidaPorCod(cods),
   ]);
 
   const estoqueByCod = new Map(estoqueRows.map((e) => [e.cod, e._sum.quantidadeDisponivel ?? 0]));
-  const vendasAcumuladasByCod = new Map(vendasAcumuladasRows.map((v) => [v.cod, v._sum.quantidade ?? 0]));
+  const devolucoesAcumuladasByCod = new Map(devolucoesAcumuladasRows.map((d) => [d.cod, d._sum.quantidade ?? 0]));
+  const vendasAcumuladasByCod = new Map(
+    vendasAcumuladasRows.map((v) => [v.cod, Math.max(0, (v._sum.quantidade ?? 0) - (devolucoesAcumuladasByCod.get(v.cod) ?? 0))])
+  );
   const hoje = new Date();
 
   return classificados.map((c) => {
@@ -1118,4 +1138,98 @@ export async function setOrcamentoTotalPlanejado(valor: number | null) {
 export async function getOrcamentoTotalPlanejado(): Promise<number | null> {
   const row = await prisma.mapaComprasConfig.findUnique({ where: { id: "global" } });
   return row?.orcamentoTotalPlanejado ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// AGREGAÇÃO POR PRODUTO (grupo::produto) — recomendações são por cod (SKU/tamanho), mas tanto a
+// matriz do Mapa de Compras quanto a camada de integração com Distribuição (ver
+// integracao-compras-distribuicao.ts) precisam de UM número por produto. Extraído em 2026-10-31
+// de src/app/dashboard/mapa-compras/matriz-helpers.ts (onde tinha nascido como código de página)
+// pra não duplicar a mesma regra de agregação em dois lugares — "página só chama lib/metrics".
+// ---------------------------------------------------------------------------
+
+export type RecomendacaoAgregadaProduto = {
+  quantidadeSugerida: number;
+  valorEstimado: number | null;
+  // Só preenchido quando o produto tem um único SKU/tamanho classificado — média de "dias de
+  // cobertura" entre tamanhos diferentes do mesmo produto não é um número que faça sentido
+  // mostrar como se fosse preciso.
+  coberturaAtualDias: number | null;
+  confiavel: boolean;
+  sellThroughAtual: number | null; // só Drop
+  riscoRuptura: boolean;
+  riscoSobra: boolean;
+  bloqueadoRecompra: boolean;
+  precisaConfirmacaoHumana: boolean;
+  premissas: string[];
+  avisos: string[];
+};
+
+function agregarPremissas(rows: { premissas: string[]; avisos: string[] }[]): { premissas: string[]; avisos: string[] } {
+  return {
+    premissas: [...new Set(rows.flatMap((r) => r.premissas))],
+    avisos: [...new Set(rows.flatMap((r) => r.avisos))],
+  };
+}
+
+export function agregarBestSellerPorProduto(rows: RecomendacaoBestSellerPorProduto[]): RecomendacaoAgregadaProduto | null {
+  if (rows.length === 0) return null;
+  const { premissas, avisos } = agregarPremissas(rows);
+  return {
+    quantidadeSugerida: rows.reduce((s, r) => s + r.quantidadeSugerida, 0),
+    valorEstimado: rows.some((r) => r.valorEstimado != null) ? rows.reduce((s, r) => s + (r.valorEstimado ?? 0), 0) : null,
+    coberturaAtualDias: rows.length === 1 ? rows[0].coberturaAtualDias : null,
+    confiavel: rows.every((r) => r.confiavel),
+    sellThroughAtual: null,
+    riscoRuptura: rows.some((r) => r.coberturaAtualDias != null && r.coberturaAtualDias < 7 && r.quantidadeSugerida > 0),
+    riscoSobra: false,
+    bloqueadoRecompra: false,
+    precisaConfirmacaoHumana: false,
+    premissas,
+    avisos,
+  };
+}
+
+export function agregarDropPorProduto(rows: RecomendacaoDropPorProduto[]): RecomendacaoAgregadaProduto | null {
+  if (rows.length === 0) return null;
+  const { premissas, avisos } = agregarPremissas(rows);
+  const comVendas = rows.filter((r) => r.sellThroughAtual != null);
+  // Média simples do sell-through entre os tamanhos/cods com dado (SugestaoDrop não expõe
+  // vendasAcumuladas por fora pra ponderar por volume) — aviso explícito de que é aproximado
+  // quando o produto tem mais de 1 SKU.
+  const sellThroughAtual = comVendas.length > 0 ? comVendas.reduce((s, r) => s + r.sellThroughAtual!, 0) / comVendas.length : null;
+  if (comVendas.length > 1) {
+    avisos.push("Sell-through exibido é a média simples entre os tamanhos/SKUs deste produto (não ponderada por volume).");
+  }
+  return {
+    quantidadeSugerida: rows.reduce((s, r) => s + (r.quantidadeSugerida ?? 0), 0),
+    valorEstimado: rows.some((r) => r.valorEstimado != null) ? rows.reduce((s, r) => s + (r.valorEstimado ?? 0), 0) : null,
+    coberturaAtualDias: null,
+    confiavel: true,
+    sellThroughAtual,
+    riscoRuptura: rows.some((r) => r.riscoRuptura),
+    riscoSobra: rows.some((r) => r.riscoSobra),
+    bloqueadoRecompra: rows.some((r) => r.bloqueadoRecompra),
+    precisaConfirmacaoHumana: rows.some((r) => r.precisaConfirmacaoHumana),
+    premissas,
+    avisos,
+  };
+}
+
+// Monta a recomendação agregada de um produto a partir dos cods já resolvidos pela ponte de
+// classificação (getClassificacaoPorProduto) — usado tanto pela matriz (página) quanto pela
+// integração com Distribuição. Não busca nada no banco: recebe os Maps já carregados pelo
+// chamador (evita round-trip duplicado quando quem chama já tem os dois Maps na mão).
+export function agregarRecomendacaoProduto(
+  tipoCompra: TipoCompraProduto,
+  cods: string[],
+  bsPorCod: Map<string, RecomendacaoBestSellerPorProduto>,
+  dropPorCod: Map<string, RecomendacaoDropPorProduto>
+): RecomendacaoAgregadaProduto | null {
+  if (tipoCompra === TipoCompraProduto.BEST_SELLER) {
+    const rows = cods.map((c) => bsPorCod.get(c)).filter((r): r is RecomendacaoBestSellerPorProduto => !!r);
+    return agregarBestSellerPorProduto(rows);
+  }
+  const rows = cods.map((c) => dropPorCod.get(c)).filter((r): r is RecomendacaoDropPorProduto => !!r);
+  return agregarDropPorProduto(rows);
 }

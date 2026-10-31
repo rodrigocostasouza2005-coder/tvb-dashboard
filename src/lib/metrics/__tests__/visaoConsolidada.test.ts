@@ -4,6 +4,7 @@ import { PossibilidadeReposicao, StatusComercialProduto, TipoCompraProduto } fro
 const classificacaoFindMany = vi.fn();
 const stockSnapshotGroupBy = vi.fn();
 const saleGroupBy = vi.fn();
+const returnGroupBy = vi.fn();
 const productionOrderGroupBy = vi.fn();
 const coberturaMetaFindMany = vi.fn();
 const mapaComprasConfigFindUnique = vi.fn();
@@ -21,6 +22,9 @@ vi.mock("@/lib/prisma", () => ({
       groupBy: (...a: unknown[]) => saleGroupBy(...a),
       findMany: (...a: unknown[]) => saleFindMany(...a),
     },
+    // Descontar devolução da venda (auditoria de 2026-10-31) — [] em todo teste deste arquivo:
+    // nenhum cenário aqui testa devolução, só precisa não quebrar a chamada.
+    return: { groupBy: (...a: unknown[]) => returnGroupBy(...a) },
     productionOrder: { groupBy: (...a: unknown[]) => productionOrderGroupBy(...a) },
     coberturaMeta: { findMany: (...a: unknown[]) => coberturaMetaFindMany(...a) },
     mapaComprasConfig: { findUnique: (...a: unknown[]) => mapaComprasConfigFindUnique(...a) },
@@ -36,11 +40,14 @@ describe("getVisaoConsolidadaCompras", () => {
     classificacaoFindMany.mockReset();
     stockSnapshotGroupBy.mockReset();
     saleGroupBy.mockReset();
+    returnGroupBy.mockReset();
     productionOrderGroupBy.mockReset();
     coberturaMetaFindMany.mockReset();
     mapaComprasConfigFindUnique.mockReset();
     saleFindMany.mockReset();
     stockSnapshotFindMany.mockReset();
+
+    returnGroupBy.mockResolvedValue([]); // nenhum teste deste arquivo envolve devolução
 
     classificacaoFindMany.mockImplementation((args: { where?: { tipoCompra?: TipoCompraProduto }; select?: unknown }) => {
       if (args.select) return Promise.resolve([]); // fila de revisão: nenhum produto classificado pendente neste teste

@@ -105,6 +105,18 @@ export type ContextoVariante = {
   coberturaAlvoDias: number;
 };
 
+// Quanto uma loja em ruptura/cobertura_crítica precisa pra chegar na cobertura-alvo (dias) —
+// extraída em 2026-10-31 pra ser reaproveitada tanto aqui quanto pela camada de integração com o
+// Mapa de Compras (integracao-compras-distribuicao.ts), que soma essa necessidade entre as 3
+// lojas pra saber "quanto a rede de varejo precisa de verdade" antes de olhar pra transferência.
+// Velocidade de 30d pode estar artificialmente baixa/zero se a ruptura começou DENTRO da janela
+// de 30 dias (a loja só vendeu enquanto tinha estoque) — cai pra 90d nesse caso pra não
+// subestimar a necessidade real.
+export function necessidadePorLoja(v: Pick<VariantePorLoja, "vendasDias30" | "vendasDias90" | "estoqueAtual">, coberturaAlvoDias: number): number {
+  const velocidadeParaNecessidade = v.vendasDias30 > 0 ? v.vendasDias30 / 30 : v.vendasDias90 / 90;
+  return Math.max(0, Math.round(velocidadeParaNecessidade * coberturaAlvoDias) - v.estoqueAtual);
+}
+
 // Pura, testável sem banco. Recebe TODAS as linhas (uma por loja) do MESMO cod e decide se há
 // oportunidade real de transferência. Regra explícita, sem score oculto:
 //  - DESTINO elegível: ruptura ou cobertura crítica (ambos já implicam demanda comprovada — ver
@@ -133,14 +145,7 @@ export function calcularOportunidadeTransferencia(
 
   const destinos = variantes
     .filter((v) => v.diagnostico === "ruptura" || v.diagnostico === "cobertura_critica")
-    .map((v) => {
-      // Velocidade de 30d pode estar artificialmente baixa/zero se a ruptura começou DENTRO da
-      // janela de 30 dias (a loja só vendeu enquanto tinha estoque) — cai pra 90d nesse caso pra
-      // não subestimar a necessidade real.
-      const velocidadeParaNecessidade = v.vendasDias30 > 0 ? v.vendasDias30 / 30 : v.vendasDias90 / 90;
-      const necessidade = Math.max(0, Math.round(velocidadeParaNecessidade * contexto.coberturaAlvoDias) - v.estoqueAtual);
-      return { ...v, necessidade };
-    })
+    .map((v) => ({ ...v, necessidade: necessidadePorLoja(v, contexto.coberturaAlvoDias) }))
     .filter((v) => v.necessidade > 0)
     .sort((a, b) => b.necessidade - a.necessidade);
 
@@ -261,7 +266,11 @@ async function montarComparacao(filters: ComparacaoFiltro): Promise<ComparacaoVa
   const agora = new Date();
   const desde = (dias: number) => new Date(agora.getTime() - dias * 86_400_000);
 
-  const [vendas30, vendas60, vendas90, minimumRules] = await Promise.all([
+  // Achado na auditoria de 2026-10-31: vendas aqui eram sempre BRUTAS (nunca descontavam
+  // Return) — mesma correção já aplicada em compras-inteligencia.ts (getVendaMediaDiariaPorCod).
+  // Sem isso, uma loja com muita troca/devolução parecia ter mais demanda do que tem de
+  // verdade, inflando a velocidade e podendo gerar falso "ruptura"/"cobertura_critica".
+  const [vendas30, vendas60, vendas90, devolucoes30, devolucoes60, devolucoes90, minimumRules] = await Promise.all([
     prisma.sale.groupBy({
       by: ["storeId", "cod"],
       where: { status: { not: "Cancelada" }, storeId: { in: lojaIds }, cod: { in: cods }, saleDate: { gte: desde(JANELA_DIAS.d30) } },
@@ -277,13 +286,32 @@ async function montarComparacao(filters: ComparacaoFiltro): Promise<ComparacaoVa
       where: { status: { not: "Cancelada" }, storeId: { in: lojaIds }, cod: { in: cods }, saleDate: { gte: desde(JANELA_DIAS.d90) } },
       _sum: { quantidade: true },
     }),
+    prisma.return.groupBy({
+      by: ["storeId", "cod"],
+      where: { status: { not: "Cancelada" }, storeId: { in: lojaIds }, cod: { in: cods }, returnDate: { gte: desde(JANELA_DIAS.d30) } },
+      _sum: { quantidade: true },
+    }),
+    prisma.return.groupBy({
+      by: ["storeId", "cod"],
+      where: { status: { not: "Cancelada" }, storeId: { in: lojaIds }, cod: { in: cods }, returnDate: { gte: desde(JANELA_DIAS.d60) } },
+      _sum: { quantidade: true },
+    }),
+    prisma.return.groupBy({
+      by: ["storeId", "cod"],
+      where: { status: { not: "Cancelada" }, storeId: { in: lojaIds }, cod: { in: cods }, returnDate: { gte: desde(JANELA_DIAS.d90) } },
+      _sum: { quantidade: true },
+    }),
     prisma.stockMinimumRule.findMany(),
   ]);
 
   const key = (storeId: string, cod: string) => `${storeId}::${cod}`;
-  const v30 = new Map(vendas30.map((v) => [key(v.storeId, v.cod), v._sum.quantidade ?? 0]));
-  const v60 = new Map(vendas60.map((v) => [key(v.storeId, v.cod), v._sum.quantidade ?? 0]));
-  const v90 = new Map(vendas90.map((v) => [key(v.storeId, v.cod), v._sum.quantidade ?? 0]));
+  function liquido(vendas: { storeId: string; cod: string; _sum: { quantidade: number | null } }[], devolucoes: typeof vendas) {
+    const devByKey = new Map(devolucoes.map((d) => [key(d.storeId, d.cod), d._sum.quantidade ?? 0]));
+    return new Map(vendas.map((v) => [key(v.storeId, v.cod), Math.max(0, (v._sum.quantidade ?? 0) - (devByKey.get(key(v.storeId, v.cod)) ?? 0))]));
+  }
+  const v30 = liquido(vendas30, devolucoes30);
+  const v60 = liquido(vendas60, devolucoes60);
+  const v90 = liquido(vendas90, devolucoes90);
   const estoquePorChave = new Map(stockRows.map((s) => [key(s.storeId, s.cod), s]));
 
   const resultado: ComparacaoVariante[] = [];
