@@ -9,9 +9,10 @@ import {
   getRecomendacoesDrop,
   getFilaRevisaoClassificacao,
   getTamanhoBreakdown,
+  getRecomendacaoConsolidada,
 } from "@/lib/metrics";
 import { StatusComercialProduto } from "@prisma/client";
-import { getGrupoRestriction } from "@/lib/permissions";
+import { getGrupoRestriction, getStoreRestriction } from "@/lib/permissions";
 import { requireTabAccess } from "@/lib/tabs";
 import { toArray, type RawSearchParams } from "@/lib/filters";
 import { MatrizCompras } from "./mapa-compras-grid";
@@ -45,8 +46,9 @@ export default async function MapaComprasPage({ searchParams }: { searchParams: 
   // Cobertura e Crescimento alimentam a recomendação de compra da empresa toda — só ADMIN/GESTAO
   // edita (actions.ts já trava isso no servidor; aqui só escondemos o controle de quem não pode).
   const canEdit = user.role === "ADMIN" || user.role === "GESTAO";
+  const allowedStores = getStoreRestriction(user);
 
-  const [grupos, crescimentoPct, classificacaoPorProduto, bsRows, dropRows, filaRevisao, filtroOpcoes, visao] = await Promise.all([
+  const [grupos, crescimentoPct, classificacaoPorProduto, bsRows, dropRows, filaRevisao, filtroOpcoes, visao, consolidacoes] = await Promise.all([
     getMapaDeComprasDetalhado({ grupoIn }),
     getCrescimentoEsperado(),
     getClassificacaoPorProduto(),
@@ -55,7 +57,13 @@ export default async function MapaComprasPage({ searchParams }: { searchParams: 
     getFilaRevisaoClassificacao(),
     getClassificacaoFilterOptions(),
     getVisaoConsolidadaCompras(comprasFiltro),
+    // Painel complementar "Recomendação Consolidada" (seção 5 do pedido de 2026-10-31) — nunca
+    // bloqueia o carregamento da matriz principal se falhar (ver resiliência em
+    // getRecomendacaoConsolidada); storeIdsPermitidas aqui é o mesmo allowedStores do usuário,
+    // pra nunca mostrar transferência envolvendo loja fora da permissão dele.
+    getRecomendacaoConsolidada({ grupoIn, colecaoIn, storeIdsPermitidas: allowedStores }),
   ]);
+  const consolidadoPorProduto = new Map(consolidacoes.map((c) => [`${c.grupo}::${c.produto}`, c]));
 
   const todosProdutos = [...new Set(grupos.flatMap((g) => g.produtos.map((p) => p.produto)))];
   const tamanhoPorProduto =
@@ -155,7 +163,14 @@ export default async function MapaComprasPage({ searchParams }: { searchParams: 
         value={{ grupoIn: grupoFiltro, colecaoIn: colecaoFiltro, statusComercialIn: statusFiltro, horizonteDias, busca }}
       />
 
-      <MatrizCompras bestSeller={bestSeller} drop={drop} canEdit={canEdit} tamanhoPorProduto={tamanhoPorProduto} busca={busca} />
+      <MatrizCompras
+        bestSeller={bestSeller}
+        drop={drop}
+        canEdit={canEdit}
+        tamanhoPorProduto={tamanhoPorProduto}
+        busca={busca}
+        consolidadoPorProduto={consolidadoPorProduto}
+      />
     </div>
   );
 }
