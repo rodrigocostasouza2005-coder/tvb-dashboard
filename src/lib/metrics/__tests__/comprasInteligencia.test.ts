@@ -4,6 +4,7 @@ import {
   calcularSugestaoBestSeller,
   calcularSugestaoDrop,
   priorizarOrcamentoCompras,
+  resolverTipoCompraProduto,
   type InputBestSeller,
   type InputDrop,
   type ItemPriorizavel,
@@ -225,5 +226,59 @@ describe("priorizarOrcamentoCompras", () => {
     ];
     const resultado = priorizarOrcamentoCompras(itens, 1000);
     expect(resultado[0].id).toBe("drop-risco");
+  });
+});
+
+describe("resolverTipoCompraProduto", () => {
+  it("lança erro se chamado sem nenhuma classificação (uso indevido, nunca deveria acontecer em produção)", () => {
+    expect(() => resolverTipoCompraProduto([])).toThrow();
+  });
+
+  it("unânime (todos os cods do produto com o mesmo tipo) -> usa esse tipo, sem divergência", () => {
+    const r = resolverTipoCompraProduto([
+      { tipoCompra: TipoCompraProduto.BEST_SELLER, receita: 100 },
+      { tipoCompra: TipoCompraProduto.BEST_SELLER, receita: 50 },
+    ]);
+    expect(r).toEqual({ tipoCompra: TipoCompraProduto.BEST_SELLER, divergente: false });
+  });
+
+  it("divergente -> vence o tipo com mais receita somada", () => {
+    const r = resolverTipoCompraProduto([
+      { tipoCompra: TipoCompraProduto.BEST_SELLER, receita: 1000 },
+      { tipoCompra: TipoCompraProduto.DROP, receita: 10 },
+    ]);
+    expect(r).toEqual({ tipoCompra: TipoCompraProduto.BEST_SELLER, divergente: true });
+  });
+
+  it("divergente com Drop vencendo por receita -> retorna DROP", () => {
+    const r = resolverTipoCompraProduto([
+      { tipoCompra: TipoCompraProduto.BEST_SELLER, receita: 10 },
+      { tipoCompra: TipoCompraProduto.DROP, receita: 1000 },
+    ]);
+    expect(r).toEqual({ tipoCompra: TipoCompraProduto.DROP, divergente: true });
+  });
+
+  it("empate exato de receita (inclusive 0 contra 0) -> cai pra BEST_SELLER, lado conservador", () => {
+    const empateZero = resolverTipoCompraProduto([
+      { tipoCompra: TipoCompraProduto.BEST_SELLER, receita: 0 },
+      { tipoCompra: TipoCompraProduto.DROP, receita: 0 },
+    ]);
+    expect(empateZero).toEqual({ tipoCompra: TipoCompraProduto.BEST_SELLER, divergente: true });
+
+    const empateNaoZero = resolverTipoCompraProduto([
+      { tipoCompra: TipoCompraProduto.BEST_SELLER, receita: 500 },
+      { tipoCompra: TipoCompraProduto.DROP, receita: 500 },
+    ]);
+    expect(empateNaoZero).toEqual({ tipoCompra: TipoCompraProduto.BEST_SELLER, divergente: true });
+  });
+
+  it("múltiplos cods do mesmo lado somam a receita antes de comparar (3 BS pequenos vencem 1 Drop grande)", () => {
+    const r = resolverTipoCompraProduto([
+      { tipoCompra: TipoCompraProduto.BEST_SELLER, receita: 400 },
+      { tipoCompra: TipoCompraProduto.BEST_SELLER, receita: 400 },
+      { tipoCompra: TipoCompraProduto.BEST_SELLER, receita: 400 },
+      { tipoCompra: TipoCompraProduto.DROP, receita: 1000 },
+    ]);
+    expect(r).toEqual({ tipoCompra: TipoCompraProduto.BEST_SELLER, divergente: true });
   });
 });

@@ -379,6 +379,91 @@ export function priorizarOrcamentoCompras(
 }
 
 // ---------------------------------------------------------------------------
+// PONTE — classificação (por cod/SKU) → produto (grupo::produto, grão do Mapa de Compras)
+// ---------------------------------------------------------------------------
+// ClassificacaoProduto é por `cod` (SKU/grade completo — pode variar por tamanho/cor), mas a
+// matriz do Mapa de Compras é agregada por nome de produto (grupo::produto, mesmo grão de
+// getMapaDeComprasDetalhado). A esmagadora maioria dos produtos tem um único tipoCompra entre
+// seus cods, mas tamanhos diferentes PODEM ter sido classificados diferente (cada cod é
+// classificado individualmente) — esta ponte decide qual tipo representa o produto como um todo.
+
+export type ClassificacaoComReceita = { tipoCompra: TipoCompraProduto; receita: number };
+
+// Pura, testável sem banco. Empate exato de receita (incluindo 0-0, produto sem venda ainda) cai
+// pra BEST_SELLER de propósito: tratar um produto como recorrente é reversível (só reclassificar),
+// enquanto tratar como Drop bloqueia recompra automática (calcularSugestaoDrop) mesmo sem
+// evidência de que essa é a intenção comercial — o lado mais conservador em caso de dúvida.
+export function resolverTipoCompraProduto(
+  classificacoes: ClassificacaoComReceita[]
+): { tipoCompra: TipoCompraProduto; divergente: boolean } {
+  if (classificacoes.length === 0) {
+    throw new Error("resolverTipoCompraProduto chamado sem nenhuma classificação");
+  }
+  const tipos = new Set(classificacoes.map((c) => c.tipoCompra));
+  if (tipos.size === 1) {
+    return { tipoCompra: classificacoes[0].tipoCompra, divergente: false };
+  }
+  const receitaPorTipo = new Map<TipoCompraProduto, number>();
+  for (const c of classificacoes) {
+    receitaPorTipo.set(c.tipoCompra, (receitaPorTipo.get(c.tipoCompra) ?? 0) + c.receita);
+  }
+  const receitaBS = receitaPorTipo.get(TipoCompraProduto.BEST_SELLER) ?? 0;
+  const receitaDrop = receitaPorTipo.get(TipoCompraProduto.DROP) ?? 0;
+  return {
+    tipoCompra: receitaDrop > receitaBS ? TipoCompraProduto.DROP : TipoCompraProduto.BEST_SELLER,
+    divergente: true,
+  };
+}
+
+export type ClassificacaoPorProdutoEntry = {
+  tipoCompra: TipoCompraProduto;
+  // true = os cods sob esse nome de produto têm tipoCompra diferente entre si (ex: um tamanho
+  // Best Seller, outro Drop) — a UI deve avisar isso em vez de esconder a divergência.
+  divergente: boolean;
+  cods: string[];
+};
+
+// Monta o Map grupo::produto -> classificação resolvida. Produto cujos cods não têm NENHUMA
+// linha em ClassificacaoProduto não entra no Map (continua caindo na fila de revisão — ver
+// getFilaRevisaoClassificacao — comportamento já existente, sem mudança).
+export async function getClassificacaoPorProduto(): Promise<Map<string, ClassificacaoPorProdutoEntry>> {
+  const classificados = await prisma.classificacaoProduto.findMany({
+    select: { cod: true, produto: true, grupo: true, tipoCompra: true },
+  });
+  if (classificados.length === 0) return new Map();
+
+  const cods = classificados.map((c) => c.cod);
+  const receitaRows = await prisma.sale.groupBy({
+    by: ["cod"],
+    where: { status: { not: "Cancelada" }, cod: { in: cods } },
+    _sum: { valorTotalLiquido: true },
+  });
+  const receitaPorCod = new Map(receitaRows.map((r) => [r.cod, r._sum.valorTotalLiquido ?? 0]));
+
+  const porProduto = new Map<string, ClassificacaoComReceita[]>();
+  for (const c of classificados) {
+    const key = `${c.grupo}::${c.produto}`;
+    const arr = porProduto.get(key) ?? [];
+    arr.push({ tipoCompra: c.tipoCompra, receita: receitaPorCod.get(c.cod) ?? 0 });
+    porProduto.set(key, arr);
+  }
+  const codsPorProduto = new Map<string, string[]>();
+  for (const c of classificados) {
+    const key = `${c.grupo}::${c.produto}`;
+    const arr = codsPorProduto.get(key) ?? [];
+    arr.push(c.cod);
+    codsPorProduto.set(key, arr);
+  }
+
+  const resultado = new Map<string, ClassificacaoPorProdutoEntry>();
+  for (const [key, entradas] of porProduto) {
+    const { tipoCompra, divergente } = resolverTipoCompraProduto(entradas);
+    resultado.set(key, { tipoCompra, divergente, cods: codsPorProduto.get(key) ?? [] });
+  }
+  return resultado;
+}
+
+// ---------------------------------------------------------------------------
 // CAMADA DE DADOS — classificação (cadastro, fila de revisão, histórico)
 // ---------------------------------------------------------------------------
 
@@ -618,6 +703,22 @@ async function getPedidosEmAbertoPorCod(cods: string[]): Promise<Map<string, Rec
   return map;
 }
 
+// "Quantidade comprada/produzida original" do Drop (seção 5 do pedido: sell-through =
+// vendido/comprado) — ProductionOrder.quantidadeOriginal já é dado real (populado pela sync desde
+// 2026-08), só não estava ligado aqui (achado da auditoria de 2026-10-30: o campo era hardcoded
+// como 0 em getRecomendacoesDrop, com comentário dizendo que o dado "não existe" — existe).
+// Soma TODO o histórico de produção do cod (sem filtro de dataFinalizacaoProducao), diferente de
+// getPedidosEmAbertoPorCod (que só quer o que ainda está em aberto).
+async function getQuantidadeOriginalProduzidaPorCod(cods: string[]): Promise<Map<string, number>> {
+  if (cods.length === 0) return new Map();
+  const rows = await prisma.productionOrder.groupBy({
+    by: ["cod"],
+    where: { cod: { in: cods } },
+    _sum: { quantidadeOriginal: true },
+  });
+  return new Map(rows.map((r) => [r.cod, r._sum.quantidadeOriginal ?? 0]));
+}
+
 // Custo unitário médio por cod a partir de StockSnapshot.valorCusto (mesmo campo que
 // getEstoqueAtual já usa pro valor de estoque) — é o único custo por SKU que o Radar já tem;
 // sem isso, "valor estimado da compra"/"verba sugerida" (seções 4, 5, 6 e 7) ficaria sempre nulo.
@@ -712,12 +813,13 @@ export async function getRecomendacoesDrop(filters: ComprasFiltro = {}): Promise
   if (classificados.length === 0) return [];
 
   const cods = classificados.map((c) => c.cod);
-  const [velocidade, pedidosAberto, estoqueRows, vendasAcumuladasRows, custoPorCod] = await Promise.all([
+  const [velocidade, pedidosAberto, estoqueRows, vendasAcumuladasRows, custoPorCod, quantidadeOriginalPorCod] = await Promise.all([
     getVendaMediaDiariaPorCod(cods),
     getPedidosEmAbertoPorCod(cods),
     prisma.stockSnapshot.groupBy({ by: ["cod"], where: { cod: { in: cods } }, _sum: { quantidadeDisponivel: true } }),
     prisma.sale.groupBy({ by: ["cod"], where: { status: { not: "Cancelada" }, cod: { in: cods } }, _sum: { quantidade: true } }),
     getCustoUnitarioPorCod(cods),
+    getQuantidadeOriginalProduzidaPorCod(cods),
   ]);
 
   const estoqueByCod = new Map(estoqueRows.map((e) => [e.cod, e._sum.quantidadeDisponivel ?? 0]));
@@ -738,7 +840,7 @@ export async function getRecomendacoesDrop(filters: ComprasFiltro = {}): Promise
       colecao: c.colecao ?? c.produto,
       grupo: c.grupo,
       possibilidadeReposicao: c.possibilidadeReposicao,
-      quantidadeCompradaOriginal: 0, // ver pendência no relatório final: não há campo de "quantidade original comprada/produzida" separado do que já foi vendido+estoque hoje
+      quantidadeCompradaOriginal: quantidadeOriginalPorCod.get(c.cod) ?? 0,
       estoqueDisponivel: estoqueByCod.get(c.cod) ?? 0,
       vendasAcumuladas: vendasAcumuladasByCod.get(c.cod) ?? 0,
       velocidadeVendaDiaria: v.mediaDiaria,

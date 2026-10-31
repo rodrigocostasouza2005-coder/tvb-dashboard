@@ -425,8 +425,10 @@ export async function searchStockVsSalesComTamanhos(filters: DashboardFilters, q
   return { rows: rowsComTamanhos, tamanhos };
 }
 
-// Acha a regra de mínimo manual mais específica (com coleção bate antes da genérica).
-function matchMinimumRule(
+// Acha a regra de mínimo manual mais específica (com coleção bate antes da genérica). Exportada
+// pra ser reaproveitada pelo motor de Distribuição (distribuicao-estoque.ts), que precisa do
+// mesmo piso de mínimo pra nunca sugerir esvaziar uma loja de origem abaixo do próprio mínimo.
+export function matchMinimumRule(
   rules: { storeId: string; grupo: string; tamanho: string; colecao: string | null; valorMinimo: number }[],
   s: { storeId: string; grupo: string; tamanho: string | null; colecao: string | null }
 ): number | null {
@@ -1048,6 +1050,35 @@ function somaChave<T extends { grupo: string; produto: string; mes: Date; unidad
 // reconstruído nem na projeção). Estoque Ideal = Vendas Planejadas × Cobertura (meses configurável
 // por grupo). Falta comprar = Estoque Ideal − Estoque Inicial daquele mês (antes da compra), só nos
 // meses projetados (comprar pro passado não existe).
+// Soma uma lista de séries mensais (uma por produto) numa série só, mês a mês — extraída da
+// closure de getMapaDeComprasDetalhado (2026-10-30) pra ser reaproveitada pela partição
+// Best Seller/Drop do Mapa de Compras (ver página), que precisa resomar o mesmo jeito só que
+// sobre um SUBCONJUNTO de produtos de um grupo (os classificados como BS, ou os classificados
+// como Drop), não o grupo inteiro. Lógica idêntica à de antes, sem nenhuma mudança de
+// comportamento pra quem já chamava via a função interna.
+export function somarSeriesMapaCompras(series: MesMapaCompras[][], todosMeses: string[]): MesMapaCompras[] {
+  return todosMeses.map((mes, i) => {
+    const linhas = series.map((s) => s[i]);
+    const vendas = linhas.reduce((s, l) => s + l.vendas, 0);
+    const estoqueFinal = linhas.reduce((s, l) => s + l.estoqueFinal, 0);
+    const estoqueInicial = linhas.reduce((s, l) => s + l.estoqueInicial, 0);
+    return {
+      mes,
+      tipo: linhas[0]?.tipo ?? "realizado",
+      estoqueInicial,
+      recebimento: linhas.reduce((s, l) => s + l.recebimento, 0),
+      vendas,
+      bonificacoes: linhas.reduce((s, l) => s + l.bonificacoes, 0),
+      estoqueFinal,
+      estoqueIdeal: linhas.reduce((s, l) => s + l.estoqueIdeal, 0),
+      // Cobertura do grupo não é a média das coberturas por produto — recalcula do total
+      // (senão um produto zerado com "cobertura null" distorceria a média).
+      coberturaAtual: vendas > 0 ? Math.round((estoqueInicial / vendas) * 10) / 10 : null,
+      faltaComprar: linhas.reduce((s, l) => s + l.faltaComprar, 0),
+    };
+  });
+}
+
 export async function getMapaDeComprasDetalhado(
   filters: Pick<DashboardFilters, "grupoIn">
 ): Promise<MapaComprasGrupo[]> {
@@ -1336,26 +1367,7 @@ export async function getMapaDeComprasDetalhado(
   }
 
   function somarSeries(series: MesMapaCompras[][]): MesMapaCompras[] {
-    return todosMeses.map((mes, i) => {
-      const linhas = series.map((s) => s[i]);
-      const vendas = linhas.reduce((s, l) => s + l.vendas, 0);
-      const estoqueFinal = linhas.reduce((s, l) => s + l.estoqueFinal, 0);
-      const estoqueInicial = linhas.reduce((s, l) => s + l.estoqueInicial, 0);
-      return {
-        mes,
-        tipo: linhas[0]?.tipo ?? "realizado",
-        estoqueInicial,
-        recebimento: linhas.reduce((s, l) => s + l.recebimento, 0),
-        vendas,
-        bonificacoes: linhas.reduce((s, l) => s + l.bonificacoes, 0),
-        estoqueFinal,
-        estoqueIdeal: linhas.reduce((s, l) => s + l.estoqueIdeal, 0),
-        // Cobertura do grupo não é a média das coberturas por produto — recalcula do total
-        // (senão um produto zerado com "cobertura null" distorceria a média).
-        coberturaAtual: vendas > 0 ? Math.round((estoqueInicial / vendas) * 10) / 10 : null,
-        faltaComprar: linhas.reduce((s, l) => s + l.faltaComprar, 0),
-      };
-    });
+    return somarSeriesMapaCompras(series, todosMeses);
   }
 
   const grupos: MapaComprasGrupo[] = [];

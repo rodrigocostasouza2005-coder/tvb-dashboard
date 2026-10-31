@@ -37,6 +37,7 @@ export type TabKey =
   | "contatos-vendedores"
   | "estoque-retirada"
   | "mapa-compras"
+  | "distribuicao-estoque"
   | "performance"
   | "analise-performance"
   | "analytics-site"
@@ -82,6 +83,10 @@ export const TABS: TabEntry[] = [
   { key: "estoque-minimo", label: "Estoque Mínimo", href: "/dashboard/estoque-minimo", group: "estoque" },
   { key: "estoque-retirada", label: "Sugestão de Retirada", href: "/dashboard/estoque-retirada", group: "estoque" },
   { key: "mapa-compras", label: "Mapa de Compras", href: "/dashboard/mapa-compras", group: "estoque" },
+  // Agente de Inteligência de Distribuição (2026-10-30) — deliberadamente separado do Mapa de
+  // Compras: aqui não se calcula compra, só compara o mesmo produto entre as lojas de varejo. Ver
+  // src/lib/metrics/distribuicao-estoque.ts.
+  { key: "distribuicao-estoque", label: "Inteligência de Distribuição", href: "/dashboard/distribuicao-estoque", group: "estoque" },
 
   // atacado
   { key: "atacado", label: "Vendas", href: "/dashboard/atacado", group: "atacado" },
