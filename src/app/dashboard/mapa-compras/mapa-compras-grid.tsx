@@ -4,8 +4,9 @@ import { useState } from "react";
 import { TipoCompraProduto } from "@prisma/client";
 import { updateCoberturaMetaAction } from "./actions";
 import { ConfirmarDecisaoForm } from "./inteligencia/forms";
+import { ConsolidadoProdutoPanel } from "./consolidado-produto-panel";
 import type { GrupoMatriz, ProdutoMatriz } from "./matriz-helpers";
-import type { TamanhoBreakdownRow } from "@/lib/metrics";
+import type { TamanhoBreakdownRow, RecomendacaoConsolidadaProduto } from "@/lib/metrics";
 
 type MesLinha = GrupoMatriz["meses"][number];
 
@@ -185,6 +186,7 @@ function ProdutoBloco({
   mesesHeader,
   canEdit,
   tamanhoPorProduto,
+  consolidadoPorProduto,
 }: {
   tipo: TipoCompraProduto;
   grupoNome: string;
@@ -192,9 +194,11 @@ function ProdutoBloco({
   mesesHeader: string[];
   canEdit: boolean;
   tamanhoPorProduto: Map<string, TamanhoBreakdownRow[]>;
+  consolidadoPorProduto: Map<string, RecomendacaoConsolidadaProduto>;
 }) {
   const [abertoTamanho, setAbertoTamanho] = useState(false);
   const tamanhos = tamanhoPorProduto.get(produto.produto) ?? [];
+  const consolidado = consolidadoPorProduto.get(`${grupoNome}::${produto.produto}`);
 
   return (
     <>
@@ -214,6 +218,16 @@ function ProdutoBloco({
       </tr>
       {abertoTamanho && <TamanhoLinha linhas={tamanhos} mesesHeader={mesesHeader} />}
       <LinhaRecomendacao tipo={tipo} grupoNome={grupoNome} produto={produto} mesesHeader={mesesHeader} canEdit={canEdit} />
+      {consolidado && (
+        <tr>
+          <td className="sticky left-0 z-10 bg-[var(--page-plane)] px-3 py-1 pl-8" colSpan={1}>
+            <ConsolidadoProdutoPanel c={consolidado} />
+          </td>
+          {mesesHeader.map((mes) => (
+            <td key={mes} className="bg-[var(--page-plane)]" />
+          ))}
+        </tr>
+      )}
       <BlocoLinhas meses={produto.meses} indent />
     </>
   );
@@ -225,12 +239,14 @@ function GrupoBloco({
   mesesHeader,
   canEdit,
   tamanhoPorProduto,
+  consolidadoPorProduto,
 }: {
   tipo: TipoCompraProduto;
   grupo: GrupoMatriz;
   mesesHeader: string[];
   canEdit: boolean;
   tamanhoPorProduto: Map<string, TamanhoBreakdownRow[]>;
+  consolidadoPorProduto: Map<string, RecomendacaoConsolidadaProduto>;
 }) {
   const [aberto, setAberto] = useState(false);
   const faltaTotal = grupo.meses.reduce((s, m) => s + m.faltaComprar, 0);
@@ -276,7 +292,16 @@ function GrupoBloco({
       <BlocoLinhas meses={grupo.meses} />
       {aberto &&
         grupo.produtos.map((produto) => (
-          <ProdutoBloco key={produto.produto} tipo={tipo} grupoNome={grupo.grupo} produto={produto} mesesHeader={mesesHeader} canEdit={canEdit} tamanhoPorProduto={tamanhoPorProduto} />
+          <ProdutoBloco
+            key={produto.produto}
+            tipo={tipo}
+            grupoNome={grupo.grupo}
+            produto={produto}
+            mesesHeader={mesesHeader}
+            canEdit={canEdit}
+            tamanhoPorProduto={tamanhoPorProduto}
+            consolidadoPorProduto={consolidadoPorProduto}
+          />
         ))}
     </>
   );
@@ -290,6 +315,7 @@ function SecaoBloco({
   mesesHeader,
   canEdit,
   tamanhoPorProduto,
+  consolidadoPorProduto,
   buscaAtiva,
 }: {
   tipo: TipoCompraProduto;
@@ -299,6 +325,7 @@ function SecaoBloco({
   mesesHeader: string[];
   canEdit: boolean;
   tamanhoPorProduto: Map<string, TamanhoBreakdownRow[]>;
+  consolidadoPorProduto: Map<string, RecomendacaoConsolidadaProduto>;
   buscaAtiva: string;
 }) {
   const [aberto, setAberto] = useState(true);
@@ -345,7 +372,15 @@ function SecaoBloco({
             </thead>
             <tbody>
               {gruposFiltrados.map((grupo) => (
-                <GrupoBloco key={grupo.grupo} tipo={tipo} grupo={grupo} mesesHeader={mesesHeader} canEdit={canEdit} tamanhoPorProduto={tamanhoPorProduto} />
+                <GrupoBloco
+                  key={grupo.grupo}
+                  tipo={tipo}
+                  grupo={grupo}
+                  mesesHeader={mesesHeader}
+                  canEdit={canEdit}
+                  tamanhoPorProduto={tamanhoPorProduto}
+                  consolidadoPorProduto={consolidadoPorProduto}
+                />
               ))}
               {gruposFiltrados.length === 0 && (
                 <tr>
@@ -368,12 +403,14 @@ export function MatrizCompras({
   canEdit,
   tamanhoPorProduto,
   busca,
+  consolidadoPorProduto,
 }: {
   bestSeller: GrupoMatriz[];
   drop: GrupoMatriz[];
   canEdit: boolean;
   tamanhoPorProduto: Map<string, TamanhoBreakdownRow[]>;
   busca: string;
+  consolidadoPorProduto: Map<string, RecomendacaoConsolidadaProduto>;
 }) {
   const mesesHeader = (bestSeller[0] ?? drop[0])?.meses.map((m) => m.mes) ?? [];
 
@@ -387,6 +424,7 @@ export function MatrizCompras({
         mesesHeader={mesesHeader}
         canEdit={canEdit}
         tamanhoPorProduto={tamanhoPorProduto}
+        consolidadoPorProduto={consolidadoPorProduto}
         buscaAtiva={busca}
       />
       <SecaoBloco
@@ -397,6 +435,7 @@ export function MatrizCompras({
         mesesHeader={mesesHeader}
         canEdit={canEdit}
         tamanhoPorProduto={tamanhoPorProduto}
+        consolidadoPorProduto={consolidadoPorProduto}
         buscaAtiva={busca}
       />
     </div>
