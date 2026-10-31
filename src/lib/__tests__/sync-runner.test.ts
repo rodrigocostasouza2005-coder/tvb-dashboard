@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { Prisma } from "@prisma/client";
 import type { DapicClient } from "@/lib/connectors/dapic";
 
 const storeFindFirst = vi.fn();
@@ -15,6 +16,24 @@ const saleFindMany = vi.fn();
 const executeRaw = vi.fn().mockResolvedValue(undefined);
 const sendTelegramMessageMock = vi.fn().mockResolvedValue(undefined);
 
+// Simulação real da constraint @@unique([clientLabel, dapicArmazenadorId]) de ArmazemConhecido
+// (não um vi.fn() solto) — um Set em memória, resetado a cada teste, que se comporta como o
+// Postgres se comportaria: 1ª criação de uma chave sucede, a 2ª lança o mesmo erro de violação
+// de unicidade (P2002) que verificarArmazemNovo() trata. Mais realista que mockar chamada por
+// chamada, e deixa os testes só precisarem "pré-semear" quem já é conhecido.
+let armazensConhecidosSimulados = new Set<string>();
+const armazemConhecidoCreate = vi.fn();
+armazemConhecidoCreate.mockImplementation(async ({ data }: { data: { clientLabel: string; dapicArmazenadorId: number } }) => {
+  const chave = `${data.clientLabel}::${data.dapicArmazenadorId}`;
+  if (armazensConhecidosSimulados.has(chave)) {
+    throw new Prisma.PrismaClientKnownRequestError("Unique constraint failed", { code: "P2002", clientVersion: "test" });
+  }
+  armazensConhecidosSimulados.add(chave);
+  return {};
+});
+const armazemConhecidoFindUnique = vi.fn().mockResolvedValue(null);
+const armazemConhecidoUpdate = vi.fn().mockResolvedValue({});
+
 // $transaction aqui só executa o callback contra o mesmo objeto mockado de "prisma" (os métodos
 // usados dentro de cada transação — syncLock.*, parcela.* — têm os mesmos nomes em tx e em
 // prisma) — suficiente pra testar a LÓGICA de dentro da transação, não o isolamento real do
@@ -25,6 +44,11 @@ const mockPrisma = {
     findMany: (...a: unknown[]) => storeFindMany(...a),
     update: (...a: unknown[]) => storeUpdate(...a),
     create: (...a: unknown[]) => storeCreate(...a),
+  },
+  armazemConhecido: {
+    create: (...a: unknown[]) => armazemConhecidoCreate(...a),
+    findUnique: (...a: unknown[]) => armazemConhecidoFindUnique(...a),
+    update: (...a: unknown[]) => armazemConhecidoUpdate(...a),
   },
   syncLock: {
     findMany: (...a: unknown[]) => syncLockFindMany(...a),
@@ -72,6 +96,10 @@ beforeEach(() => {
   storeFindMany.mockReset().mockResolvedValue([]);
   storeUpdate.mockReset();
   storeCreate.mockReset();
+  armazensConhecidosSimulados = new Set();
+  armazemConhecidoCreate.mockClear();
+  armazemConhecidoFindUnique.mockClear().mockResolvedValue(null);
+  armazemConhecidoUpdate.mockClear().mockResolvedValue({});
   syncLockFindMany.mockReset().mockResolvedValue([]);
   syncLockUpsert.mockReset();
   syncLockUpdate.mockReset().mockResolvedValue(undefined);
@@ -141,7 +169,7 @@ describe("syncArmazenadores — âncora do primaryStoreId e alerta de armazém n
   });
 
   it("armazém com code nunca visto antes dispara alerta de 'armazém novo' uma única vez", async () => {
-    storeFindMany.mockResolvedValue([{ code: "CD" }]); // só CD já é conhecido
+    armazensConhecidosSimulados.add("cd-atacado::3"); // CD já é conhecido; "Armazém Nunca Visto" (Id 77) não
     storeFindFirst.mockImplementation(({ where }: { where: { OR?: { code?: string }[]; code?: string } }) => {
       const code = where.OR?.[0]?.code ?? where.code;
       if (code === "CD") return Promise.resolve({ id: "store-cd" });
@@ -459,13 +487,14 @@ describe("Ponto C — Telegram: alerta, repetição e resiliência a falha", () 
     const { syncArmazenadores } = await import("../sync-runner");
     const client1 = fakeClient("cd-atacado", [{ Id: 3, Descricao: "CD" }, { Id: 77, Descricao: "Novo Armazem" }]);
 
-    storeFindMany.mockResolvedValueOnce([{ code: "CD" }]); // 1º ciclo: "Novo Armazem" ainda não é conhecido
+    armazensConhecidosSimulados.add("cd-atacado::3"); // 1º ciclo: CD já conhecido, "Novo Armazem" (Id 77) ainda não
     await syncArmazenadores(client1);
     const alertasNovo1 = sendTelegramMessageMock.mock.calls.filter(([m]) => (m as string).includes("Armazém novo encontrado"));
     expect(alertasNovo1).toHaveLength(1);
 
     sendTelegramMessageMock.mockClear();
-    storeFindMany.mockResolvedValueOnce([{ code: "CD" }, { code: "Novo Armazem" }]); // 2º ciclo: já persistido
+    // 2º ciclo: "Novo Armazem" já foi persistido pelo 1º ciclo (ver create() acima, que grava em
+    // armazensConhecidosSimulados de verdade) — não precisa semear nada, é o comportamento real.
     const client2 = fakeClient("cd-atacado", [{ Id: 3, Descricao: "CD" }, { Id: 77, Descricao: "Novo Armazem" }]);
     await syncArmazenadores(client2);
     const alertasNovo2 = sendTelegramMessageMock.mock.calls.filter(([m]) => (m as string).includes("Armazém novo encontrado"));

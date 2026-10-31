@@ -722,3 +722,27 @@ model SyncLog {
 
   store Store? @relation(fields: [storeId], references: [id])
 }
+
+// Registro persistente de "já vimos esse armazém" pro alerta de "armazém novo no DAPIC"
+// (sync-runner.ts, syncArmazenadores) — achado em 2026-10-31: o alerta comparava por NOME
+// (Store.code) contra o estado do banco no início de cada sync, não por ID estável; o próprio
+// Store.code também nunca era atualizado quando o nome mudava, então qualquer divergência de
+// nome ficava permanente e reacendia o alerta "novo" em toda sincronização seguinte. A chave
+// aqui é (clientLabel, dapicArmazenadorId) — o ID do DAPIC é estável, o nome é só informativo
+// (nomeAtual), atualizado sem gerar novo alerta nem nova linha. clientLabel entra na chave porque
+// cada token DAPIC (cd-atacado, leblon, barra, rio-sul, matriz) tem sua PRÓPRIA numeração de
+// armazenador — o mesmo Id em tokens diferentes não é o mesmo armazém.
+model ArmazemConhecido {
+  id                 String   @id @default(cuid())
+  clientLabel        String
+  dapicArmazenadorId Int
+  nomeAtual          String
+  // "VENDE" | "NAO_VENDE" — snapshot da regra sellsProducts() no momento do último sync que viu
+  // esse armazém. Texto livre (não enum) de propósito: é só informativo/auditoria, não chave de
+  // nenhuma lógica — evita precisar de migration nova se a classificação ganhar um 3º estado.
+  classificacao      String
+  primeiraVezVistoEm DateTime @default(now())
+  atualizadoEm       DateTime @updatedAt
+
+  @@unique([clientLabel, dapicArmazenadorId])
+}

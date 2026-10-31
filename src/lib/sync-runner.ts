@@ -5,7 +5,7 @@ import { Prisma } from "@prisma/client";
 import { randomUUID } from "crypto";
 import { createDapicClients, stripReferenciaPrefix, parseDapicDateTime, stableItemIndexes, isGarrafaBrinde, waitMsFromDapicError, sleep, mapWithConcurrency, parseTabelaPrecosLabel, type DapicClient } from "@/lib/connectors/dapic";
 // (import type { Prisma } removido abaixo — já importado acima como valor+tipo)
-import { displayGroupFor, sellsProducts, PRIMARY_STORE_CODE_BY_CLIENT_LABEL } from "@/lib/connectors/armazenadores";
+import { displayGroupFor, sellsProducts, PRIMARY_STORE_CODE_BY_CLIENT_LABEL, verificarArmazemNovo } from "@/lib/connectors/armazenadores";
 import { upsertStockSnapshots, type StockSnapshotRow } from "@/lib/connectors/upsert-stock";
 import { upsertProductionOrders, type ProductionOrderRow } from "@/lib/connectors/upsert-production-order";
 import { fetchPriceCatalogCached, inferTabelaPreco, type PriceCatalog } from "@/lib/connectors/tabela-preco";
@@ -30,17 +30,25 @@ export async function syncArmazenadores(client: DapicClient) {
 
   // Achado em 2026-10-30: nunca houve aviso automático quando um armazenador novo aparece — o
   // incidente do "Conserto" só foi notado 5 dias depois, por inspeção visual do número errado.
-  // Captura os códigos já conhecidos ANTES do loop pra poder apontar exatamente quais são novos
-  // nesta chamada (depois do loop todos já estariam gravados, perdendo a distinção).
-  const codesConhecidos = new Set(
-    (await prisma.store.findMany({ select: { code: true } })).map((s) => s.code)
-  );
+  // Corrigido em 2026-10-31 (ver verificarArmazemNovo, armazenadores.ts): a 1ª versão comparava
+  // por NOME contra um snapshot do Store tirado no início da sync — qualquer divergência de nome
+  // (ou corrida entre syncs concorrentes lendo o mesmo snapshot) reacendia o alerta "novo" pra
+  // sempre, mesmo o armazém já sendo conhecido. Agora a identidade é (token, Id DAPIC), persistida
+  // de forma idempotente e segura sob concorrência (create + trata violação de unicidade).
   const armazensNovos: { descricao: string; dapicId: number; sells: boolean }[] = [];
+  const falhasVerificacaoNovo: { descricao: string; dapicId: number }[] = [];
   const expectedPrimaryCode = PRIMARY_STORE_CODE_BY_CLIENT_LABEL[client.label];
 
   for (const a of armazenadores) {
-    if (!codesConhecidos.has(a.Descricao)) {
-      armazensNovos.push({ descricao: a.Descricao, dapicId: a.Id, sells: sellsProducts(a.Descricao) });
+    const sellsParaVerificacao = sellsProducts(a.Descricao);
+    const verificacao = await verificarArmazemNovo(client.label, a.Id, a.Descricao, sellsParaVerificacao);
+    if (verificacao.ehNovo) {
+      armazensNovos.push({ descricao: a.Descricao, dapicId: a.Id, sells: sellsParaVerificacao });
+    } else if (verificacao.erro) {
+      // Falha de banco que não é "já existe" — nunca afirma "é novo" sem conseguir persistir
+      // (isso é exatamente o que causava o alerta repetitivo); só registra pra investigar.
+      falhasVerificacaoNovo.push({ descricao: a.Descricao, dapicId: a.Id });
+      console.error(`[syncArmazenadores] falha ao verificar armazém ${client.label}/${a.Id} (${a.Descricao}):`, verificacao.erro);
     }
     const existing = await prisma.store.findFirst({
       where: { OR: [{ code: a.Descricao }, { dapicArmazenadorId: a.Id }] },
@@ -113,6 +121,17 @@ export async function syncArmazenadores(client: DapicClient) {
       .join("\n");
     await sendTelegramMessage(
       `🆕 Armazém novo encontrado no DAPIC (token ${client.label}):\n${linhas}\nConfirme a classificação antes de confiar nos números dessa loja/canal.`,
+      { adminOnly: true }
+    ).catch((e) => console.error(`[syncArmazenadores] Telegram falhou (${client.label}):`, e?.message ?? e));
+  }
+
+  if (falhasVerificacaoNovo.length) {
+    // Mensagem DELIBERADAMENTE diferente da de "armazém novo" — nunca afirma novidade sem
+    // conseguir persistir (ver verificarArmazemNovo). Se isso se repetir toda sync, é sinal de
+    // problema de conexão com o Neon, não de armazém novo de verdade.
+    const linhas = falhasVerificacaoNovo.map((n) => `• "${n.descricao}" (Id DAPIC ${n.dapicId})`).join("\n");
+    await sendTelegramMessage(
+      `⚠️ syncArmazenadores (${client.label}): não foi possível confirmar se os armazéns abaixo já são conhecidos (falha de banco, ver logs):\n${linhas}`,
       { adminOnly: true }
     ).catch((e) => console.error(`[syncArmazenadores] Telegram falhou (${client.label}):`, e?.message ?? e));
   }
