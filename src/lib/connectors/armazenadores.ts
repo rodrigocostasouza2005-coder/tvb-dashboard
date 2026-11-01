@@ -51,32 +51,72 @@ export type VerificacaoArmazemNovo = {
   erro?: unknown;
 };
 
+export type ArmazemConhecidoCache = Map<number, { nomeAtual: string; classificacao: string }>;
+
+// Carrega TODOS os armazéns já conhecidos de um token numa única consulta — chamado 1x por
+// syncArmazenadores, antes do loop por armazenador. Achado em 2026-11-01: a versão anterior de
+// verificarArmazemNovo fazia 1-2 consultas por armazém DENTRO do loop (create, e no caso comum
+// de "já existe" também um findUnique) — pra um token com 8 armazéns (cd-atacado), isso virou
+// 8-16 round-trips extras por sincronização, a cada ~10min. Uma instabilidade pontual de conexão
+// com o Neon durante esse loop reproduzia exatamente o sintoma reportado: TODOS os armazéns do
+// token falhando juntos no mesmo ciclo ("não foi possível confirmar"). Pré-carregar tudo numa
+// consulta só devolve o caminho comum (nada novo, nada mudou) a 0 queries extras no loop.
+export async function carregarArmazensConhecidos(clientLabel: string): Promise<ArmazemConhecidoCache> {
+  const rows = await prisma.armazemConhecido.findMany({
+    where: { clientLabel },
+    select: { dapicArmazenadorId: true, nomeAtual: true, classificacao: true },
+  });
+  return new Map(rows.map((r) => [r.dapicArmazenadorId, { nomeAtual: r.nomeAtual, classificacao: r.classificacao }]));
+}
+
 // Identificação persistente e idempotente de armazém "já visto", pra alimentar o alerta de
 // "armazém novo no DAPIC" (syncArmazenadores, sync-runner.ts). Achado em 2026-10-31: a versão
-// anterior comparava por NOME (Store.code) contra um snapshot do banco tirado no início de cada
-// sync, e o próprio Store.code nunca era atualizado quando o DAPIC mudava o nome do armazém —
-// qualquer divergência de nome (ou qualquer corrida entre syncs concorrentes lendo o mesmo
-// snapshot "antes de ambos gravarem") disparava o alerta de novo em TODA sincronização seguinte,
-// pra sempre, mesmo o armazém já sendo conhecido. "Conserto (enviados para fornecedor)" (Id 20,
-// token cd-atacado) foi o caso real reportado.
+// original (antes desta) comparava por NOME (Store.code) contra um snapshot do banco tirado no
+// início de cada sync, e o próprio Store.code nunca era atualizado quando o DAPIC mudava o nome
+// do armazém — qualquer divergência de nome (ou qualquer corrida entre syncs concorrentes lendo
+// o mesmo snapshot "antes de ambos gravarem") disparava o alerta de novo em TODA sincronização
+// seguinte, pra sempre, mesmo o armazém já sendo conhecido. "Conserto (enviados para fornecedor)"
+// (Id 20, token cd-atacado) foi o caso real reportado.
 //
 // Correção: chave estável é (clientLabel, dapicArmazenadorId) — o ID do DAPIC não muda, o nome é
-// só informativo. A detecção de "é novo" não lê o estado antes e decide depois (a mesma janela
-// de corrida do bug antigo) — tenta CRIAR direto; se o banco aceitar o INSERT, é
-// inequivocamente a primeira vez (mesmo sob concorrência, só uma das duas chamadas concorrentes
-// consegue criar — a constraint @@unique garante isso, não precisa de lock manual). Se o banco
-// rejeitar por violação de unicidade (P2002), já existia — não é novo, só atualiza nome/
-// classificação se mudaram (e registra em log quando a CLASSIFICAÇÃO muda, não o nome, que é só
-// estético). Qualquer outro erro de banco não é tratado como "sabemos que não é novo" nem como
-// "é novo" — devolve o erro pro chamador decidir (nunca afirmar novidade sem conseguir persistir,
-// senão volta a alertar toda sync; ver runbook do incidente de 2026-10-31).
+// só informativo. `cache` (carregarArmazensConhecidos) resolve o caminho comum SEM nenhuma query
+// — só armazém que não estava na cache (realmente novo, ou criado por uma sync concorrente
+// depois do carregamento) ou que teve nome/classificação mudados precisa de uma escrita. Pra
+// quem não está na cache, create() + tratar violação de unicidade (P2002) continua sendo a fonte
+// de verdade sob concorrência (a constraint @@unique garante atomicidade, não precisa de lock
+// manual) — nunca reconsulta antes de decidir "é novo", e qualquer erro de banco que não seja
+// "já existe" nunca é tratado como "é novo" (devolve o erro pro chamador decidir, sem alertar
+// sem conseguir persistir de verdade — ver runbook do incidente de 2026-10-31).
 export async function verificarArmazemNovo(
+  cache: ArmazemConhecidoCache,
   clientLabel: string,
   dapicArmazenadorId: number,
   nomeAtual: string,
   sells: boolean
 ): Promise<VerificacaoArmazemNovo> {
   const classificacao = sells ? "VENDE" : "NAO_VENDE";
+  const conhecido = cache.get(dapicArmazenadorId);
+
+  if (conhecido) {
+    if (conhecido.nomeAtual === nomeAtual && conhecido.classificacao === classificacao) {
+      return { ehNovo: false }; // caminho comum — 0 queries
+    }
+    if (conhecido.classificacao !== classificacao) {
+      console.warn(
+        `[armazem-conhecido] classificação mudou: ${clientLabel}/${dapicArmazenadorId} (${nomeAtual}) ${conhecido.classificacao} -> ${classificacao}`
+      );
+    }
+    try {
+      await prisma.armazemConhecido.update({
+        where: { clientLabel_dapicArmazenadorId: { clientLabel, dapicArmazenadorId } },
+        data: { nomeAtual, classificacao },
+      });
+    } catch (e) {
+      return { ehNovo: false, erro: e };
+    }
+    return { ehNovo: false };
+  }
+
   try {
     await prisma.armazemConhecido.create({
       data: { clientLabel, dapicArmazenadorId, nomeAtual, classificacao },
@@ -87,21 +127,9 @@ export async function verificarArmazemNovo(
     if (!violacaoDeUnicidade) {
       return { ehNovo: false, erro: e };
     }
-    // Já existia (sync anterior, ou a outra ponta de uma corrida concorrente que ganhou o
-    // INSERT) — atualiza nome/classificação se mudaram, sem contar como "novo".
-    const existente = await prisma.armazemConhecido
-      .findUnique({ where: { clientLabel_dapicArmazenadorId: { clientLabel, dapicArmazenadorId } } })
-      .catch(() => null);
-    if (existente && (existente.nomeAtual !== nomeAtual || existente.classificacao !== classificacao)) {
-      if (existente.classificacao !== classificacao) {
-        console.warn(
-          `[armazem-conhecido] classificação mudou: ${clientLabel}/${dapicArmazenadorId} (${nomeAtual}) ${existente.classificacao} -> ${classificacao}`
-        );
-      }
-      await prisma.armazemConhecido
-        .update({ where: { clientLabel_dapicArmazenadorId: { clientLabel, dapicArmazenadorId } }, data: { nomeAtual, classificacao } })
-        .catch(() => {});
-    }
+    // Corrida: outra sync concorrente criou entre o carregamento da cache e agora — já é
+    // conhecido, não é novo. Não reconfere nome/classificação aqui (janela rara; a próxima
+    // sincronização corrige qualquer divergência pelo caminho comum acima).
     return { ehNovo: false };
   }
 }

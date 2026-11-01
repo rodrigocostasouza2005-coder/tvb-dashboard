@@ -5,7 +5,7 @@ import { Prisma } from "@prisma/client";
 import { randomUUID } from "crypto";
 import { createDapicClients, stripReferenciaPrefix, parseDapicDateTime, stableItemIndexes, isGarrafaBrinde, waitMsFromDapicError, sleep, mapWithConcurrency, parseTabelaPrecosLabel, type DapicClient } from "@/lib/connectors/dapic";
 // (import type { Prisma } removido abaixo — já importado acima como valor+tipo)
-import { displayGroupFor, sellsProducts, PRIMARY_STORE_CODE_BY_CLIENT_LABEL, verificarArmazemNovo } from "@/lib/connectors/armazenadores";
+import { displayGroupFor, sellsProducts, PRIMARY_STORE_CODE_BY_CLIENT_LABEL, verificarArmazemNovo, carregarArmazensConhecidos } from "@/lib/connectors/armazenadores";
 import { upsertStockSnapshots, type StockSnapshotRow } from "@/lib/connectors/upsert-stock";
 import { upsertProductionOrders, type ProductionOrderRow } from "@/lib/connectors/upsert-production-order";
 import { fetchPriceCatalogCached, inferTabelaPreco, type PriceCatalog } from "@/lib/connectors/tabela-preco";
@@ -35,13 +35,19 @@ export async function syncArmazenadores(client: DapicClient) {
   // (ou corrida entre syncs concorrentes lendo o mesmo snapshot) reacendia o alerta "novo" pra
   // sempre, mesmo o armazém já sendo conhecido. Agora a identidade é (token, Id DAPIC), persistida
   // de forma idempotente e segura sob concorrência (create + trata violação de unicidade).
+  // Achado em 2026-11-01: essa correção tinha introduzido 1-2 queries por ARMAZÉM dentro do loop
+  // (8-16 round-trips extras pro token cd-atacado a cada ~10min) — uma instabilidade pontual do
+  // Neon durante o loop fazia todos os armazéns falharem juntos ("não foi possível confirmar").
+  // carregarArmazensConhecidos faz 1 consulta só, antes do loop — o caminho comum (nada novo,
+  // nada mudou) fica a 0 queries extras dentro dele.
+  const cacheArmazensConhecidos = await carregarArmazensConhecidos(client.label);
   const armazensNovos: { descricao: string; dapicId: number; sells: boolean }[] = [];
   const falhasVerificacaoNovo: { descricao: string; dapicId: number }[] = [];
   const expectedPrimaryCode = PRIMARY_STORE_CODE_BY_CLIENT_LABEL[client.label];
 
   for (const a of armazenadores) {
     const sellsParaVerificacao = sellsProducts(a.Descricao);
-    const verificacao = await verificarArmazemNovo(client.label, a.Id, a.Descricao, sellsParaVerificacao);
+    const verificacao = await verificarArmazemNovo(cacheArmazensConhecidos, client.label, a.Id, a.Descricao, sellsParaVerificacao);
     if (verificacao.ehNovo) {
       armazensNovos.push({ descricao: a.Descricao, dapicId: a.Id, sells: sellsParaVerificacao });
     } else if (verificacao.erro) {
