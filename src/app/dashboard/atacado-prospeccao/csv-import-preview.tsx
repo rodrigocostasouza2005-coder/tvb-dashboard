@@ -20,6 +20,10 @@ function parseLine(line: string, delimiter: string): string[] {
   return result;
 }
 
+function normalizeHeader(value: string): string {
+  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
 export function CsvImportPreview() {
   const [file, setFile] = useState<File | null>(null);
   const [headers, setHeaders] = useState<string[]>([]);
@@ -39,7 +43,8 @@ export function CsvImportPreview() {
     if (lines.length > 501) { setError("Limite de 500 lojas por arquivo."); return; }
     const delimiter = (lines[0].match(/;/g) ?? []).length > (lines[0].match(/,/g) ?? []).length ? ";" : ",";
     const parsedHeaders = parseLine(lines[0], delimiter);
-    if (!parsedHeaders.some((h) => h.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "") === "nomefantasia" || ["nome", "loja", "empresa", "nomeloja"].includes(h.toLowerCase()))) {
+    const normalizedHeaders = parsedHeaders.map(normalizeHeader);
+    if (!normalizedHeaders.some((header) => ["nomefantasia", "nomeloja", "loja", "empresa", "nome"].includes(header))) {
       setError("Não encontrei a coluna obrigatória nome_fantasia (ou nome/loja/empresa).");
       return;
     }
