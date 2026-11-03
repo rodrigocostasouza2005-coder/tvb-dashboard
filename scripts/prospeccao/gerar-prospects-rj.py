@@ -57,7 +57,10 @@ def main() -> int:
     parser.add_argument("--municipios", required=True)
     parser.add_argument("--saida", required=True)
     parser.add_argument("--uf", default="RJ")
+    parser.add_argument("--competencia", required=True, help="Competência dos arquivos no formato AAAA-MM")
     args = parser.parse_args()
+    if not re.fullmatch(r"\\d{4}-\\d{2}", args.competencia):
+        parser.error("--competencia deve estar no formato AAAA-MM")
 
     # Domínio de municípios: código;descrição. Arquivos da Receita não têm cabeçalho.
     municipios = {}
@@ -128,7 +131,7 @@ def main() -> int:
                 "porte": company.get("porte", ""),
                 "origem": "receita_federal_dados_abertos",
                 "evidencia_url": "https://dados.gov.br/dados/conjuntos-dados/cadastro-nacional-da-pessoa-juridica---cnpj",
-                "competencia": "PREENCHER_AAAA-MM",
+                "competencia": args.competencia,
             })
             count_written += 1
 
@@ -137,7 +140,6 @@ def main() -> int:
         f"com CNAE-alvo={count_cnae} | exportados={count_written} | arquivo={output}",
         file=sys.stderr,
     )
-    print("ATENÇÃO: substitua competencia pelo mês real dos arquivos antes da importação.")
     return 0
 
 
