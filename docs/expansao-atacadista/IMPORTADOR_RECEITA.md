@@ -5,20 +5,18 @@
 - Fonte primária: arquivos públicos do Cadastro Nacional da Pessoa Jurídica (CNPJ), publicados pela Receita Federal.
 - Sem chave, API paga, assinatura, trial ou cobrança por consulta.
 - O processamento é offline/em lote. Não roda em Server Action, rota HTTP ou função Vercel.
-- O CSV gerado passa pela tela de prévia/importação já existente em `/dashboard/atacado-prospeccao`.
+- O CSV gerado pode ser revisado e importado em `/dashboard/atacado-prospeccao`.
 - Não gravar a base nacional inteira no Neon. Só candidatos revisados entram na carteira.
-- Não importar dados de sócios/administradores nem inferir WhatsApp. Telefone/e-mail são os campos comerciais públicos que constarem no cadastro, sujeitos a desatualização.
+- Não importar dados de sócios/administradores nem inferir WhatsApp. Telefone/e-mail só são aproveitados quando constarem no cadastro público e podem estar desatualizados.
 
 ## Arquivos e layout
 
-A Receita publica arquivos ZIP sem cabeçalho, CSV separado por ponto e vírgula, codificação Latin-1. Para montar os campos do estabelecimento, o layout relevante é:
-- `Estabelecimentos`: 30 colunas; contém CNPJ completo, nome fantasia, situação, CNAEs, endereço, UF, município, telefones e e-mail.
-- `Empresas`: 7 colunas; contém raiz do CNPJ e razão social/porte.
+O script espera arquivos extraídos da mesma competência, sem cabeçalho, separados por ponto e vírgula e codificados em Latin-1:
+- `Estabelecimentos`: ao menos 30 colunas;
+- `Empresas`: ao menos 7 colunas;
 - `Municipios`: código e descrição.
 
-Use arquivos da MESMA competência. O importador valida o número mínimo de colunas e falha fechado se o layout não corresponder.
-
-Fonte e dicionário oficial: https://www.gov.br/receitafederal/dados e https://www.gov.br/receitafederal/dados/cnpj-metadados.pdf
+O script falha se encontrar linhas com menos colunas que o layout esperado. Fonte e dicionário: https://www.gov.br/receitafederal/dados e https://www.gov.br/receitafederal/dados/cnpj-metadados.pdf.
 
 ## Piloto
 
@@ -27,17 +25,15 @@ O script `scripts/prospeccao/gerar-prospects-rj.py` filtra:
 - situação cadastral ativa;
 - CNAEs iniciais de vestuário, calçados, artigos de viagem e bijuterias/acessórios.
 
-A lista de CNAEs é uma hipótese inicial de prospecção, não uma definição final de ICP. Validar com a equipe comercial antes de ampliar para outros segmentos/UFs. O script exporta CSV compatível com o importador do dashboard.
+A lista de CNAEs é uma hipótese inicial, não uma definição final do perfil de revendedor TVB. Validar com a equipe comercial antes de ampliar segmentos ou estados.
 
 ## Execução manual controlada
 
 1. Baixe a competência mais recente diretamente do repositório oficial da Receita.
-2. Extraia localmente apenas os ZIPs necessários de Empresas, Estabelecimentos e Municipios.
-3. Execute o script passando todos os arquivos particionados de Estabelecimentos e Empresas daquela competência.
-4. Substitua `PREENCHER_AAAA-MM` pela competência real no CSV exportado.
-5. Revise a amostra e os totais. Não importe sem validar competência, UF, situação e CNAE.
-6. Use a prévia CSV do dashboard e confirme a importação.
-7. Registre a competência e a data da carga no controle operacional.
+2. Extraia localmente os arquivos de Empresas, Estabelecimentos e Municípios da mesma competência.
+3. Passe todas as partições necessárias de Estabelecimentos e Empresas.
+4. Informe a competência real no formato `AAAA-MM`.
+5. Revise amostra e totais antes de importar.
 
 Exemplo:
 
@@ -47,29 +43,34 @@ python scripts/prospeccao/gerar-prospects-rj.py \
   --empresas /dados/Empresas0.csv /dados/Empresas1.csv \
   --municipios /dados/Municipios.csv \
   --uf RJ \
+  --competencia 2026-10 \
   --saida /dados/prospects-rj.csv
 ```
 
-O comando acima é ilustrativo: inclua todas as partições disponibilizadas para a competência escolhida.
+Substitua caminhos e competência pelos arquivos efetivamente baixados. Inclua todas as partições da competência.
 
-## Testes automatizados\n\nA suíte em `scripts/prospeccao/tests/` cobre seleção de estabelecimentos ativos do RJ, CNAE-alvo, rejeição de CNPJ com dígito inválido, competência fora do formato/mês permitido e falha fechada para layout curto. O workflow `.github/workflows/prospeccao-python-tests.yml` executa os testes em push/PR. CI aprovado não equivale a validação com o dump real da Receita.\n\n## Limitações conhecidas
+## Testes automatizados
+
+A suíte em `scripts/prospeccao/tests/` cobre seleção de estabelecimentos ativos do RJ, CNAE-alvo, rejeição de CNPJ com dígito inválido, competência inválida e falha para layout curto. O workflow `.github/workflows/prospeccao-python-tests.yml` executa esses testes. CI aprovado não equivale a validação com o dump real da Receita.
+
+## Limitações conhecidas
 
 - O cadastro é um retrato da competência, não um feed em tempo real.
-- A Receita não garante que telefone/e-mail estejam presentes ou atualizados.
+- Telefone/e-mail podem estar ausentes ou desatualizados.
 - O piloto não faz enriquecimento por sites, redes sociais ou diretórios.
-- O script valida os 14 dígitos do CNPJ (incluindo os dígitos verificadores) e gera candidatos; não decide sozinho quem é bom revendedor. Porte, CNAE e localização ajudam a triagem, mas não substituem análise comercial.
-- O importador atual do dashboard trata CNPJ duplicado como ignorado; ele não atualiza dados de um prospecto existente nem registra mudanças históricas automaticamente.
-- O arquivo CSV atual do dashboard tem limite de 500 linhas. Para listas maiores, dividir em lotes ou ampliar o importador após testes.
+- O script valida CNPJ numérico de 14 dígitos; a compatibilidade com eventual CNPJ alfanumérico deve ser tratada separadamente.
+- O importador do dashboard ignora CNPJ duplicado; não atualiza dados existentes nem mantém histórico de mudanças.
+- O CSV do dashboard tem limite de 500 linhas. Para listas maiores, dividir em lotes até existir um fluxo de staging/reconciliação testado.
 
 ## Atualização recorrente — ainda não ativada
 
 A automação não deve ser ligada até existir:
-1. detecção confiável da nova competência no repositório oficial;
-2. download retomável/verificação de integridade;
+1. detecção confiável de nova competência;
+2. download retomável e verificação de integridade;
 3. armazenamento temporário com espaço suficiente;
 4. execução fora da Vercel com custo zero comprovado;
-5. staging e reconciliação por CNPJ (novo, alterado, inativo), sem duplicar CRM;
-6. log de competência, contagens, erros e reprocessamento;
+5. staging e reconciliação por CNPJ;
+6. logs, contagens, erros e reprocessamento;
 7. aprovação operacional do piloto.
 
-Uma verificação semanal pode procurar competência nova, mas só haverá dados novos quando a Receita publicar uma carga. Não prometer atualização semanal da própria base.
+A base só muda quando a Receita publica uma nova competência. Não prometer atualização semanal dos próprios dados.
