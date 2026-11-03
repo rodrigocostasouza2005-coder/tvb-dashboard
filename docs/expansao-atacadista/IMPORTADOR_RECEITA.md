@@ -52,12 +52,12 @@ python scripts/prospeccao/gerar-prospects-rj.py \
 
 O comando acima é ilustrativo: inclua todas as partições disponibilizadas para a competência escolhida.
 
-## Limitações conhecidas
+## Testes automatizados\n\nA suíte em `scripts/prospeccao/tests/` cobre seleção de estabelecimentos ativos do RJ, CNAE-alvo, rejeição de CNPJ com dígito inválido, competência fora do formato/mês permitido e falha fechada para layout curto. O workflow `.github/workflows/prospeccao-python-tests.yml` executa os testes em push/PR. CI aprovado não equivale a validação com o dump real da Receita.\n\n## Limitações conhecidas
 
 - O cadastro é um retrato da competência, não um feed em tempo real.
 - A Receita não garante que telefone/e-mail estejam presentes ou atualizados.
 - O piloto não faz enriquecimento por sites, redes sociais ou diretórios.
-- O script gera candidatos, não decide sozinho quem é bom revendedor. Porte, CNAE e localização ajudam a triagem, mas não substituem análise comercial.
+- O script valida os 14 dígitos do CNPJ (incluindo os dígitos verificadores) e gera candidatos; não decide sozinho quem é bom revendedor. Porte, CNAE e localização ajudam a triagem, mas não substituem análise comercial.
 - O importador atual do dashboard trata CNPJ duplicado como ignorado; ele não atualiza dados de um prospecto existente nem registra mudanças históricas automaticamente.
 - O arquivo CSV atual do dashboard tem limite de 500 linhas. Para listas maiores, dividir em lotes ou ampliar o importador após testes.
 
