@@ -147,7 +147,7 @@ export async function importarProspectosCsvAction(formData: FormData) {
   if (!(file instanceof File) || file.size === 0) {
     redirect("/dashboard/atacado-prospeccao?importacao=arquivo");
   }
-  if (file.size > 2 * 1024 * 1024) {
+  if (file.size > 900 * 1024) {
     redirect("/dashboard/atacado-prospeccao?importacao=tamanho");
   }
 
