@@ -17,7 +17,7 @@ export async function criarProspectAction(formData: FormData) {
 
   const nomeFantasia = value(formData, "nomeFantasia");
   const cnpjRaw = value(formData, "cnpj");
-  const cnpj = cnpjRaw ? cnpjRaw.replace(/\\D/g, "") : null;
+  const cnpj = cnpjRaw ? cnpjRaw.replace(/\D/g, "") : null;
   const estado = value(formData, "estado").toUpperCase();
   const site = value(formData, "site");
   const evidenciaUrl = value(formData, "evidenciaUrl");
