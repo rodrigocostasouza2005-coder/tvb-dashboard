@@ -50,6 +50,23 @@ def digits(value: str) -> str:
     return re.sub(r"\D", "", value or "")
 
 
+
+def valid_cnpj(value: str) -> bool:
+    """Valida os dois dígitos verificadores do CNPJ."""
+    number = digits(value)
+    if len(number) != 14 or len(set(number)) == 1:
+        return False
+
+    def calculate(base: str, weights: tuple[int, ...]) -> str:
+        total = sum(int(char) * weight for char, weight in zip(base, weights))
+        remainder = total % 11
+        return str(0 if remainder < 2 else 11 - remainder)
+
+    first = calculate(number[:12], (5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2))
+    second = calculate(number[:12] + first, (6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2))
+    return number[-2:] == first + second
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--estabelecimentos", nargs="+", required=True)
