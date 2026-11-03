@@ -65,6 +65,17 @@ class ReceitaProspectorTests(unittest.TestCase):
             self.assertEqual(data[0]["telefone"], "2122223333")
             self.assertEqual(data[0]["competencia"], "2026-10")
 
+    def test_deduplicates_repeated_cnpj(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            result, output = self.run_script(
+                root, [establishment(), establishment()]
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            with output.open(encoding="utf-8-sig", newline="") as f:
+                data = list(csv.DictReader(f, delimiter=";"))
+            self.assertEqual(len(data), 1)
+
     def test_accepts_official_alphanumeric_cnpj(self):
         # Exemplo publicado pela Receita Federal: 12.ABC.345/01DE-35.
         with tempfile.TemporaryDirectory() as tmp:
