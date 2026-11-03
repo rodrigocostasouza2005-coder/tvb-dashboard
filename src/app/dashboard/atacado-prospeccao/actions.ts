@@ -26,7 +26,21 @@ function normalizeHttpUrl(input: string): string | null {
 
 function isValidCnpjFormat(cnpj: string): boolean {
   // CNPJ alfanumérico: 12 posições alfanuméricas e 2 dígitos verificadores numéricos.
-  return /^[A-Z0-9]{12}[0-9]{2}$/.test(cnpj) && cnpj.length === 14;
+  if (!/^[A-Z0-9]{12}[0-9]{2}$/.test(cnpj) || cnpj.length !== 14) return false;
+  if (/^(.)\\1+$/.test(cnpj)) return false;
+
+  const calculate = (base: string, weights: number[]) => {
+    const total = [...base].reduce(
+      (sum, char, index) => sum + (char.charCodeAt(0) - 48) * weights[index],
+      0,
+    );
+    const remainder = total % 11;
+    return String(remainder < 2 ? 0 : 11 - remainder);
+  };
+
+  const first = calculate(cnpj.slice(0, 12), [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]);
+  const second = calculate(cnpj.slice(0, 12) + first, [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]);
+  return cnpj.slice(-2) === first + second;
 }
 
 export async function criarProspectAction(formData: FormData) {
