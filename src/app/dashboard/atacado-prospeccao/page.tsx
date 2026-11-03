@@ -44,6 +44,7 @@ export default async function AtacadoProspeccaoPage({
   const erroTexto = erro === "nome" ? "Informe o nome da loja."
     : erro === "cnpj" ? "Informe um CNPJ com 14 caracteres válidos."
     : erro === "estado" ? "Informe a UF com duas letras."
+    : erro === "url" ? "Use apenas endereços completos iniciados por http:// ou https://."
     : erro === "duplicado" ? "Já existe um prospecto cadastrado com esse CNPJ."
     : erro === "status" ? "Status inválido."
     : erro === "nao-encontrado" ? "Prospecto não encontrado."
