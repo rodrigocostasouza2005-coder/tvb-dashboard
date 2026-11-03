@@ -10,6 +10,15 @@ function value(formData: FormData, key: string): string {
   return String(formData.get(key) ?? "").trim();
 }
 
+function normalizeCnpj(input: string): string {
+  return input.toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+function isValidCnpjFormat(cnpj: string): boolean {
+  // CNPJ alfanumérico: 12 posições alfanuméricas e 2 dígitos verificadores numéricos.
+  return /^[A-Z0-9]{12}[0-9]{2}$/.test(cnpj) && cnpj.length === 14;
+}
+
 export async function criarProspectAction(formData: FormData) {
   const user = await getSessionUser();
   if (!user) redirect("/login");
@@ -17,13 +26,13 @@ export async function criarProspectAction(formData: FormData) {
 
   const nomeFantasia = value(formData, "nomeFantasia");
   const cnpjRaw = value(formData, "cnpj");
-  const cnpj = cnpjRaw ? cnpjRaw.replace(/\D/g, "") : null;
+  const cnpj = cnpjRaw ? normalizeCnpj(cnpjRaw) : null;
   const estado = value(formData, "estado").toUpperCase();
   const site = value(formData, "site");
   const evidenciaUrl = value(formData, "evidenciaUrl");
 
   if (!nomeFantasia) redirect("/dashboard/atacado-prospeccao?erro=nome");
-  if (cnpj && cnpj.length !== 14) redirect("/dashboard/atacado-prospeccao?erro=cnpj");
+  if (cnpj && !isValidCnpjFormat(cnpj)) redirect("/dashboard/atacado-prospeccao?erro=cnpj");
   if (estado && !/^[A-Z]{2}$/.test(estado)) redirect("/dashboard/atacado-prospeccao?erro=estado");
 
   try {
@@ -181,10 +190,10 @@ export async function importarProspectosCsvAction(formData: FormData) {
     const get = (index: number) => index >= 0 ? (cells[index] ?? "").trim() : "";
     const nomeFantasia = get(columns.nome).slice(0, 160);
     const cnpjRaw = get(columns.cnpj);
-    const cnpj = cnpjRaw ? cnpjRaw.replace(/\D/g, "") : null;
+    const cnpj = cnpjRaw ? normalizeCnpj(cnpjRaw) : null;
     const estado = get(columns.estado).toUpperCase().slice(0, 2);
 
-    if (!nomeFantasia || (cnpj && cnpj.length !== 14) || (estado && !/^[A-Z]{2}$/.test(estado))) {
+    if (!nomeFantasia || (cnpj && !isValidCnpjFormat(cnpj)) || (estado && !/^[A-Z]{2}$/.test(estado))) {
       invalidos++;
       continue;
     }
