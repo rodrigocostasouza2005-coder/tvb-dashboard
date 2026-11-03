@@ -199,7 +199,7 @@ export async function importarProspectosCsvAction(formData: FormData) {
     }
 
     try {
-      const prospect = await prisma.atacadoProspect.create({
+      await prisma.atacadoProspect.create({
         data: {
           nomeFantasia,
           razaoSocial: get(columns.razao).slice(0, 180) || null,
@@ -233,5 +233,5 @@ export async function importarProspectosCsvAction(formData: FormData) {
   }
 
   revalidatePath("/dashboard/atacado-prospeccao");
-  redirect(\`/dashboard/atacado-prospeccao?importacao=concluida&novos=\${importados}&duplicados=\${duplicados}&invalidos=\${invalidos}\`);
+  redirect(`/dashboard/atacado-prospeccao?importacao=concluida&novos=${importados}&duplicados=${duplicados}&invalidos=${invalidos}`);
 }
