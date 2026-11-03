@@ -104,7 +104,7 @@ def main() -> int:
 
             raiz, ordem, dv = row[0].strip(), row[1].strip(), row[2].strip()
             cnpj = raiz + ordem + dv
-            if len(cnpj) != 14 or cnpj in seen:
+            if not valid_cnpj(cnpj) or cnpj in seen:
                 continue
             seen.add(cnpj)
             company = empresas.get(raiz, {})
