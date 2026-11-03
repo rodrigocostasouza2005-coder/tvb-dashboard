@@ -2,7 +2,8 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { requireTabAccess } from "@/lib/tabs";
-import { criarProspectAction, atualizarStatusProspectAction, importarProspectosCsvAction } from "./actions";
+import { criarProspectAction, atualizarStatusProspectAction } from "./actions";
+import { CsvImportPreview } from "./csv-import-preview";
 
 const STATUS: Record<string, string> = {
   NOVO: "Novo",
@@ -135,10 +136,7 @@ export default async function AtacadoProspeccaoPage({
         </div>
         {params.importacao === "concluida" && <p role="status" className="mt-3 text-sm text-[var(--text-secondary)]">Importação concluída: {params.novos ?? "0"} novos, {params.duplicados ?? "0"} duplicados ignorados e {params.invalidos ?? "0"} linhas inválidas.</p>}
         {params.importacao && params.importacao !== "concluida" && <p role="alert" className="mt-3 text-sm text-red-600">Não foi possível importar. Verifique o arquivo, o cabeçalho e o limite de tamanho/linhas.</p>}
-        <form action={importarProspectosCsvAction} className="mt-3 flex flex-wrap items-center gap-3">
-          <input required type="file" name="arquivo" accept=".csv,text/csv" className="max-w-full text-xs text-[var(--text-secondary)]" />
-          <button type="submit" className="rounded-md border border-[var(--border)] px-3 py-2 text-xs font-medium">Validar e importar</button>
-        </form>
+        <CsvImportPreview />
       </section>
       <section className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)]">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border)] px-4 py-3">
