@@ -25,7 +25,7 @@ O script `scripts/prospeccao/gerar-prospects-rj.py` filtra:
 - situação cadastral ativa;
 - CNAEs iniciais de vestuário, calçados, artigos de viagem e bijuterias/acessórios.
 
-A lista de CNAEs é uma hipótese inicial, não uma definição final do perfil de revendedor TVB. Validar com a equipe comercial antes de ampliar segmentos ou estados.
+A lista de CNAEs é uma hipótese inicial, não uma definição final do perfil de revendedor TVB. Validar com a equipe comercial antes de ampliar segmentos ou estados. O validador aceita CNPJ numérico legado e alfanumérico no formato oficial (12 posições alfanuméricas + 2 DVs numéricos).
 
 ## Execução manual controlada
 
@@ -51,14 +51,14 @@ Substitua caminhos e competência pelos arquivos efetivamente baixados. Inclua t
 
 ## Testes automatizados
 
-A suíte em `scripts/prospeccao/tests/` cobre seleção de estabelecimentos ativos do RJ, CNAE-alvo, rejeição de CNPJ com dígito inválido, competência inválida e falha para layout curto. O workflow `.github/workflows/prospeccao-python-tests.yml` executa esses testes. CI aprovado não equivale a validação com o dump real da Receita.
+A suíte em `scripts/prospeccao/tests/` cobre seleção de estabelecimentos ativos do RJ, CNAE-alvo, validação de CNPJ numérico e do exemplo alfanumérico oficial da Receita, competência inválida e falha para layout curto. O workflow `.github/workflows/prospeccao-python-tests.yml` executa esses testes. CI aprovado não equivale a validação com o dump real da Receita.
 
 ## Limitações conhecidas
 
 - O cadastro é um retrato da competência, não um feed em tempo real.
 - Telefone/e-mail podem estar ausentes ou desatualizados.
 - O piloto não faz enriquecimento por sites, redes sociais ou diretórios.
-- O script valida CNPJ numérico de 14 dígitos; a compatibilidade com eventual CNPJ alfanumérico deve ser tratada separadamente.
+- CNPJs alfanuméricos seguem o cálculo oficial módulo 11 com valores ASCII menos 48; o script ainda precisa ser validado com dump oficial real pós-implantação.
 - O importador do dashboard ignora CNPJ duplicado; não atualiza dados existentes nem mantém histórico de mudanças.
 - O CSV do dashboard tem limite de 500 linhas. Para listas maiores, dividir em lotes até existir um fluxo de staging/reconciliação testado.
 
