@@ -51,14 +51,21 @@ def digits(value: str) -> str:
 
 
 
+def normalize_cnpj(value: str) -> str:
+    """Remove pontuação e padroniza CNPJ numérico ou alfanumérico."""
+    return re.sub(r"[^A-Z0-9]", "", (value or "").upper())
+
+
 def valid_cnpj(value: str) -> bool:
-    """Valida os dois dígitos verificadores do CNPJ."""
-    number = digits(value)
-    if len(number) != 14 or len(set(number)) == 1:
+    """Valida CNPJ numérico ou alfanumérico conforme regra oficial (ASCII - 48)."""
+    number = normalize_cnpj(value)
+    if not re.fullmatch(r"[A-Z0-9]{12}[0-9]{2}", number):
+        return False
+    if len(set(number)) == 1:
         return False
 
     def calculate(base: str, weights: tuple[int, ...]) -> str:
-        total = sum(int(char) * weight for char, weight in zip(base, weights))
+        total = sum((ord(char) - 48) * weight for char, weight in zip(base, weights))
         remainder = total % 11
         return str(0 if remainder < 2 else 11 - remainder)
 

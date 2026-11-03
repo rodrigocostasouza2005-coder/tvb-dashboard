@@ -9,10 +9,12 @@ Branch: `feature/expansao-atacadista`
 - Modelos Prisma separados `AtacadoProspect` e `AtacadoProspectActivity`; prospectos não são misturados com `ClienteCadastro`, sincronizado pelo DAPIC.
 - Cadastro manual, atualização de status com histórico e importação CSV com prévia no navegador.
 - Limites atuais do CSV: 500 linhas e 900 KB. Duplicados por CNPJ são ignorados; a importação não reconcilia alterações.
-- Importador offline em Python para arquivos públicos da Receita, com filtro inicial RJ/CNAEs, validação de CNPJ numérico e exportação CSV.
+- Importador offline em Python para arquivos públicos da Receita, com filtro inicial RJ/CNAEs, validação de CNPJ numérico e alfanumérico (regra oficial módulo 11) e exportação CSV.
 - Testes automatizados Python no GitHub Actions.
 
 ## Validação observada
+
+- O importador passou a aceitar CNPJ alfanumérico no formato oficial (12 caracteres alfanuméricos + 2 dígitos verificadores), com teste baseado no exemplo publicado pela Receita Federal. A alteração está em revisão na PR específica; ainda aguarda CI e validação com dump real.
 
 - Workflow `Prospecting importer tests`: sucesso no commit `c25edaa4aa06abe5af7d30cc493b88cf62668995`.
 - Check Vercel da PR: sucesso no mesmo commit.
