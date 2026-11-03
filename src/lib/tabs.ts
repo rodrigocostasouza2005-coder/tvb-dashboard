@@ -21,6 +21,7 @@ export type TabKey =
   | "atacado"
   | "atacado-cidades"
   | "atacado-clientes"
+  | "atacado-prospeccao"
   | "cobertura"
   | "inadimplencia"
   | "top-mais-vendidos"
@@ -92,6 +93,7 @@ export const TABS: TabEntry[] = [
   { key: "atacado", label: "Vendas", href: "/dashboard/atacado", group: "atacado" },
   { key: "atacado-cidades", label: "Por estado/cidade", href: "/dashboard/atacado-cidades", group: "atacado" },
   { key: "atacado-clientes", label: "Por cliente", href: "/dashboard/atacado-clientes", group: "atacado" },
+  { key: "atacado-prospeccao", label: "Prospecção", href: "/dashboard/atacado-prospeccao", group: "atacado" },
   { key: "inadimplencia", label: "Inadimplência", href: "/dashboard/inadimplencia", group: "atacado" },
   { key: "atacado-custo-familia", label: "Custo por Família", href: "/dashboard/atacado-custo-familia", group: "atacado" },
 
