@@ -3,84 +3,40 @@
 Data: 2026-11-03
 Branch: `feature/expansao-atacadista`
 
-## 1. Estrutura existente confirmada
+## O que foi implementado
 
-- Aplicação: Next.js 16.3, App Router, TypeScript.
-- Persistência: Prisma 6.19 + PostgreSQL, conexão por `DATABASE_URL`.
-- Deploy informado pelo projeto: Vercel; banco PostgreSQL gerenciado (Neon conforme arquitetura já utilizada pelo TVB).
-- Testes: Vitest (`npm test`); lint via ESLint; build via `next build`.
-- Navegação: `src/lib/tabs.ts`, com grupos e controle de acesso por usuário.
-- Layout autenticado: `src/app/dashboard/layout.tsx`.
-- Prisma schema atual: `prisma/schema.prisma`.
+- Nova aba `/dashboard/atacado-prospeccao`, integrada ao grupo Atacado e protegida por sessão e `requireTabAccess`.
+- Modelos Prisma separados `AtacadoProspect` e `AtacadoProspectActivity`; prospectos não são misturados com `ClienteCadastro`, sincronizado pelo DAPIC.
+- Cadastro manual, atualização de status com histórico e importação CSV com prévia no navegador.
+- Limites atuais do CSV: 500 linhas e 900 KB. Duplicados por CNPJ são ignorados; a importação não reconcilia alterações.
+- Importador offline em Python para arquivos públicos da Receita, com filtro inicial RJ/CNAEs, validação de CNPJ numérico e exportação CSV.
+- Testes automatizados Python no GitHub Actions.
 
-## 2. Atacado já existente — não duplicar
+## Validação observada
 
-Já existem as rotas:
-- `/dashboard/atacado`: visão de vendas B2B, receita, pedidos, unidades, clientes e produtos.
-- `/dashboard/atacado-clientes`: clientes existentes, retenção, CMV estimado e margem.
-- `/dashboard/atacado-cidades`: cidades/estados atendidos e mapa.
-- `/dashboard/inadimplencia`: parcelas em aberto, com filtro de atacado pelo plano de contas.
+- Workflow `Prospecting importer tests`: sucesso no commit `c25edaa4aa06abe5af7d30cc493b88cf62668995`.
+- Check Vercel da PR: sucesso no mesmo commit.
+- Não há aprovação de revisão registrada nem threads de revisão abertas.
+- O check Python cobre o importador e seus casos de teste; não substitui validação funcional com os arquivos reais da Receita.
+- O check Vercel indica que o pipeline de preview terminou com sucesso, mas não valida a migration no banco de produção.
 
-Essas rotas já usam sessão, permissões, filtros e funções de métricas do Radar. A nova frente deve ser uma aba irmã dentro do grupo Atacado, sem substituir essas páginas.
+## Pendências antes de liberar em produção
 
-## 3. Dados existentes que podem ser reaproveitados
+1. Aplicar a migration `20261103190000_add_atacado_prospects` no banco correto, após backup/verificação e confirmação de ambiente. Ela cria tabelas novas; não foi aplicada até esta auditoria.
+2. Confirmar quais usuários têm `allowedTabs` explícito. Usuários com lista explícita só verão a aba se a chave `atacado-prospeccao` estiver nela; listas vazias usam o padrão por perfil.
+3. Testar a tela autenticada após migration: cadastro, alteração de status, CSV válido, CSV inválido e duplicidade.
+4. Testar o importador com um dump oficial real e confirmar layout/competência antes de usar os leads.
+5. Definir tratamento de listas acima de 500 registros e reconciliação por competência antes de qualquer rotina recorrente.
+6. Não ativar cron, scraping, serviços pagos, consultas Serasa ou mensagens automáticas. A política atual é custo zero e revisão humana.
 
-- `ClienteCadastro`: cadastro sincronizado do DAPIC, com nome, telefone, celular, e-mail e CPF/CNPJ; possui `dapicId` único.
-- `Sale`: histórico de vendas, com cliente, cidade, estado, produto, quantidade e valores.
-- `Parcela`: dados financeiros/parcelas, incluindo pessoa, valor em aberto e plano de contas.
-- `ContatoMarcado`: marcação de contatos de CRM já existentes; não representa um pipeline completo de prospecção.
-- `VendaHistoricaExterna`: histórico anterior do e-commerce, não é cadastro de leads.
+## Limites conhecidos do MVP
 
-## 4. Lacuna confirmada
+- A prospecção automática recorrente ainda não existe; o script é executado manualmente e offline.
+- O CSV aceita até 500 linhas por carga e não suporta campos entre aspas que contenham quebras de linha.
+- A deduplicação operacional é por CNPJ; não há reconciliação de dados já importados.
+- O score comercial, mapa/ranking e qualificação automatizada ainda não foram implementados.
+- A situação atual não comprova que telefone/e-mail estejam atualizados nem que o estabelecimento seja um revendedor aderente ao perfil TVB.
 
-Não foi encontrada entidade dedicada a prospectos/lojas ainda não clientes, nem pipeline comercial com:
-- origem e evidência de descoberta;
-- status de qualificação e responsável;
-- histórico de tentativas/interações;
-- deduplicação por CNPJ e por identidade comercial;
-- motivo de descarte e trilha de auditoria.
+## Segurança de implantação
 
-Não reutilizar `ClienteCadastro` para leads: ele representa cadastro sincronizado do DAPIC e tem semântica diferente. Não reutilizar `ContatoMarcado` como CRM de prospecção: seu modelo atual foi desenhado para marcar contatos de clientes existentes.
-
-## 5. Decisão de arquitetura recomendada
-
-Criar módulo `/dashboard/atacado-prospeccao` dentro do grupo Atacado, protegido por sessão e `requireTabAccess`.
-
-Criar entidades próprias e enxutas, após validar os campos com os padrões atuais do schema:
-- `AtacadoProspect`: empresa/loja, CNPJ normalizado opcional, nome fantasia/razão social, cidade/UF, site, telefone/e-mail públicos, origem, URL de evidência, data da evidência, status, responsável, notas, timestamps.
-- `AtacadoProspectActivity`: histórico append-only de ações e alterações relevantes (contato tentado, resposta, qualificação, mudança de status, descarte), ligado ao prospect.
-
-Índices/constraints:
-- CNPJ normalizado único quando não nulo (índice único parcial via migration SQL, caso o padrão Prisma não expresse a condição).
-- Índices por UF/cidade, status e updatedAt.
-- Deduplicação adicional por domínio/site e combinação nome+cidade, sempre com revisão humana quando ambígua.
-
-## 6. Limites do MVP
-
-- Importação CSV com limite de 500 linhas/900 KB, validação de cabeçalhos e campos, normalização de CNPJ (numérico e alfanumérico), deduplicação por CNPJ e contagem de inválidos/duplicados. A prévia visual antes da gravação ainda está pendente.
-- Cadastro manual de prospect.
-- Lista, filtros por UF/cidade/status e fila de revisão.
-- Score de aderência comercial explicável, baseado somente em critérios observáveis de compatibilidade com o canal/segmento; nunca chamar isso de score de crédito.
-- Origem, URL e data da evidência visíveis em cada lead.
-- Histórico de atividades e aprovação humana antes de converter em cliente/negociar prazo.
-- Sem consultas Serasa no MVP.
-- Sem scraping que contorne login, CAPTCHA, bloqueios ou termos de uso.
-- Sem disparo automático de mensagens em massa.
-- Nenhuma migração aplicada em produção nesta etapa.
-
-## 7. Próximos passos de implementação
-
-1. Confirmar a navegação e os padrões de formulário/tabela existentes; adicionar a aba irmã com controle de acesso.
-2. Definir migration Prisma para prospect e atividades, incluindo índices e unicidade segura de CNPJ.
-3. Implementar validação/normalização e importação CSV idempotente com prévia.
-4. Implementar CRUD, filtros, fila de revisão e histórico.
-5. Cobrir regras críticas com testes Vitest e validar lint/build.
-6. Abrir PR em draft para revisão; não fazer merge/deploy nem executar migration em produção sem autorização.
-
-## 8. Pontos ainda não verificados
-
-- Região física configurada no projeto Vercel e região do projeto Neon.
-- Permissões/escopo de fontes externas de descoberta e custo de acesso.
-- Contrato/entitlements da assinatura Serasa de R$124 e disponibilidade de API.
-- Acesso a variáveis de ambiente e execução de testes/build neste ambiente remoto.
-
+O merge para `main` pode disparar o deploy de produção pela integração Vercel. Não abrir a rota para uso real antes de aplicar a migration e validar permissões. Nenhuma migration foi executada e nenhum dado de prospecto foi gravado em produção durante esta implementação.
