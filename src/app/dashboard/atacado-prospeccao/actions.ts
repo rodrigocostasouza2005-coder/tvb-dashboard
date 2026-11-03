@@ -14,6 +14,16 @@ function normalizeCnpj(input: string): string {
   return input.toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 
+function normalizeHttpUrl(input: string): string | null {
+  if (!input) return null;
+  try {
+    const url = new URL(input);
+    return url.protocol === "https:" || url.protocol === "http:" ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
 function isValidCnpjFormat(cnpj: string): boolean {
   // CNPJ alfanumérico: 12 posições alfanuméricas e 2 dígitos verificadores numéricos.
   return /^[A-Z0-9]{12}[0-9]{2}$/.test(cnpj) && cnpj.length === 14;
@@ -29,7 +39,11 @@ export async function criarProspectAction(formData: FormData) {
   const cnpj = cnpjRaw ? normalizeCnpj(cnpjRaw) : null;
   const estado = value(formData, "estado").toUpperCase();
   const site = value(formData, "site");
-  const evidenciaUrl = value(formData, "evidenciaUrl");
+  const evidenciaRaw = value(formData, "evidenciaUrl");
+  const evidenciaUrl = normalizeHttpUrl(evidenciaRaw);
+  const siteUrl = normalizeHttpUrl(site);
+  if (site && !siteUrl) redirect("/dashboard/atacado-prospeccao?erro=url");
+  if (evidenciaRaw && !evidenciaUrl) redirect("/dashboard/atacado-prospeccao?erro=url");
 
   if (!nomeFantasia) redirect("/dashboard/atacado-prospeccao?erro=nome");
   if (cnpj && !isValidCnpjFormat(cnpj)) redirect("/dashboard/atacado-prospeccao?erro=cnpj");
@@ -43,11 +57,12 @@ export async function criarProspectAction(formData: FormData) {
         cnpj,
         cidade: value(formData, "cidade") || null,
         estado: estado || null,
-        site: site || null,
+        site: siteUrl,
         telefone: value(formData, "telefone") || null,
         email: value(formData, "email") || null,
         origem: value(formData, "origem") || "manual",
-        evidenciaUrl: evidenciaUrl || null,
+        evidenciaUrl,
+        evidenciaEm: evidenciaUrl ? new Date() : null,
         observacoes: value(formData, "observacoes") || null,
         criadoPor: user.name,
         activities: {
@@ -208,8 +223,9 @@ export async function importarProspectosCsvAction(formData: FormData) {
           estado: estado || null,
           telefone: get(columns.telefone).slice(0, 40) || null,
           email: get(columns.email).slice(0, 180) || null,
-          site: get(columns.site).slice(0, 500) || null,
-          evidenciaUrl: get(columns.evidencia).slice(0, 1000) || null,
+          site: normalizeHttpUrl(get(columns.site).slice(0, 500)),
+          evidenciaUrl: normalizeHttpUrl(get(columns.evidencia).slice(0, 1000)),
+          evidenciaEm: normalizeHttpUrl(get(columns.evidencia)) ? new Date() : null,
           origem: "importacao",
           criadoPor: user.name,
           activities: {
