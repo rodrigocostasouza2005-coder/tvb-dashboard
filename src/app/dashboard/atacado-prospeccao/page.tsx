@@ -2,7 +2,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { requireTabAccess } from "@/lib/tabs";
-import { criarProspectAction } from "./actions";
+import { criarProspectAction, atualizarStatusProspectAction } from "./actions";
 
 const STATUS: Record<string, string> = {
   NOVO: "Novo",
@@ -44,6 +44,8 @@ export default async function AtacadoProspeccaoPage({
     : erro === "cnpj" ? "O CNPJ deve conter 14 dígitos."
     : erro === "estado" ? "Informe a UF com duas letras."
     : erro === "duplicado" ? "Já existe um prospecto cadastrado com esse CNPJ."
+    : erro === "status" ? "Status inválido."
+    : erro === "nao-encontrado" ? "Prospecto não encontrado."
     : null;
 
   return (
@@ -158,7 +160,15 @@ export default async function AtacadoProspeccaoPage({
                   <td className="px-4 py-3 text-[var(--text-secondary)]">{[p.cidade, p.estado].filter(Boolean).join(" / ") || "—"}</td>
                   <td className="px-4 py-3 text-[var(--text-secondary)]">{p.telefone || p.email || "—"}</td>
                   <td className="px-4 py-3 text-[var(--text-secondary)]">{p.origem.replaceAll("_", " ")}</td>
-                  <td className="px-4 py-3">{STATUS[p.status] ?? p.status}</td>
+                  <td className="px-4 py-3">
+                    <form action={atualizarStatusProspectAction} className="flex min-w-44 items-center gap-1">
+                      <input type="hidden" name="prospectId" value={p.id} />
+                      <select name="status" defaultValue={p.status} aria-label="Status do prospecto" className="min-w-0 flex-1 rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1 text-xs">
+                        {Object.entries(STATUS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+                      </select>
+                      <button type="submit" className="rounded-md border border-[var(--border)] px-2 py-1 text-xs">Salvar</button>
+                    </form>
+                  </td>
                   <td className="whitespace-nowrap px-4 py-3 text-xs text-[var(--text-muted)]">{p.updatedAt.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" })}</td>
                 </tr>
               ))}
