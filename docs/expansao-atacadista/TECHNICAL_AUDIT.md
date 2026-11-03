@@ -57,7 +57,7 @@ Criar entidades próprias e enxutas, após validar os campos com os padrões atu
 
 ## 6. Limites do MVP
 
-- Importação CSV com prévia, validação e relatório de erros.
+- Importação CSV com limite de 500 linhas/900 KB, validação de cabeçalhos e campos, normalização de CNPJ (numérico e alfanumérico), deduplicação por CNPJ e contagem de inválidos/duplicados. A prévia visual antes da gravação ainda está pendente.
 - Cadastro manual de prospect.
 - Lista, filtros por UF/cidade/status e fila de revisão.
 - Score de aderência comercial explicável, baseado somente em critérios observáveis de compatibilidade com o canal/segmento; nunca chamar isso de score de crédito.
