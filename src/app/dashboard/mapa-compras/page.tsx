@@ -66,7 +66,7 @@ export default async function MapaComprasPage({ searchParams }: { searchParams: 
   const bsPorCod = new Map(bsRows.map((r) => [r.cod, r]));
   const dropPorCod = new Map(dropRows.map((r) => [r.cod, r]));
   const todosMeses = grupos[0]?.meses.map((m) => m.mes) ?? [];
-  const { bestSeller, drop } = particionarMatrizCompras(grupos, classificacaoPorProduto, bsPorCod, dropPorCod, todosMeses);
+  const gruposMatriz = particionarMatrizCompras(grupos, classificacaoPorProduto, bsPorCod, dropPorCod, todosMeses);
 
   return (
     <div>
@@ -155,7 +155,7 @@ export default async function MapaComprasPage({ searchParams }: { searchParams: 
         value={{ grupoIn: grupoFiltro, colecaoIn: colecaoFiltro, statusComercialIn: statusFiltro, horizonteDias, busca }}
       />
 
-      <MatrizCompras bestSeller={bestSeller} drop={drop} canEdit={canEdit} tamanhoPorProduto={tamanhoPorProduto} busca={busca} />
+      <MatrizCompras grupos={gruposMatriz} canEdit={canEdit} tamanhoPorProduto={tamanhoPorProduto} busca={busca} />
     </div>
   );
 }

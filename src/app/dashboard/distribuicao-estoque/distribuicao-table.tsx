@@ -1,88 +1,38 @@
-"use client";
-
-import { useState } from "react";
-import type { ComparacaoVariante, VariantePorLoja } from "@/lib/metrics";
+import type { ComparacaoVariante } from "@/lib/metrics";
 import { diagnosticoInfo, formatNumero } from "./format";
 
-function VarianteTabela({ v }: { v: ComparacaoVariante }) {
-  const linhas: { label: string; render: (l: VariantePorLoja) => string }[] = [
-    { label: "Estoque atual", render: (l) => formatNumero(l.estoqueAtual) },
-    { label: "Vendas 30 dias", render: (l) => formatNumero(l.vendasDias30) },
-    { label: "Vendas 60 dias", render: (l) => formatNumero(l.vendasDias60) },
-    { label: "Vendas 90 dias", render: (l) => formatNumero(l.vendasDias90) },
-    { label: "Cobertura (dias)", render: (l) => formatNumero(l.coberturaDias, 1) },
-  ];
-
-  return (
-    <div className="overflow-x-auto rounded-md border border-[var(--border)]">
-      <table className="w-full text-xs">
-        <thead>
-          <tr className="border-b border-[var(--gridline)] bg-[var(--page-plane)] text-left text-[var(--text-muted)]">
-            <th className="px-3 py-1.5 font-medium whitespace-nowrap">
-              {v.cor ?? "—"} · {v.tamanho ?? "—"} <span className="text-[var(--text-muted)]">({v.cod})</span>
-            </th>
-            {v.porLoja.map((l) => (
-              <th key={l.storeId} className="px-3 py-1.5 text-right font-medium whitespace-nowrap">
-                {l.storeName}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {linhas.map((linha) => (
-            <tr key={linha.label} className="border-b border-[var(--gridline)] last:border-0">
-              <td className="px-3 py-1.5 text-[var(--text-secondary)] whitespace-nowrap">{linha.label}</td>
-              {v.porLoja.map((l) => (
-                <td key={l.storeId} className="px-3 py-1.5 text-right tabular-nums">
-                  {linha.render(l)}
-                </td>
-              ))}
-            </tr>
-          ))}
-          <tr>
-            <td className="px-3 py-1.5 text-[var(--text-secondary)] whitespace-nowrap">Diagnóstico</td>
-            {v.porLoja.map((l) => {
-              const info = diagnosticoInfo(l.diagnostico);
-              return (
-                <td key={l.storeId} className="px-3 py-1.5 text-right">
-                  <span className="inline-flex items-center justify-end gap-1.5 whitespace-nowrap">
-                    <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: info.color }} />
-                    {info.label}
-                  </span>
-                </td>
-              );
-            })}
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  );
+// Uma tabela por produto, uma linha por variante (cor/tamanho), uma coluna "Estoque" + uma
+// coluna "Diagnóstico" por loja — substitui as mini-tabelas por variante (que exigiam clicar
+// pra abrir o produto e depois ler uma tabela separada por SKU) por uma visão única, sempre
+// visível, scanneável sem nenhum clique (pedido do Rodrigo em 2026-11-02). Detalhe fino
+// (vendas 30/60/90d, cobertura em dias) vai pro atributo title (tooltip nativo) do badge de
+// diagnóstico de cada loja, em vez de ocupar coluna própria.
+function tituloDiagnostico(l: ComparacaoVariante["porLoja"][number]): string {
+  return `Cobertura: ${formatNumero(l.coberturaDias, 1)} dias · Vendas 30/60/90d: ${formatNumero(l.vendasDias30)}/${formatNumero(l.vendasDias60)}/${formatNumero(l.vendasDias90)}`;
 }
 
-// Mesmo idioma de expand/collapse já usado em mapa-compras-grid.tsx (GrupoBloco) e
-// inteligencia/tabelas.tsx (GrupoLinha) — useState boolean + ▸ rotacionado, reimplementado aqui
-// (não extraído pra componente compartilhado, consistente com o que as outras duas telas já
-// fazem: ver auditoria de padrões de UI, cada tabela expansível reimplementa o idioma).
-function ProdutoBloco({ produto, variantes }: { produto: string; variantes: ComparacaoVariante[] }) {
-  const [aberto, setAberto] = useState(false);
+function ProdutoTabela({ produto, variantes }: { produto: string; variantes: ComparacaoVariante[] }) {
   const comDesequilibrio = variantes.filter((v) =>
     v.porLoja.some((l) => l.diagnostico === "ruptura" || l.diagnostico === "cobertura_critica")
   ).length;
 
+  // Lojas na ordem em que já vêm do backend (consistente, ver porLoja) — colunas derivadas
+  // dinamicamente, nunca hardcoded, pra não quebrar se a lista de lojas mudar.
+  const lojas: { storeId: string; storeName: string }[] = [];
+  const vistos = new Set<string>();
+  for (const v of variantes) {
+    for (const l of v.porLoja) {
+      if (!vistos.has(l.storeId)) {
+        vistos.add(l.storeId);
+        lojas.push({ storeId: l.storeId, storeName: l.storeName });
+      }
+    }
+  }
+
   return (
     <div className="border-b border-[var(--gridline)] last:border-0">
-      <button
-        type="button"
-        onClick={() => setAberto((v) => !v)}
-        className="flex w-full items-center justify-between gap-2 px-4 py-2.5 text-left hover:bg-[var(--page-plane)]"
-      >
+      <div className="flex w-full flex-wrap items-center justify-between gap-2 px-4 py-2.5">
         <span className="flex items-center gap-1.5 text-sm font-medium text-[var(--text-primary)]">
-          <span
-            className="inline-block w-3 text-[var(--text-muted)] transition-transform"
-            style={{ transform: aberto ? "rotate(90deg)" : "rotate(0deg)" }}
-          >
-            ▸
-          </span>
           {produto}
           <span className="text-xs font-normal text-[var(--text-muted)]">
             ({variantes.length} variante{variantes.length > 1 ? "s" : ""})
@@ -96,14 +46,52 @@ function ProdutoBloco({ produto, variantes }: { produto: string; variantes: Comp
             {comDesequilibrio} com ruptura/cobertura crítica
           </span>
         )}
-      </button>
-      {aberto && (
-        <div className="space-y-3 px-4 pb-3">
-          {variantes.map((v) => (
-            <VarianteTabela key={v.cod} v={v} />
-          ))}
-        </div>
-      )}
+      </div>
+      <div className="overflow-x-auto px-4 pb-3">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="border-b border-[var(--gridline)] bg-[var(--page-plane)] text-left text-[var(--text-muted)]">
+              <th className="px-3 py-1.5 font-medium whitespace-nowrap">Variante</th>
+              {lojas.map((loja) => (
+                <th key={loja.storeId} className="px-3 py-1.5 text-right font-medium whitespace-nowrap" colSpan={2}>
+                  {loja.storeName}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {variantes.map((v) => (
+              <tr key={v.cod} className="border-b border-[var(--gridline)] last:border-0">
+                <td className="px-3 py-1.5 whitespace-nowrap text-[var(--text-secondary)]">
+                  {v.cor ?? "—"} · {v.tamanho ?? "—"} <span className="text-[var(--text-muted)]">({v.cod})</span>
+                </td>
+                {lojas.map((loja) => {
+                  const l = v.porLoja.find((x) => x.storeId === loja.storeId);
+                  if (!l) {
+                    return (
+                      <td key={loja.storeId} className="px-3 py-1.5 text-right text-[var(--text-muted)]" colSpan={2}>
+                        —
+                      </td>
+                    );
+                  }
+                  const info = diagnosticoInfo(l.diagnostico);
+                  return (
+                    <td key={loja.storeId} className="px-3 py-1.5 text-right" colSpan={2}>
+                      <span className="inline-flex items-center justify-end gap-3 whitespace-nowrap">
+                        <span className="tabular-nums">{formatNumero(l.estoqueAtual)}</span>
+                        <span className="inline-flex items-center gap-1.5" title={tituloDiagnostico(l)}>
+                          <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: info.color }} />
+                          {info.label}
+                        </span>
+                      </span>
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -129,7 +117,7 @@ export function DistribuicaoTable({ variantes }: { variantes: ComparacaoVariante
   return (
     <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
       {produtos.map(([produto, vs]) => (
-        <ProdutoBloco key={produto} produto={produto} variantes={vs} />
+        <ProdutoTabela key={produto} produto={produto} variantes={vs} />
       ))}
     </div>
   );

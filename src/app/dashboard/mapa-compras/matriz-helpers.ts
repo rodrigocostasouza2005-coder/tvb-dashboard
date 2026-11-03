@@ -39,6 +39,40 @@ export type GrupoMatriz = {
   produtos: ProdutoMatriz[];
 };
 
+// Matriz unificada (pedido do Rodrigo em 2026-11-02, substitui as duas matrizes separadas
+// Best Seller/Drop por UMA tabela organizada por família/grupo, com BESTSELLER e Drop como
+// dois sub-blocos fixos dentro de cada grupo — espelha a planilha de referência que ele mostrou).
+export type GrupoMatrizUnificado = {
+  grupo: string;
+  coberturaMeses: number;
+  totalMeses: MesMapaCompras[];
+  bestSeller: { meses: MesMapaCompras[]; produtos: ProdutoMatriz[] };
+  drop: { meses: MesMapaCompras[]; produtos: ProdutoMatriz[] };
+};
+
+// Quando um dos dois buckets (BS/Drop) não tem nenhum produto classificado nesse grupo,
+// somarSeriesMapaCompras([], todosMeses) ainda funciona (reduce sobre array vazio = 0 em tudo),
+// MAS o campo `tipo` de cada mês cai no fallback `linhas[0]?.tipo ?? "realizado"` — sempre
+// "realizado", mesmo pros meses projetados (futuros). Isso faria o bucket vazio renderizar sem
+// o destaque visual de "projetado" (fundo azulado) nas colunas futuras, inconsistente com o
+// outro bucket do mesmo grupo e com a linha de TOTAL. `referencia` é a série do grupo inteiro
+// (sempre com o `tipo` certo por mês, independente de quais produtos compõem o bucket) — usamos
+// só o campo `tipo` dela pra zerar corretamente.
+function zerarMeses(referencia: MesMapaCompras[]): MesMapaCompras[] {
+  return referencia.map((m) => ({
+    mes: m.mes,
+    tipo: m.tipo,
+    estoqueInicial: 0,
+    recebimento: 0,
+    vendas: 0,
+    bonificacoes: 0,
+    estoqueFinal: 0,
+    estoqueIdeal: 0,
+    coberturaAtual: null,
+    faltaComprar: 0,
+  }));
+}
+
 function agregarPremissas(rows: { premissas: string[]; avisos: string[] }[]): { premissas: string[]; avisos: string[] } {
   return {
     premissas: [...new Set(rows.flatMap((r) => r.premissas))],
@@ -91,19 +125,19 @@ function agregarDrop(rows: RecomendacaoDropPorProduto[]): RecomendacaoAgregadaPr
 }
 
 // Pura: recebe os dados já buscados (grade mensal por grupo/produto + classificação por produto
-// + recomendações já calculadas pela Inteligência de Compras, indexadas por cod) e devolve as
-// DUAS matrizes separadas (Best Seller / Drop) que a tela mostra. Nenhuma chamada a banco aqui —
-// testável sem mock de Prisma, só não tem teste dedicado nesta entrega (ver plano: coberto pela
-// validação manual via dev+curl, por ser composição de dado já testado nas camadas de baixo).
+// + recomendações já calculadas pela Inteligência de Compras, indexadas por cod) e devolve UMA
+// matriz por família/grupo, cada grupo com dois sub-blocos fixos (BESTSELLER/Drop) + o total dos
+// dois somado. Nenhuma chamada a banco aqui — testável sem mock de Prisma, só não tem teste
+// dedicado nesta entrega (ver plano: coberto pela validação manual via dev+curl, por ser
+// composição de dado já testado nas camadas de baixo).
 export function particionarMatrizCompras(
   grupos: MapaComprasGrupo[],
   classificacaoPorProduto: Map<string, ClassificacaoPorProdutoEntry>,
   bsPorCod: Map<string, RecomendacaoBestSellerPorProduto>,
   dropPorCod: Map<string, RecomendacaoDropPorProduto>,
   todosMeses: string[]
-): { bestSeller: GrupoMatriz[]; drop: GrupoMatriz[] } {
-  const bestSeller: GrupoMatriz[] = [];
-  const drop: GrupoMatriz[] = [];
+): GrupoMatrizUnificado[] {
+  const resultado: GrupoMatrizUnificado[] = [];
 
   for (const grupo of grupos) {
     const produtosBS: ProdutoMatriz[] = [];
@@ -128,23 +162,19 @@ export function particionarMatrizCompras(
       else produtosDrop.push(entry);
     }
 
-    if (produtosBS.length > 0) {
-      bestSeller.push({
-        grupo: grupo.grupo,
-        coberturaMeses: grupo.coberturaMeses,
-        meses: somarSeriesMapaCompras(produtosBS.map((p) => p.meses), todosMeses),
-        produtos: produtosBS,
-      });
-    }
-    if (produtosDrop.length > 0) {
-      drop.push({
-        grupo: grupo.grupo,
-        coberturaMeses: grupo.coberturaMeses,
-        meses: somarSeriesMapaCompras(produtosDrop.map((p) => p.meses), todosMeses),
-        produtos: produtosDrop,
-      });
-    }
+    if (produtosBS.length === 0 && produtosDrop.length === 0) continue; // fila de revisão, não aparece aqui
+
+    const mesesBS = produtosBS.length > 0 ? somarSeriesMapaCompras(produtosBS.map((p) => p.meses), todosMeses) : zerarMeses(grupo.meses);
+    const mesesDrop = produtosDrop.length > 0 ? somarSeriesMapaCompras(produtosDrop.map((p) => p.meses), todosMeses) : zerarMeses(grupo.meses);
+
+    resultado.push({
+      grupo: grupo.grupo,
+      coberturaMeses: grupo.coberturaMeses,
+      totalMeses: somarSeriesMapaCompras([mesesBS, mesesDrop], todosMeses),
+      bestSeller: { meses: mesesBS, produtos: produtosBS },
+      drop: { meses: mesesDrop, produtos: produtosDrop },
+    });
   }
 
-  return { bestSeller, drop };
+  return resultado;
 }

@@ -6,6 +6,7 @@ import { requireTabAccess } from "@/lib/tabs";
 import { DistribuicaoFiltros, type NivelDesequilibrio } from "./filtros";
 import { DistribuicaoTable } from "./distribuicao-table";
 import { SugestoesTransferencia } from "./sugestoes-transferencia";
+import { ResumoDistribuicao } from "./resumo-distribuicao";
 
 const NIVEIS_VALIDOS: NivelDesequilibrio[] = ["todos", "critico", "excesso"];
 
@@ -67,6 +68,8 @@ export default async function DistribuicaoEstoquePage({
         recomendação — a aprovação e a execução da transferência são feitas pela equipe, fora do
         Radar.
       </p>
+
+      <ResumoDistribuicao comparacoes={comparacoesTodas} oportunidades={oportunidades} />
 
       <DistribuicaoFiltros
         basePath="/dashboard/distribuicao-estoque"

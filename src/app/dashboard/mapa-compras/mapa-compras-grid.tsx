@@ -4,10 +4,10 @@ import { useState } from "react";
 import { TipoCompraProduto } from "@prisma/client";
 import { updateCoberturaMetaAction } from "./actions";
 import { ConfirmarDecisaoForm } from "./inteligencia/forms";
-import type { GrupoMatriz, ProdutoMatriz } from "./matriz-helpers";
+import type { GrupoMatrizUnificado, ProdutoMatriz } from "./matriz-helpers";
 import type { TamanhoBreakdownRow } from "@/lib/metrics";
 
-type MesLinha = GrupoMatriz["meses"][number];
+type MesLinha = GrupoMatrizUnificado["totalMeses"][number];
 
 const MES_NOMES = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
 function formatMes(mes: string) {
@@ -219,21 +219,72 @@ function ProdutoBloco({
   );
 }
 
-function GrupoBloco({
+// Sub-bloco fixo dentro de um grupo (BESTSELLER ou Drop) — mesmo idioma de expand/collapse já
+// usado em todo o resto da tela (useState boolean + ▸ rotacionado): o subtotal do sub-bloco
+// fica sempre visível; expandir revela os produtos individuais classificados nele (o "ver quais
+// produtos são Bestseller" que o Rodrigo pediu).
+function SubBlocoClassificacao({
   tipo,
-  grupo,
+  label,
+  cor,
+  grupoNome,
+  meses,
+  produtos,
   mesesHeader,
   canEdit,
   tamanhoPorProduto,
 }: {
   tipo: TipoCompraProduto;
-  grupo: GrupoMatriz;
+  label: string;
+  cor: string;
+  grupoNome: string;
+  meses: MesLinha[];
+  produtos: ProdutoMatriz[];
   mesesHeader: string[];
   canEdit: boolean;
   tamanhoPorProduto: Map<string, TamanhoBreakdownRow[]>;
 }) {
   const [aberto, setAberto] = useState(false);
-  const faltaTotal = grupo.meses.reduce((s, m) => s + m.faltaComprar, 0);
+
+  return (
+    <>
+      <tr>
+        <td className="sticky left-0 z-10 bg-[var(--surface-1)] px-3 py-1.5 pl-6" colSpan={1}>
+          <button type="button" onClick={() => setAberto((v) => !v)} className="flex items-center gap-1.5 text-left text-xs font-bold tracking-wide uppercase" style={{ color: cor }}>
+            <span className="inline-block w-3 transition-transform" style={{ transform: aberto ? "rotate(90deg)" : "rotate(0deg)" }}>
+              ▸
+            </span>
+            {label}
+            <span className="text-[10px] font-normal text-[var(--text-muted)]">({produtos.length})</span>
+          </button>
+        </td>
+        {mesesHeader.map((mes) => (
+          <td key={mes} className="bg-[var(--surface-1)]" />
+        ))}
+      </tr>
+      <BlocoLinhas meses={meses} indent />
+      {aberto &&
+        produtos.map((produto) => (
+          <ProdutoBloco key={produto.produto} tipo={tipo} grupoNome={grupoNome} produto={produto} mesesHeader={mesesHeader} canEdit={canEdit} tamanhoPorProduto={tamanhoPorProduto} />
+        ))}
+    </>
+  );
+}
+
+function GrupoBloco({
+  grupo,
+  mesesHeader,
+  canEdit,
+  tamanhoPorProduto,
+}: {
+  grupo: GrupoMatrizUnificado;
+  mesesHeader: string[];
+  canEdit: boolean;
+  tamanhoPorProduto: Map<string, TamanhoBreakdownRow[]>;
+}) {
+  const [aberto, setAberto] = useState(false);
+  const faltaTotal = grupo.totalMeses.reduce((s, m) => s + m.faltaComprar, 0);
+  const totalProdutos = grupo.bestSeller.produtos.length + grupo.drop.produtos.length;
 
   return (
     <>
@@ -244,7 +295,7 @@ function GrupoBloco({
               ▸
             </span>
             {grupo.grupo}
-            <span className="text-xs font-normal text-[var(--text-muted)]">({grupo.produtos.length})</span>
+            <span className="text-xs font-normal text-[var(--text-muted)]">({totalProdutos})</span>
           </button>
         </td>
         {mesesHeader.map((mes, i) => (
@@ -273,132 +324,100 @@ function GrupoBloco({
           </td>
         ))}
       </tr>
-      <BlocoLinhas meses={grupo.meses} />
-      {aberto &&
-        grupo.produtos.map((produto) => (
-          <ProdutoBloco key={produto.produto} tipo={tipo} grupoNome={grupo.grupo} produto={produto} mesesHeader={mesesHeader} canEdit={canEdit} tamanhoPorProduto={tamanhoPorProduto} />
-        ))}
+      <BlocoLinhas meses={grupo.totalMeses} />
+      {aberto && (
+        <>
+          <SubBlocoClassificacao
+            tipo={TipoCompraProduto.BEST_SELLER}
+            label="BESTSELLER"
+            cor="var(--series-1)"
+            grupoNome={grupo.grupo}
+            meses={grupo.bestSeller.meses}
+            produtos={grupo.bestSeller.produtos}
+            mesesHeader={mesesHeader}
+            canEdit={canEdit}
+            tamanhoPorProduto={tamanhoPorProduto}
+          />
+          <SubBlocoClassificacao
+            tipo={TipoCompraProduto.DROP}
+            label="Drop"
+            cor="var(--series-2)"
+            grupoNome={grupo.grupo}
+            meses={grupo.drop.meses}
+            produtos={grupo.drop.produtos}
+            mesesHeader={mesesHeader}
+            canEdit={canEdit}
+            tamanhoPorProduto={tamanhoPorProduto}
+          />
+        </>
+      )}
     </>
   );
 }
 
-function SecaoBloco({
-  tipo,
-  label,
-  cor,
-  grupos,
-  mesesHeader,
-  canEdit,
-  tamanhoPorProduto,
-  buscaAtiva,
-}: {
-  tipo: TipoCompraProduto;
-  label: string;
-  cor: string;
-  grupos: GrupoMatriz[];
-  mesesHeader: string[];
-  canEdit: boolean;
-  tamanhoPorProduto: Map<string, TamanhoBreakdownRow[]>;
-  buscaAtiva: string;
-}) {
-  const [aberto, setAberto] = useState(true);
-  const buscaLower = buscaAtiva.trim().toLowerCase();
-  const gruposFiltrados = buscaLower
-    ? grupos
-        .map((g) => ({ ...g, produtos: g.produtos.filter((p) => p.produto.toLowerCase().includes(buscaLower) || p.cods.some((c) => c.toLowerCase().includes(buscaLower))) }))
-        .filter((g) => g.produtos.length > 0)
-    : grupos;
-  const totalProdutos = gruposFiltrados.reduce((s, g) => s + g.produtos.length, 0);
-
-  return (
-    <div className="mb-6">
-      <button type="button" onClick={() => setAberto((v) => !v)} className="mb-2 flex items-center gap-2">
-        <span className="inline-block w-3 text-[var(--text-muted)] transition-transform" style={{ transform: aberto ? "rotate(90deg)" : "rotate(0deg)" }}>
-          ▸
-        </span>
-        <h2 className="text-sm font-bold tracking-wide uppercase" style={{ color: cor }}>
-          {label}
-        </h2>
-        <span className="text-xs text-[var(--text-muted)]">({totalProdutos} produto{totalProdutos !== 1 ? "s" : ""})</span>
-      </button>
-      {aberto && (
-        <div className="max-h-[70vh] overflow-auto rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]" style={{ borderTopColor: cor, borderTopWidth: 3 }}>
-          <table className="w-full border-collapse text-sm">
-            <thead>
-              <tr>
-                <th className="sticky top-0 left-0 z-20 min-w-[220px] border-b border-[var(--gridline)] bg-[var(--surface-1)] px-3 py-2 text-left text-xs font-medium text-[var(--text-muted)]">
-                  Grupo / Produto
-                </th>
-                {mesesHeader.map((mes) => {
-                  const tipoMes = gruposFiltrados[0]?.meses.find((m) => m.mes === mes)?.tipo;
-                  return (
-                    <th
-                      key={mes}
-                      className="sticky top-0 z-10 min-w-[76px] border-b border-[var(--gridline)] px-2 py-2 text-right text-xs font-medium whitespace-nowrap text-[var(--text-muted)]"
-                      style={{ backgroundColor: tipoMes === "projetado" ? "color-mix(in srgb, var(--series-1) 8%, var(--surface-1))" : "var(--surface-1)" }}
-                    >
-                      {formatMes(mes)}
-                    </th>
-                  );
-                })}
-              </tr>
-            </thead>
-            <tbody>
-              {gruposFiltrados.map((grupo) => (
-                <GrupoBloco key={grupo.grupo} tipo={tipo} grupo={grupo} mesesHeader={mesesHeader} canEdit={canEdit} tamanhoPorProduto={tamanhoPorProduto} />
-              ))}
-              {gruposFiltrados.length === 0 && (
-                <tr>
-                  <td colSpan={mesesHeader.length + 1} className="px-4 py-6 text-center text-[var(--text-muted)]">
-                    Nenhum produto {label.toLowerCase()} no filtro atual.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
-}
-
 export function MatrizCompras({
-  bestSeller,
-  drop,
+  grupos,
   canEdit,
   tamanhoPorProduto,
   busca,
 }: {
-  bestSeller: GrupoMatriz[];
-  drop: GrupoMatriz[];
+  grupos: GrupoMatrizUnificado[];
   canEdit: boolean;
   tamanhoPorProduto: Map<string, TamanhoBreakdownRow[]>;
   busca: string;
 }) {
-  const mesesHeader = (bestSeller[0] ?? drop[0])?.meses.map((m) => m.mes) ?? [];
+  const mesesHeader = grupos[0]?.totalMeses.map((m) => m.mes) ?? [];
+  const buscaLower = busca.trim().toLowerCase();
+
+  const matchProduto = (p: ProdutoMatriz) => p.produto.toLowerCase().includes(buscaLower) || p.cods.some((c) => c.toLowerCase().includes(buscaLower));
+
+  const gruposFiltrados = buscaLower
+    ? grupos
+        .map((g) => ({
+          ...g,
+          bestSeller: { ...g.bestSeller, produtos: g.bestSeller.produtos.filter(matchProduto) },
+          drop: { ...g.drop, produtos: g.drop.produtos.filter(matchProduto) },
+        }))
+        .filter((g) => g.bestSeller.produtos.length > 0 || g.drop.produtos.length > 0)
+    : grupos;
 
   return (
-    <div>
-      <SecaoBloco
-        tipo={TipoCompraProduto.BEST_SELLER}
-        label="Best Seller"
-        cor="var(--series-1)"
-        grupos={bestSeller}
-        mesesHeader={mesesHeader}
-        canEdit={canEdit}
-        tamanhoPorProduto={tamanhoPorProduto}
-        buscaAtiva={busca}
-      />
-      <SecaoBloco
-        tipo={TipoCompraProduto.DROP}
-        label="Drop"
-        cor="var(--series-2)"
-        grupos={drop}
-        mesesHeader={mesesHeader}
-        canEdit={canEdit}
-        tamanhoPorProduto={tamanhoPorProduto}
-        buscaAtiva={busca}
-      />
+    <div className="mb-6">
+      <div className="max-h-[75vh] overflow-auto rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+        <table className="w-full border-collapse text-sm">
+          <thead>
+            <tr>
+              <th className="sticky top-0 left-0 z-20 min-w-[220px] border-b border-[var(--gridline)] bg-[var(--surface-1)] px-3 py-2 text-left text-xs font-medium text-[var(--text-muted)]">
+                Família / Produto
+              </th>
+              {mesesHeader.map((mes) => {
+                const tipoMes = gruposFiltrados[0]?.totalMeses.find((m) => m.mes === mes)?.tipo;
+                return (
+                  <th
+                    key={mes}
+                    className="sticky top-0 z-10 min-w-[76px] border-b border-[var(--gridline)] px-2 py-2 text-right text-xs font-medium whitespace-nowrap text-[var(--text-muted)]"
+                    style={{ backgroundColor: tipoMes === "projetado" ? "color-mix(in srgb, var(--series-1) 8%, var(--surface-1))" : "var(--surface-1)" }}
+                  >
+                    {formatMes(mes)}
+                  </th>
+                );
+              })}
+            </tr>
+          </thead>
+          <tbody>
+            {gruposFiltrados.map((grupo) => (
+              <GrupoBloco key={grupo.grupo} grupo={grupo} mesesHeader={mesesHeader} canEdit={canEdit} tamanhoPorProduto={tamanhoPorProduto} />
+            ))}
+            {gruposFiltrados.length === 0 && (
+              <tr>
+                <td colSpan={mesesHeader.length + 1} className="px-4 py-6 text-center text-[var(--text-muted)]">
+                  Nenhum produto no filtro atual.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

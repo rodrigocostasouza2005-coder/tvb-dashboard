@@ -24,6 +24,11 @@ export function SugestoesTransferencia({ oportunidades }: { oportunidades: Oport
       <div className="space-y-2">
         {oportunidades.map((o, i) => (
           <div key={i} className="rounded-md border border-[var(--gridline)] p-3 text-xs">
+            <p className="mb-1.5 text-sm font-semibold text-[var(--text-primary)]">
+              Transfira {formatNumero(o.quantidadeSugerida)} un. de {o.produto}
+              {o.cor || o.tamanho ? ` (${[o.cor, o.tamanho].filter(Boolean).join("/")})` : ""} de {o.lojaOrigem} para{" "}
+              {o.lojaDestino}.
+            </p>
             <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
               <span className="font-medium text-[var(--text-primary)]">
                 {o.produto}
