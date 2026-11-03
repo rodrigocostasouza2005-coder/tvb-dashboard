@@ -1,0 +1,83 @@
+import csv
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+SCRIPT = Path(__file__).resolve().parents[1] / "gerar-prospects-rj.py"
+
+
+def establishment(cnpj="11222333000181", uf="RJ", status="02", cnae="4781400"):
+    row = [""] * 30
+    row[0], row[1], row[2] = cnpj[:8], cnpj[8:12], cnpj[12:]
+    row[4] = "LOJA TESTE"
+    row[5] = status
+    row[11] = cnae
+    row[12] = ""
+    row[19] = uf
+    row[20] = "6001"
+    row[21], row[22] = "21", "22223333"
+    row[27] = "CONTATO@EXEMPLO.COM"
+    return row
+
+
+class ReceitaProspectorTests(unittest.TestCase):
+    def run_script(self, root, rows, competence="2026-10"):
+        establishments = root / "Estabelecimentos.csv"
+        companies = root / "Empresas.csv"
+        municipalities = root / "Municipios.csv"
+        output = root / "saida.csv"
+        with establishments.open("w", encoding="latin-1", newline="") as f:
+            writer = csv.writer(f, delimiter=";")
+            writer.writerows(rows)
+        with companies.open("w", encoding="latin-1", newline="") as f:
+            csv.writer(f, delimiter=";").writerow(
+                ["11222333", "EMPRESA TESTE LTDA", "2062", "49", "10000,00", "03", ""]
+            )
+        with municipalities.open("w", encoding="latin-1", newline="") as f:
+            csv.writer(f, delimiter=";").writerow(["6001", "RIO DE JANEIRO"])
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), "--estabelecimentos", str(establishments),
+             "--empresas", str(companies), "--municipios", str(municipalities),
+             "--saida", str(output), "--uf", "RJ", "--competencia", competence],
+            capture_output=True, text=True,
+        )
+        return result, output
+
+    def test_exports_only_active_rj_target_cnae_with_valid_cnpj(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            rows = [
+                establishment(),
+                establishment("11222333000181", status="01"),
+                establishment("11222333000181", uf="SP"),
+                establishment("11222333000181", cnae="4711301"),
+                establishment("11222333000180"),  # dígito verificador inválido
+            ]
+            result, output = self.run_script(root, rows)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            with output.open(encoding="utf-8-sig", newline="") as f:
+                data = list(csv.DictReader(f, delimiter=";"))
+            self.assertEqual(len(data), 1)
+            self.assertEqual(data[0]["cnpj"], "11222333000181")
+            self.assertEqual(data[0]["cidade"], "RIO DE JANEIRO")
+            self.assertEqual(data[0]["telefone"], "2122223333")
+            self.assertEqual(data[0]["competencia"], "2026-10")
+
+    def test_rejects_invalid_competence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            result, _ = self.run_script(root, [establishment()], "2026-13")
+            self.assertNotEqual(result.returncode, 0)
+
+    def test_fails_on_wrong_layout(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            result, _ = self.run_script(root, [["too", "short"]])
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("esperado", result.stderr)
+
+
+if __name__ == "__main__":
+    unittest.main()

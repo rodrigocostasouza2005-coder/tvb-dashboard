@@ -1,0 +1,29 @@
+name: Prospecting importer tests
+
+on:
+  pull_request:
+    paths:
+      - "scripts/prospeccao/**"
+      - ".github/workflows/prospeccao-python-tests.yml"
+  push:
+    branches:
+      - feature/expansao-atacadista
+    paths:
+      - "scripts/prospeccao/**"
+      - ".github/workflows/prospeccao-python-tests.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  python-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Run importer regression tests
+        run: python -m unittest discover -s scripts/prospeccao/tests -v
