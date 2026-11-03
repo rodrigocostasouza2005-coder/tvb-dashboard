@@ -59,7 +59,7 @@ def main() -> int:
     parser.add_argument("--uf", default="RJ")
     parser.add_argument("--competencia", required=True, help="Competência dos arquivos no formato AAAA-MM")
     args = parser.parse_args()
-    if not re.fullmatch(r"\\d{4}-\\d{2}", args.competencia):
+    if not re.fullmatch(r"[0-9]{4}-[0-9]{2}", args.competencia):
         parser.error("--competencia deve estar no formato AAAA-MM")
 
     # Domínio de municípios: código;descrição. Arquivos da Receita não têm cabeçalho.
