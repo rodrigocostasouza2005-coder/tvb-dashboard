@@ -746,3 +746,47 @@ model ArmazemConhecido {
 
   @@unique([clientLabel, dapicArmazenadorId])
 }
+
+
+// Prospectos comerciais B2B ainda não convertidos em clientes do DAPIC.
+// Mantido separado de ClienteCadastro, que representa exclusivamente clientes sincronizados.
+model AtacadoProspect {
+  id               String   @id @default(cuid())
+  razaoSocial      String?
+  nomeFantasia     String
+  cnpj             String?  @unique
+  cidade           String?
+  estado           String?
+  site             String?
+  telefone         String?
+  email            String?
+  origem           String   @default("manual")
+  evidenciaUrl     String?
+  evidenciaEm      DateTime?
+  status           String   @default("NOVO")
+  responsavel      String?
+  observacoes      String?
+  criadoPor        String?
+  convertidoEm     DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  activities AtacadoProspectActivity[]
+
+  @@index([estado, cidade])
+  @@index([status, updatedAt])
+  @@index([nomeFantasia])
+}
+
+model AtacadoProspectActivity {
+  id          String   @id @default(cuid())
+  prospectId  String
+  tipo        String
+  descricao   String
+  criadoPor   String?
+  createdAt   DateTime @default(now())
+
+  prospect AtacadoProspect @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+
+  @@index([prospectId, createdAt])
+}
