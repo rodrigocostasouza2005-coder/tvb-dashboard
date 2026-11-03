@@ -2,7 +2,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { requireTabAccess } from "@/lib/tabs";
-import { criarProspectAction, atualizarStatusProspectAction } from "./actions";
+import { criarProspectAction, atualizarStatusProspectAction, importarProspectosCsvAction } from "./actions";
 
 const STATUS: Record<string, string> = {
   NOVO: "Novo",
@@ -17,7 +17,7 @@ const STATUS: Record<string, string> = {
 export default async function AtacadoProspeccaoPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; erro?: string; criado?: string }>;
+  searchParams: Promise<{ status?: string; erro?: string; criado?: string; importacao?: string; novos?: string; duplicados?: string; invalidos?: string }>;
 }) {
   const user = await getSessionUser();
   if (!user) return null;
@@ -125,6 +125,21 @@ export default async function AtacadoProspeccaoPage({
         </form>
       </section>
 
+      <section className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold">Importar lista de lojas (CSV)</h2>
+            <p className="mt-1 text-xs text-[var(--text-muted)]">Até 500 linhas e 2 MB. Colunas aceitas: nome_fantasia (obrigatória), razao_social, cnpj, cidade, uf, telefone, email, site e evidencia_url.</p>
+          </div>
+          <a href="/exemplos/modelo-prospeccao-atacado.csv" className="text-xs underline text-[var(--text-secondary)]">Baixar modelo CSV</a>
+        </div>
+        {params.importacao === "concluida" && <p role="status" className="mt-3 text-sm text-[var(--text-secondary)]">Importação concluída: {params.novos ?? "0"} novos, {params.duplicados ?? "0"} duplicados ignorados e {params.invalidos ?? "0"} linhas inválidas.</p>}
+        {params.importacao && params.importacao !== "concluida" && <p role="alert" className="mt-3 text-sm text-red-600">Não foi possível importar. Verifique o arquivo, o cabeçalho e o limite de tamanho/linhas.</p>}
+        <form action={importarProspectosCsvAction} className="mt-3 flex flex-wrap items-center gap-3">
+          <input required type="file" name="arquivo" accept=".csv,text/csv" className="max-w-full text-xs text-[var(--text-secondary)]" />
+          <button type="submit" className="rounded-md border border-[var(--border)] px-3 py-2 text-xs font-medium">Validar e importar</button>
+        </form>
+      </section>
       <section className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)]">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border)] px-4 py-3">
           <h2 className="text-sm font-semibold">Carteira de prospectos ({prospects.length}{total > 250 ? " de " + total : ""})</h2>
