@@ -110,21 +110,11 @@ async function main() {
   const file = arg("--arquivo");
   const competence = arg("--competencia");
   const apply = args.includes("--apply");
-  const municipalitiesFile = arg("--municipios");
   if (!file || !/^20\d{2}-(0[1-9]|1[0-2])$/.test(competence)) {
     throw new Error("Uso: --arquivo <csv> --competencia AAAA-MM [--apply]");
   }
 
   const rows = parseCsv(await readFile(file, "utf8"));
-  const municipalityLines = municipalitiesFile
-    ? (await readFile(municipalitiesFile, "utf8")).replace(/^\uFEFF/, "").trim().split(/\r?\n/).slice(1)
-    : [];
-  const municipalityMap = new Map<string, string>();
-  for (const line of municipalityLines) {
-    const [code, ...nameParts] = parseCsvLine(line);
-    const name = nameParts.join(";").trim();
-    if (code && name) municipalityMap.set(code.trim().padStart(4, "0"), name);
-  }
   const unique = new Map<string, ProspectRow>();
   for (const row of rows) if (!unique.has(row.cnpj)) unique.set(row.cnpj, row);
   const deduped = [...unique.values()];
@@ -140,25 +130,7 @@ async function main() {
   try {
     let inserted = 0;
     let citiesNormalized = 0;
-    // Não apresentar razão social (que pode ser nome de pessoa) como nome da loja.
-    const namesHidden = await prisma.$executeRaw`
-      UPDATE "AtacadoProspect"
-      SET "nomeFantasia" = 'NOME COMERCIAL NÃO IDENTIFICADO'
-      WHERE "origem" = 'receita_federal_dados_abertos'
-        AND "estado" = ${arg("--uf").toUpperCase()}
-        AND "nomeFantasia" = "razaoSocial"
-        AND "razaoSocial" IS NOT NULL
-    `;
-    console.log(`Nomes comerciais pendentes de pesquisa: ${namesHidden}`);
-    // Corrige códigos TOM já importados para nomes de municípios, sem alterar UF/CNPJ.
-    for (const [code, name] of municipalityMap) {
-      const result = await prisma.atacadoProspect.updateMany({
-        where: { estado: arg("--uf").toUpperCase(), cidade: code },
-        data: { cidade: name, codigoMunicipio: code },
-      });
-      citiesNormalized += result.count;
-    }
-    console.log(`Municípios normalizados na UF ${arg("--uf") || "não informada"}: ${citiesNormalized}`);
+    // Importação somente aditiva: registros existentes nunca são alterados.
     for (let offset = 0; offset < deduped.length; offset += 400) {
       const batch = deduped.slice(offset, offset + 400);
       const existing = await prisma.atacadoProspect.findMany({
