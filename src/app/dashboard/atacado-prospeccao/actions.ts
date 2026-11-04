@@ -336,7 +336,7 @@ type CandidatoParaAprovacao = {
 
 function validarCnpjCompleto(input: string): string | null {
   const cnpj = normalizeCnpj(input);
-  if (!/^[A-Z0-9]{12}[0-9]{2}$/.test(cnpj) || /^(.)\\1+$/.test(cnpj)) return null;
+  if (!/^[A-Z0-9]{12}[0-9]{2}$/.test(cnpj) || cnpj.split("").every((char) => char === cnpj[0])) return null;
   const valor = (char: string) => char.charCodeAt(0) - 48;
   const calcular = (base: string, pesos: number[]) => {
     const soma = [...base].reduce((total, char, i) => total + valor(char) * pesos[i], 0);
