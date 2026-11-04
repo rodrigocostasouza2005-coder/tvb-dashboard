@@ -113,6 +113,15 @@ def main() -> int:
     """
     try:
         con.execute(sql)
+        municipios_saida = str(Path(args.saida).with_name("municipios-receita.csv"))
+        con.execute(f"""
+          COPY (
+            SELECT trim(CAST(codigo AS VARCHAR)) AS codigo,
+                   trim(CAST(descricao AS VARCHAR)) AS descricao
+            FROM read_parquet('{municipalities}')
+          ) TO '{Path(municipios_saida).as_posix()}'
+          (HEADER, DELIMITER ';', QUOTE '"', ESCAPE '"');
+        """)
         count = con.execute(
             f"SELECT count(*) FROM read_csv('{Path(args.saida).as_posix()}', delim=';', header=true, all_varchar=true)"
         ).fetchone()[0]
