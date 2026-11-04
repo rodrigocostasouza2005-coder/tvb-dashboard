@@ -11,7 +11,7 @@ function classificarAderencia(observacoes: string | null) {
     return { label: "Revisar", detalhe: "Moda aparece como atividade secundária", nivel: "revisar" as const };
   }
   if (texto.includes("CNAE principal: 4781400")) {
-    return { label: "Alta aderência", detalhe: "Vestuário e acessórios como atividade principal", nivel: "alto" as const };
+    return { label: "CNAE de vestuário", detalhe: "Atividade cadastral compatível; validar loja multimarcas e moda masculina", nivel: "medio" as const };
   }
   if (texto.includes("CNAE principal: 4782201") || texto.includes("CNAE principal: 4782202")) {
     return { label: "Complementar", detalhe: "Calçados ou artigos de viagem como atividade principal", nivel: "medio" as const };
@@ -234,7 +234,7 @@ export default async function AtacadoProspeccaoPage({
                   <td className="px-4 py-3 text-[var(--text-secondary)]">{[p.cidade, p.estado].filter(Boolean).join(" / ") || "Cidade não identificada"}</td>
                   <td className="px-4 py-3">
                     <div className="mb-1 font-semibold">{p.grupoComercial === "PENDENTE" ? "Pendente" : `Grupo ${p.grupoComercial}`}</div>
-                    {p.scoreComercial !== null && <div className="text-[11px] text-[var(--text-muted)]">Score {p.scoreComercial}/100</div>}
+                    {p.scoreComercial !== null && <div className="text-[11px] text-[var(--text-muted)]">Score cadastral {p.scoreComercial}/100</div>}
                     {p.justificativaGrupo && <div className="mt-1 max-w-48 text-[11px] text-[var(--text-muted)]">{p.justificativaGrupo}</div>}
                     {p.responsavel && <div className="mt-1 text-[11px] font-medium text-[var(--series-1)]">Fila: {p.responsavel.replaceAll("_", " ")}</div>}
                     {p.confiancaPesquisa === "CADASTRAL" && <div className="mt-0.5 text-[10px] text-[var(--text-muted)]">Fonte cadastral oficial; perfil comercial ainda não verificado</div>}
