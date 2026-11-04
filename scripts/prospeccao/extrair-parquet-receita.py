@@ -6,7 +6,10 @@ A leitura é remota via DuckDB/Hugging Face; não baixa nem descompacta o dump n
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 
 import duckdb
@@ -40,7 +43,6 @@ def main() -> int:
     establishments = base + "/estabelecimentos/*.parquet"
     companies = base + "/empresas/*.parquet"
     municipalities = base + "/municipios/*.parquet"
-    cnaes = ", ".join("'" + code + "'" for code in CNAES)
 
     # Garante que o diretório de saída exista no runner limpo do GitHub Actions.
     Path(args.saida).parent.mkdir(parents=True, exist_ok=True)
@@ -92,19 +94,37 @@ def main() -> int:
       LEFT JOIN read_parquet('{companies}') e USING (cnpj_basico)
       LEFT JOIN read_parquet('{municipalities}') m
         ON lpad(trim(CAST(f.municipio AS VARCHAR)), 4, '0') = lpad(trim(CAST(m.codigo AS VARCHAR)), 4, '0')
-      ORDER BY
-        CASE WHEN length(trim(coalesce(f.telefone1, ''))) > 0 OR length(trim(coalesce(f.telefone2, ''))) > 0 THEN 0 ELSE 1 END,
-        CASE WHEN length(trim(coalesce(f.correio_eletronico, ''))) > 0 THEN 0 ELSE 1 END,
-        f.cnpj_basico, f.cnpj_ordem
       {limit_sql}
     ) TO '{Path(args.saida).as_posix()}' (FORMAT PARQUET, COMPRESSION ZSTD);
     """
     try:
         con.execute(sql)
+        output_path = Path(args.saida)
         count = con.execute(
-            f"SELECT count(*) FROM read_parquet('{Path(args.saida).as_posix()}')"
+            "SELECT count(*) FROM read_parquet(?)", [str(output_path)]
         ).fetchone()[0]
-        print(f"Competência={args.competencia} | UF={uf} | prospects exportados={count} | arquivo={args.saida}")
+        digest = hashlib.sha256(output_path.read_bytes()).hexdigest()
+        manifest = {
+            "schema_version": 1,
+            "source": "receita_federal_dados_abertos",
+            "competencia": args.competencia,
+            "uf": uf,
+            "rows": count,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "sha256": digest,
+            "filter": {
+                "situacao_cadastral": "02",
+                "cnae_principal": "4781400",
+                "nome_fantasia_required": True,
+                "contact_required": ["telefone", "email"],
+                "contact_logic": "telefone OR email"
+            },
+            "commercially_verified": False,
+            "neon_imported": False
+        }
+        manifest_path = output_path.with_suffix(output_path.suffix + ".manifest.json")
+        manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        print(f"Competência={args.competencia} | UF={uf} | candidatos={count} | parquet={output_path} | sha256={digest}")
     finally:
         con.close()
     return 0
