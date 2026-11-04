@@ -28,7 +28,7 @@ async function main() {
       status: { in: ["NOVO", "EM_QUALIFICACAO"] },
       grupoComercial: "PENDENTE",
       origem: { in: ["pesquisa_web", "manual"] },
-      NOT: { confiancaPesquisa: "CADASTRAL_OFICIAL" },
+      OR: [{ confiancaPesquisa: null }, { confiancaPesquisa: { not: "CADASTRAL_OFICIAL" } }],
     },
     orderBy: [{ createdAt: "asc" }],
     take: limit,
