@@ -80,11 +80,16 @@ def main() -> int:
     parser.add_argument("--empresas", nargs="+", required=True)
     parser.add_argument("--municipios", required=True)
     parser.add_argument("--saida", required=True)
-    parser.add_argument("--uf", default="RJ")
+    parser.add_argument("--uf", default=None, help="UF única (compatibilidade)")
+    parser.add_argument("--ufs", nargs="+", default=None, help="Lista de UFs para prospecção em lote")
     parser.add_argument("--competencia", required=True, help="Competência dos arquivos no formato AAAA-MM")
     args = parser.parse_args()
     if not re.fullmatch(r"[0-9]{4}-(0[1-9]|1[0-2])", args.competencia):
         parser.error("--competencia deve estar no formato AAAA-MM")
+
+    ufs = {uf.upper() for uf in (args.ufs or ([args.uf] if args.uf else ["RJ"]))}
+    if not ufs or any(not re.fullmatch(r"[A-Z]{2}", uf) for uf in ufs):
+        parser.error("Informe UFs válidas com --uf ou --ufs")
 
     # Domínio de municípios: código;descrição. Arquivos da Receita não têm cabeçalho.
     municipios = {}
@@ -116,7 +121,7 @@ def main() -> int:
 
         for filename, line_number, row in read_csv(args.estabelecimentos, 30):
             uf = row[19].strip().upper()
-            if uf != args.uf.upper() or row[5].strip() != SITUACAO_ATIVA:
+            if uf not in ufs or row[5].strip() != SITUACAO_ATIVA:
                 continue
             count_active += 1
             principal = digits(row[11])
@@ -160,7 +165,7 @@ def main() -> int:
             count_written += 1
 
     print(
-        f"UF={args.uf.upper()} | ativos examinados={count_active} | "
+        f"UFs={','.join(sorted(ufs))} | ativos examinados={count_active} | "
         f"com CNAE-alvo={count_cnae} | exportados={count_written} | arquivo={output}",
         file=sys.stderr,
     )
