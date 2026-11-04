@@ -6,7 +6,7 @@ A base bruta da Receita Federal deve permanecer fora do Postgres operacional do 
 
 ## Armazenamento
 
-O workflow `.github/workflows/agentes-prospeccao.yml` grava um arquivo Parquet compactado em um bucket compatível com S3, organizado por competência e UF:
+O workflow `.github/workflows/agentes-prospeccao.yml` grava o Parquet compactado e um manifesto JSON em um bucket compatível com S3, organizado por competência e UF. O manifesto informa quantidade de linhas, filtros, horário de geração e SHA-256 do arquivo para conferência de integridade:
 
 `receita-cnpj/competencia=AAAA-MM/uf=UF/candidatos.parquet`
 
@@ -45,7 +45,7 @@ A consulta atual seleciona estabelecimentos:
 
 O filtro é uma etapa de captura cadastral, não uma confirmação de que a loja vende moda masculina ou trabalha com multimarcas. Essa validação precisa ser feita depois por pesquisa comercial com evidências verificáveis.
 
-A execução é por UF e competência. Para cobrir o território nacional, será necessário executar as UFs desejadas e controlar a competência de cada partição. Não interpretar o resultado de uma UF como a base nacional completa.
+A execução é por UF e competência. O workflow oferece as 27 UFs; para cobrir o território nacional, será necessário executar cada UF e controlar a competência de cada partição. Não interpretar o resultado de uma UF como a base nacional completa. O arquivo é processado sem ordenar toda a base, evitando custo de memória e tempo desnecessário.
 
 ## Fluxo desejado após a captura
 
