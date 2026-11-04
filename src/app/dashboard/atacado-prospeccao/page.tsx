@@ -5,6 +5,7 @@ import { requireTabAccess } from "@/lib/tabs";
 import { criarProspectAction, atualizarStatusProspectAction, registrarInteracaoBruceAction } from "./actions";
 import { CsvImportPreview } from "./csv-import-preview";
 import { ProspeccaoRadarConsole } from "./prospeccao-radar-console";
+import { aprenderPerfis } from "@/lib/prospeccao/aprendizado-comercial";
 
 function classificarAderencia(observacoes: string | null) {
   const texto = observacoes ?? "";
@@ -74,26 +75,25 @@ export default async function AtacadoProspeccaoPage({
     prisma.atacadoProspect.findMany({ where: { estado: uf ?? "RJ" }, distinct: ["cidade"], select: { cidade: true }, orderBy: { cidade: "asc" }, take: 300 }),
   ]);
 
-  const gruposBruce = await prisma.atacadoProspect.groupBy({
-    by: ["segmentoComercial", "perfilLoja", "faixaPreco", "estado", "status"],
-    where: { status: { in: ["CONVERTIDO", "NEGOCIACAO", "CONTATADO", "DESCARTADO"] } },
-    _count: { _all: true },
+  const atividadesAprendizado = await prisma.atacadoProspectActivity.findMany({
+    where: { tipo: "INTERACAO_BRUCE", resultado: { not: null } },
+    orderBy: { createdAt: "desc" },
+    take: 5000,
+    select: {
+      prospectId: true,
+      resultado: true,
+      prospect: { select: { segmentoComercial: true, perfilLoja: true, faixaPreco: true, estado: true, status: true } },
+    },
   });
-  const perfisBruce = new Map<string, { total: number; convertidas: number; negociacao: number; descartadas: number }>();
-  for (const item of gruposBruce) {
-    const key = [item.segmentoComercial || "Segmento pendente", item.perfilLoja || "Perfil pendente", item.faixaPreco || "Faixa não informada", item.estado || "UF não informada"].join(" · ");
-    const current = perfisBruce.get(key) ?? { total: 0, convertidas: 0, negociacao: 0, descartadas: 0 };
-    current.total += item._count._all;
-    if (item.status === "CONVERTIDO") current.convertidas += item._count._all;
-    if (item.status === "NEGOCIACAO") current.negociacao += item._count._all;
-    if (item.status === "DESCARTADO") current.descartadas += item._count._all;
-    perfisBruce.set(key, current);
-  }
-  const recomendacoesBruce = [...perfisBruce.entries()]
-    .map(([perfil, dados]) => ({ perfil, ...dados, taxaConversao: dados.total ? Math.round(dados.convertidas / dados.total * 100) : 0 }))
-    .filter((item) => item.total >= 3)
-    .sort((a, b) => b.taxaConversao - a.taxaConversao || b.convertidas - a.convertidas)
-    .slice(0, 5);
+  const recomendacoesBruce = aprenderPerfis(atividadesAprendizado.map((atividade) => ({
+    prospectId: atividade.prospectId,
+    resultado: atividade.resultado as "INTERESSADO" | "SEM_RESPOSTA" | "RECUSOU" | "PEDIU_CATALOGO" | "PEDIU_PRECO" | "NEGOCIANDO" | "PEDIDO_REALIZADO" | "RECOMPRA" | "SEM_ADERENCIA" | "DADOS_INVALIDOS" | "OUTRO" | null,
+    segmentoComercial: atividade.prospect.segmentoComercial,
+    perfilLoja: atividade.prospect.perfilLoja,
+    faixaPreco: atividade.prospect.faixaPreco,
+    estado: atividade.prospect.estado,
+    status: atividade.prospect.status,
+  })));
 
   const erro = params.erro;
   const erroTexto = erro === "nome" ? "Informe o nome da loja."
@@ -124,7 +124,7 @@ export default async function AtacadoProspeccaoPage({
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 className="text-sm font-semibold">Bruce · Inteligência comercial</h2>
-            <p className="mt-1 max-w-3xl text-xs text-[var(--text-muted)]">Bruce acompanha a carteira e aprende com resultados reais registrados no Radar. Só sugere perfis com pelo menos três lojas no funil; o score cadastral não é tratado como potencial de compra.</p>
+            <p className="mt-1 max-w-3xl text-xs text-[var(--text-muted)]">Bruce acompanha a carteira. O Radar considera a interação mais recente de cada loja, exige ao menos cinco lojas e três resultados conclusivos por perfil, e separa interesse comercial de conversão confirmada no DAPIC.</p>
           </div>
           <span className="text-xs text-[var(--text-muted)]">{recomendacoesBruce.length} padrões com amostra mínima</span>
         </div>
@@ -133,14 +133,16 @@ export default async function AtacadoProspeccaoPage({
             {recomendacoesBruce.map((item) => <div key={item.perfil} className="flex flex-wrap items-center justify-between gap-3 py-2 text-xs">
               <div className="font-medium">{item.perfil}</div>
               <div className="flex gap-3 text-[var(--text-secondary)]">
-                <span>{item.total} lojas</span>
-                <span>{item.convertidas} convertidas</span>
-                <span>{item.taxaConversao}% conversão</span>
+                <span>{item.totalLojas} lojas</span>
+                <span>{item.sinaisPositivos}/{item.interacoesComSinal} sinais positivos</span>
+                <span>{item.convertidasDapic} pedidos DAPIC</span>
+                <span>{item.taxaConversaoDapic}% conversão DAPIC</span>
+                <span>confiança {item.confianca.toLowerCase()}</span>
               </div>
             </div>)}
           </div>
         ) : (
-          <p className="mt-3 rounded-md border border-dashed border-[var(--border)] px-3 py-3 text-xs text-[var(--text-muted)]">Ainda não há três lojas com histórico no mesmo perfil. Bruce não vai inventar padrões: as recomendações aparecem conforme as negociações e os pedidos confirmados no DAPIC forem registrados.</p>
+          <p className="mt-3 rounded-md border border-dashed border-[var(--border)] px-3 py-3 text-xs text-[var(--text-muted)]">Ainda não há amostra suficiente. O Radar só exibirá um padrão quando houver pelo menos cinco lojas distintas no perfil e três resultados de interação que indiquem avanço ou recusa. “Pedido realizado” anotado pelo Bruce não conta como conversão: essa confirmação depende do DAPIC.</p>
         )}
       </section>
 
