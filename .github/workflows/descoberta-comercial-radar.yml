@@ -1,0 +1,56 @@
+name: Descoberta de novas lojas pelo Radar
+
+on:
+  workflow_dispatch:
+    inputs:
+      uf:
+        description: "UF para descobrir novas lojas"
+        required: true
+        default: "RJ"
+        type: choice
+        options: [AC, AL, AP, AM, BA, CE, DF, ES, GO, MA, MT, MS, MG, PA, PB, PR, PE, PI, RJ, RN, RS, RO, RR, SC, SP, SE, TO]
+      max_queries:
+        description: "Quantidade máxima de buscas (1 a 12)"
+        required: true
+        default: "8"
+        type: string
+      max_candidates:
+        description: "Quantidade máxima de sites candidatos (1 a 100)"
+        required: true
+        default: "40"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  descobrir:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      UF: ${{ inputs.uf }}
+      MAX_QUERIES: ${{ inputs.max_queries }}
+      MAX_CANDIDATES: ${{ inputs.max_candidates }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - name: Instalar dependências
+        run: npm ci
+      - name: Validar parâmetros e executar descoberta (somente leitura)
+        shell: bash
+        run: |
+          test -n "$DATABASE_URL" || { echo "Secret DATABASE_URL ausente"; exit 1; }
+          [[ "$MAX_QUERIES" =~ ^[0-9]+$ ]] && (( MAX_QUERIES >= 1 && MAX_QUERIES <= 12 )) || { echo "Buscas devem ser de 1 a 12"; exit 1; }
+          [[ "$MAX_CANDIDATES" =~ ^[0-9]+$ ]] && (( MAX_CANDIDATES >= 1 && MAX_CANDIDATES <= 100 )) || { echo "Candidatos devem ser de 1 a 100"; exit 1; }
+          npm run prospeccao:descobrir -- --uf "$UF" --max-queries "$MAX_QUERIES" --max-candidates "$MAX_CANDIDATES"
+      - name: Publicar arquivos para revisão
+        uses: actions/upload-artifact@v4
+        with:
+          name: radar-descoberta-${{ inputs.uf }}-${{ github.run_id }}
+          path: artifacts/prospeccao-descoberta/*
+          if-no-files-found: error
+          retention-days: 30

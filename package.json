@@ -12,7 +12,8 @@
     "postinstall": "prisma generate",
     "prospeccao:importar-receita": "tsx scripts/prospeccao/importar-receita.ts",
     "prospeccao:qualificar": "tsx scripts/prospeccao/agente-qualificacao.ts",
-    "prospeccao:pesquisa-web": "tsx scripts/prospeccao/agente-pesquisa-comercial.ts"
+    "prospeccao:pesquisa-web": "tsx scripts/prospeccao/agente-pesquisa-comercial.ts",
+    "prospeccao:descobrir": "tsx scripts/prospeccao/agente-descoberta-comercial.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
