@@ -18,11 +18,11 @@ export function normalizarUrl(v:string):string|null { try { const u=new URL(v.st
 export function extrairResultadosBusca(html:string):ResultadoBusca[] { const out:ResultadoBusca[]=[]; for(const block of html.split(/<div[^>]+class="[^"]*result[^"]*"/i).slice(1)){ const m=block.match(/<a[^>]+class="[^"]*result__a[^"]*"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i); if(!m)continue; let dest=decodeHtml(m[1]); try{const u=new URL(dest,"https://html.duckduckgo.com");dest=u.searchParams.get("uddg")?decodeURIComponent(u.searchParams.get("uddg")!):dest;}catch{continue;} const url=normalizarUrl(dest);if(!url)continue;const snippet=block.match(/class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/[^>]+>/i)?.[1]??"";out.push({url,titulo:normalizarTexto(m[2]),trecho:normalizarTexto(snippet)});}return out; }
 export function hostEhRedeSocial(url:string):boolean { try{const h=new URL(url).hostname.toLowerCase().replace(/^www\./,"");return SOCIAIS.has(h)||h.endsWith(".instagram.com")||h.endsWith(".facebook.com");}catch{return false;} }
 export function extrairEvidenciasSite(url:string,html:string):EvidenciaSite {
-  const title=html.match(/<title[^>]*>([\\s\\S]*?)<\\/title>/i)?.[1]??"";
+  const title=html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]??"";
   const desc=html.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']*)["']/i)?.[1]??html.match(/<meta[^>]+content=["']([^"']*)["'][^>]+name=["']description["']/i)?.[1]??"";
-  const text=normalizarTexto(html.replace(/<(script|style|noscript|svg)[^>]*>[\\s\\S]*?<\\/\\1>/gi," ").replace(/<[^>]+>/g," ")).slice(0,30000);
-  const all=(`${title} ${desc} ${text}`).toLocaleLowerCase("pt-BR").normalize("NFD").replace(/[\\u0300-\\u036f]/g,"");
-  const match=(terms:string[])=>terms.filter(x=>all.includes(x.normalize("NFD").replace(/[\\u0300-\\u036f]/g,"")));
+  const text=normalizarTexto(html.replace(/<(script|style|noscript|svg)[^>]*>[\s\S]*?<\/\1>/gi," ").replace(/<[^>]+>/g," ")).slice(0,30000);
+  const all=(`${title} ${desc} ${text}`).toLocaleLowerCase("pt-BR").normalize("NFD").replace(/[\u0300-\u036f]/g,"");
+  const match=(terms:string[])=>terms.filter(x=>all.includes(x.normalize("NFD").replace(/[\u0300-\u036f]/g,"")));
   return {
     url,titulo:normalizarTexto(title),descricao:normalizarTexto(desc),texto:text,
     marcas:MARCAS.filter(x=>all.includes(x.toLocaleLowerCase("pt-BR"))),
