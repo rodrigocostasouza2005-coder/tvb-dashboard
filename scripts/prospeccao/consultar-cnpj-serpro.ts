@@ -26,7 +26,8 @@ async function main() {
       estado: uf,
       cnpj: { not: null },
       status: { in: ["NOVO", "EM_QUALIFICACAO"] },
-      grupoComercial: "PENDENTE",\n      origem: { in: ["pesquisa_web", "manual"] },
+      grupoComercial: "PENDENTE",
+      origem: { in: ["pesquisa_web", "manual"] },
       NOT: { confiancaPesquisa: "CADASTRAL_OFICIAL" },
     },
     orderBy: [{ createdAt: "asc" }],
@@ -100,6 +101,7 @@ async function main() {
         }),
       ]);
       consultados++;
+      await new Promise((resolve) => setTimeout(resolve, 250));
       console.log("OK " + prospect.cnpj + " | " + official.situacao + " | " + (official.cidade ?? "localização não informada"));
     } catch (error) {
       falhas++;
