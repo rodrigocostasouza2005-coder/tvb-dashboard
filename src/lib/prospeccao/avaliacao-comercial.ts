@@ -29,8 +29,8 @@ export function avaliarEvidenciasComerciais(input: {
   const multimarcas = Boolean(ev?.sinaisMultimarcas.length);
   const marcas = [...new Set(ev?.marcas ?? [])];
   const identidade = input.confiancaIdentidade;
-  const scoreEvidencia =
-    (identidade === "ALTA" ? 20 : identidade === "MEDIA" ? 12 : 0) +
+  const scoreEvidencia = identidade === "BAIXA" || !ev ? 0 :
+    (identidade === "ALTA" ? 20 : 12) +
     (masculina ? 35 : 0) +
     (multimarcas ? 35 : 0) +
     (marcas.length >= 2 ? 10 : marcas.length === 1 ? 5 : 0);
