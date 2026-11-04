@@ -85,3 +85,12 @@ A aprovação coloca o registro como `NOVO`, com `grupoComercial=PENDENTE`, orig
 Os resultados Serpro agora são gravados em colunas próprias, além do histórico: situação cadastral e código, data da situação, CNAE principal e secundários, endereço, CEP, porte e data de abertura. A carteira permite filtrar por situação da Receita e abrir os detalhes oficiais de cada empresa. A situação cadastral fica separada do status comercial do funil.
 
 A integração valida os dígitos verificadores do CNPJ antes de chamar a API e rejeita respostas sem CNPJ ou com identidade divergente. A migração `20261104150000_add_official_cnpj_fields` é aditiva e preserva os registros existentes.
+
+ 
+## Qualificação comercial baseada em evidências
+
+A pesquisa web calcula um índice de evidências (0–100), separado da situação cadastral da Receita. O índice considera correspondência do site com nome/cidade, sinais textuais explícitos de moda masculina e de operação multimarcas, além de marcas encontradas no conteúdo. Marcas citadas sem declaração explícita de multimarcas são apenas indício, não confirmação.
+
+Somente lojas com identidade do site de confiança média/alta e sinais explícitos de moda masculina e multimarcas recebem o rótulo **PRONTA_PARA_REVISAO_HUMANA**. Isso significa apenas que há evidência suficiente para uma pessoa revisar; não significa loja aprovada, qualificada, grupo A/B/C/D, atribuição ao Bruce ou autorização para contato. A situação cadastral (ATIVA, BAIXADA etc.) aparece como pendência separada e não aumenta nem reduz o índice de aderência comercial.
+
+O agente não preenche automaticamente `segmentoComercial` ou `perfilLoja` com rótulos inferidos: esses campos continuam reservados a atributos confirmados pela equipe, evitando contaminar o aprendizado do Bruce com classificações especulativas. A execução em prévia não grava nada; `--apply` grava o score e a justificativa com trilha de auditoria, mantendo `grupoComercial=PENDENTE`.
