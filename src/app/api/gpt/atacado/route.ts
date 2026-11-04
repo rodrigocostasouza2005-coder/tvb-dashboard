@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { verifyApiToken } from "@/lib/api-token";
 
-const STATUS = new Set(["NOVO", "EM_QUALIFICACAO", "QUALIFICADO", "CONTATADO", "NEGOCIACAO", "CONVERTIDO", "DESCARTADO"]);
+const STATUS = new Set(["NOVO", "EM_QUALIFICACAO", "QUALIFICADO", "CONTATADO", "NEGOCIACAO", "DESCARTADO"]);
+// CONVERTIDO is deliberately excluded: Bruce can log a claimed order, but only a verified
+// first order in the DAPIC sales flow may mark a prospect as converted.
 const RESULTADOS = new Set(["INTERESSADO", "SEM_RESPOSTA", "RECUSOU", "PEDIU_CATALOGO", "PEDIU_PRECO", "NEGOCIANDO", "PEDIDO_REALIZADO", "RECOMPRA", "SEM_ADERENCIA", "DADOS_INVALIDOS", "OUTRO"]);
 const CANAIS = new Set(["TELEFONE", "EMAIL", "INSTAGRAM", "WHATSAPP", "PRESENCIAL", "OUTRO"]);
 
@@ -59,6 +61,7 @@ export async function POST(request: NextRequest) {
   if (!body?.prospectId || typeof body.descricao !== "string" || !body.descricao.trim() || body.descricao.length > 1200) return NextResponse.json({ error: "prospectId e descricao (até 1200 caracteres) são obrigatórios." }, { status: 400 });
   if (body.resultado && !RESULTADOS.has(body.resultado)) return NextResponse.json({ error: "Resultado inválido." }, { status: 400 });
   if (body.canal && !CANAIS.has(body.canal)) return NextResponse.json({ error: "Canal inválido." }, { status: 400 });
+  if (body.status === "CONVERTIDO") return NextResponse.json({ error: "Conversão exige confirmação do primeiro pedido no DAPIC; Bruce não pode marcar CONVERTIDO manualmente." }, { status: 409 });
   if (body.status && !STATUS.has(body.status)) return NextResponse.json({ error: "Status inválido." }, { status: 400 });
   const current = await prisma.atacadoProspect.findUnique({ where: { id: body.prospectId }, select: { id: true, status: true } });
   if (!current) return NextResponse.json({ error: "Prospecto não encontrado." }, { status: 404 });
