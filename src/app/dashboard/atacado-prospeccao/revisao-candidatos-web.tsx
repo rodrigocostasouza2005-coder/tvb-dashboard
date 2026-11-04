@@ -33,10 +33,8 @@ function parseCsv(text: string): string[][] {
       else quoted = !quoted;
     } else if (char === "," && !quoted) {
       row.push(cell); cell = "";
-    } else if ((char === "
-" || char === "\r") && !quoted) {
-      if (char === "\r" && text[i + 1] === "
-") i++;
+    } else if ((char === "\n" || char === "\r") && !quoted) {
+      if (char === "\r" && text[i + 1] === "\n") i++;
       row.push(cell); cell = "";
       if (row.some((v) => v.trim())) rows.push(row);
       row = [];
@@ -46,7 +44,6 @@ function parseCsv(text: string): string[][] {
   if (row.some((v) => v.trim())) rows.push(row);
   return rows;
 }
-
 function isSafeHttpUrl(value: string): boolean {
   try { const url = new URL(value); return (url.protocol === "https:" || url.protocol === "http:") && !url.username && !url.password; } catch { return false; }
 }
