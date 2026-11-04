@@ -67,8 +67,9 @@ async function main() {
     segmentoComercial: a.prospect.segmentoComercial, perfilLoja: a.prospect.perfilLoja,
     faixaPreco: a.prospect.faixaPreco, estado: a.prospect.estado, status: a.prospect.status,
   })));
-  const profilesForUf = profiles.filter((p) => !p.atributos.estado || p.atributos.estado === uf);\n  const queries = gerarConsultasDescoberta(profilesForUf, uf, maxQueries);
-  console.log(`RADAR DESCOBERTA | UF=${uf} | perfis aprendidos=${profiles.length} | consultas=${queries.length} | modo=ARQUIVOS PARA REVISÃO (somente leitura)`);
+  const profilesForUf = profiles.filter((p) => !p.atributos.estado || p.atributos.estado === uf);
+  const queries = gerarConsultasDescoberta(profilesForUf, uf, maxQueries);
+  console.log(`RADAR DESCOBERTA | UF=${uf} | perfis aprendidos=${profilesForUf.length} | consultas=${queries.length} | modo=ARQUIVOS PARA REVISÃO (somente leitura)`);
 
   const byDomain = new Map<string, CandidatoDescoberto>();
   for (let i = 0; i < queries.length && byDomain.size < maxCandidates; i++) {
