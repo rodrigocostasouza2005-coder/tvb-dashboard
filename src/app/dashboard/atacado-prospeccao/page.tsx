@@ -286,7 +286,7 @@ export default async function AtacadoProspeccaoPage({
                     {(() => {
                       const fit = classificarAderencia(p.observacoes);
                       return <div title={fit.detalhe} className="text-xs">
-                        <span className={fit.nivel === "alto" ? "font-semibold text-emerald-700" : fit.nivel === "revisar" ? "font-semibold text-amber-700" : "text-[var(--text-secondary)]"}>{fit.label}</span>
+                        <span className={fit.nivel === "revisar" ? "font-semibold text-amber-700" : "text-[var(--text-secondary)]"}>{fit.label}</span>
                         <div className="mt-0.5 max-w-48 text-[11px] text-[var(--text-muted)]">{fit.detalhe}</div>
                       </div>;
                     })()}
