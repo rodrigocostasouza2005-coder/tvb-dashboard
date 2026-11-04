@@ -21,7 +21,7 @@ export function gerarConsultasDescoberta(perfis: PerfilAprendido[], uf: string, 
     const termos = termosPerfil(perfil);
     return termos.length ? `loja "moda masculina" multimarcas ${termos.map((x) => `"${x}"`).join(" ")} ${local}` : base;
   });
-  consultas.push(base, `"roupas masculinas" "multimarcas" loja ${sigla}`);
+  consultas.push(base, `"roupas masculinas" "multimarcas" loja ${local}`);
   return [...new Set(consultas)].slice(0, Math.max(1, Math.min(12, limite)));
 }
 
