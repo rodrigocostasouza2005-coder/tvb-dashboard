@@ -26,7 +26,7 @@ async function main() {
       estado: uf,
       cnpj: { not: null },
       status: { in: ["NOVO", "EM_QUALIFICACAO"] },
-      grupoComercial: "PENDENTE",
+      grupoComercial: "PENDENTE",\n      origem: { in: ["pesquisa_web", "manual"] },
       NOT: { confiancaPesquisa: "CADASTRAL_OFICIAL" },
     },
     orderBy: [{ createdAt: "asc" }],
