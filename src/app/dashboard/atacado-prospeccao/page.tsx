@@ -38,7 +38,7 @@ const STATUS: Record<string, string> = {
 export default async function AtacadoProspeccaoPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; grupo?: string; cidade?: string; uf?: string; erro?: string; criado?: string; importacao?: string; novos?: string; duplicados?: string; invalidos?: string; bruce?: string; revisao?: string }>;
+  searchParams: Promise<{ status?: string; grupo?: string; cidade?: string; uf?: string; erro?: string; criado?: string; importacao?: string; novos?: string; duplicados?: string; invalidos?: string; bruce?: string; revisao?: string; cadastro?: string }>;
 }) {
   const user = await getSessionUser();
   if (!user) return null;
@@ -49,12 +49,12 @@ export default async function AtacadoProspeccaoPage({
   const grupos = ["A", "B", "C", "D", "PENDENTE"];
   const grupo = params.grupo && grupos.includes(params.grupo) ? params.grupo : undefined;
   const uf = params.uf && /^[A-Z]{2}$/.test(params.uf.toUpperCase()) ? params.uf.toUpperCase() : undefined;
-  const cidade = params.cidade?.trim().slice(0, 100) || undefined;
+  const cidade = params.cidade?.trim().slice(0, 100) || undefined;\n  const cadastroValores = ["ATIVA", "SUSPENSA", "INAPTA", "BAIXADA", "NULA", "NAO_INFORMADA"];\n  const cadastro = params.cadastro && cadastroValores.includes(params.cadastro) ? params.cadastro : undefined;
   const where = {
     ...(status ? { status } : {}),
     ...(grupo ? { grupoComercial: grupo } : {}),
     ...(uf ? { estado: uf } : {}),
-    ...(cidade ? { cidade: { contains: cidade, mode: "insensitive" as const } } : {}),
+    ...(cidade ? { cidade: { contains: cidade, mode: "insensitive" as const } } : {}),\n    ...(cadastro ? { situacaoCadastral: cadastro } : {}),
   };
   const prospects = await prisma.atacadoProspect.findMany({
     where,
@@ -233,6 +233,11 @@ export default async function AtacadoProspeccaoPage({
               <option value="">Todos</option>
               {Object.entries(STATUS).map(([key, label]) => <option key={key} value={key} disabled={key === "CONVERTIDO"}>{key === "CONVERTIDO" ? "Convertido (confirmação DAPIC)" : label}</option>)}
             </select>
+            <label htmlFor="cadastro" className="text-xs text-[var(--text-muted)]">Receita</label>
+            <select id="cadastro" name="cadastro" defaultValue={cadastro ?? ""} className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-sm">
+              <option value="">Todas as situações</option>
+              {["ATIVA", "SUSPENSA", "INAPTA", "BAIXADA", "NULA", "NAO_INFORMADA"].map((item) => <option key={item} value={item}>{item.replaceAll("_", " ")}</option>)}
+            </select>
             <button className="rounded-md border border-[var(--border)] px-3 py-1.5 text-xs">Filtrar</button>
           </form>
         </div>
@@ -258,6 +263,18 @@ export default async function AtacadoProspeccaoPage({
                     {p.instagram && <a href={p.instagram} target="_blank" rel="noreferrer" className="mt-1 block text-xs underline">Instagram</a>}
                     {p.site && <a href={p.site} target="_blank" rel="noreferrer" className="mt-1 block text-xs underline">Site</a>}
                     {p.cnpj && <div className="mt-0.5 text-xs text-[var(--text-muted)]">{p.cnpj}</div>}
+                    {p.situacaoCadastral && <div className={`mt-1 inline-flex rounded px-1.5 py-0.5 text-[10px] font-semibold ${p.situacaoCadastral === "ATIVA" ? "bg-green-100 text-green-800" : "bg-amber-100 text-amber-800"}`}>Receita: {p.situacaoCadastral}</div>}
+                    {p.situacaoCadastral && <details className="mt-1">
+                      <summary className="cursor-pointer text-[10px] text-[var(--text-secondary)] underline">Dados cadastrais oficiais</summary>
+                      <div className="mt-1 space-y-0.5 text-[10px] text-[var(--text-muted)]">
+                        <div>CNAE principal: {[p.cnaePrincipalCodigo, p.cnaePrincipalDescricao].filter(Boolean).join(" · ") || "Não informado"}</div>
+                        {p.cnaesSecundarios && <div>CNAEs secundários: {p.cnaesSecundarios.split("\\n").join("; ")}</div>}
+                        <div>Endereço: {[p.enderecoOficial, p.cidade, p.estado, p.cepOficial].filter(Boolean).join(" · ") || "Não informado"}</div>
+                        <div>Porte: {p.porteEmpresa ?? "Não informado"}</div>
+                        <div>Data de abertura: {p.dataAbertura?.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" }) ?? "Não informada"}</div>
+                        <div>Consulta: {p.pesquisadoEm?.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" }) ?? "Não informada"}</div>
+                      </div>
+                    </details>}
                     {p.evidenciaUrl && <a href={p.evidenciaUrl} target="_blank" rel="noreferrer" className="mt-1 inline-block text-xs underline text-[var(--text-secondary)]">Ver evidência</a>}
                   </td>
                   <td className="px-4 py-3 text-[var(--text-secondary)]">{[p.cidade, p.estado].filter(Boolean).join(" / ") || "Cidade não identificada"}</td>
