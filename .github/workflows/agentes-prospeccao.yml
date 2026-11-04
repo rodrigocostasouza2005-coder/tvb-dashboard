@@ -74,15 +74,15 @@ jobs:
         run: python -m pip install duckdb==1.4.1
       - name: Exportar conjunto completo para Parquet compactado
         run: |
-          python scripts/prospeccao/extrair-parquet-receita.py \\
-            --competencia "${{ steps.params.outputs.competencia }}" \\
-            --uf "${{ steps.params.outputs.uf }}" \\
+          python scripts/prospeccao/extrair-parquet-receita.py \
+            --competencia "${{ steps.params.outputs.competencia }}" \
+            --uf "${{ steps.params.outputs.uf }}" \
             --saida dados/candidatos.parquet
       - name: Persistir fora do Neon em bucket S3 compatível
         shell: bash
         run: |
-          aws s3 cp dados/candidatos.parquet \\
-            "s3://$PROSPECCAO_S3_BUCKET/receita-cnpj/competencia=${{ steps.params.outputs.competencia }}/uf=${{ steps.params.outputs.uf }}/candidatos.parquet" \\
-            --endpoint-url "$PROSPECCAO_S3_ENDPOINT" \\
+          aws s3 cp dados/candidatos.parquet \
+            "s3://$PROSPECCAO_S3_BUCKET/receita-cnpj/competencia=${{ steps.params.outputs.competencia }}/uf=${{ steps.params.outputs.uf }}/candidatos.parquet" \
+            --endpoint-url "$PROSPECCAO_S3_ENDPOINT" \
             --only-show-errors
           echo "Arquivo persistido no bucket externo; nenhuma linha foi enviada ao Neon."
