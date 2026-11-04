@@ -34,6 +34,12 @@ on:
         type: string
   schedule:
     - cron: "0 11 * * 1"
+  push:
+    branches: [main]
+    paths:
+      - "scripts/prospeccao/**"
+      - "package.json"
+      - ".github/workflows/agentes-prospeccao.yml"
 
 permissions:
   contents: read
