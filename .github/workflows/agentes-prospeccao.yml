@@ -85,15 +85,21 @@ jobs:
       - name: Instalar DuckDB
         run: python -m pip install duckdb==1.4.1
       - name: Exportar conjunto completo para Parquet compactado
+        env:
+          COMPETENCIA: ${{ steps.params.outputs.competencia }}
+          UF: ${{ steps.params.outputs.uf }}
         run: |
           python scripts/prospeccao/extrair-parquet-receita.py \
-            --competencia "$INPUT_COMPETENCIA" \
-            --uf "$INPUT_UF" \
+            --competencia "$COMPETENCIA" \
+            --uf "$UF" \
             --saida dados/candidatos.parquet
       - name: Persistir fora do Neon em bucket S3 compatível
         shell: bash
+        env:
+          COMPETENCIA: ${{ steps.params.outputs.competencia }}
+          UF: ${{ steps.params.outputs.uf }}
         run: |
-          PREFIX="s3://$PROSPECCAO_S3_BUCKET/receita-cnpj/competencia=$INPUT_COMPETENCIA/uf=$INPUT_UF"
+          PREFIX="s3://$PROSPECCAO_S3_BUCKET/receita-cnpj/competencia=$COMPETENCIA/uf=$UF"
           aws s3 cp dados/candidatos.parquet "$PREFIX/candidatos.parquet" \
             --endpoint-url "$PROSPECCAO_S3_ENDPOINT" --only-show-errors
           aws s3 cp dados/candidatos.parquet.manifest.json "$PREFIX/candidatos.parquet.manifest.json" \
