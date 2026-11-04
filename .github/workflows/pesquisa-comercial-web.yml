@@ -1,0 +1,50 @@
+name: Pesquisa comercial web do Radar
+
+on:
+  workflow_dispatch:
+    inputs:
+      uf:
+        description: "UF dos prospects já cadastrados"
+        required: true
+        default: "RJ"
+        type: choice
+        options: [AC, AL, AP, AM, BA, CE, DF, ES, GO, MA, MT, MS, MG, PA, PB, PR, PE, PI, RJ, RN, RS, RO, RR, SC, SP, SE, TO]
+      limite:
+        description: "Quantidade máxima por execução (1 a 25)"
+        required: true
+        default: "5"
+        type: string
+      aplicar:
+        description: "Gravar os resultados no Neon (não aprova nem contata leads)"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  pesquisar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      UF: ${{ inputs.uf }}
+      LIMITE: ${{ inputs.limite }}
+      APLICAR: ${{ inputs.aplicar }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - name: Instalar dependências
+        run: npm ci
+      - name: Validar parâmetros e executar pesquisa
+        shell: bash
+        run: |
+          test -n "$DATABASE_URL" || { echo "Secret DATABASE_URL ausente"; exit 1; }
+          [[ "$LIMITE" =~ ^[0-9]+$ ]] && (( LIMITE >= 1 && LIMITE <= 25 )) || { echo "Limite deve ser de 1 a 25"; exit 1; }
+          ARGS=(--uf "$UF" --limit "$LIMITE")
+          if [ "$APLICAR" = "true" ]; then ARGS+=(--apply); fi
+          npm run prospeccao:pesquisa-web -- "${ARGS[@]}"
