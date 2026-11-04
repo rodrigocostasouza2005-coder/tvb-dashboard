@@ -20,7 +20,8 @@ const evidencia = {
 describe("descoberta comercial", () => {
   it("gera buscas com atributos aprendidos e UF, sem duplicar consultas", () => {
     const queries = gerarConsultasDescoberta([perfil], "rj", 8);
-    expect(queries[0]).toContain("RJ");\n    expect(queries[0]).toContain("surf");
+    expect(queries[0]).toContain("RJ");
+    expect(queries[0]).toContain("surf");
     expect(queries[0]).toContain('"medio"');
     expect(queries[0]).not.toContain("evidencia");
     expect(queries[0]).not.toContain("publica");
@@ -33,7 +34,9 @@ describe("descoberta comercial", () => {
     expect(queries[0]).toContain("Niterói");
     expect(queries[0]).toContain("RJ");
   });
-  it("rejeita loja cujo nome não indica surf ou skate", () => {\n    expect(avaliarCandidatoDescoberto({ ...resultado, titulo: "Loja Exemplo - Moda masculina" }, evidencia, perfil.perfil)).toBeNull();\n  });\n  it("rejeita site sem evidência de moda masculina", () => {
+  it("rejeita loja cujo nome não indica surf ou skate", () => {\n    expect(avaliarCandidatoDescoberto({ ...resultado, titulo: "Loja Exemplo - Moda masculina" }, evidencia, perfil.perfil)).toBeNull();
+  });
+  it("rejeita site sem evidência de moda masculina", () => {
     expect(avaliarCandidatoDescoberto(resultado, { ...evidencia, sinaisModaMasculina: [] }, perfil.perfil)).toBeNull();
   });
   it("exige sinal multimarcas ou ao menos duas marcas", () => {
