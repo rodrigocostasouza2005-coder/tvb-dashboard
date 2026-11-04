@@ -1,0 +1,40 @@
+name: Reconcile production Prisma migrations
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Validate Prisma schema
+        run: npx prisma validate
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      # These migrations were applied to production by earlier controlled SQL
+      # rollouts. Their tables, columns, indexes and constraints were verified
+      # before recording them as applied in Prisma's migration ledger.
+      - name: Reconcile previously applied migrations
+        run: |
+          npx prisma migrate resolve --applied 20261027150000_add_classificacao_compras
+          npx prisma migrate resolve --applied 20261031180000_add_armazem_conhecido
+          npx prisma migrate resolve --applied 20261103190000_add_atacado_prospects
+          npx prisma migrate resolve --applied 20261104120000_add_prospect_research_fields
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      - name: Deploy pending additive migrations
+        run: npx prisma migrate deploy
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
