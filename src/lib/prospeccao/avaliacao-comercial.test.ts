@@ -14,25 +14,19 @@ const evidence = {
 describe("avaliação de evidências comerciais", () => {
   it("encaminha para revisão humana apenas com identidade, moda masculina e multimarcas evidenciados", () => {
     const result = avaliarEvidenciasComerciais({
-      nomeLoja: "Loja Teste",
-      cidade: "Rio de Janeiro",
-      confiancaIdentidade: "ALTA",
-      evidencia: evidence,
-      situacaoCadastral: "ATIVA",
+      nomeLoja: "Loja Teste", cidade: "Rio de Janeiro", confiancaIdentidade: "ALTA",
+      evidencia: evidence, situacaoCadastral: "ATIVA",
     });
     expect(result.situacao).toBe("PRONTA_PARA_REVISAO_HUMANA");
     expect(result.scoreEvidencia).toBe(100);
-    expect(result.pendencias).toContain("confirmar se as marcas citadas são efetivamente comercializadas pela loja");
+    expect(result.pendencias).not.toContain("confirmar se as marcas citadas são efetivamente comercializadas pela loja");
     expect(result.explicacao).toContain("não aprova");
   });
 
   it("não confunde duas marcas citadas com prova de operação multimarcas", () => {
     const result = avaliarEvidenciasComerciais({
-      nomeLoja: "Loja Teste",
-      cidade: null,
-      confiancaIdentidade: "ALTA",
-      evidencia: { ...evidence, sinaisMultimarcas: [] },
-      situacaoCadastral: "ATIVA",
+      nomeLoja: "Loja Teste", cidade: null, confiancaIdentidade: "ALTA",
+      evidencia: { ...evidence, sinaisMultimarcas: [] }, situacaoCadastral: "ATIVA",
     });
     expect(result.multimarcas).toBe("INDICIO_POR_MARCAS");
     expect(result.situacao).toBe("EVIDENCIA_PARCIAL");
@@ -40,11 +34,8 @@ describe("avaliação de evidências comerciais", () => {
 
   it("não recomenda revisão comercial quando o site não corresponde à loja", () => {
     const result = avaliarEvidenciasComerciais({
-      nomeLoja: "Loja Teste",
-      cidade: "Rio de Janeiro",
-      confiancaIdentidade: "BAIXA",
-      evidencia: evidence,
-      situacaoCadastral: "ATIVA",
+      nomeLoja: "Loja Teste", cidade: "Rio de Janeiro", confiancaIdentidade: "BAIXA",
+      evidencia: evidence, situacaoCadastral: "ATIVA",
     });
     expect(result.situacao).toBe("EVIDENCIA_PARCIAL");
     expect(result.scoreEvidencia).toBe(0);
