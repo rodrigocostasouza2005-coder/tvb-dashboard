@@ -6,6 +6,7 @@ on:
     paths:
       - "src/app/api/gpt/atacado/**"
       - "src/app/api/gpt/openapi/**"
+      - "src/app/dashboard/atacado-prospeccao/**"
       - "prisma/**"
       - "vitest.config.ts"
       - "package.json"
