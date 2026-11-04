@@ -6,6 +6,7 @@
  */
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { isIP } from "node:net";
 import { PrismaClient } from "@prisma/client";
 import { aprenderPerfis } from "../../src/lib/prospeccao/aprendizado-comercial";
 import { avaliarCandidatoDescoberto, gerarConsultasDescoberta, gerarCsvDescoberta, type CandidatoDescoberto } from "../../src/lib/prospeccao/descoberta-comercial";
@@ -13,7 +14,7 @@ import { extrairEvidenciasSite, extrairResultadosBusca, hostEhRedeSocial } from 
 
 const prisma = new PrismaClient();
 const UA = "TVB-Radar-Discovery/1.0";
-const TIMEOUT = 12000;
+const TIMEOUT = 7000;\nconst MAX_SITE_CHECKS = 80;
 
 async function html(url: string): Promise<{ body: string; finalUrl: string } | null> {
   try {
@@ -97,8 +98,8 @@ async function main() {
   const csvPath = join(outDir, `candidatos-${uf}-${stamp}.csv`);
   const jsonPath = join(outDir, `candidatos-${uf}-${stamp}.json`);
   await writeFile(csvPath, gerarCsvDescoberta(candidates), "utf8");
-  await writeFile(jsonPath, JSON.stringify({ schemaVersion: 1, generatedAt: new Date().toISOString(), uf, profilesUsed: profiles.length, queries, candidates }, null, 2), "utf8");
-  console.log(`Candidatos com evidência textual: ${candidates.length}`);
+  await writeFile(jsonPath, JSON.stringify({ schemaVersion: 1, generatedAt: new Date().toISOString(), uf, profilesUsed: profilesForUf.length, queries, candidates }, null, 2), "utf8");
+  console.log(`Sites verificados: ${siteChecks}/${MAX_SITE_CHECKS}`);\n  console.log(`Candidatos com evidência textual: ${candidates.length}`);
   console.log(`CSV: ${csvPath}`);
   console.log(`JSON: ${jsonPath}`);
   console.log("Nenhum prospecto foi criado, atualizado, atribuído ou contatado. Revisão humana obrigatória.");
