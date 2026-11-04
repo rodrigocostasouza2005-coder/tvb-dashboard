@@ -110,11 +110,24 @@ async function main() {
   const file = arg("--arquivo");
   const competence = arg("--competencia");
   const apply = args.includes("--apply");
+  const municipalitiesFile = arg("--municipios");
   if (!file || !/^20\d{2}-(0[1-9]|1[0-2])$/.test(competence)) {
     throw new Error("Uso: --arquivo <csv> --competencia AAAA-MM [--apply]");
   }
 
   const rows = parseCsv(await readFile(file, "utf8"));
+  const municipalities = municipalitiesFile
+    ? parseCsvLine((await readFile(municipalitiesFile, "utf8")).replace(/^\\uFEFF/, "").trim().split(/\\r?\\n/)[0])
+    : [];
+  const municipalityLines = municipalitiesFile
+    ? (await readFile(municipalitiesFile, "utf8")).replace(/^\\uFEFF/, "").trim().split(/\\r?\\n/).slice(1)
+    : [];
+  const municipalityMap = new Map<string, string>();
+  for (const line of municipalityLines) {
+    const [code, ...nameParts] = parseCsvLine(line);
+    const name = nameParts.join(";").trim();
+    if (code && name) municipalityMap.set(code.trim().padStart(4, "0"), name);
+  }
   const unique = new Map<string, ProspectRow>();
   for (const row of rows) if (!unique.has(row.cnpj)) unique.set(row.cnpj, row);
   const deduped = [...unique.values()];
@@ -129,6 +142,16 @@ async function main() {
   const prisma = new PrismaClient();
   try {
     let inserted = 0;
+    let citiesNormalized = 0;
+    // Corrige códigos TOM já importados para nomes de municípios, sem alterar UF/CNPJ.
+    for (const [code, name] of municipalityMap) {
+      const result = await prisma.atacadoProspect.updateMany({
+        where: { estado: arg("--uf").toUpperCase(), cidade: code },
+        data: { cidade: name, codigoMunicipio: code },
+      });
+      citiesNormalized += result.count;
+    }
+    console.log(`Municípios normalizados na UF ${arg("--uf") || "não informada"}: ${citiesNormalized}`);
     for (let offset = 0; offset < deduped.length; offset += 400) {
       const batch = deduped.slice(offset, offset + 400);
       const result = await prisma.atacadoProspect.createMany({
