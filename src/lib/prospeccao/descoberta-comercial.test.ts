@@ -34,7 +34,8 @@ describe("descoberta comercial", () => {
     expect(queries[0]).toContain("Niterói");
     expect(queries[0]).toContain("RJ");
   });
-  it("rejeita loja cujo nome não indica surf ou skate", () => {\n    expect(avaliarCandidatoDescoberto({ ...resultado, titulo: "Loja Exemplo - Moda masculina" }, evidencia, perfil.perfil)).toBeNull();
+  it("rejeita loja cujo nome não indica surf ou skate", () => {
+    expect(avaliarCandidatoDescoberto({ ...resultado, titulo: "Loja Exemplo - Moda masculina" }, evidencia, perfil.perfil)).toBeNull();
   });
   it("rejeita site sem evidência de moda masculina", () => {
     expect(avaliarCandidatoDescoberto(resultado, { ...evidencia, sinaisModaMasculina: [] }, perfil.perfil)).toBeNull();
@@ -67,7 +68,7 @@ describe("descoberta comercial", () => {
   it("escapa aspas e listas no CSV", () => {
     const candidate = avaliarCandidatoDescoberto(resultado, evidencia, perfil.perfil)!;
     const csv = gerarCsvDescoberta([candidate]);
-    expect(csv).toContain('"Loja Exemplo - Moda masculina"');
+    expect(csv).toContain('"Surf Shop Exemplo - Moda masculina"');
     expect(csv).toContain('"Reserva; Aramis; Osklen"');
   });
 });
