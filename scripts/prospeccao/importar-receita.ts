@@ -116,9 +116,6 @@ async function main() {
   }
 
   const rows = parseCsv(await readFile(file, "utf8"));
-  const municipalities = municipalitiesFile
-    ? parseCsvLine((await readFile(municipalitiesFile, "utf8")).replace(/^\\uFEFF/, "").trim().split(/\\r?\\n/)[0])
-    : [];
   const municipalityLines = municipalitiesFile
     ? (await readFile(municipalitiesFile, "utf8")).replace(/^\\uFEFF/, "").trim().split(/\\r?\\n/).slice(1)
     : [];
