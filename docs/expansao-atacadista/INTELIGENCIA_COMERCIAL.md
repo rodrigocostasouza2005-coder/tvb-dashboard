@@ -13,12 +13,8 @@ Canais: `TELEFONE`, `EMAIL`, `INSTAGRAM`, `WHATSAPP`, `PRESENCIAL`, `OUTRO`. Sta
 
 Uma resposta ou pedido de catálogo não é conversão. Conversão é registrada somente quando o status é `CONVERTIDO` (idealmente após confirmação do primeiro pedido no processo comercial). Recompra fica como evento separado.
 
-## API para Bruce
-Base: `/api/gpt/atacado`. Usa o Bearer token já existente no TVB Radar, sem criar credencial paga ou serviço paralelo.
-
-- `GET ?resource=fila&limit=15`: devolve no máximo 25 oportunidades qualificadas/contatadas/em negociação, com as últimas três atividades.
-- `POST`: registra uma interação. JSON: `{ prospectId, descricao, resultado?, canal?, status?, etapa? }`.
-- `GET ?resource=inteligencia`: mostra padrões por segmento, perfil de loja, faixa de preço e UF. Só sugere perfis com amostra mínima de três registros; não modifica classificação nem cria leads automaticamente.
+## Bruce dentro do Radar
+Bruce acompanha a carteira pela tela de prospecção do Radar. O histórico e os resultados são registrados diretamente no banco por ações autenticadas da interface; não há integração do Bruce com Custom GPT, Action ou API externa.
 
 ## Ciclo de melhoria
 1. Agentes prospectam e o agente de validação qualifica.
