@@ -2,7 +2,7 @@ export type ResultadoBusca = { url: string; titulo: string; trecho: string };
 export type EvidenciaSite = {
   url: string; titulo: string; descricao: string; texto: string; marcas: string[];
   sinaisModaMasculina: string[]; sinaisMultimarcas: string[];
-  sinaisExclusao?: string[]; sinaisMarcaPropria?: string[]; sinaisModaFeminina?: string[];
+  sinaisExclusao?: string[]; sinaisMarcaPropria?: string[]; sinaisModaFeminina?: string[]; sinaisSurfSkate?: string[];
 };
 const MARCAS = ["Reserva","Aramis","Osklen","Ellus","Tommy Hilfiger","Lacoste","Calvin Klein","Colcci","John John","Dudalina","Foxton","Richards","VR","Levi's","Levis","Nike","Adidas","Polo Wear","Cavalera","Diesel","Hugo Boss","Zara","Riachuelo","Hering","Sergio K"];
 const MASCULINO = ["moda masculina","roupa masculina","roupas masculinas","masculino","masculina","menswear","moda para homens","camisaria masculina"];
@@ -10,7 +10,7 @@ const MASCULINO = ["moda masculina","roupa masculina","roupas masculinas","mascu
 const MULTIMARCAS = ["loja multimarcas","moda masculina multimarcas","trabalhamos com marcas","marcas que trabalhamos","marcas que vendemos","revendedor autorizado","revenda de marcas","marcas parceiras","marcas disponíveis"];
 const MARCA_PROPRIA = ["marca própria","produção própria","fabricação própria","confecção própria","coleção própria","coleções próprias","produto autoral","marca autoral","marca da casa","nossa marca","nossas coleções","somos fabricantes","direto da fábrica"];
 const EXCLUSOES = ["somente moda feminina","apenas moda feminina","exclusivamente feminina","não trabalhamos com moda masculina","não vendemos roupas masculinas","loja de lingerie","lingerie","moda íntima","sutiã","calcinha","semijoias","bijuterias","loja de bijuterias","joalheria","loja de móveis","móveis planejados","estofados","colchões","loja de decoração","restaurante","pizzaria","lanchonete","hamburgueria","churrascaria","sushi","padaria","cafeteria","supermercado","mercearia","açougue","alimentos","delivery de comida"];
-const MODA_FEMININA = ["moda feminina","roupas femininas","vestuário feminino","moda para mulheres"];
+const MODA_FEMININA = ["moda feminina","roupas femininas","vestuário feminino","moda para mulheres"];\nconst SURF_SKATE = ["surf shop","surfwear","surf wear","surf","skate shop","skateshop","skatewear","streetwear","boardshop","pranchas de surf","moda praia masculina","roupas de surf"];
 const SOCIAIS = new Set(["instagram.com","facebook.com","tiktok.com","linkedin.com","youtube.com"]);
 export function decodeHtml(v:string):string { return v.replace(/&amp;/g,"&").replace(/&quot;/g,'"').replace(/&#39;|&apos;/g,"'").replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&#(\d+);/g,(_,n:string)=>String.fromCodePoint(Number(n))).replace(/&#x([\da-f]+);/gi,(_,n:string)=>String.fromCodePoint(parseInt(n,16))); }
 export function normalizarTexto(v:string):string { return decodeHtml(v).replace(/<[^>]*>/g," ").replace(/\s+/g," ").trim(); }
@@ -30,7 +30,7 @@ export function extrairEvidenciasSite(url:string,html:string):EvidenciaSite {
     sinaisMultimarcas:match(MULTIMARCAS),
     sinaisExclusao:match(EXCLUSOES),
     sinaisMarcaPropria:match(MARCA_PROPRIA),
-    sinaisModaFeminina:match(MODA_FEMININA),
+    sinaisModaFeminina:match(MODA_FEMININA),\n    sinaisSurfSkate:match(SURF_SKATE),
   };
 }
 export function calcularConfiancaPesquisa(input:{nomeLoja:string;cidade:string|null;titulo:string;descricao:string;texto:string}):"ALTA"|"MEDIA"|"BAIXA"{const norm=(s:string)=>s.normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase();const parts=norm(input.nomeLoja).split(/\s+/).filter(x=>x.length>2);const evidence=norm(`${input.titulo} ${input.descricao} ${input.texto}`);const ratio=parts.length?parts.filter(x=>evidence.includes(x)).length/parts.length:0;const city=!!input.cidade&&evidence.includes(norm(input.cidade));if(ratio>=.7&&city)return"ALTA";if(ratio>=.5||(ratio>=.35&&city))return"MEDIA";return"BAIXA";}
