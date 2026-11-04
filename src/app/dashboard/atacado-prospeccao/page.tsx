@@ -4,6 +4,7 @@ import { getSessionUser } from "@/lib/auth";
 import { requireTabAccess } from "@/lib/tabs";
 import { criarProspectAction, atualizarStatusProspectAction, registrarInteracaoBruceAction } from "./actions";
 import { CsvImportPreview } from "./csv-import-preview";
+import { ProspeccaoRadarConsole } from "./prospeccao-radar-console";
 
 function classificarAderencia(observacoes: string | null) {
   const texto = observacoes ?? "";
@@ -107,19 +108,9 @@ export default async function AtacadoProspeccaoPage({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <p className="text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">Atacado · Expansão comercial</p>
-          <h1 className="mt-1 text-xl font-semibold text-[var(--text-primary)]">Prospecção de novos lojistas</h1>
-          <p className="mt-1 max-w-2xl text-sm text-[var(--text-secondary)]">
-            Cadastre e acompanhe lojas com potencial para revender TVB. Prospectos ficam separados da base de clientes já sincronizada pelo DAPIC.
-          </p>
-        </div>
-        <Link href="/dashboard/atacado" className="text-sm text-[var(--text-secondary)] underline">Voltar para Atacado</Link>
-      </div>
-
       {params.bruce === "registrado" && <p role="status" className="rounded-md border border-green-600/40 px-3 py-2 text-sm text-green-700">Interação registrada no histórico do Radar.</p>}
       {params.bruce === "erro" && <p role="alert" className="rounded-md border border-red-500/40 px-3 py-2 text-sm text-red-600">Não foi possível registrar a interação. Confira os campos e tente novamente.</p>}
+      <ProspeccaoRadarConsole total={total} novos={novos} emPesquisa={emPesquisa} qualificados={qualificados} contatados={contatados} aguardandoAprovacao={0} />
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
         {[
           ["Prospectos", total],
