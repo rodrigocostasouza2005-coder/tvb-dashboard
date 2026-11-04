@@ -112,21 +112,6 @@ export default async function AtacadoProspeccaoPage({
       {params.bruce === "erro" && <p role="alert" className="rounded-md border border-red-500/40 px-3 py-2 text-sm text-red-600">Não foi possível registrar a interação. Confira os campos e tente novamente.</p>}
       <ProspeccaoRadarConsole total={total} novos={novos} emPesquisa={emPesquisa} qualificados={qualificados} contatados={contatados} />
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-        {[
-          ["Prospectos", total],
-          ["Novos", novos],
-          ["Em pesquisa", emPesquisa],
-          ["Qualificados", qualificados],
-          ["Contatados", contatados],
-        ].map(([label, count]) => (
-          <div key={label} className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3">
-            <div className="text-xs text-[var(--text-muted)]">{label}</div>
-            <div className="mt-1 text-2xl font-semibold tabular-nums">{count}</div>
-          </div>
-        ))}
-      </div>
-
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
         {([["A", grupoA], ["B", grupoB], ["C", grupoC], ["D", grupoD], ["Pendentes", total - grupoA - grupoB - grupoC - grupoD]] as const).map(([label, count]) => (
           <Link key={label} href={label === "Pendentes" ? "?grupo=PENDENTE" : `?grupo=${label}`} className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3 hover:border-[var(--series-1)]">
             <div className="text-xs text-[var(--text-muted)]">Grupo {label}</div>
