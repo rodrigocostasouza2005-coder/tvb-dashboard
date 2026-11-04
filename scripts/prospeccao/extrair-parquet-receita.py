@@ -37,6 +37,9 @@ def main() -> int:
     companies = base + "/empresas/*.parquet"
     cnaes = ", ".join("'" + code + "'" for code in CNAES)
 
+    # Garante que o diretório de saída exista no runner limpo do GitHub Actions.
+    Path(args.saida).parent.mkdir(parents=True, exist_ok=True)
+
     # SQL literal seguro: os únicos valores interpolados já passaram por regex.
     con = duckdb.connect()
     con.execute("SET threads = 4")
