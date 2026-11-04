@@ -115,7 +115,7 @@ async function main() {
   await writeFile(csvPath, gerarCsvDescoberta(candidates), "utf8");
   await writeFile(jsonPath, JSON.stringify({ schemaVersion: 1, generatedAt: new Date().toISOString(), uf, profilesUsed: profilesForUf.length, queries, candidates }, null, 2), "utf8");
   console.log(`Sites verificados: ${siteChecks}/${MAX_SITE_CHECKS}`);
-  console.log(`Sites verificados: ${siteChecks}/${MAX_SITE_CHECKS}`);
+
   console.log(`Candidatos com evidência textual: ${candidates.length}`);
   console.log(`CSV: ${csvPath}`);
   console.log(`JSON: ${jsonPath}`);
