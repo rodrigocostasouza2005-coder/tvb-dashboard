@@ -22,9 +22,9 @@ SHARE_TOKEN = "YggdBLfdninEJX9"
 BASE = "https://arquivos.receitafederal.gov.br/public.php/dav/files"
 DEFAULT_REMOTE = "Dados/Cadastros/CNPJ"
 FAMILY_PATTERNS = {
-    "estabelecimentos": re.compile(r"^Estabelecimentos\\d+\\.zip$", re.I),
-    "empresas": re.compile(r"^Empresas\\d+\\.zip$", re.I),
-    "municipios": re.compile(r"^Municipios\\.zip$", re.I),
+    "estabelecimentos": re.compile(r"^Estabelecimentos\d+\.zip$", re.I),
+    "empresas": re.compile(r"^Empresas\d+\.zip$", re.I),
+    "municipios": re.compile(r"^Municipios\.zip$", re.I),
 }
 NS = {"d": "DAV:"}
 
@@ -58,7 +58,7 @@ def list_directory(url: str) -> list[dict]:
 
 def discover_competence(token: str, remote: str) -> tuple[str, str]:
     root = f"{BASE}/{urllib.parse.quote(token, safe='')}/{urllib.parse.quote(remote.strip('/'), safe='/')}/"
-    dirs = [x["name"] for x in list_directory(root) if x["directory"] and re.fullmatch(r"20\\d{2}-\\d{2}", x["name"])]
+    dirs = [x["name"] for x in list_directory(root) if x["directory"] and re.fullmatch(r"20\d{2}-\d{2}", x["name"])]
     if not dirs:
         raise RuntimeError(f"Nenhuma competência AAAA-MM encontrada em {root}")
     latest = max(dirs)
@@ -113,7 +113,7 @@ def main():
 
     latest, latest_url = discover_competence(args.token, args.remote_path)
     competence = latest if args.competencia == "latest" else args.competencia
-    if not re.fullmatch(r"20\\d{2}-(0[1-9]|1[0-2])", competence):
+    if not re.fullmatch(r"20\d{2}-(0[1-9]|1[0-2])", competence):
         parser.error("--competencia deve ser latest ou AAAA-MM")
     folder_url = latest_url if competence == latest else latest_url.rsplit(latest + "/", 1)[0] + urllib.parse.quote(competence, safe="") + "/"
     entries = list_directory(folder_url)
