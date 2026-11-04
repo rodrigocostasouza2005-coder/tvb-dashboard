@@ -266,7 +266,7 @@ export default async function AtacadoProspeccaoPage({
                     {p.scoreComercial !== null && <div className="text-[11px] text-[var(--text-muted)]">Score cadastral {p.scoreComercial}/100</div>}
                     {p.justificativaGrupo && <div className="mt-1 max-w-48 text-[11px] text-[var(--text-muted)]">{p.justificativaGrupo}</div>}
                     {p.responsavel && <div className="mt-1 text-[11px] font-medium text-[var(--series-1)]">Fila: {p.responsavel.replaceAll("_", " ")}</div>}
-                    {p.confiancaPesquisa === "CADASTRAL" && <div className="mt-0.5 text-[10px] text-[var(--text-muted)]">Fonte cadastral oficial; perfil comercial ainda não verificado</div>}
+                    {p.confiancaPesquisa === "CADASTRAL_OFICIAL" && <div className="mt-0.5 text-[10px] font-semibold text-emerald-700">Receita Federal consultada via Serpro · perfil comercial ainda não verificado</div>}{p.confiancaPesquisa === "CADASTRAL" && <div className="mt-0.5 text-[10px] text-[var(--text-muted)]">Triagem cadastral; perfil comercial ainda não verificado</div>}
                     {(() => {
                       const fit = classificarAderencia(p.observacoes);
                       return <div title={fit.detalhe} className="text-xs">
