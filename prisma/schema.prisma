@@ -766,6 +766,11 @@ model AtacadoProspect {
   confiancaPesquisa String?
   nomeComercialVerificado Boolean @default(false)
   pesquisadoEm     DateTime?
+  // Atributos comerciais observáveis usados para aprender quais perfis avançam no funil.
+  segmentoComercial String?
+  perfilLoja        String?
+  faixaPreco        String?
+  origemAgente      String?
   telefone         String?
   email            String?
   origem           String   @default("manual")
@@ -791,6 +796,10 @@ model AtacadoProspectActivity {
   prospectId  String
   tipo        String
   descricao   String
+  // Resultado estruturado da interação: INTERESSADO, SEM_RESPOSTA, RECUSOU, PEDIU_CATALOGO etc.
+  resultado   String?
+  canal       String?
+  etapa       String?
   criadoPor   String?
   createdAt   DateTime @default(now())
 

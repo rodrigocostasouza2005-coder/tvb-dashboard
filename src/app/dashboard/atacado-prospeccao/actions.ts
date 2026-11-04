@@ -106,7 +106,6 @@ const STATUS_VALIDOS = new Set([
   "QUALIFICADO",
   "CONTATADO",
   "NEGOCIACAO",
-  "CONVERTIDO",
   "DESCARTADO",
 ]);
 
@@ -117,6 +116,7 @@ export async function atualizarStatusProspectAction(formData: FormData) {
 
   const prospectId = value(formData, "prospectId");
   const novoStatus = value(formData, "status");
+  if (novoStatus === "CONVERTIDO") redirect("/dashboard/atacado-prospeccao?erro=conversao");
   if (!prospectId || !STATUS_VALIDOS.has(novoStatus)) {
     redirect("/dashboard/atacado-prospeccao?erro=status");
   }

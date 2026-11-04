@@ -79,6 +79,23 @@ const OPENAPI_SPEC = {
         },
       },
     },
+    "/api/gpt/atacado": {
+      get: {
+        operationId: "consultarCarteiraAtacado",
+        summary: "Consulta a fila comercial ou padrões de conversão da prospecção",
+        parameters: [
+          { name: "resource", in: "query", required: false, schema: { type: "string", enum: ["fila", "inteligencia"] }, description: "fila retorna até 25 oportunidades qualificadas; inteligencia retorna padrões por perfil com amostra mínima." },
+          { name: "limit", in: "query", required: false, schema: { type: "integer", minimum: 1, maximum: 25 }, description: "Limite da fila; padrão 15." },
+        ],
+        responses: { "200": { description: "Oportunidades ou recomendações de perfil.", content: { "application/json": { schema: { type: "object" } } } }, "401": { description: "Token ausente ou inválido." } },
+      },
+      post: {
+        operationId: "registrarInteracaoComercial",
+        summary: "Registra uma interação comercial; conversão exige confirmação do primeiro pedido no DAPIC",
+        requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["prospectId", "descricao"], properties: { prospectId: { type: "string" }, descricao: { type: "string", maxLength: 1200 }, resultado: { type: "string", enum: ["INTERESSADO", "SEM_RESPOSTA", "RECUSOU", "PEDIU_CATALOGO", "PEDIU_PRECO", "NEGOCIANDO", "PEDIDO_REALIZADO", "RECOMPRA", "SEM_ADERENCIA", "DADOS_INVALIDOS", "OUTRO"] }, canal: { type: "string", enum: ["TELEFONE", "EMAIL", "INSTAGRAM", "WHATSAPP", "PRESENCIAL", "OUTRO"] }, status: { type: "string", enum: ["NOVO", "EM_QUALIFICACAO", "QUALIFICADO", "CONTATADO", "NEGOCIACAO", "DESCARTADO"] }, etapa: { type: "string", maxLength: 80 } } } } } },
+        responses: { "200": { description: "Interação registrada." }, "400": { description: "Dados inválidos." }, "401": { description: "Token ausente ou inválido." }, "404": { description: "Prospecto não encontrado." } },
+      },
+    },
   },
   components: {
     securitySchemes: {
