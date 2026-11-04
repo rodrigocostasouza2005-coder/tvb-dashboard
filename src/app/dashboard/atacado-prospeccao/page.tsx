@@ -73,6 +73,27 @@ export default async function AtacadoProspeccaoPage({
     prisma.atacadoProspect.findMany({ where: { estado: uf ?? "RJ" }, distinct: ["cidade"], select: { cidade: true }, orderBy: { cidade: "asc" }, take: 300 }),
   ]);
 
+  const gruposBruce = await prisma.atacadoProspect.groupBy({
+    by: ["segmentoComercial", "perfilLoja", "faixaPreco", "estado", "status"],
+    where: { status: { in: ["CONVERTIDO", "NEGOCIACAO", "CONTATADO", "DESCARTADO"] } },
+    _count: { _all: true },
+  });
+  const perfisBruce = new Map<string, { total: number; convertidas: number; negociacao: number; descartadas: number }>();
+  for (const item of gruposBruce) {
+    const key = [item.segmentoComercial || "Segmento pendente", item.perfilLoja || "Perfil pendente", item.faixaPreco || "Faixa não informada", item.estado || "UF não informada"].join(" · ");
+    const current = perfisBruce.get(key) ?? { total: 0, convertidas: 0, negociacao: 0, descartadas: 0 };
+    current.total += item._count._all;
+    if (item.status === "CONVERTIDO") current.convertidas += item._count._all;
+    if (item.status === "NEGOCIACAO") current.negociacao += item._count._all;
+    if (item.status === "DESCARTADO") current.descartadas += item._count._all;
+    perfisBruce.set(key, current);
+  }
+  const recomendacoesBruce = [...perfisBruce.entries()]
+    .map(([perfil, dados]) => ({ perfil, ...dados, taxaConversao: dados.total ? Math.round(dados.convertidas / dados.total * 100) : 0 }))
+    .filter((item) => item.total >= 3)
+    .sort((a, b) => b.taxaConversao - a.taxaConversao || b.convertidas - a.convertidas)
+    .slice(0, 5);
+
   const erro = params.erro;
   const erroTexto = erro === "nome" ? "Informe o nome da loja."
     : erro === "cnpj" ? "Informe um CNPJ com 14 caracteres válidos."
@@ -122,6 +143,30 @@ export default async function AtacadoProspeccaoPage({
           </Link>
         ))}
       </div>
+
+      <section className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold">Bruce · Inteligência comercial</h2>
+            <p className="mt-1 max-w-3xl text-xs text-[var(--text-muted)]">Bruce acompanha a carteira e aprende com resultados reais registrados no Radar. Só sugere perfis com pelo menos três lojas no funil; o score cadastral não é tratado como potencial de compra.</p>
+          </div>
+          <span className="text-xs text-[var(--text-muted)]">{recomendacoesBruce.length} padrões com amostra mínima</span>
+        </div>
+        {recomendacoesBruce.length > 0 ? (
+          <div className="mt-3 divide-y divide-[var(--border)]">
+            {recomendacoesBruce.map((item) => <div key={item.perfil} className="flex flex-wrap items-center justify-between gap-3 py-2 text-xs">
+              <div className="font-medium">{item.perfil}</div>
+              <div className="flex gap-3 text-[var(--text-secondary)]">
+                <span>{item.total} lojas</span>
+                <span>{item.convertidas} convertidas</span>
+                <span>{item.taxaConversao}% conversão</span>
+              </div>
+            </div>)}
+          </div>
+        ) : (
+          <p className="mt-3 rounded-md border border-dashed border-[var(--border)] px-3 py-3 text-xs text-[var(--text-muted)]">Ainda não há três lojas com histórico no mesmo perfil. Bruce não vai inventar padrões: as recomendações aparecem conforme as negociações e os pedidos confirmados no DAPIC forem registrados.</p>
+        )}
+      </section>
 
       <section className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
         <h2 className="mb-3 text-sm font-semibold">Cadastrar prospecto</h2>
