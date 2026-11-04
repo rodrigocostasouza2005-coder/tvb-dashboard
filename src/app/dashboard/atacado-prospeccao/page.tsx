@@ -287,7 +287,7 @@ export default async function AtacadoProspeccaoPage({
                     <form action={atualizarStatusProspectAction} className="mt-2 flex min-w-44 items-center gap-1">
                       <input type="hidden" name="prospectId" value={p.id} />
                       <select name="status" defaultValue={p.status} aria-label="Status do prospecto" className="min-w-0 flex-1 rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1 text-xs">
-                        {Object.entries(STATUS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+                        {Object.entries(STATUS).filter(([key]) => key !== "CONVERTIDO").map(([key, label]) => <option key={key} value={key}>{label}</option>)}
                       </select>
                       <button type="submit" className="rounded-md border border-[var(--border)] px-2 py-1 text-xs">Salvar</button>
                     </form>
