@@ -144,7 +144,7 @@ export default async function AtacadoProspeccaoPage({
             <input name="site" type="url" maxLength={500} placeholder="https://www.loja.com.br" className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2 text-sm text-[var(--text-primary)]" />
           </label>
           <label className="text-xs text-[var(--text-secondary)]">Instagram da loja
-            <input name="instagram" type="url" maxLength={500} placeholder="https://www.instagram.com/loj a/" className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2 text-sm text-[var(--text-primary)]" />
+            <input name="instagram" type="url" maxLength={500} placeholder="https://www.instagram.com/sualoja/" className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2 text-sm text-[var(--text-primary)]" />
           </label>
           <label className="text-xs text-[var(--text-secondary)]">Link da evidência / origem
             <input name="evidenciaUrl" type="url" maxLength={1000} placeholder="https://" className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2 text-sm text-[var(--text-primary)]" />
