@@ -117,7 +117,7 @@ async function main() {
 
   const rows = parseCsv(await readFile(file, "utf8"));
   const municipalityLines = municipalitiesFile
-    ? (await readFile(municipalitiesFile, "utf8")).replace(/^\\uFEFF/, "").trim().split(/\\r?\\n/).slice(1)
+    ? (await readFile(municipalitiesFile, "utf8")).replace(/^\uFEFF/, "").trim().split(/\r?\n/).slice(1)
     : [];
   const municipalityMap = new Map<string, string>();
   for (const line of municipalityLines) {
