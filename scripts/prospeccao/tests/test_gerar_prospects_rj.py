@@ -23,7 +23,7 @@ def establishment(cnpj="11222333000181", uf="RJ", status="02", cnae="4781400"):
 
 
 class ReceitaProspectorTests(unittest.TestCase):
-    def run_script(self, root, rows, competence="2026-10"):
+    def run_script(self, root, rows, competence="2026-10", ufs=None):
         establishments = root / "Estabelecimentos.csv"
         companies = root / "Empresas.csv"
         municipalities = root / "Municipios.csv"
@@ -40,7 +40,8 @@ class ReceitaProspectorTests(unittest.TestCase):
         result = subprocess.run(
             [sys.executable, str(SCRIPT), "--estabelecimentos", str(establishments),
              "--empresas", str(companies), "--municipios", str(municipalities),
-             "--saida", str(output), "--uf", "RJ", "--competencia", competence],
+             "--saida", str(output), "--competencia", competence,
+             *(["--ufs", *ufs] if ufs else ["--uf", "RJ"])],
             capture_output=True, text=True,
         )
         return result, output
@@ -75,6 +76,18 @@ class ReceitaProspectorTests(unittest.TestCase):
             with output.open(encoding="utf-8-sig", newline="") as f:
                 data = list(csv.DictReader(f, delimiter=";"))
             self.assertEqual(len(data), 1)
+
+    def test_collects_multiple_coastal_states_in_one_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            rows = [establishment("11222333000181", uf="RJ"),
+                    establishment("11222333000262", uf="ES")]
+            result, output = self.run_script(root, rows, ufs=["RJ", "ES"])
+            self.assertEqual(result.returncode, 0, result.stderr)
+            with output.open(encoding="utf-8-sig", newline="") as f:
+                data = list(csv.DictReader(f, delimiter=";"))
+            self.assertEqual({row["uf"] for row in data}, {"RJ", "ES"})
+            self.assertEqual(len(data), 2)
 
     def test_accepts_official_alphanumeric_cnpj(self):
         # Exemplo publicado pela Receita Federal: 12.ABC.345/01DE-35.
