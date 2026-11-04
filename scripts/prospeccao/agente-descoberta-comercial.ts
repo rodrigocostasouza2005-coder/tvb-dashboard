@@ -65,6 +65,7 @@ async function main() {
   if (process.argv.includes("--apply")) throw new Error("Este agente é somente leitura; não aceita --apply.");
   const arg = (key: string, fallback: string) => { const i = process.argv.indexOf(key); return i >= 0 ? process.argv[i + 1] ?? fallback : fallback; };
   const uf = arg("--uf", "RJ").toUpperCase();
+  const cidade = arg("--cidade", "").trim().split(" ").filter(Boolean).join(" ").slice(0, 100);
   const maxQueries = Math.max(1, Math.min(12, Number(arg("--max-queries", "8")) || 8));
   const maxCandidates = Math.max(1, Math.min(100, Number(arg("--max-candidates", "40")) || 40));
   if (!/^[A-Z]{2}$/.test(uf)) throw new Error("UF inválida.");
@@ -81,8 +82,8 @@ async function main() {
     faixaPreco: a.prospect.faixaPreco, estado: a.prospect.estado, status: a.prospect.status,
   })));
   const profilesForUf = profiles.filter((p) => !p.atributos.estado || p.atributos.estado === uf);
-  const queries = gerarConsultasDescoberta(profilesForUf, uf, maxQueries);
-  console.log(`RADAR DESCOBERTA | UF=${uf} | perfis aprendidos=${profilesForUf.length} | consultas=${queries.length} | modo=ARQUIVOS PARA REVISÃO (somente leitura)`);
+  const queries = gerarConsultasDescoberta(profilesForUf, uf, maxQueries, cidade || undefined);
+  console.log(`RADAR DESCOBERTA | UF=${uf} | CIDADE=${cidade || "TODAS"} | perfis aprendidos=${profilesForUf.length} | consultas=${queries.length} | modo=ARQUIVOS PARA REVISÃO (somente leitura)`);
 
   const byDomain = new Map<string, CandidatoDescoberto>();
   let siteChecks = 0;
@@ -110,10 +111,11 @@ async function main() {
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const outDir = join(process.cwd(), "artifacts", "prospeccao-descoberta");
   await mkdir(outDir, { recursive: true });
-  const csvPath = join(outDir, `candidatos-${uf}-${stamp}.csv`);
-  const jsonPath = join(outDir, `candidatos-${uf}-${stamp}.json`);
+  const slugCidade = cidade ? "-" + cidade.split(" ").join("-").toLowerCase() : "";
+  const csvPath = join(outDir, `candidatos-${uf}${slugCidade}-${stamp}.csv`);
+  const jsonPath = join(outDir, `candidatos-${uf}${slugCidade}-${stamp}.json`);
   await writeFile(csvPath, gerarCsvDescoberta(candidates), "utf8");
-  await writeFile(jsonPath, JSON.stringify({ schemaVersion: 1, generatedAt: new Date().toISOString(), uf, profilesUsed: profilesForUf.length, queries, candidates }, null, 2), "utf8");
+  await writeFile(jsonPath, JSON.stringify({ schemaVersion: 1, generatedAt: new Date().toISOString(), uf, city: cidade || null, profilesUsed: profilesForUf.length, queries, candidates }, null, 2), "utf8");
   console.log(`Sites verificados: ${siteChecks}/${MAX_SITE_CHECKS}`);
 
   console.log(`Candidatos com evidência textual: ${candidates.length}`);

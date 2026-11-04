@@ -9,6 +9,11 @@ on:
         default: "RJ"
         type: choice
         options: [AC, AL, AP, AM, BA, CE, DF, ES, GO, MA, MT, MS, MG, PA, PB, PR, PE, PI, RJ, RN, RS, RO, RR, SC, SP, SE, TO]
+      cidade:
+        description: "Cidade opcional para restringir a descoberta"
+        required: false
+        default: ""
+        type: string
       max_queries:
         description: "Quantidade máxima de buscas (1 a 12)"
         required: true
@@ -30,6 +35,7 @@ jobs:
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       UF: ${{ inputs.uf }}
+      CIDADE: ${{ inputs.cidade }}
       MAX_QUERIES: ${{ inputs.max_queries }}
       MAX_CANDIDATES: ${{ inputs.max_candidates }}
     steps:
@@ -46,7 +52,7 @@ jobs:
           test -n "$DATABASE_URL" || { echo "Secret DATABASE_URL ausente"; exit 1; }
           [[ "$MAX_QUERIES" =~ ^[0-9]+$ ]] && (( MAX_QUERIES >= 1 && MAX_QUERIES <= 12 )) || { echo "Buscas devem ser de 1 a 12"; exit 1; }
           [[ "$MAX_CANDIDATES" =~ ^[0-9]+$ ]] && (( MAX_CANDIDATES >= 1 && MAX_CANDIDATES <= 100 )) || { echo "Candidatos devem ser de 1 a 100"; exit 1; }
-          npm run prospeccao:descobrir -- --uf "$UF" --max-queries "$MAX_QUERIES" --max-candidates "$MAX_CANDIDATES"
+          npm run prospeccao:descobrir -- --uf "$UF" --cidade "$CIDADE" --max-queries "$MAX_QUERIES" --max-candidates "$MAX_CANDIDATES"
       - name: Publicar arquivos para revisão
         uses: actions/upload-artifact@v4
         with:
