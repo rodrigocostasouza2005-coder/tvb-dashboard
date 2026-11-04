@@ -6,7 +6,8 @@
  */
 import { PrismaClient } from "@prisma/client";
 import { calcularConfiancaPesquisa, extrairEvidenciasSite, extrairResultadosBusca, hostEhRedeSocial, type ResultadoBusca } from "../../src/lib/prospeccao/pesquisa-web";
-import { aprenderPerfis, pontuarAderenciaPerfil } from "../../src/lib/prospeccao/aprendizado-comercial";\nimport { avaliarEvidenciasComerciais } from "../../src/lib/prospeccao/avaliacao-comercial";
+import { aprenderPerfis, pontuarAderenciaPerfil } from "../../src/lib/prospeccao/aprendizado-comercial";
+import { avaliarEvidenciasComerciais } from "../../src/lib/prospeccao/avaliacao-comercial";
 const prisma=new PrismaClient();
 const UA="TVB-Radar-CommercialResearch/1.0";
 const TIMEOUT=12000;
