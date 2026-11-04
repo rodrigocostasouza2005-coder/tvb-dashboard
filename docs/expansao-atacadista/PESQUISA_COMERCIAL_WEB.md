@@ -31,3 +31,15 @@ Limite de 25 lojas por execução. Seleciona apenas prospects EM_QUALIFICACAO, g
 
 ## Campos atualizados
 site, instagram, evidenciaUrl, evidenciaEm, pesquisadoEm, confiancaPesquisa, justificativaGrupo, observacoes, segmentoComercial e perfilLoja. grupoComercial permanece PENDENTE e nomeComercialVerificado permanece false.
+
+## Aprendizado comercial com o histórico do Bruce
+
+O Radar usa a interação mais recente de cada loja (não soma contatos repetidos como lojas diferentes) para identificar padrões por segmento, perfil de loja, faixa de preço e UF.
+
+- Só exibe padrões com pelo menos 5 lojas distintas e 3 resultados conclusivos (positivos ou negativos).
+- Interesse, pedido de catálogo/preço e negociação são sinais de avanço, não conversões.
+- `PEDIDO_REALIZADO` registrado manualmente pelo Bruce também é apenas sinal positivo. Conversão só é contabilizada quando o status `CONVERTIDO` é confirmado pela integração DAPIC.
+- `SEM_RESPOSTA` e `OUTRO` não entram no cálculo de sinais positivos/negativos.
+- A confiança é baixa entre 5–9 lojas, média entre 10–19 e alta a partir de 20.
+- O agente de pesquisa prioriza, entre os prospects já capturados e ainda pendentes, os que compartilham atributos com perfis que tiveram melhor histórico. A pontuação é explicável (segmento, perfil, faixa de preço e UF) e não aprova nem descarta ninguém.
+- Se não houver amostra suficiente, não cria padrão nem altera a fila. Nenhum contato é enviado automaticamente.
