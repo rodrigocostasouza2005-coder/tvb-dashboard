@@ -125,7 +125,7 @@ def main() -> int:
     output = Path(args.saida)
     output.parent.mkdir(parents=True, exist_ok=True)
     seen: set[str] = set()
-    count_active = count_cnae = count_written = 0
+    count_written = 0
 
     # Estabelecimento (30 campos): raiz/ordem/DV; fantasia; situação; CNAEs;
     # endereço; UF/município; DDD/telefone; e-mail.
@@ -141,13 +141,11 @@ def main() -> int:
             uf = row[19].strip().upper()
             if uf not in ufs or row[5].strip() != SITUACAO_ATIVA:
                 continue
-            count_active += 1
             principal = digits(row[11])
             secundarias = {digits(item) for item in row[12].split(",") if digits(item)}
             matched = [code for code in CNAES_ALVO if code == principal or code in secundarias]
             if not matched:
                 continue
-            count_cnae += 1
 
             raiz, ordem, dv = row[0].strip(), row[1].strip(), row[2].strip()
             cnpj = raiz + ordem + dv
