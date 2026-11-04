@@ -17,5 +17,10 @@ it("detecta categorias incompatíveis, marca própria e moda feminina",()=>{
  const propria=extrairEvidenciasSite("https://loja.com",'<title>Marca própria</title><main>Produção própria e fabricação própria.</main>');
  expect(propria.sinaisMarcaPropria).toContain("marca própria");
 });
+it("detecta operação exclusivamente feminina mesmo com menção negativa ao masculino",()=>{
+ const r=extrairEvidenciasSite("https://loja.com",'<title>Moda feminina</title><main>Somente moda feminina. Não trabalhamos com moda masculina.</main>');
+ expect(r.sinaisExclusao).toContain("somente moda feminina");
+ expect(r.sinaisExclusao).toContain("não trabalhamos com moda masculina");
+});
 it("exige nome e cidade para confiança alta",()=>{expect(calcularConfiancaPesquisa({nomeLoja:"Loja Costa Moda",cidade:"Niterói",titulo:"Loja Costa Moda Niterói",descricao:"",texto:""})).toBe("ALTA");expect(calcularConfiancaPesquisa({nomeLoja:"Loja Costa Moda",cidade:"Niterói",titulo:"Moda masculina",descricao:"",texto:""})).toBe("BAIXA");});
 });
