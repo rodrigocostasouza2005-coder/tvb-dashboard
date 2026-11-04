@@ -49,7 +49,7 @@ export function avaliarCandidatoDescoberto(
     dominio = u.hostname.toLowerCase().replace(/^www\./, "");
     if (!["http:", "https:"].includes(u.protocol)) return null;
   } catch { return null; }
-  const masculino = evidencia.sinaisModaMasculina;\n  const nomeLoja = `${resultado.titulo} ${evidencia.titulo}`.normalize("NFD").replace(/[\\u0300-\\u036f]/g, "").toLowerCase();\n  const nomeSegmento = /\\b(surf|surfwear|surf\\s*shop|skate|skateshop|streetwear|boardshop)\\b/.test(nomeLoja);
+  const masculino = evidencia.sinaisModaMasculina;\n  const nomeLoja = `${resultado.titulo} ${evidencia.titulo}`.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();\n  const nomeSegmento = /\b(surf|surfwear|surf\s*shop|skate|skateshop|streetwear|boardshop)\b/.test(nomeLoja);
   const multi = evidencia.sinaisMultimarcas;
   const marcas = evidencia.marcas;
   const exclusoes = evidencia.sinaisExclusao ?? [];
