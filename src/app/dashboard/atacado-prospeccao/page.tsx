@@ -276,6 +276,24 @@ export default async function AtacadoProspeccaoPage({
                     </details>
                     <details className="mt-2">
                       <summary className="cursor-pointer text-[11px] font-medium text-[var(--series-1)] underline">Bruce · Registrar interação</summary>
+                      <div className="mt-2 min-w-48 space-y-2">
+                        <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Acesso rápido da loja</div>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <a
+                            href={p.site && /^https?:\\/\\//i.test(p.site) ? p.site : `https://www.google.com/search?q=${encodeURIComponent(`${p.nomeFantasia} ${p.cidade ?? ""} ${p.estado ?? ""} site oficial`)}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center justify-center rounded-md border border-[var(--border)] px-2 py-2 text-[11px] font-medium text-[var(--text-primary)] hover:border-[var(--series-1)]"
+                          >{p.site && /^https?:\\/\\//i.test(p.site) ? "Abrir site ↗" : "Buscar site ↗"}</a>
+                          <a
+                            href={p.instagram && /^https?:\\/\\//i.test(p.instagram) ? p.instagram : `https://www.google.com/search?q=${encodeURIComponent(`site:instagram.com ${p.nomeFantasia} ${p.cidade ?? ""} ${p.estado ?? ""}`)}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center justify-center rounded-md border border-[var(--border)] px-2 py-2 text-[11px] font-medium text-[var(--text-primary)] hover:border-[var(--series-1)]"
+                          >{p.instagram && /^https?:\\/\\//i.test(p.instagram) ? "Abrir Instagram ↗" : "Buscar Instagram ↗"}</a>
+                        </div>
+                        <p className="text-[10px] text-[var(--text-muted)]">Os links abrem em nova aba. Se ainda não houver endereço cadastrado, o Radar abre uma pesquisa para localizar o perfil ou site correto.</p>
+                      </div>
                       <form action={registrarInteracaoBruceAction} className="mt-2 min-w-48 space-y-2">
                         <input type="hidden" name="prospectId" value={p.id} />
                         <textarea name="descricao" required maxLength={1200} rows={2} placeholder="O que aconteceu na conversa?" className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-xs" />
