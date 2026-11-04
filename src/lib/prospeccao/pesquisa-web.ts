@@ -31,7 +31,8 @@ export function extrairEvidenciasSite(url:string,html:string):EvidenciaSite {
     sinaisMultimarcas:match(MULTIMARCAS),
     sinaisExclusao:match(EXCLUSOES),
     sinaisMarcaPropria:match(MARCA_PROPRIA),
-    sinaisModaFeminina:match(MODA_FEMININA),\n    sinaisSurfSkate:match(SURF_SKATE),
+    sinaisModaFeminina:match(MODA_FEMININA),
+    sinaisSurfSkate:match(SURF_SKATE),
   };
 }
 export function calcularConfiancaPesquisa(input:{nomeLoja:string;cidade:string|null;titulo:string;descricao:string;texto:string}):"ALTA"|"MEDIA"|"BAIXA"{const norm=(s:string)=>s.normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase();const parts=norm(input.nomeLoja).split(/\s+/).filter(x=>x.length>2);const evidence=norm(`${input.titulo} ${input.descricao} ${input.texto}`);const ratio=parts.length?parts.filter(x=>evidence.includes(x)).length/parts.length:0;const city=!!input.cidade&&evidence.includes(norm(input.cidade));if(ratio>=.7&&city)return"ALTA";if(ratio>=.5||(ratio>=.35&&city))return"MEDIA";return"BAIXA";}
