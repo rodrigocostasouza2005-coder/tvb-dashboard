@@ -279,6 +279,49 @@ const RESULTADOS_BRUCE = new Set([
 ]);
 const CANAIS_BRUCE = new Set(["TELEFONE", "EMAIL", "INSTAGRAM", "WHATSAPP", "PRESENCIAL", "OUTRO"]);
 
+export async function atualizarPresencaDigitalProspectAction(formData: FormData) {
+  const user = await getSessionUser();
+  if (!user) redirect("/login");
+  requireTabAccess(user, user.role, "atacado-prospeccao");
+
+  const prospectId = value(formData, "prospectId");
+  const siteRaw = value(formData, "site");
+  const instagramRaw = value(formData, "instagram");
+  const site = normalizeHttpUrl(siteRaw);
+  const instagram = normalizeHttpUrl(instagramRaw);
+
+  if (!prospectId || (siteRaw && !site) || (instagramRaw && !instagram)) {
+    redirect("/dashboard/atacado-prospeccao?presenca=erro");
+  }
+
+  const atual = await prisma.atacadoProspect.findUnique({
+    where: { id: prospectId },
+    select: { id: true, site: true, instagram: true },
+  });
+  if (!atual) redirect("/dashboard/atacado-prospeccao?erro=nao-encontrado");
+
+  const mudou = atual.site !== site || atual.instagram !== instagram;
+  if (mudou) {
+    await prisma.$transaction([
+      prisma.atacadoProspect.update({
+        where: { id: prospectId },
+        data: { site, instagram },
+      }),
+      prisma.atacadoProspectActivity.create({
+        data: {
+          prospectId,
+          tipo: "PRESENCA_DIGITAL_ATUALIZADA",
+          descricao: "Site e Instagram da loja atualizados durante o acompanhamento comercial.",
+          criadoPor: user.name,
+        },
+      }),
+    ]);
+  }
+
+  revalidatePath("/dashboard/atacado-prospeccao");
+  redirect("/dashboard/atacado-prospeccao?presenca=salva");
+}
+
 export async function registrarInteracaoBruceAction(formData: FormData) {
   const user = await getSessionUser();
   if (!user) redirect("/login");
