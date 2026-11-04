@@ -14,7 +14,7 @@ function termosPerfil(perfil: PerfilAprendido): string[] {
 export function gerarConsultasDescoberta(perfis: PerfilAprendido[], uf: string, limite = 8, cidade?: string): string[] {
   const sigla = uf.trim().toUpperCase();
   if (!/^[A-Z]{2}$/.test(sigla)) throw new Error("UF inválida");
-  const municipio = cidade?.trim().replace(/\\s+/g, " ").slice(0, 100);
+  const municipio = cidade?.trim().replace(/\s+/g, " ").slice(0, 100);
   const local = municipio ? `"${municipio}" ${sigla}` : sigla;
   const base = `loja "moda masculina" multimarcas ${local}`;
   const consultas = perfis.slice(0, 5).map((perfil) => {
