@@ -283,17 +283,17 @@ export default async function AtacadoProspeccaoPage({
                         <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Acesso rápido da loja</div>
                         <div className="grid grid-cols-2 gap-1.5">
                           <a
-                            href={p.site && /^https?:\\/\\//i.test(p.site) ? p.site : `https://www.google.com/search?q=${encodeURIComponent(`${p.nomeFantasia} ${p.cidade ?? ""} ${p.estado ?? ""} site oficial`)}`}
+                            href={p.site && /^https?:\/\//i.test(p.site) ? p.site : `https://www.google.com/search?q=${encodeURIComponent(`${p.nomeFantasia} ${p.cidade ?? ""} ${p.estado ?? ""} site oficial`)}`}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="inline-flex items-center justify-center rounded-md border border-[var(--border)] px-2 py-2 text-[11px] font-medium text-[var(--text-primary)] hover:border-[var(--series-1)]"
-                          >{p.site && /^https?:\\/\\//i.test(p.site) ? "Abrir site ↗" : "Buscar site ↗"}</a>
+                          >{p.site && /^https?:\/\//i.test(p.site) ? "Abrir site ↗" : "Buscar site ↗"}</a>
                           <a
-                            href={p.instagram && /^https?:\\/\\//i.test(p.instagram) ? p.instagram : `https://www.google.com/search?q=${encodeURIComponent(`site:instagram.com ${p.nomeFantasia} ${p.cidade ?? ""} ${p.estado ?? ""}`)}`}
+                            href={p.instagram && /^https?:\/\//i.test(p.instagram) ? p.instagram : `https://www.google.com/search?q=${encodeURIComponent(`site:instagram.com ${p.nomeFantasia} ${p.cidade ?? ""} ${p.estado ?? ""}`)}`}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="inline-flex items-center justify-center rounded-md border border-[var(--border)] px-2 py-2 text-[11px] font-medium text-[var(--text-primary)] hover:border-[var(--series-1)]"
-                          >{p.instagram && /^https?:\\/\\//i.test(p.instagram) ? "Abrir Instagram ↗" : "Buscar Instagram ↗"}</a>
+                          >{p.instagram && /^https?:\/\//i.test(p.instagram) ? "Abrir Instagram ↗" : "Buscar Instagram ↗"}</a>
                         </div>
                         <p className="text-[10px] text-[var(--text-muted)]">Os links abrem em nova aba. Se ainda não houver endereço cadastrado, o Radar abre uma pesquisa para localizar o perfil ou site correto.</p>
                       </div>
