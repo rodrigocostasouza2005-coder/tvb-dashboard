@@ -41,7 +41,7 @@ export function avaliarEvidenciasComerciais(input: {
   if (marcaPropria && !multimarcas) motivosDesqualificacao.push("indícios de marca/fabricação própria sem evidência de revenda de marcas de terceiros");
   if (sinaisFemininos.length && !masculina) motivosDesqualificacao.push("evidência de moda feminina sem evidência de linha masculina");
 
-  const bloqueada = exclusoes.length > 0 || (marcaPropria && !multimarcas);
+  const bloqueada = exclusoes.length > 0 || (marcaPropria && !multimarcas) || (sinaisFemininos.length > 0 && !masculina);
   const scoreEvidencia = identidade === "BAIXA" || !ev || bloqueada ? 0 :
     (identidade === "ALTA" ? 20 : 12) +
     (masculina ? 35 : 0) +
