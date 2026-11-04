@@ -28,6 +28,8 @@ describe("descoberta comercial", () => {
   });
   it("restringe consultas à cidade escolhida sem perder a UF", () => {
     const queries = gerarConsultasDescoberta([perfil], "RJ", 8, "Niterói");
+    const normalized = gerarConsultasDescoberta([perfil], "RJ", 8, "  Niterói   Centro  ");
+    expect(normalized[0]).toContain('"Niterói Centro" RJ');
     expect(queries[0]).toContain("Niterói");
     expect(queries[0]).toContain("RJ");
   });
