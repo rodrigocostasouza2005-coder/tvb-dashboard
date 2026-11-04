@@ -4,7 +4,8 @@ export type SituacaoAvaliacaoComercial =
   | "PRONTA_PARA_REVISAO_HUMANA"
   | "EVIDENCIA_PARCIAL"
   | "SEM_EVIDENCIA_COMERCIAL"
-  | "SITE_NAO_VALIDADO";
+  | "SITE_NAO_VALIDADO"
+  | "NAO_ADERENTE";
 
 export type AvaliacaoComercial = {
   scoreEvidencia: number;
@@ -13,6 +14,7 @@ export type AvaliacaoComercial = {
   modaMasculina: "EVIDENCIADA" | "NAO_ENCONTRADA";
   multimarcas: "EVIDENCIADA" | "INDICIO_POR_MARCAS" | "NAO_ENCONTRADA";
   marcasEncontradas: string[];
+  motivosDesqualificacao: string[];
   pendencias: string[];
   explicacao: string;
 };
@@ -26,30 +28,42 @@ export function avaliarEvidenciasComerciais(input: {
 }): AvaliacaoComercial {
   const ev = input.evidencia;
   const masculina = Boolean(ev?.sinaisModaMasculina.length);
-  const multimarcas = Boolean(ev?.sinaisMultimarcas.length);
   const marcas = [...new Set(ev?.marcas ?? [])];
+  const sinaisMulti = ev?.sinaisMultimarcas ?? [];
+  // Uma palavra genérica ("marcas", "nossas marcas") não prova revenda multimarcas.
+  const multimarcas = sinaisMulti.length > 0 && marcas.length >= 2;
+  const exclusoes = [...new Set(ev?.sinaisExclusao ?? [])];
+  const marcaPropria = (ev?.sinaisMarcaPropria?.length ?? 0) > 0;
+  const sinaisFemininos = ev?.sinaisModaFeminina ?? [];
   const identidade = input.confiancaIdentidade;
-  const scoreEvidencia = identidade === "BAIXA" || !ev ? 0 :
+  const motivosDesqualificacao: string[] = [];
+  if (exclusoes.length) motivosDesqualificacao.push(`atividade/categoria incompatível identificada: ${exclusoes.join(", ")}`);
+  if (marcaPropria && !multimarcas) motivosDesqualificacao.push("indícios de marca/fabricação própria sem evidência de revenda de marcas de terceiros");
+  if (sinaisFemininos.length && !masculina) motivosDesqualificacao.push("evidência de moda feminina sem evidência de linha masculina");
+
+  const bloqueada = exclusoes.length > 0 || (marcaPropria && !multimarcas);
+  const scoreEvidencia = identidade === "BAIXA" || !ev || bloqueada ? 0 :
     (identidade === "ALTA" ? 20 : 12) +
     (masculina ? 35 : 0) +
     (multimarcas ? 35 : 0) +
     (marcas.length >= 2 ? 10 : marcas.length === 1 ? 5 : 0);
-
-  const pronta = identidade !== "BAIXA" && masculina && multimarcas;
-  const algumaEvidencia = masculina || multimarcas || marcas.length > 0;
+  const pronta = !bloqueada && identidade !== "BAIXA" && masculina && multimarcas;
+  const algumaEvidencia = masculina || sinaisMulti.length > 0 || marcas.length > 0 || sinaisFemininos.length > 0 || marcaPropria;
   const situacao: SituacaoAvaliacaoComercial = !ev
     ? "SITE_NAO_VALIDADO"
-    : pronta
-      ? "PRONTA_PARA_REVISAO_HUMANA"
-      : algumaEvidencia
-        ? "EVIDENCIA_PARCIAL"
-        : "SEM_EVIDENCIA_COMERCIAL";
+    : bloqueada
+      ? "NAO_ADERENTE"
+      : pronta
+        ? "PRONTA_PARA_REVISAO_HUMANA"
+        : algumaEvidencia
+          ? "EVIDENCIA_PARCIAL"
+          : "SEM_EVIDENCIA_COMERCIAL";
 
   const pendencias: string[] = [];
   if (identidade === "BAIXA") pendencias.push("confirmar se o site pertence à loja e à cidade informadas");
-  if (!masculina) pendencias.push("confirmar atuação em moda masculina");
-  if (!multimarcas) pendencias.push("confirmar venda de mais de uma marca");
-  if (marcas.length > 0) pendencias.push("confirmar se as marcas citadas são efetivamente comercializadas pela loja");
+  if (!masculina) pendencias.push("não foi comprovada linha de moda masculina");
+  if (!multimarcas) pendencias.push("não foram comprovadas duas ou mais marcas de terceiros comercializadas pela loja");
+  if (sinaisFemininos.length && !masculina) pendencias.push("o conteúdo aponta para moda feminina, sem prova de linha masculina");
   if (!input.situacaoCadastral) pendencias.push("consultar situação cadastral oficial na Receita Federal");
   else if (input.situacaoCadastral !== "ATIVA") pendencias.push(`revisar situação cadastral: ${input.situacaoCadastral}`);
 
@@ -59,21 +73,25 @@ export function avaliarEvidenciasComerciais(input: {
   const explicacao = [
     `EVIDÊNCIA COMERCIAL ${situacao} · ${scoreEvidencia}/100`,
     `identidade do site: ${identidade}`,
-    masculina ? `moda masculina: evidência textual (${ev?.sinaisModaMasculina.join(", ")})` : "moda masculina: não encontrada no conteúdo analisado",
-    multimarcas ? `multimarcas: evidência textual (${ev?.sinaisMultimarcas.join(", ")})` : marcas.length >= 2 ? `marcas citadas (${marcas.join(", ")}), mas multimarcas não comprovado` : "multimarcas: não comprovado",
-    marcas.length ? `marcas citadas: ${marcas.join(", ")}` : "marcas da lista de referência: nenhuma identificada",
+    masculina ? `moda masculina: evidência textual (${ev?.sinaisModaMasculina.join(", ")})` : "moda masculina: não comprovada",
+    multimarcas ? `revenda multimarcas: sinal explícito (${sinaisMulti.join(", ")}) e marcas identificadas (${marcas.join(", ")})` : "revenda multimarcas: não comprovada; marcas citadas isoladamente não bastam",
+    marcaPropria ? `sinais de marca própria: ${ev?.sinaisMarcaPropria?.join(", ")}` : "sem sinal textual de marca própria",
+    exclusoes.length ? `bloqueios: ${exclusoes.join(", ")}` : "nenhuma categoria incompatível detectada",
+    sinaisFemininos.length ? `sinais de moda feminina: ${sinaisFemininos.join(", ")}` : "sem sinal específico de moda feminina",
     cadastro,
+    motivosDesqualificacao.length ? `motivos de desqualificação: ${motivosDesqualificacao.join("; ")}` : "",
     pendencias.length ? `pendências: ${pendencias.join("; ")}` : "pendência: revisão humana obrigatória antes de qualificar",
-    "Esta avaliação organiza evidências públicas; não aprova, atribui grupo A/B/C/D nem autoriza contato.",
-  ].join(" | ");
+    "Apenas candidatos com identidade, moda masculina e revenda multimarcas comprovadas seguem para revisão humana. Esta avaliação não aprova nem autoriza contato.",
+  ].filter(Boolean).join(" | ");
 
   return {
     scoreEvidencia,
     situacao,
     identidade,
     modaMasculina: masculina ? "EVIDENCIADA" : "NAO_ENCONTRADA",
-    multimarcas: multimarcas ? "EVIDENCIADA" : marcas.length >= 2 ? "INDICIO_POR_MARCAS" : "NAO_ENCONTRADA",
+    multimarcas: multimarcas ? "EVIDENCIADA" : sinaisMulti.length || marcas.length >= 2 ? "INDICIO_POR_MARCAS" : "NAO_ENCONTRADA",
     marcasEncontradas: marcas,
+    motivosDesqualificacao,
     pendencias,
     explicacao,
   };
