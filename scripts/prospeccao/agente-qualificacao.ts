@@ -32,7 +32,7 @@ async function main() {
       estado: uf,
       status: "NOVO",
       grupoComercial: "PENDENTE",
-      origemAgente: null,
+      origemAgente: "AGENTE_CAPTACAO_RECEITA_V1",
       observacoes: { contains: "CNAE principal: 4781400" },
     },
     orderBy: [{ createdAt: "asc" }],
