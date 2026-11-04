@@ -27,7 +27,7 @@ function normalizeHttpUrl(input: string): string | null {
 function isValidCnpjFormat(cnpj: string): boolean {
   // CNPJ alfanumérico: 12 posições alfanuméricas e 2 dígitos verificadores numéricos.
   if (!/^[A-Z0-9]{12}[0-9]{2}$/.test(cnpj) || cnpj.length !== 14) return false;
-  if (/^(.)\\1+$/.test(cnpj)) return false;
+  if (cnpj.split("").every((char) => char === cnpj[0])) return false;
 
   const calculate = (base: string, weights: number[]) => {
     const total = [...base].reduce(
