@@ -74,10 +74,10 @@ describe("avaliação de evidências comerciais", () => {
     });
   }
 
-  it("descarta loja de marca própria sem prova de revenda multimarcas", () => {
+  it("descarta fabricante ou marca própria mesmo com sinais de multimarcas", () => {
     const result = avaliarEvidenciasComerciais({
       nomeLoja: "Marca Própria", cidade: null, confiancaIdentidade: "ALTA",
-      evidencia: { ...evidence, sinaisMultimarcas: [], sinaisMarcaPropria: ["marca própria"], marcas: [] },
+      evidencia: { ...evidence, sinaisMarcaPropria: ["marca própria"] },
       situacaoCadastral: "ATIVA",
     });
     expect(result.situacao).toBe("NAO_ADERENTE");
