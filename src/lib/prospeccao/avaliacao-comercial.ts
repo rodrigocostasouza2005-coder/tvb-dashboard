@@ -47,7 +47,7 @@ export function avaliarEvidenciasComerciais(input: {
     (masculina ? 35 : 0) +
     (multimarcas ? 35 : 0) +
     (marcas.length >= 2 ? 10 : marcas.length === 1 ? 5 : 0);
-  const pronta = !bloqueada && identidade !== "BAIXA" && masculina && multimarcas;
+  const pronta = !bloqueada && identidade === "ALTA" && masculina && multimarcas;
   const algumaEvidencia = masculina || sinaisMulti.length > 0 || marcas.length > 0 || sinaisFemininos.length > 0 || marcaPropria;
   const situacao: SituacaoAvaliacaoComercial = !ev
     ? "SITE_NAO_VALIDADO"
@@ -60,7 +60,7 @@ export function avaliarEvidenciasComerciais(input: {
           : "SEM_EVIDENCIA_COMERCIAL";
 
   const pendencias: string[] = [];
-  if (identidade === "BAIXA") pendencias.push("confirmar se o site pertence à loja e à cidade informadas");
+  if (identidade !== "ALTA") pendencias.push("confirmar identidade do site e vínculo com a loja/cidade; somente confiança ALTA segue para revisão");
   if (!masculina) pendencias.push("não foi comprovada linha de moda masculina");
   if (!multimarcas) pendencias.push("não foram comprovadas duas ou mais marcas de terceiros comercializadas pela loja");
   if (sinaisFemininos.length && !masculina) pendencias.push("o conteúdo aponta para moda feminina, sem prova de linha masculina");
