@@ -29,13 +29,6 @@ export async function GET(request: NextRequest) {
   }
 
   if (resource === "inteligencia") {
-    const rows = await prisma.atacadoProspect.groupBy({
-      by: ["segmentoComercial", "perfilLoja", "faixaPreco", "cidade", "estado"],
-      _count: { _all: true },
-      where: { status: { in: ["CONVERTIDO", "NEGOCIACAO", "CONTATADO", "DESCARTADO"] } },
-      orderBy: { _count: { id: "desc" } }, take: 100,
-    });
-    const insights = rows.map((r) => ({ ...r, convertido: 0, emNegociacao: 0, descartado: 0 }));
     // Conta os resultados reais por perfil, sem inferir conversão a partir de mera resposta.
     const grouped = await prisma.atacadoProspect.groupBy({
       by: ["segmentoComercial", "perfilLoja", "faixaPreco", "cidade", "estado", "status"],
