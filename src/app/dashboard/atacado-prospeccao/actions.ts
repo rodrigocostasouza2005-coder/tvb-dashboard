@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { requireTabAccess } from "@/lib/tabs";
+import { validarCnpj } from "@/lib/prospeccao/cnpj";
 
 function value(formData: FormData, key: string): string {
   return String(formData.get(key) ?? "").trim();
@@ -27,7 +28,7 @@ function normalizeHttpUrl(input: string): string | null {
 function isValidCnpjFormat(cnpj: string): boolean {
   // CNPJ alfanumérico: 12 posições alfanuméricas e 2 dígitos verificadores numéricos.
   if (!/^[A-Z0-9]{12}[0-9]{2}$/.test(cnpj) || cnpj.length !== 14) return false;
-  if (/^(.)\\1+$/.test(cnpj)) return false;
+  if (cnpj.split("").every((char) => char === cnpj[0])) return false;
 
   const calculate = (base: string, weights: number[]) => {
     const total = [...base].reduce(
@@ -318,4 +319,103 @@ export async function registrarInteracaoBruceAction(formData: FormData) {
 
   revalidatePath("/dashboard/atacado-prospeccao");
   redirect("/dashboard/atacado-prospeccao?bruce=registrado");
+}
+
+
+type CandidatoParaAprovacao = {
+  nomeFantasia: string;
+  cnpj: string;
+  cidade: string;
+  estado: string;
+  site: string;
+  trechoBusca: string;
+  sinaisMasculino: string[];
+  sinaisMultimarcas: string[];
+  marcasEncontradas: string[];
+  perfilReferencia: string;
+};
+
+
+export async function aprovarCandidatosDescobertosAction(formData: FormData) {
+  const user = await getSessionUser();
+  if (!user) redirect("/login");
+  requireTabAccess(user, user.role, "atacado-prospeccao");
+
+  let candidatos: CandidatoParaAprovacao[];
+  try {
+    const raw = JSON.parse(value(formData, "candidatos"));
+    if (!Array.isArray(raw) || raw.length < 1 || raw.length > 100) throw new Error("Quantidade inválida");
+    candidatos = raw.map((item): CandidatoParaAprovacao => ({
+      nomeFantasia: String(item.nomeFantasia ?? "").trim().slice(0, 160),
+      cnpj: String(item.cnpj ?? "").trim(),
+      cidade: String(item.cidade ?? "").trim().slice(0, 100),
+      estado: String(item.estado ?? "").trim().toUpperCase(),
+      site: String(item.site ?? "").trim(),
+      trechoBusca: String(item.trechoBusca ?? "").trim().slice(0, 500),
+      sinaisMasculino: Array.isArray(item.sinaisMasculino) ? item.sinaisMasculino.map(String).slice(0, 10) : [],
+      sinaisMultimarcas: Array.isArray(item.sinaisMultimarcas) ? item.sinaisMultimarcas.map(String).slice(0, 10) : [],
+      marcasEncontradas: Array.isArray(item.marcasEncontradas) ? item.marcasEncontradas.map(String).slice(0, 30) : [],
+      perfilReferencia: String(item.perfilReferencia ?? "").trim().slice(0, 300),
+    }));
+  } catch {
+    redirect("/dashboard/atacado-prospeccao?revisao=arquivo-invalido");
+  }
+
+  for (const candidato of candidatos) {
+    if (!candidato.nomeFantasia || !validarCnpj(candidato.cnpj) || !/^[A-Z]{2}$/.test(candidato.estado) || !candidato.cidade) {
+      redirect("/dashboard/atacado-prospeccao?revisao=dados-invalidos");
+    }
+    const site = normalizeHttpUrl(candidato.site);
+    if (!site || !candidato.sinaisMasculino.length || (!candidato.sinaisMultimarcas.length && candidato.marcasEncontradas.length < 2)) {
+      redirect("/dashboard/atacado-prospeccao?revisao=evidencia-invalida");
+    }
+  }
+
+  let criados = 0;
+  let duplicados = 0;
+  for (const candidato of candidatos) {
+    const cnpj = validarCnpj(candidato.cnpj)!;
+    const site = normalizeHttpUrl(candidato.site)!;
+    const existente = await prisma.atacadoProspect.findFirst({
+      where: { OR: [{ cnpj }, { site }] },
+      select: { id: true },
+    });
+    if (existente) { duplicados++; continue; }
+
+    await prisma.atacadoProspect.create({
+      data: {
+        nomeFantasia: candidato.nomeFantasia,
+        cnpj,
+        cidade: candidato.cidade,
+        estado: candidato.estado,
+        site,
+        evidenciaUrl: site,
+        evidenciaEm: new Date(),
+        origem: "pesquisa_web",
+        origemAgente: "RADAR_DESCOBERTA_WEB_V1",
+        grupoComercial: "PENDENTE",
+        status: "NOVO",
+        nomeComercialVerificado: false,
+        observacoes: [
+          "Candidato descoberto na web; aprovado manualmente para entrar na fila de qualificação, não para contato comercial.",
+          `Evidência masculina: ${candidato.sinaisMasculino.join(", ")}.`,
+          `Evidência multimarcas: ${candidato.sinaisMultimarcas.join(", ") || "não identificada; marcas encontradas: " + candidato.marcasEncontradas.join(", ")}.`,
+          `Trecho de busca: ${candidato.trechoBusca}`,
+          `Perfil que originou a busca: ${candidato.perfilReferencia}`,
+        ].join("\n"),
+        criadoPor: user.name,
+        activities: {
+          create: {
+            tipo: "REVISAO_WEB_APROVADA",
+            descricao: "Candidato da descoberta web revisado por pessoa e incluído na fila de qualificação. CNPJ informado e dígitos verificadores validados.",
+            criadoPor: user.name,
+          },
+        },
+      },
+    });
+    criados++;
+  }
+
+  revalidatePath("/dashboard/atacado-prospeccao");
+  redirect(`/dashboard/atacado-prospeccao?revisao=concluida&novos=${criados}&duplicados=${duplicados}`);
 }
