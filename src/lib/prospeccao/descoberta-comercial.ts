@@ -1,7 +1,7 @@
 import type { PerfilAprendido } from "./aprendizado-comercial";
 import type { EvidenciaSite, ResultadoBusca } from "./pesquisa-web";
 
-const STOP = new Set(["loja","lojas","moda","roupa","roupas","masculina","masculino","multimarcas","multi","marcas","comercio","varejo","ltda","me","epp","de","da","do","e"]);
+const STOP = new Set(["loja","lojas","moda","roupa","roupas","masculina","masculino","multimarcas","multi","marcas","comercio","varejo","ltda","me","epp","evidencia","publica","validar","pendente","informado","informada","de","da","do","e"]);
 
 function termosPerfil(perfil: PerfilAprendido): string[] {
   const raw = [perfil.atributos.segmentoComercial, perfil.atributos.perfilLoja, perfil.atributos.faixaPreco]
