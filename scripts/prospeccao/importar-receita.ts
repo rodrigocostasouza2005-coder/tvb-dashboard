@@ -17,6 +17,7 @@ type ProspectRow = {
   razao_social: string;
   cnpj: string;
   cidade: string;
+  codigo_municipio: string;
   uf: string;
   telefone: string;
   email: string;
@@ -71,6 +72,7 @@ function parseCsv(raw: string): ProspectRow[] {
       razao_social: get("razao_social"),
       cnpj: get("cnpj").toUpperCase().replace(/[^A-Z0-9]/g, ""),
       cidade: get("cidade"),
+      codigo_municipio: get("codigo_municipio"),
       uf: get("uf").toUpperCase(),
       telefone: get("telefone"),
       email: get("email").toLowerCase(),
@@ -135,6 +137,7 @@ async function main() {
           razaoSocial: row.razao_social.slice(0, 180) || null,
           cnpj: row.cnpj,
           cidade: row.cidade.slice(0, 100) || null,
+          codigoMunicipio: row.codigo_municipio.slice(0, 10) || null,
           estado: row.uf,
           telefone: row.telefone.slice(0, 40) || null,
           email: row.email.slice(0, 180) || null,
@@ -148,6 +151,8 @@ async function main() {
             row.tipo_correspondencia === "PRINCIPAL" ? "Correspondência CNAE: atividade principal" : "Correspondência CNAE: atividade secundária — validar aderência comercial",
             row.cnae_descricao,
             row.porte ? `Porte cadastral: ${row.porte}` : "",
+            row.nome_fantasia === "NOME COMERCIAL NÃO IDENTIFICADO" ? "Nome fantasia ausente na Receita; razão social mantida separadamente e nome comercial pendente de pesquisa." : "",
+            "Grupo comercial pendente de pesquisa; CNAE não é suficiente para classificar A/B/C/D.",
             "Lead cadastral não verificado comercialmente.",
           ].filter(Boolean).join(" | "),
         })),
