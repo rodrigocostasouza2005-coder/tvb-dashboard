@@ -110,7 +110,7 @@ export default async function AtacadoProspeccaoPage({
     <div className="space-y-6">
       {params.bruce === "registrado" && <p role="status" className="rounded-md border border-green-600/40 px-3 py-2 text-sm text-green-700">Interação registrada no histórico do Radar.</p>}
       {params.bruce === "erro" && <p role="alert" className="rounded-md border border-red-500/40 px-3 py-2 text-sm text-red-600">Não foi possível registrar a interação. Confira os campos e tente novamente.</p>}
-      <ProspeccaoRadarConsole total={total} novos={novos} emPesquisa={emPesquisa} qualificados={qualificados} contatados={contatados} aguardandoAprovacao={0} />
+      <ProspeccaoRadarConsole total={total} novos={novos} emPesquisa={emPesquisa} qualificados={qualificados} contatados={contatados} />
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
         {[
           ["Prospectos", total],
