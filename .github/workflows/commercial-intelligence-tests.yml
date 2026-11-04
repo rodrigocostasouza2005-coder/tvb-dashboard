@@ -1,0 +1,34 @@
+name: Commercial intelligence tests
+
+on:
+  pull_request:
+    branches: [main, feat/radar-lojas-classificacao-abcd]
+    paths:
+      - "src/app/api/gpt/atacado/**"
+      - "src/app/api/gpt/openapi/**"
+      - "prisma/**"
+      - "vitest.config.ts"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/commercial-intelligence-tests.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Validate Prisma schema
+        run: npx prisma validate
+        env:
+          DATABASE_URL: postgresql://test:test@localhost:5432/test
+      - name: Run test suite
+        run: npm test
