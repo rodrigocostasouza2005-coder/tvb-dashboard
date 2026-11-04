@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Extrai prospects ativos de varejo de moda diretamente do espelho Parquet da Receita.
+"""Extrai candidatos ativos de varejo de moda diretamente do espelho Parquet da Receita. Sem limite por padrão; use --limite apenas em testes.
 
 A leitura é remota via DuckDB/Hugging Face; não baixa nem descompacta o dump nacional.
 """
@@ -24,7 +24,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--competencia", default="2026-10")
     parser.add_argument("--uf", default="RJ")
-    parser.add_argument("--saida", default="dados/prospects-rj.csv")
+    parser.add_argument("--saida", default="dados/prospects-receita.parquet")
+    parser.add_argument("--limite", type=int, default=0, help="limite opcional para testes; 0 = sem limite")
     args = parser.parse_args()
 
     if not re.fullmatch(r"20\d{2}-(0[1-9]|1[0-2])", args.competencia):
@@ -32,6 +33,9 @@ def main() -> int:
     uf = args.uf.upper()
     if not re.fullmatch(r"[A-Z]{2}", uf):
         parser.error("UF inválida.")
+    if args.limite < 0:
+        parser.error("--limite não pode ser negativo.")
+    limit_sql = f"LIMIT {args.limite}" if args.limite else ""
     base = BASE.format(competencia=args.competencia)
     establishments = base + "/estabelecimentos/*.parquet"
     companies = base + "/empresas/*.parquet"
@@ -56,7 +60,7 @@ def main() -> int:
         FROM read_parquet('{establishments}') s
         WHERE s.uf = '{uf}'
           AND s.situacao_cadastral = '02'
-          -- Piloto estrito: vestuário como CNAE principal, nome fantasia e contato.
+          -- Filtro inicial: vestuário como CNAE principal, nome fantasia e contato.
           AND s.cnae_fiscal_principal = '4781400'
           AND trim(coalesce(s.nome_fantasia, '')) <> ''
           AND (
@@ -92,22 +96,13 @@ def main() -> int:
         CASE WHEN length(trim(coalesce(f.telefone1, ''))) > 0 OR length(trim(coalesce(f.telefone2, ''))) > 0 THEN 0 ELSE 1 END,
         CASE WHEN length(trim(coalesce(f.correio_eletronico, ''))) > 0 THEN 0 ELSE 1 END,
         f.cnpj_basico, f.cnpj_ordem
-      LIMIT 500
-    ) TO '{Path(args.saida).as_posix()}' (HEADER, DELIMITER ';', QUOTE '"', ESCAPE '"');
+      {limit_sql}
+    ) TO '{Path(args.saida).as_posix()}' (FORMAT PARQUET, COMPRESSION ZSTD);
     """
     try:
         con.execute(sql)
-        municipios_saida = str(Path(args.saida).with_name("municipios-receita.csv"))
-        con.execute(f"""
-          COPY (
-            SELECT trim(CAST(codigo AS VARCHAR)) AS codigo,
-                   trim(CAST(descricao AS VARCHAR)) AS descricao
-            FROM read_parquet('{municipalities}')
-          ) TO '{Path(municipios_saida).as_posix()}'
-          (HEADER, DELIMITER ';', QUOTE '"', ESCAPE '"');
-        """)
         count = con.execute(
-            f"SELECT count(*) FROM read_csv('{Path(args.saida).as_posix()}', delim=';', header=true, all_varchar=true)"
+            f"SELECT count(*) FROM read_parquet('{Path(args.saida).as_posix()}')"
         ).fetchone()[0]
         print(f"Competência={args.competencia} | UF={uf} | prospects exportados={count} | arquivo={args.saida}")
     finally:
