@@ -84,7 +84,7 @@ async function main() {
       const page = await html(result.url);
       if (!page) continue;
       const evidence = extrairEvidenciasSite(page.finalUrl, page.body);
-      const profileReference = profilesForUf[i]?.perfil ?? "busca-base de moda masculina multimarcas";
+      const profileReference = query;
       const candidate = avaliarCandidatoDescoberto(result, evidence, profileReference);
       if (candidate) byDomain.set(candidate.dominio, candidate);
     }
