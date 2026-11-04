@@ -39,6 +39,23 @@ describe("descoberta comercial", () => {
   it("exige sinal multimarcas ou ao menos duas marcas", () => {
     expect(avaliarCandidatoDescoberto(resultado, { ...evidencia, sinaisMultimarcas: [], marcas: ["Reserva"] }, perfil.perfil)).toBeNull();
   });
+  it("rejeita loja com sinal de categoria incompatível", () => {
+    expect(avaliarCandidatoDescoberto(resultado, { ...evidencia, sinaisExclusao: ["lingerie"] }, perfil.perfil)).toBeNull();
+    expect(avaliarCandidatoDescoberto(resultado, { ...evidencia, sinaisExclusao: ["restaurante"] }, perfil.perfil)).toBeNull();
+  });
+  it("rejeita marca própria sem evidência de revenda de terceiros", () => {
+    expect(avaliarCandidatoDescoberto(resultado, {
+      ...evidencia, sinaisMultimarcas: [], sinaisMarcaPropria: ["marca própria"], marcas: [],
+    }, perfil.perfil)).toBeNull();
+  });
+  it("não aceita lista de marcas sem frase explícita de revenda multimarcas", () => {
+    expect(avaliarCandidatoDescoberto(resultado, { ...evidencia, sinaisMultimarcas: [] }, perfil.perfil)).toBeNull();
+  });
+  it("não aceita loja feminina sem sinal de linha masculina", () => {
+    expect(avaliarCandidatoDescoberto(resultado, {
+      ...evidencia, sinaisModaMasculina: [], sinaisModaFeminina: ["moda feminina"],
+    }, perfil.perfil)).toBeNull();
+  });
   it("classifica achado como candidato para revisão, nunca como lead aprovado", () => {
     const candidate = avaliarCandidatoDescoberto(resultado, evidencia, perfil.perfil);
     expect(candidate?.classificacao).toBe("CANDIDATO_PARA_REVISAO");
