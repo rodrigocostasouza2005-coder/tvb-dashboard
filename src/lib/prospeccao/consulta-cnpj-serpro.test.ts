@@ -20,6 +20,8 @@ describe("consulta CNPJ Serpro", () => {
     expect(record.telefone).toBe("21999999999");
     expect(record.email).toBe("loja@exemplo.com");
     expect(record.cnaePrincipalCodigo).toBe("4781400");
+    expect(record.cnaesSecundarios).toEqual(["4781400 - Vestuário"]);
+    expect(record.situacaoCodigo).toBe("2");
   });
 
   it("does not guess unknown or absent registration status", () => {
@@ -49,9 +51,25 @@ describe("consulta CNPJ Serpro", () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "old", expires_in: 3600 }), { status: 200 }))
       .mockResolvedValueOnce(new Response("unauthorized", { status: 401 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "new", expires_in: 3600 }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ ni: "34238864000168" }), { status: 200 }));
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ni: "34238864000168", situacao_cadastral: { codigo: "2" } }), { status: 200 }));
     const client = criarClienteSerpro({ consumerKey: "key", consumerSecret: "secret", fetchImpl: fetchMock as typeof fetch });
     await client.consultarBasica("34238864000168");
     expect(fetchMock).toHaveBeenCalledTimes(4);
   });
+
+  it("rejects an invalid CNPJ before making any network request", async () => {
+    const fetchMock = vi.fn();
+    const client = criarClienteSerpro({ consumerKey: "key", consumerSecret: "secret", fetchImpl: fetchMock as typeof fetch });
+    await expect(client.consultarBasica("11.111.111/1111-11")).rejects.toThrow("CNPJ_INVALIDO");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a response that omits the CNPJ identity", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "token-test", expires_in: 3600 }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ situacao_cadastral: { codigo: "2" } }), { status: 200 }));
+    const client = criarClienteSerpro({ consumerKey: "key", consumerSecret: "secret", fetchImpl: fetchMock as typeof fetch });
+    await expect(client.consultarBasica("34238864000168")).rejects.toThrow("SERPRO_RESPOSTA_SEM_CNPJ");
+  });
+
 });

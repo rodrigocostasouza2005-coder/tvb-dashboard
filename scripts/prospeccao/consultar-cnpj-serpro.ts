@@ -52,6 +52,12 @@ async function main() {
     tokenUrl: process.env.SERPRO_CNPJ_TOKEN_URL,
   });
 
+  const parseDate = (value: string | null) => {
+    if (!value) return null;
+    const date = new Date(value.length === 10 ? value + "T12:00:00.000Z" : value);
+    return Number.isNaN(date.getTime()) ? null : date;
+  };
+
   let consultados = 0;
   let falhas = 0;
   for (const prospect of prospects) {
@@ -78,6 +84,16 @@ async function main() {
         ...(official.estado ? { estado: official.estado } : {}),
         ...(official.telefone ? { telefone: official.telefone.slice(0, 40) } : {}),
         ...(official.email ? { email: official.email.slice(0, 180) } : {}),
+        situacaoCadastral: official.situacao,
+        situacaoCadastralCodigo: official.situacaoCodigo,
+        situacaoCadastralData: parseDate(official.situacaoData),
+        cnaePrincipalCodigo: official.cnaePrincipalCodigo,
+        cnaePrincipalDescricao: official.cnaePrincipalDescricao,
+        cnaesSecundarios: official.cnaesSecundarios.join("\n").slice(0, 4000) || null,
+        enderecoOficial: official.endereco,
+        cepOficial: official.cep,
+        porteEmpresa: official.porte,
+        dataAbertura: parseDate(official.dataAbertura),
         confiancaPesquisa: "CADASTRAL_OFICIAL",
         pesquisadoEm: new Date(),
         observacoes: [prospect.observacoes ?? "", prospect.razaoSocial ? "Razão social anterior: " + prospect.razaoSocial : "", "Nome fantasia anterior: " + prospect.nomeFantasia, previous].filter(Boolean).join("\n\n").slice(0, 6000),

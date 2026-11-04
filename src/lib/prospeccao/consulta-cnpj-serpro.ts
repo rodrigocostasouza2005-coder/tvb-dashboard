@@ -1,3 +1,5 @@
+import { validarCnpj } from "./cnpj";
+
 export type SerproCnpjResponse = {
   ni?: string;
   nome_empresarial?: string;
@@ -129,8 +131,8 @@ export function criarClienteSerpro(config: SerproConfig) {
   }
 
   async function consultarBasica(cnpj: string): Promise<CnpjOfficialRecord> {
-    const normalized = cnpj.toUpperCase().replace(/[^A-Z0-9]/g, "");
-    if (!/^[A-Z0-9]{12}[0-9]{2}$/.test(normalized)) throw new Error("CNPJ_FORMATO_INVALIDO");
+    const normalized = validarCnpj(cnpj);
+    if (!normalized) throw new Error("CNPJ_INVALIDO_OU_DIGITOS_VERIFICADORES_INCORRETOS");
     for (let attempt = 0; attempt < 2; attempt++) {
       const bearer = await obterToken(attempt === 1);
       const response = await fetcher(apiBase + "/basica/" + encodeURIComponent(normalized), {
@@ -142,7 +144,8 @@ export function criarClienteSerpro(config: SerproConfig) {
       if (!response.ok) throw new Error("SERPRO_CONSULTA_HTTP_" + response.status);
       const data = await response.json() as SerproCnpjResponse;
       const record = mapearConsultaSerpro(data);
-      if (record.cnpj && record.cnpj.toUpperCase() !== normalized) throw new Error("CNPJ_RETORNADO_DIVERGENTE");
+      if (!record.cnpj) throw new Error("SERPRO_RESPOSTA_SEM_CNPJ");
+      if (record.cnpj.toUpperCase() !== normalized) throw new Error("CNPJ_RETORNADO_DIVERGENTE");
       return { ...record, cnpj: normalized };
     }
     throw new Error("SERPRO_NAO_AUTORIZADO");
