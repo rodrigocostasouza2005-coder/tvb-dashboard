@@ -52,9 +52,13 @@ export function avaliarCandidatoDescoberto(
   const masculino = evidencia.sinaisModaMasculina;
   const multi = evidencia.sinaisMultimarcas;
   const marcas = evidencia.marcas;
-  // Não basta CNAE, título ou menção genérica a moda: exige evidência textual no site.
-  if (!masculino.length || (!multi.length && marcas.length < 2)) return null;
-  const score = Math.min(100, 30 + Math.min(35, multi.length * 20) + Math.min(30, marcas.length * 10) + (evidencia.titulo ? 5 : 0));
+  const exclusoes = evidencia.sinaisExclusao ?? [];
+  const marcaPropria = (evidencia.sinaisMarcaPropria?.length ?? 0) > 0;
+  // Exige moda masculina + prova explícita de revenda + pelo menos duas marcas identificadas.
+  if (exclusoes.length || (evidencia.sinaisModaFeminina?.length && !masculino.length)) return null;
+  if (marcaPropria && !(multi.length && marcas.length >= 2)) return null;
+  if (!masculino.length || !multi.length || marcas.length < 2) return null;
+  const score = Math.min(100, 55 + Math.min(30, marcas.length * 10) + (evidencia.titulo ? 5 : 0) + (evidencia.descricao ? 5 : 0));
   return {
     nomeResultado: resultado.titulo || dominio,
     url: evidencia.url,
