@@ -68,7 +68,8 @@ async function main() {
   const cidade = arg("--cidade", "").trim().split(" ").filter(Boolean).join(" ").slice(0, 100);
   const maxQueries = Math.max(1, Math.min(12, Number(arg("--max-queries", "8")) || 8));
   const maxCandidates = Math.max(1, Math.min(2, Number(arg("--max-candidates", "2")) || 2));
-  if (!/^[A-Z]{2}$/.test(uf)) throw new Error("UF inválida.");\n  if (!cidade) throw new Error("Informe --cidade. A prospecção de alta precisão é executada município por município, com no máximo duas lojas aprováveis por localidade.");
+  if (!/^[A-Z]{2}$/.test(uf)) throw new Error("UF inválida.");
+  if (!cidade) throw new Error("Informe --cidade. A prospecção de alta precisão é executada município por município, com no máximo duas lojas aprováveis por localidade.");
 
   const activities = await prisma.atacadoProspectActivity.findMany({
     where: { tipo: "INTERACAO_BRUCE", resultado: { not: null } },
