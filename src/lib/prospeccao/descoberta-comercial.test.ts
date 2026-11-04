@@ -26,6 +26,11 @@ describe("descoberta comercial", () => {
     expect(queries[0]).not.toContain("publica");
     expect(new Set(queries).size).toBe(queries.length);
   });
+  it("restringe consultas à cidade escolhida sem perder a UF", () => {
+    const queries = gerarConsultasDescoberta([perfil], "RJ", 8, "Niterói");
+    expect(queries[0]).toContain("Niterói");
+    expect(queries[0]).toContain("RJ");
+  });
   it("rejeita site sem evidência de moda masculina", () => {
     expect(avaliarCandidatoDescoberto(resultado, { ...evidencia, sinaisModaMasculina: [] }, perfil.perfil)).toBeNull();
   });
