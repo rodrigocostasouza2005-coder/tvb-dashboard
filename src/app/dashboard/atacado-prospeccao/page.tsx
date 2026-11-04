@@ -2,7 +2,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { requireTabAccess } from "@/lib/tabs";
-import { criarProspectAction, atualizarStatusProspectAction } from "./actions";
+import { criarProspectAction, atualizarStatusProspectAction, registrarInteracaoBruceAction } from "./actions";
 import { CsvImportPreview } from "./csv-import-preview";
 
 function classificarAderencia(observacoes: string | null) {
@@ -35,7 +35,7 @@ const STATUS: Record<string, string> = {
 export default async function AtacadoProspeccaoPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; grupo?: string; cidade?: string; uf?: string; erro?: string; criado?: string; importacao?: string; novos?: string; duplicados?: string; invalidos?: string }>;
+  searchParams: Promise<{ status?: string; grupo?: string; cidade?: string; uf?: string; erro?: string; criado?: string; importacao?: string; novos?: string; duplicados?: string; invalidos?: string; bruce?: string }>;
 }) {
   const user = await getSessionUser();
   if (!user) return null;
@@ -57,7 +57,7 @@ export default async function AtacadoProspeccaoPage({
     where,
     orderBy: [{ updatedAt: "desc" }],
     take: 250,
-    include: { activities: { orderBy: { createdAt: "desc" }, take: 1 } },
+    include: { activities: { orderBy: { createdAt: "desc" }, take: 3 } },
   });
 
   const [total, novos, emPesquisa, qualificados, contatados, grupoA, grupoB, grupoC, grupoD, cidades] = await Promise.all([
@@ -97,7 +97,9 @@ export default async function AtacadoProspeccaoPage({
         <Link href="/dashboard/atacado" className="text-sm text-[var(--text-secondary)] underline">Voltar para Atacado</Link>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      {params.bruce === "registrado" && <p role="status" className="rounded-md border border-green-600/40 px-3 py-2 text-sm text-green-700">Interação registrada no histórico do Radar.</p>}
+      {params.bruce === "erro" && <p role="alert" className="rounded-md border border-red-500/40 px-3 py-2 text-sm text-red-600">Não foi possível registrar a interação. Confira os campos e tente novamente.</p>}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
         {[
           ["Prospectos", total],
           ["Novos", novos],
@@ -251,7 +253,38 @@ export default async function AtacadoProspeccaoPage({
                   </td>
                   <td className="px-4 py-3 text-[var(--text-secondary)]">{p.origem.replaceAll("_", " ")}</td>
                   <td className="px-4 py-3">
-                    <form action={atualizarStatusProspectAction} className="flex min-w-44 items-center gap-1">
+                    <details className="mt-2">
+                      <summary className="cursor-pointer text-[11px] text-[var(--text-secondary)] underline">Histórico recente ({p.activities.length})</summary>
+                      <div className="mt-2 space-y-2">
+                        {p.activities.map((activity) => <div key={activity.id} className="rounded border border-[var(--border)] p-2 text-[11px]">
+                          <div className="font-medium">{activity.tipo.replaceAll("_", " ")}{activity.resultado ? ` · ${activity.resultado.replaceAll("_", " ")}` : ""}</div>
+                          <div className="mt-0.5 text-[var(--text-secondary)]">{activity.descricao}</div>
+                          <div className="mt-0.5 text-[var(--text-muted)]">{activity.createdAt.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })}</div>
+                        </div>)}
+                      </div>
+                    </details>
+                    <details className="mt-2">
+                      <summary className="cursor-pointer text-[11px] font-medium text-[var(--series-1)] underline">Bruce · Registrar interação</summary>
+                      <form action={registrarInteracaoBruceAction} className="mt-2 min-w-48 space-y-2">
+                        <input type="hidden" name="prospectId" value={p.id} />
+                        <textarea name="descricao" required maxLength={1200} rows={2} placeholder="O que aconteceu na conversa?" className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-xs" />
+                        <select name="resultado" defaultValue="" className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-xs">
+                          <option value="">Resultado (opcional)</option>
+                          {["INTERESSADO","SEM_RESPOSTA","RECUSOU","PEDIU_CATALOGO","PEDIU_PRECO","NEGOCIANDO","PEDIDO_REALIZADO","RECOMPRA","SEM_ADERENCIA","DADOS_INVALIDOS","OUTRO"].map((item) => <option key={item} value={item}>{item.replaceAll("_", " ")}</option>)}
+                        </select>
+                        <select name="canal" defaultValue="" className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-xs">
+                          <option value="">Canal (opcional)</option>
+                          {["TELEFONE","EMAIL","INSTAGRAM","WHATSAPP","PRESENCIAL","OUTRO"].map((item) => <option key={item} value={item}>{item}</option>)}
+                        </select>
+                        <input name="etapa" maxLength={80} placeholder="Etapa (opcional)" className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-xs" />
+                        <select name="status" defaultValue="" className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-xs">
+                          <option value="">Manter status atual</option>
+                          {Object.entries(STATUS).filter(([key]) => key !== "CONVERTIDO").map(([key,label]) => <option key={key} value={key}>{label}</option>)}
+                        </select>
+                        <button type="submit" className="w-full rounded-md border border-[var(--series-1)] px-2 py-1.5 text-xs font-medium">Salvar no Radar</button>
+                      </form>
+                    </details>
+                    <form action={atualizarStatusProspectAction} className="mt-2 flex min-w-44 items-center gap-1">
                       <input type="hidden" name="prospectId" value={p.id} />
                       <select name="status" defaultValue={p.status} aria-label="Status do prospecto" className="min-w-0 flex-1 rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1 text-xs">
                         {Object.entries(STATUS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
