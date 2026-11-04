@@ -140,8 +140,11 @@ export default async function AtacadoProspeccaoPage({
           <label className="text-xs text-[var(--text-secondary)]">E-mail comercial
             <input name="email" type="email" maxLength={180} className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2 text-sm text-[var(--text-primary)]" />
           </label>
-          <label className="text-xs text-[var(--text-secondary)]">Site / Instagram
-            <input name="site" maxLength={500} placeholder="https://" className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2 text-sm text-[var(--text-primary)]" />
+          <label className="text-xs text-[var(--text-secondary)]">Site oficial
+            <input name="site" type="url" maxLength={500} placeholder="https://www.loja.com.br" className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2 text-sm text-[var(--text-primary)]" />
+          </label>
+          <label className="text-xs text-[var(--text-secondary)]">Instagram da loja
+            <input name="instagram" type="url" maxLength={500} placeholder="https://www.instagram.com/loj a/" className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2 text-sm text-[var(--text-primary)]" />
           </label>
           <label className="text-xs text-[var(--text-secondary)]">Link da evidência / origem
             <input name="evidenciaUrl" type="url" maxLength={1000} placeholder="https://" className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2 text-sm text-[var(--text-primary)]" />
@@ -168,7 +171,7 @@ export default async function AtacadoProspeccaoPage({
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 className="text-sm font-semibold">Importar lista de lojas (CSV)</h2>
-            <p className="mt-1 text-xs text-[var(--text-muted)]">Até 500 linhas e 900 KB. Colunas aceitas: nome_fantasia (obrigatória), razao_social, cnpj, cidade, uf, telefone, email, site e evidencia_url.</p>
+            <p className="mt-1 text-xs text-[var(--text-muted)]">Até 500 linhas e 900 KB. Colunas aceitas: nome_fantasia (obrigatória), razao_social, cnpj, cidade, uf, telefone, email, site, instagram e evidencia_url.</p>
           </div>
           <a href="/exemplos/modelo-prospeccao-atacado.csv" className="text-xs underline text-[var(--text-secondary)]">Baixar modelo CSV</a>
         </div>
