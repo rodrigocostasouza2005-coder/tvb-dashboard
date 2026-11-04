@@ -58,7 +58,8 @@ export function avaliarCandidatoDescoberto(
   const marcaPropria = (evidencia.sinaisMarcaPropria?.length ?? 0) > 0;
   // Exige moda masculina + prova explícita de revenda + pelo menos duas marcas identificadas.
   if (exclusoes.length || (evidencia.sinaisModaFeminina?.length && !masculino.length)) return null;
-  // O nome público da loja também precisa apontar para surf/skate; segmento citado só no rodapé não basta.\n  if (!nomeSegmento) return null;
+  // O nome público da loja também precisa apontar para surf/skate; segmento citado só no rodapé não basta.
+  if (!nomeSegmento) return null;
   if (marcaPropria) return null;
   if (!masculino.length || !multi.length || marcas.length < 2) return null;
   const score = Math.min(100, 60 + Math.min(25, marcas.length * 8) + (nomeSegmento ? 10 : 0) + (evidencia.descricao ? 5 : 0));
