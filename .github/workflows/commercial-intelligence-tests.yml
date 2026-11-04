@@ -11,7 +11,7 @@ on:
       - "vitest.config.ts"
       - "package.json"
       - "package-lock.json"
-      - ".github/workflows/commercial-intelligence-tests.yml"
+      - ".github/workflows/**"
 
 permissions:
   contents: read
