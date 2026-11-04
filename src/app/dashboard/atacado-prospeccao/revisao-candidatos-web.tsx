@@ -45,7 +45,7 @@ function parseCsv(text: string): string[][] {
   return rows;
 }
 
-function parseList(value: string): string[] {
+function isSafeHttpUrl(value: string): boolean {\n  try { const url = new URL(value); return (url.protocol === "https:" || url.protocol === "http:") && !url.username && !url.password; } catch { return false; }\n}\n\nfunction parseList(value: string): string[] {
   return value.split(";").map((item) => item.trim()).filter(Boolean);
 }
 
@@ -87,7 +87,7 @@ export function RevisaoCandidatosWeb({ defaultUf = "RJ" }: { defaultUf?: string 
           estado: defaultUf.toUpperCase(),
           selecionado: false,
         };
-      }).filter((candidate) => candidate.classificacao === "CANDIDATO_PARA_REVISAO" && candidate.url && candidate.nomeFantasia);
+      }).filter((candidate) => candidate.classificacao === "CANDIDATO_PARA_REVISAO" && isSafeHttpUrl(candidate.url) && candidate.nomeFantasia);
       if (!parsed.length) throw new Error("Nenhum candidato válido para revisão foi encontrado.");
       setCandidates(parsed);
       setFileName(file.name);
