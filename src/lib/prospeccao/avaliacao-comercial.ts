@@ -38,10 +38,10 @@ export function avaliarEvidenciasComerciais(input: {
   const identidade = input.confiancaIdentidade;
   const motivosDesqualificacao: string[] = [];
   if (exclusoes.length) motivosDesqualificacao.push(`atividade/categoria incompatível identificada: ${exclusoes.join(", ")}`);
-  if (marcaPropria && !multimarcas) motivosDesqualificacao.push("indícios de marca/fabricação própria sem evidência de revenda de marcas de terceiros");
+  if (marcaPropria) motivosDesqualificacao.push("indícios de produção, fabricação ou marca própria; o perfil exigido é revendedor de terceiros");
   if (sinaisFemininos.length && !masculina) motivosDesqualificacao.push("evidência de moda feminina sem evidência de linha masculina");
 
-  const bloqueada = exclusoes.length > 0 || (marcaPropria && !multimarcas) || (sinaisFemininos.length > 0 && !masculina);
+  const bloqueada = exclusoes.length > 0 || marcaPropria || (sinaisFemininos.length > 0 && !masculina);
   const scoreEvidencia = identidade === "BAIXA" || !ev || bloqueada ? 0 :
     (identidade === "ALTA" ? 20 : 12) +
     (masculina ? 35 : 0) +
@@ -75,7 +75,7 @@ export function avaliarEvidenciasComerciais(input: {
     `identidade do site: ${identidade}`,
     masculina ? `moda masculina: evidência textual (${ev?.sinaisModaMasculina.join(", ")})` : "moda masculina: não comprovada",
     multimarcas ? `revenda multimarcas: sinal explícito (${sinaisMulti.join(", ")}) e marcas identificadas (${marcas.join(", ")})` : "revenda multimarcas: não comprovada; marcas citadas isoladamente não bastam",
-    marcaPropria ? `sinais de marca própria: ${ev?.sinaisMarcaPropria?.join(", ")}` : "sem sinal textual de marca própria",
+    marcaPropria ? `sinais de produção/marca própria: ${ev?.sinaisMarcaPropria?.join(", ")}` : "sem sinal textual de fabricação própria",
     exclusoes.length ? `bloqueios: ${exclusoes.join(", ")}` : "nenhuma categoria incompatível detectada",
     sinaisFemininos.length ? `sinais de moda feminina: ${sinaisFemininos.join(", ")}` : "sem sinal específico de moda feminina",
     cadastro,
