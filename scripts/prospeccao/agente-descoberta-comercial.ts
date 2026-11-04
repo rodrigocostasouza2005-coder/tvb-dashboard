@@ -67,7 +67,7 @@ async function main() {
     segmentoComercial: a.prospect.segmentoComercial, perfilLoja: a.prospect.perfilLoja,
     faixaPreco: a.prospect.faixaPreco, estado: a.prospect.estado, status: a.prospect.status,
   })));
-  const queries = gerarConsultasDescoberta(profiles.filter((p) => !p.atributos.estado || p.atributos.estado === uf), uf, maxQueries);
+  const profilesForUf = profiles.filter((p) => !p.atributos.estado || p.atributos.estado === uf);\n  const queries = gerarConsultasDescoberta(profilesForUf, uf, maxQueries);
   console.log(`RADAR DESCOBERTA | UF=${uf} | perfis aprendidos=${profiles.length} | consultas=${queries.length} | modo=ARQUIVOS PARA REVISÃO (somente leitura)`);
 
   const byDomain = new Map<string, CandidatoDescoberto>();
@@ -83,7 +83,7 @@ async function main() {
       const page = await html(result.url);
       if (!page) continue;
       const evidence = extrairEvidenciasSite(page.finalUrl, page.body);
-      const profileReference = profiles[i]?.perfil ?? "busca-base de moda masculina multimarcas";
+      const profileReference = profilesForUf[i]?.perfil ?? "busca-base de moda masculina multimarcas";
       const candidate = avaliarCandidatoDescoberto(result, evidence, profileReference);
       if (candidate) byDomain.set(candidate.dominio, candidate);
     }
