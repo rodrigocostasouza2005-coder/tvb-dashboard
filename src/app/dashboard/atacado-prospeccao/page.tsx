@@ -49,12 +49,15 @@ export default async function AtacadoProspeccaoPage({
   const grupos = ["A", "B", "C", "D", "PENDENTE"];
   const grupo = params.grupo && grupos.includes(params.grupo) ? params.grupo : undefined;
   const uf = params.uf && /^[A-Z]{2}$/.test(params.uf.toUpperCase()) ? params.uf.toUpperCase() : undefined;
-  const cidade = params.cidade?.trim().slice(0, 100) || undefined;\n  const cadastroValores = ["ATIVA", "SUSPENSA", "INAPTA", "BAIXADA", "NULA", "NAO_INFORMADA"];\n  const cadastro = params.cadastro && cadastroValores.includes(params.cadastro) ? params.cadastro : undefined;
+  const cidade = params.cidade?.trim().slice(0, 100) || undefined;
+  const cadastroValores = ["ATIVA", "SUSPENSA", "INAPTA", "BAIXADA", "NULA", "NAO_INFORMADA"];
+  const cadastro = params.cadastro && cadastroValores.includes(params.cadastro) ? params.cadastro : undefined;
   const where = {
     ...(status ? { status } : {}),
     ...(grupo ? { grupoComercial: grupo } : {}),
     ...(uf ? { estado: uf } : {}),
-    ...(cidade ? { cidade: { contains: cidade, mode: "insensitive" as const } } : {}),\n    ...(cadastro ? { situacaoCadastral: cadastro } : {}),
+    ...(cidade ? { cidade: { contains: cidade, mode: "insensitive" as const } } : {}),
+    ...(cadastro ? { situacaoCadastral: cadastro } : {}),
   };
   const prospects = await prisma.atacadoProspect.findMany({
     where,
