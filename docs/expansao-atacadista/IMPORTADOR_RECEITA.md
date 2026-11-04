@@ -75,3 +75,30 @@ A automação não deve ser ligada até existir:
 7. aprovação operacional do piloto.
 
 A base só muda quando a Receita publica uma nova competência. Não prometer atualização semanal dos próprios dados.
+
+
+## Downloader retomável da Receita
+
+O script `scripts/prospeccao/baixar_receita_cnpj.py` consulta o diretório público da Receita via WebDAV/Nextcloud, identifica a competência mais recente e lista os ZIPs das famílias selecionadas. Ele não extrai os arquivos.
+
+Prévia segura (padrão; não baixa nada):
+
+```bash
+python scripts/prospeccao/baixar_receita_cnpj.py --dry-run
+```
+
+Baixar os arquivos de estabelecimentos e empresas, com limite de 12 GiB:
+
+```bash
+python scripts/prospeccao/baixar_receita_cnpj.py --familias estabelecimentos empresas --limite-gb 12 --download
+```
+
+Para baixar também municípios:
+
+```bash
+python scripts/prospeccao/baixar_receita_cnpj.py --familias estabelecimentos empresas municipios --limite-gb 12 --download
+```
+
+Os arquivos são salvos em `dados/receita-cnpj/AAAA-MM`. O download usa arquivo temporário `.part`, tenta retomar via HTTP Range, valida tamanho informado pelo servidor e testa CRC do ZIP antes de renomear para o nome final. Arquivos já íntegros são reaproveitados. Se o servidor não suportar retomada, o download reinicia do começo.
+
+**Atenção:** o layout público da Receita pode mudar. A primeira execução deve ser feita em `--dry-run` para confirmar competência, nomes e tamanhos exibidos. O downloader não é executado no GitHub Actions/Vercel e não envia dados ao Neon. O caminho remoto padrão e o token público são configuráveis por `--remote-path` e `--token`. O limite é uma proteção operacional, não estimativa do tamanho futuro da base.
