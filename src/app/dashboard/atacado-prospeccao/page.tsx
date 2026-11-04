@@ -2,7 +2,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { requireTabAccess } from "@/lib/tabs";
-import { criarProspectAction, atualizarStatusProspectAction, registrarInteracaoBruceAction } from "./actions";
+import { criarProspectAction, atualizarStatusProspectAction, registrarInteracaoBruceAction, atualizarPresencaDigitalProspectAction } from "./actions";
 import { CsvImportPreview } from "./csv-import-preview";
 import { ProspeccaoRadarConsole } from "./prospeccao-radar-console";
 import { RevisaoCandidatosWeb } from "./revisao-candidatos-web";
@@ -40,7 +40,7 @@ const STATUS: Record<string, string> = {
 export default async function AtacadoProspeccaoPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; grupo?: string; cidade?: string; uf?: string; erro?: string; criado?: string; importacao?: string; novos?: string; duplicados?: string; invalidos?: string; bruce?: string; revisao?: string; cadastro?: string }>;
+  searchParams: Promise<{ status?: string; grupo?: string; cidade?: string; uf?: string; erro?: string; criado?: string; importacao?: string; novos?: string; duplicados?: string; invalidos?: string; bruce?: string; revisao?: string; cadastro?: string; presenca?: string }>;
 }) {
   const user = await getSessionUser();
   if (!user) return null;
@@ -98,6 +98,8 @@ export default async function AtacadoProspeccaoPage({
     <div className="space-y-6">
       {params.bruce === "registrado" && <p role="status" className="rounded-md border border-green-600/40 px-3 py-2 text-sm text-green-700">Interação registrada no histórico do Radar.</p>}
       {params.bruce === "erro" && <p role="alert" className="rounded-md border border-red-500/40 px-3 py-2 text-sm text-red-600">Não foi possível registrar a interação. Confira os campos e tente novamente.</p>}
+      {params.presenca === "salva" && <p role="status" className="rounded-md border border-green-600/40 px-3 py-2 text-sm text-green-700">Presença digital salva no cadastro da loja.</p>}
+      {params.presenca === "erro" && <p role="alert" className="rounded-md border border-red-500/40 px-3 py-2 text-sm text-red-600">Não foi possível salvar. Use URLs completas iniciadas por http:// ou https://.</p>}
       <ProspeccaoRadarConsole total={total} novos={novos} emPesquisa={emPesquisa} qualificados={qualificados} contatados={contatados} />
       <CoastalProspectingMap selectedUf={uf ?? ""} selectedCity={cidade ?? ""} cities={cidades.map((item) => item.cidade).filter((value): value is string => Boolean(value))} stateCounts={stateCounts} />
       {params.revisao === "concluida" && <p role="status" className="border border-green-600/40 px-3 py-2 text-sm text-green-700">Revisão concluída: {params.novos ?? "0"} candidatos incluídos na fila de qualificação; {params.duplicados ?? "0"} duplicados ignorados.</p>}
@@ -140,8 +142,11 @@ export default async function AtacadoProspeccaoPage({
           <label className="text-xs text-[var(--text-secondary)]">E-mail comercial
             <input name="email" type="email" maxLength={180} className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2 text-sm text-[var(--text-primary)]" />
           </label>
-          <label className="text-xs text-[var(--text-secondary)]">Site / Instagram
-            <input name="site" maxLength={500} placeholder="https://" className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2 text-sm text-[var(--text-primary)]" />
+          <label className="text-xs text-[var(--text-secondary)]">Site oficial
+            <input name="site" type="url" maxLength={500} placeholder="https://www.loja.com.br" className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2 text-sm text-[var(--text-primary)]" />
+          </label>
+          <label className="text-xs text-[var(--text-secondary)]">Instagram da loja
+            <input name="instagram" type="url" maxLength={500} placeholder="https://www.instagram.com/sualoja/" className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2 text-sm text-[var(--text-primary)]" />
           </label>
           <label className="text-xs text-[var(--text-secondary)]">Link da evidência / origem
             <input name="evidenciaUrl" type="url" maxLength={1000} placeholder="https://" className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2 text-sm text-[var(--text-primary)]" />
@@ -168,7 +173,7 @@ export default async function AtacadoProspeccaoPage({
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 className="text-sm font-semibold">Importar lista de lojas (CSV)</h2>
-            <p className="mt-1 text-xs text-[var(--text-muted)]">Até 500 linhas e 900 KB. Colunas aceitas: nome_fantasia (obrigatória), razao_social, cnpj, cidade, uf, telefone, email, site e evidencia_url.</p>
+            <p className="mt-1 text-xs text-[var(--text-muted)]">Até 500 linhas e 900 KB. Colunas aceitas: nome_fantasia (obrigatória), razao_social, cnpj, cidade, uf, telefone, email, site, instagram e evidencia_url.</p>
           </div>
           <a href="/exemplos/modelo-prospeccao-atacado.csv" className="text-xs underline text-[var(--text-secondary)]">Baixar modelo CSV</a>
         </div>
@@ -276,6 +281,34 @@ export default async function AtacadoProspeccaoPage({
                     </details>
                     <details className="mt-2">
                       <summary className="cursor-pointer text-[11px] font-medium text-[var(--series-1)] underline">Bruce · Registrar interação</summary>
+                      <div className="mt-2 min-w-48 space-y-2">
+                        <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Acesso rápido da loja</div>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <a
+                            href={p.site && /^https?:\/\//i.test(p.site) ? p.site : `https://www.google.com/search?q=${encodeURIComponent(`${p.nomeFantasia} ${p.cidade ?? ""} ${p.estado ?? ""} site oficial`)}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center justify-center rounded-md border border-[var(--border)] px-2 py-2 text-[11px] font-medium text-[var(--text-primary)] hover:border-[var(--series-1)]"
+                          >{p.site && /^https?:\/\//i.test(p.site) ? "Abrir site ↗" : "Buscar site ↗"}</a>
+                          <a
+                            href={p.instagram && /^https?:\/\//i.test(p.instagram) ? p.instagram : `https://www.google.com/search?q=${encodeURIComponent(`site:instagram.com ${p.nomeFantasia} ${p.cidade ?? ""} ${p.estado ?? ""}`)}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center justify-center rounded-md border border-[var(--border)] px-2 py-2 text-[11px] font-medium text-[var(--text-primary)] hover:border-[var(--series-1)]"
+                          >{p.instagram && /^https?:\/\//i.test(p.instagram) ? "Abrir Instagram ↗" : "Buscar Instagram ↗"}</a>
+                        </div>
+                        <p className="text-[10px] text-[var(--text-muted)]">Os links abrem em nova aba. Se ainda não houver endereço cadastrado, o Radar abre uma pesquisa para localizar o perfil ou site correto.</p>
+                        <form action={atualizarPresencaDigitalProspectAction} className="space-y-1.5 rounded-md border border-[var(--border)] p-2">
+                          <input type="hidden" name="prospectId" value={p.id} />
+                          <label className="block text-[10px] text-[var(--text-secondary)]">Salvar site oficial
+                            <input name="site" type="url" maxLength={500} defaultValue={p.site ?? ""} placeholder="https://www.loja.com.br" className="mt-0.5 w-full rounded border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-[11px]" />
+                          </label>
+                          <label className="block text-[10px] text-[var(--text-secondary)]">Salvar Instagram
+                            <input name="instagram" type="url" maxLength={500} defaultValue={p.instagram ?? ""} placeholder="https://www.instagram.com/loja/" className="mt-0.5 w-full rounded border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-[11px]" />
+                          </label>
+                          <button type="submit" className="w-full rounded border border-[var(--series-1)] px-2 py-1.5 text-[11px] font-medium">Salvar links no cadastro</button>
+                        </form>
+                      </div>
                       <form action={registrarInteracaoBruceAction} className="mt-2 min-w-48 space-y-2">
                         <input type="hidden" name="prospectId" value={p.id} />
                         <textarea name="descricao" required maxLength={1200} rows={2} placeholder="O que aconteceu na conversa?" className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-xs" />
