@@ -5,6 +5,23 @@ import { requireTabAccess } from "@/lib/tabs";
 import { criarProspectAction, atualizarStatusProspectAction } from "./actions";
 import { CsvImportPreview } from "./csv-import-preview";
 
+function classificarAderencia(observacoes: string | null) {
+  const texto = observacoes ?? "";
+  if (texto.includes("Correspondência CNAE: atividade secundária") || texto.includes("Atividade secundária de varejo de moda/acessórios")) {
+    return { label: "Revisar", detalhe: "Moda aparece como atividade secundária", nivel: "revisar" as const };
+  }
+  if (texto.includes("CNAE principal: 4781400")) {
+    return { label: "Alta aderência", detalhe: "Vestuário e acessórios como atividade principal", nivel: "alto" as const };
+  }
+  if (texto.includes("CNAE principal: 4782201") || texto.includes("CNAE principal: 4782202")) {
+    return { label: "Complementar", detalhe: "Calçados ou artigos de viagem como atividade principal", nivel: "medio" as const };
+  }
+  if (texto.includes("CNAE principal: 4789001")) {
+    return { label: "Baixa aderência", detalhe: "Bijuterias e suvenires como atividade principal", nivel: "baixo" as const };
+  }
+  return { label: "Não classificado", detalhe: "Cadastro manual ou sem CNAE disponível", nivel: "neutro" as const };
+}
+
 const STATUS: Record<string, string> = {
   NOVO: "Novo",
   EM_QUALIFICACAO: "Em qualificação",
@@ -157,6 +174,7 @@ export default async function AtacadoProspeccaoPage({
               <tr>
                 <th className="px-4 py-3 font-medium">Loja</th>
                 <th className="px-4 py-3 font-medium">Localização</th>
+                <th className="px-4 py-3 font-medium">Aderência</th>
                 <th className="px-4 py-3 font-medium">Contato</th>
                 <th className="px-4 py-3 font-medium">Origem</th>
                 <th className="px-4 py-3 font-medium">Status</th>
@@ -172,7 +190,20 @@ export default async function AtacadoProspeccaoPage({
                     {p.evidenciaUrl && <a href={p.evidenciaUrl} target="_blank" rel="noreferrer" className="mt-1 inline-block text-xs underline text-[var(--text-secondary)]">Ver evidência</a>}
                   </td>
                   <td className="px-4 py-3 text-[var(--text-secondary)]">{[p.cidade, p.estado].filter(Boolean).join(" / ") || "—"}</td>
-                  <td className="px-4 py-3 text-[var(--text-secondary)]">{p.telefone || p.email || "—"}</td>
+                  <td className="px-4 py-3">
+                    {(() => {
+                      const fit = classificarAderencia(p.observacoes);
+                      return <div title={fit.detalhe} className="text-xs">
+                        <span className={fit.nivel === "alto" ? "font-semibold text-emerald-700" : fit.nivel === "revisar" ? "font-semibold text-amber-700" : "text-[var(--text-secondary)]"}>{fit.label}</span>
+                        <div className="mt-0.5 max-w-48 text-[11px] text-[var(--text-muted)]">{fit.detalhe}</div>
+                      </div>;
+                    })()}
+                  </td>
+                  <td className="px-4 py-3 text-xs text-[var(--text-secondary)]">
+                    {p.telefone && <div>{p.telefone}</div>}
+                    {p.email && <div className="mt-1 break-all">{p.email}</div>}
+                    {!p.telefone && !p.email && "—"}
+                  </td>
                   <td className="px-4 py-3 text-[var(--text-secondary)]">{p.origem.replaceAll("_", " ")}</td>
                   <td className="px-4 py-3">
                     <form action={atualizarStatusProspectAction} className="flex min-w-44 items-center gap-1">
@@ -186,7 +217,7 @@ export default async function AtacadoProspeccaoPage({
                   <td className="whitespace-nowrap px-4 py-3 text-xs text-[var(--text-muted)]">{p.updatedAt.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" })}</td>
                 </tr>
               ))}
-              {prospects.length === 0 && <tr><td colSpan={6} className="px-4 py-8 text-center text-sm text-[var(--text-muted)]">Nenhum prospecto cadastrado. Comece adicionando uma loja ou importe uma base numa próxima etapa.</td></tr>}
+              {prospects.length === 0 && <tr><td colSpan={7} className="px-4 py-8 text-center text-sm text-[var(--text-muted)]">Nenhum prospecto cadastrado. Comece adicionando uma loja ou importe uma base numa próxima etapa.</td></tr>}
             </tbody>
           </table>
         </div>

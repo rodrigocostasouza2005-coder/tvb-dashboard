@@ -121,3 +121,20 @@ npm run prospeccao:importar-receita -- --arquivo dados/prospects.csv --competenc
 O importador exige nome fantasia, CNPJ e UF; remove CNPJs repetidos no próprio arquivo; grava em lotes de 400; ignora CNPJs já existentes sem atualizar cadastros revisados. Competência, CNAE e porte são preservados em observações. A origem fica marcada como `receita_federal_dados_abertos`. O modo padrão é prévia; `--apply` é obrigatório para gravar.
 
 **Atenção:** confirme que `DATABASE_URL` aponta para o ambiente desejado. Este comando não baixa nem extrai os arquivos da Receita e não comprova que o estabelecimento é uma multimarcas adequada à TVB.
+
+
+## Classificação de aderência comercial (nov/2026)
+
+A extração Parquet diferencia explicitamente:
+- `cnae_principal`: atividade principal cadastrada no CNPJ;
+- `cnae_correspondente`: CNAE de vestuário/acessórios encontrado na atividade principal ou secundária;
+- `tipo_correspondencia`: `PRINCIPAL` ou `SECUNDARIO`.
+
+A classificação exibida no painel é **preliminar e baseada apenas no CNAE**, não comprova que a empresa seja uma multimarcas masculina nem que tenha interesse em comprar da TVB:
+- Alta aderência: CNAE 4781400 como atividade principal;
+- Complementar: calçados ou artigos de viagem como atividade principal;
+- Baixa aderência: bijuterias/suvenires como atividade principal;
+- Revisar: CNAE de moda encontrado somente entre atividades secundárias;
+- Não classificado: cadastro manual ou sem CNAE registrado.
+
+Não usar a etiqueta como decisão automática de contato. A próxima etapa comercial deve validar nome fantasia, presença digital, mix masculino e operação real da loja antes de promover o lead para qualificado.

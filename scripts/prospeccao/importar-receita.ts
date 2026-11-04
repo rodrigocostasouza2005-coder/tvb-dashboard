@@ -22,6 +22,8 @@ type ProspectRow = {
   email: string;
   site: string;
   cnae_principal: string;
+  cnae_correspondente: string;
+  tipo_correspondencia: string;
   cnae_descricao: string;
   porte: string;
   origem: string;
@@ -74,6 +76,8 @@ function parseCsv(raw: string): ProspectRow[] {
       email: get("email").toLowerCase(),
       site: get("site"),
       cnae_principal: get("cnae_principal"),
+      cnae_correspondente: get("cnae_correspondente"),
+      tipo_correspondencia: get("tipo_correspondencia").toUpperCase(),
       cnae_descricao: get("cnae_descricao"),
       porte: get("porte"),
       origem: get("origem"),
@@ -140,6 +144,8 @@ async function main() {
           observacoes: [
             `Coleta cadastral Receita Federal — competência ${competence}`,
             row.cnae_principal ? `CNAE principal: ${row.cnae_principal}` : "",
+            row.cnae_correspondente ? `CNAE de moda identificado: ${row.cnae_correspondente}` : "",
+            row.tipo_correspondencia === "PRINCIPAL" ? "Correspondência CNAE: atividade principal" : "Correspondência CNAE: atividade secundária — validar aderência comercial",
             row.cnae_descricao,
             row.porte ? `Porte cadastral: ${row.porte}` : "",
             "Lead cadastral não verificado comercialmente.",

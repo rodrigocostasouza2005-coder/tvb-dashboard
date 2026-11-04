@@ -76,11 +76,29 @@ def main() -> int:
         '' AS site,
         f.cnae_fiscal_principal AS cnae_principal,
         CASE
-          WHEN f.cnae_fiscal_principal = '4781400' THEN 'Comércio varejista de artigos do vestuário e acessórios'
-          WHEN f.cnae_fiscal_principal = '4782201' THEN 'Comércio varejista de calçados'
-          WHEN f.cnae_fiscal_principal = '4782202' THEN 'Comércio varejista de artigos de viagem'
-          WHEN f.cnae_fiscal_principal = '4789001' THEN 'Comércio varejista de suvenires, bijuterias e artesanatos'
-          ELSE 'Atividade secundária de varejo de moda/acessórios'
+          WHEN f.cnae_fiscal_principal IN ('4781400', '4782201', '4782202', '4789001') THEN f.cnae_fiscal_principal
+          ELSE (
+            SELECT trim(code)
+            FROM unnest(string_split(coalesce(f.cnae_fiscal_secundaria, ''), ',')) x(code)
+            WHERE trim(code) IN ('4781400', '4782201', '4782202', '4789001')
+            LIMIT 1
+          )
+        END AS cnae_correspondente,
+        CASE WHEN f.cnae_fiscal_principal IN ('4781400', '4782201', '4782202', '4789001') THEN 'PRINCIPAL' ELSE 'SECUNDARIO' END AS tipo_correspondencia,
+        CASE
+          WHEN f.cnae_fiscal_principal = '4781400' OR EXISTS (
+            SELECT 1 FROM unnest(string_split(coalesce(f.cnae_fiscal_secundaria, ''), ',')) x(code)
+            WHERE trim(code) = '4781400'
+          ) THEN 'Comércio varejista de artigos do vestuário e acessórios'
+          WHEN f.cnae_fiscal_principal = '4782201' OR EXISTS (
+            SELECT 1 FROM unnest(string_split(coalesce(f.cnae_fiscal_secundaria, ''), ',')) x(code)
+            WHERE trim(code) = '4782201'
+          ) THEN 'Comércio varejista de calçados'
+          WHEN f.cnae_fiscal_principal = '4782202' OR EXISTS (
+            SELECT 1 FROM unnest(string_split(coalesce(f.cnae_fiscal_secundaria, ''), ',')) x(code)
+            WHERE trim(code) = '4782202'
+          ) THEN 'Comércio varejista de artigos de viagem'
+          ELSE 'Comércio varejista de suvenires, bijuterias e artesanatos'
         END AS cnae_descricao,
         coalesce(e.porte_empresa, '') AS porte,
         'receita_federal_dados_abertos' AS origem,
