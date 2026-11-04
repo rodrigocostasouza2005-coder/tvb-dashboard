@@ -7,6 +7,8 @@ import { CsvImportPreview } from "./csv-import-preview";
 import { ProspeccaoRadarConsole } from "./prospeccao-radar-console";
 import { RevisaoCandidatosWeb } from "./revisao-candidatos-web";
 import { ProspectFilters } from "./prospect-filters";
+import { CoastalProspectingMap } from "./coastal-prospecting-map";
+import { ESTADOS_BRASIL } from "@/lib/prospeccao/estados-litoraneos";
 
 function classificarAderencia(observacoes: string | null) {
   const texto = observacoes ?? "";
@@ -79,6 +81,8 @@ export default async function AtacadoProspeccaoPage({
     prisma.atacadoProspect.findMany({ where: { estado: uf ?? "RJ" }, distinct: ["cidade"], select: { cidade: true }, orderBy: { cidade: "asc" }, take: 300 }),
   ]);
 
+  const stateCounts = Object.fromEntries(await Promise.all(ESTADOS_BRASIL.filter((state) => state.litoraneo).map(async (state) => [state.uf, await prisma.atacadoProspect.count({ where: { estado: state.uf } })] as const)));
+
   const erro = params.erro;
   const erroTexto = erro === "nome" ? "Informe o nome da loja."
     : erro === "cnpj" ? "Informe um CNPJ com 14 caracteres válidos."
@@ -95,6 +99,7 @@ export default async function AtacadoProspeccaoPage({
       {params.bruce === "registrado" && <p role="status" className="rounded-md border border-green-600/40 px-3 py-2 text-sm text-green-700">Interação registrada no histórico do Radar.</p>}
       {params.bruce === "erro" && <p role="alert" className="rounded-md border border-red-500/40 px-3 py-2 text-sm text-red-600">Não foi possível registrar a interação. Confira os campos e tente novamente.</p>}
       <ProspeccaoRadarConsole total={total} novos={novos} emPesquisa={emPesquisa} qualificados={qualificados} contatados={contatados} />
+      <CoastalProspectingMap selectedUf={uf ?? ""} selectedCity={cidade ?? ""} cities={cidades.map((item) => item.cidade).filter((value): value is string => Boolean(value))} stateCounts={stateCounts} />
       {params.revisao === "concluida" && <p role="status" className="border border-green-600/40 px-3 py-2 text-sm text-green-700">Revisão concluída: {params.novos ?? "0"} candidatos incluídos na fila de qualificação; {params.duplicados ?? "0"} duplicados ignorados.</p>}
       {params.revisao === "dados-invalidos" && <p role="alert" className="border border-red-500/40 px-3 py-2 text-sm text-red-600">Revise nome, CNPJ com dígitos verificadores, cidade e UF de cada candidato selecionado.</p>}
       {params.revisao === "evidencia-invalida" && <p role="alert" className="border border-red-500/40 px-3 py-2 text-sm text-red-600">Um ou mais candidatos não possuem URL ou evidências comerciais mínimas válidas.</p>}
