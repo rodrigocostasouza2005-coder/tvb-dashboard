@@ -133,9 +133,11 @@ export default async function AtacadoProspeccaoPage({
             {recomendacoesBruce.map((item) => <div key={item.perfil} className="flex flex-wrap items-center justify-between gap-3 py-2 text-xs">
               <div className="font-medium">{item.perfil}</div>
               <div className="flex gap-3 text-[var(--text-secondary)]">
-                <span>{item.total} lojas</span>
-                <span>{item.convertidas} convertidas</span>
-                <span>{item.taxaConversao}% conversão</span>
+                <span>{item.totalLojas} lojas</span>
+                <span>{item.sinaisPositivos}/{item.interacoesComSinal} sinais positivos</span>
+                <span>{item.convertidasDapic} pedidos DAPIC</span>
+                <span>{item.taxaConversaoDapic}% conversão DAPIC</span>
+                <span>confiança {item.confianca.toLowerCase()}</span>
               </div>
             </div>)}
           </div>
