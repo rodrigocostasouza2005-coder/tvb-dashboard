@@ -265,3 +265,57 @@ export async function importarProspectosCsvAction(formData: FormData) {
   revalidatePath("/dashboard/atacado-prospeccao");
   redirect(`/dashboard/atacado-prospeccao?importacao=concluida&novos=${importados}&duplicados=${duplicados}&invalidos=${invalidos}`);
 }
+
+
+const RESULTADOS_BRUCE = new Set([
+  "INTERESSADO", "SEM_RESPOSTA", "RECUSOU", "PEDIU_CATALOGO", "PEDIU_PRECO",
+  "NEGOCIANDO", "PEDIDO_REALIZADO", "RECOMPRA", "SEM_ADERENCIA", "DADOS_INVALIDOS", "OUTRO",
+]);
+const CANAIS_BRUCE = new Set(["TELEFONE", "EMAIL", "INSTAGRAM", "WHATSAPP", "PRESENCIAL", "OUTRO"]);
+
+export async function registrarInteracaoBruceAction(formData: FormData) {
+  const user = await getSessionUser();
+  if (!user) redirect("/login");
+  requireTabAccess(user, user.role, "atacado-prospeccao");
+
+  const prospectId = value(formData, "prospectId");
+  const descricao = value(formData, "descricao");
+  const resultado = value(formData, "resultado");
+  const canal = value(formData, "canal");
+  const etapa = value(formData, "etapa");
+  const novoStatus = value(formData, "status");
+
+  if (!prospectId || !descricao || descricao.length > 1200) {
+    redirect("/dashboard/atacado-prospeccao?bruce=erro");
+  }
+  if (resultado && !RESULTADOS_BRUCE.has(resultado)) redirect("/dashboard/atacado-prospeccao?bruce=erro");
+  if (canal && !CANAIS_BRUCE.has(canal)) redirect("/dashboard/atacado-prospeccao?bruce=erro");
+  if (novoStatus === "CONVERTIDO") redirect("/dashboard/atacado-prospeccao?erro=conversao");
+  if (novoStatus && !STATUS_VALIDOS.has(novoStatus)) redirect("/dashboard/atacado-prospeccao?bruce=erro");
+
+  const atual = await prisma.atacadoProspect.findUnique({
+    where: { id: prospectId },
+    select: { id: true, status: true },
+  });
+  if (!atual) redirect("/dashboard/atacado-prospeccao?erro=nao-encontrado");
+
+  await prisma.$transaction([
+    prisma.atacadoProspectActivity.create({
+      data: {
+        prospectId,
+        tipo: "INTERACAO_BRUCE",
+        descricao,
+        resultado: resultado || null,
+        canal: canal || null,
+        etapa: etapa.slice(0, 80) || null,
+        criadoPor: user.name,
+      },
+    }),
+    ...(novoStatus && novoStatus !== atual.status
+      ? [prisma.atacadoProspect.update({ where: { id: prospectId }, data: { status: novoStatus } })]
+      : []),
+  ]);
+
+  revalidatePath("/dashboard/atacado-prospeccao");
+  redirect("/dashboard/atacado-prospeccao?bruce=registrado");
+}

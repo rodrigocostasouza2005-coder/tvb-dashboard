@@ -10,7 +10,8 @@
     "test": "vitest run",
     "db:seed": "tsx prisma/seed.ts",
     "postinstall": "prisma generate",
-    "prospeccao:importar-receita": "tsx scripts/prospeccao/importar-receita.ts"
+    "prospeccao:importar-receita": "tsx scripts/prospeccao/importar-receita.ts",
+    "prospeccao:qualificar": "tsx scripts/prospeccao/agente-qualificacao.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { requireTabAccess } from "@/lib/tabs";
-import { criarProspectAction, atualizarStatusProspectAction } from "./actions";
+import { criarProspectAction, atualizarStatusProspectAction, registrarInteracaoBruceAction } from "./actions";
 import { CsvImportPreview } from "./csv-import-preview";
 
 function classificarAderencia(observacoes: string | null) {
@@ -11,7 +11,7 @@ function classificarAderencia(observacoes: string | null) {
     return { label: "Revisar", detalhe: "Moda aparece como atividade secundária", nivel: "revisar" as const };
   }
   if (texto.includes("CNAE principal: 4781400")) {
-    return { label: "Alta aderência", detalhe: "Vestuário e acessórios como atividade principal", nivel: "alto" as const };
+    return { label: "CNAE de vestuário", detalhe: "Atividade cadastral compatível; validar loja multimarcas e moda masculina", nivel: "medio" as const };
   }
   if (texto.includes("CNAE principal: 4782201") || texto.includes("CNAE principal: 4782202")) {
     return { label: "Complementar", detalhe: "Calçados ou artigos de viagem como atividade principal", nivel: "medio" as const };
@@ -35,7 +35,7 @@ const STATUS: Record<string, string> = {
 export default async function AtacadoProspeccaoPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; grupo?: string; cidade?: string; uf?: string; erro?: string; criado?: string; importacao?: string; novos?: string; duplicados?: string; invalidos?: string }>;
+  searchParams: Promise<{ status?: string; grupo?: string; cidade?: string; uf?: string; erro?: string; criado?: string; importacao?: string; novos?: string; duplicados?: string; invalidos?: string; bruce?: string }>;
 }) {
   const user = await getSessionUser();
   if (!user) return null;
@@ -57,12 +57,13 @@ export default async function AtacadoProspeccaoPage({
     where,
     orderBy: [{ updatedAt: "desc" }],
     take: 250,
-    include: { activities: { orderBy: { createdAt: "desc" }, take: 1 } },
+    include: { activities: { orderBy: { createdAt: "desc" }, take: 3 } },
   });
 
-  const [total, novos, qualificados, contatados, grupoA, grupoB, grupoC, grupoD, cidades] = await Promise.all([
+  const [total, novos, emPesquisa, qualificados, contatados, grupoA, grupoB, grupoC, grupoD, cidades] = await Promise.all([
     prisma.atacadoProspect.count(),
     prisma.atacadoProspect.count({ where: { status: "NOVO" } }),
+    prisma.atacadoProspect.count({ where: { status: "EM_QUALIFICACAO" } }),
     prisma.atacadoProspect.count({ where: { status: "QUALIFICADO" } }),
     prisma.atacadoProspect.count({ where: { status: "CONTATADO" } }),
     prisma.atacadoProspect.count({ where: { grupoComercial: "A" } }),
@@ -71,6 +72,27 @@ export default async function AtacadoProspeccaoPage({
     prisma.atacadoProspect.count({ where: { grupoComercial: "D" } }),
     prisma.atacadoProspect.findMany({ where: { estado: uf ?? "RJ" }, distinct: ["cidade"], select: { cidade: true }, orderBy: { cidade: "asc" }, take: 300 }),
   ]);
+
+  const gruposBruce = await prisma.atacadoProspect.groupBy({
+    by: ["segmentoComercial", "perfilLoja", "faixaPreco", "estado", "status"],
+    where: { status: { in: ["CONVERTIDO", "NEGOCIACAO", "CONTATADO", "DESCARTADO"] } },
+    _count: { _all: true },
+  });
+  const perfisBruce = new Map<string, { total: number; convertidas: number; negociacao: number; descartadas: number }>();
+  for (const item of gruposBruce) {
+    const key = [item.segmentoComercial || "Segmento pendente", item.perfilLoja || "Perfil pendente", item.faixaPreco || "Faixa não informada", item.estado || "UF não informada"].join(" · ");
+    const current = perfisBruce.get(key) ?? { total: 0, convertidas: 0, negociacao: 0, descartadas: 0 };
+    current.total += item._count._all;
+    if (item.status === "CONVERTIDO") current.convertidas += item._count._all;
+    if (item.status === "NEGOCIACAO") current.negociacao += item._count._all;
+    if (item.status === "DESCARTADO") current.descartadas += item._count._all;
+    perfisBruce.set(key, current);
+  }
+  const recomendacoesBruce = [...perfisBruce.entries()]
+    .map(([perfil, dados]) => ({ perfil, ...dados, taxaConversao: dados.total ? Math.round(dados.convertidas / dados.total * 100) : 0 }))
+    .filter((item) => item.total >= 3)
+    .sort((a, b) => b.taxaConversao - a.taxaConversao || b.convertidas - a.convertidas)
+    .slice(0, 5);
 
   const erro = params.erro;
   const erroTexto = erro === "nome" ? "Informe o nome da loja."
@@ -96,10 +118,13 @@ export default async function AtacadoProspeccaoPage({
         <Link href="/dashboard/atacado" className="text-sm text-[var(--text-secondary)] underline">Voltar para Atacado</Link>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      {params.bruce === "registrado" && <p role="status" className="rounded-md border border-green-600/40 px-3 py-2 text-sm text-green-700">Interação registrada no histórico do Radar.</p>}
+      {params.bruce === "erro" && <p role="alert" className="rounded-md border border-red-500/40 px-3 py-2 text-sm text-red-600">Não foi possível registrar a interação. Confira os campos e tente novamente.</p>}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
         {[
           ["Prospectos", total],
           ["Novos", novos],
+          ["Em pesquisa", emPesquisa],
           ["Qualificados", qualificados],
           ["Contatados", contatados],
         ].map(([label, count]) => (
@@ -118,6 +143,30 @@ export default async function AtacadoProspeccaoPage({
           </Link>
         ))}
       </div>
+
+      <section className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold">Bruce · Inteligência comercial</h2>
+            <p className="mt-1 max-w-3xl text-xs text-[var(--text-muted)]">Bruce acompanha a carteira e aprende com resultados reais registrados no Radar. Só sugere perfis com pelo menos três lojas no funil; o score cadastral não é tratado como potencial de compra.</p>
+          </div>
+          <span className="text-xs text-[var(--text-muted)]">{recomendacoesBruce.length} padrões com amostra mínima</span>
+        </div>
+        {recomendacoesBruce.length > 0 ? (
+          <div className="mt-3 divide-y divide-[var(--border)]">
+            {recomendacoesBruce.map((item) => <div key={item.perfil} className="flex flex-wrap items-center justify-between gap-3 py-2 text-xs">
+              <div className="font-medium">{item.perfil}</div>
+              <div className="flex gap-3 text-[var(--text-secondary)]">
+                <span>{item.total} lojas</span>
+                <span>{item.convertidas} convertidas</span>
+                <span>{item.taxaConversao}% conversão</span>
+              </div>
+            </div>)}
+          </div>
+        ) : (
+          <p className="mt-3 rounded-md border border-dashed border-[var(--border)] px-3 py-3 text-xs text-[var(--text-muted)]">Ainda não há três lojas com histórico no mesmo perfil. Bruce não vai inventar padrões: as recomendações aparecem conforme as negociações e os pedidos confirmados no DAPIC forem registrados.</p>
+        )}
+      </section>
 
       <section className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
         <h2 className="mb-3 text-sm font-semibold">Cadastrar prospecto</h2>
@@ -230,12 +279,14 @@ export default async function AtacadoProspeccaoPage({
                   <td className="px-4 py-3 text-[var(--text-secondary)]">{[p.cidade, p.estado].filter(Boolean).join(" / ") || "Cidade não identificada"}</td>
                   <td className="px-4 py-3">
                     <div className="mb-1 font-semibold">{p.grupoComercial === "PENDENTE" ? "Pendente" : `Grupo ${p.grupoComercial}`}</div>
-                    {p.scoreComercial !== null && <div className="text-[11px] text-[var(--text-muted)]">Score {p.scoreComercial}/100</div>}
+                    {p.scoreComercial !== null && <div className="text-[11px] text-[var(--text-muted)]">Score cadastral {p.scoreComercial}/100</div>}
                     {p.justificativaGrupo && <div className="mt-1 max-w-48 text-[11px] text-[var(--text-muted)]">{p.justificativaGrupo}</div>}
+                    {p.responsavel && <div className="mt-1 text-[11px] font-medium text-[var(--series-1)]">Fila: {p.responsavel.replaceAll("_", " ")}</div>}
+                    {p.confiancaPesquisa === "CADASTRAL" && <div className="mt-0.5 text-[10px] text-[var(--text-muted)]">Fonte cadastral oficial; perfil comercial ainda não verificado</div>}
                     {(() => {
                       const fit = classificarAderencia(p.observacoes);
                       return <div title={fit.detalhe} className="text-xs">
-                        <span className={fit.nivel === "alto" ? "font-semibold text-emerald-700" : fit.nivel === "revisar" ? "font-semibold text-amber-700" : "text-[var(--text-secondary)]"}>{fit.label}</span>
+                        <span className={fit.nivel === "revisar" ? "font-semibold text-amber-700" : "text-[var(--text-secondary)]"}>{fit.label}</span>
                         <div className="mt-0.5 max-w-48 text-[11px] text-[var(--text-muted)]">{fit.detalhe}</div>
                       </div>;
                     })()}
@@ -247,10 +298,41 @@ export default async function AtacadoProspeccaoPage({
                   </td>
                   <td className="px-4 py-3 text-[var(--text-secondary)]">{p.origem.replaceAll("_", " ")}</td>
                   <td className="px-4 py-3">
-                    <form action={atualizarStatusProspectAction} className="flex min-w-44 items-center gap-1">
+                    <details className="mt-2">
+                      <summary className="cursor-pointer text-[11px] text-[var(--text-secondary)] underline">Histórico recente ({p.activities.length})</summary>
+                      <div className="mt-2 space-y-2">
+                        {p.activities.map((activity) => <div key={activity.id} className="rounded border border-[var(--border)] p-2 text-[11px]">
+                          <div className="font-medium">{activity.tipo.replaceAll("_", " ")}{activity.resultado ? ` · ${activity.resultado.replaceAll("_", " ")}` : ""}</div>
+                          <div className="mt-0.5 text-[var(--text-secondary)]">{activity.descricao}</div>
+                          <div className="mt-0.5 text-[var(--text-muted)]">{activity.createdAt.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })}</div>
+                        </div>)}
+                      </div>
+                    </details>
+                    <details className="mt-2">
+                      <summary className="cursor-pointer text-[11px] font-medium text-[var(--series-1)] underline">Bruce · Registrar interação</summary>
+                      <form action={registrarInteracaoBruceAction} className="mt-2 min-w-48 space-y-2">
+                        <input type="hidden" name="prospectId" value={p.id} />
+                        <textarea name="descricao" required maxLength={1200} rows={2} placeholder="O que aconteceu na conversa?" className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-xs" />
+                        <select name="resultado" defaultValue="" className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-xs">
+                          <option value="">Resultado (opcional)</option>
+                          {["INTERESSADO","SEM_RESPOSTA","RECUSOU","PEDIU_CATALOGO","PEDIU_PRECO","NEGOCIANDO","PEDIDO_REALIZADO","RECOMPRA","SEM_ADERENCIA","DADOS_INVALIDOS","OUTRO"].map((item) => <option key={item} value={item}>{item.replaceAll("_", " ")}</option>)}
+                        </select>
+                        <select name="canal" defaultValue="" className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-xs">
+                          <option value="">Canal (opcional)</option>
+                          {["TELEFONE","EMAIL","INSTAGRAM","WHATSAPP","PRESENCIAL","OUTRO"].map((item) => <option key={item} value={item}>{item}</option>)}
+                        </select>
+                        <input name="etapa" maxLength={80} placeholder="Etapa (opcional)" className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-xs" />
+                        <select name="status" defaultValue="" className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-xs">
+                          <option value="">Manter status atual</option>
+                          {Object.entries(STATUS).filter(([key]) => key !== "CONVERTIDO").map(([key,label]) => <option key={key} value={key}>{label}</option>)}
+                        </select>
+                        <button type="submit" className="w-full rounded-md border border-[var(--series-1)] px-2 py-1.5 text-xs font-medium">Salvar no Radar</button>
+                      </form>
+                    </details>
+                    <form action={atualizarStatusProspectAction} className="mt-2 flex min-w-44 items-center gap-1">
                       <input type="hidden" name="prospectId" value={p.id} />
                       <select name="status" defaultValue={p.status} aria-label="Status do prospecto" className="min-w-0 flex-1 rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1 text-xs">
-                        {Object.entries(STATUS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+                        {Object.entries(STATUS).filter(([key]) => key !== "CONVERTIDO").map(([key, label]) => <option key={key} value={key}>{label}</option>)}
                       </select>
                       <button type="submit" className="rounded-md border border-[var(--border)] px-2 py-1 text-xs">Salvar</button>
                     </form>

@@ -56,12 +56,13 @@ def main() -> int:
         FROM read_parquet('{establishments}') s
         WHERE s.uf = '{uf}'
           AND s.situacao_cadastral = '02'
+          -- Piloto estrito: vestuário como CNAE principal, nome fantasia e contato.
+          AND s.cnae_fiscal_principal = '4781400'
+          AND trim(coalesce(s.nome_fantasia, '')) <> ''
           AND (
-            s.cnae_fiscal_principal IN ({cnaes})
-            OR EXISTS (
-              SELECT 1 FROM unnest(string_split(coalesce(s.cnae_fiscal_secundaria, ''), ',')) x(code)
-              WHERE trim(x.code) IN ({cnaes})
-            )
+            length(trim(coalesce(s.telefone1, ''))) > 0
+            OR length(trim(coalesce(s.telefone2, ''))) > 0
+            OR length(trim(coalesce(s.correio_eletronico, ''))) > 0
           )
       )
       SELECT
@@ -76,31 +77,9 @@ def main() -> int:
         coalesce(f.correio_eletronico, '') AS email,
         '' AS site,
         f.cnae_fiscal_principal AS cnae_principal,
-        CASE
-          WHEN f.cnae_fiscal_principal IN ('4781400', '4782201', '4782202', '4789001') THEN f.cnae_fiscal_principal
-          ELSE (
-            SELECT trim(code)
-            FROM unnest(string_split(coalesce(f.cnae_fiscal_secundaria, ''), ',')) x(code)
-            WHERE trim(code) IN ('4781400', '4782201', '4782202', '4789001')
-            LIMIT 1
-          )
-        END AS cnae_correspondente,
-        CASE WHEN f.cnae_fiscal_principal IN ('4781400', '4782201', '4782202', '4789001') THEN 'PRINCIPAL' ELSE 'SECUNDARIO' END AS tipo_correspondencia,
-        CASE
-          WHEN f.cnae_fiscal_principal = '4781400' OR EXISTS (
-            SELECT 1 FROM unnest(string_split(coalesce(f.cnae_fiscal_secundaria, ''), ',')) x(code)
-            WHERE trim(code) = '4781400'
-          ) THEN 'Comércio varejista de artigos do vestuário e acessórios'
-          WHEN f.cnae_fiscal_principal = '4782201' OR EXISTS (
-            SELECT 1 FROM unnest(string_split(coalesce(f.cnae_fiscal_secundaria, ''), ',')) x(code)
-            WHERE trim(code) = '4782201'
-          ) THEN 'Comércio varejista de calçados'
-          WHEN f.cnae_fiscal_principal = '4782202' OR EXISTS (
-            SELECT 1 FROM unnest(string_split(coalesce(f.cnae_fiscal_secundaria, ''), ',')) x(code)
-            WHERE trim(code) = '4782202'
-          ) THEN 'Comércio varejista de artigos de viagem'
-          ELSE 'Comércio varejista de suvenires, bijuterias e artesanatos'
-        END AS cnae_descricao,
+        f.cnae_fiscal_principal AS cnae_correspondente,
+        'PRINCIPAL' AS tipo_correspondencia,
+        'Comércio varejista de artigos do vestuário e acessórios' AS cnae_descricao,
         coalesce(e.porte_empresa, '') AS porte,
         'receita_federal_dados_abertos' AS origem,
         'https://dados.gov.br/dados/conjuntos-dados/cadastro-nacional-da-pessoa-juridica---cnpj' AS evidencia_url,
@@ -109,6 +88,11 @@ def main() -> int:
       LEFT JOIN read_parquet('{companies}') e USING (cnpj_basico)
       LEFT JOIN read_parquet('{municipalities}') m
         ON lpad(trim(CAST(f.municipio AS VARCHAR)), 4, '0') = lpad(trim(CAST(m.codigo AS VARCHAR)), 4, '0')
+      ORDER BY
+        CASE WHEN length(trim(coalesce(f.telefone1, ''))) > 0 OR length(trim(coalesce(f.telefone2, ''))) > 0 THEN 0 ELSE 1 END,
+        CASE WHEN length(trim(coalesce(f.correio_eletronico, ''))) > 0 THEN 0 ELSE 1 END,
+        f.cnpj_basico, f.cnpj_ordem
+      LIMIT 500
     ) TO '{Path(args.saida).as_posix()}' (HEADER, DELIMITER ';', QUOTE '"', ESCAPE '"');
     """
     try:

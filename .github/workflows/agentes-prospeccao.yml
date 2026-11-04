@@ -1,0 +1,101 @@
+name: Agentes autônomos de prospecção TVB
+
+on:
+  workflow_dispatch:
+    inputs:
+      uf:
+        description: "Estado para a prospecção"
+        required: true
+        default: "RJ"
+        type: choice
+        options:
+          - RJ
+          - SP
+          - ES
+          - PR
+          - SC
+          - RS
+          - BA
+          - SE
+          - AL
+          - PE
+          - PB
+          - RN
+          - CE
+          - PI
+          - MA
+          - PA
+          - AP
+          - MG
+      competencia:
+        description: "Competência Receita Federal (AAAA-MM)"
+        required: false
+        default: ""
+        type: string
+  schedule:
+    - cron: "0 11 * * 1"
+  push:
+    branches: [main]
+    paths:
+      - "scripts/prospeccao/**"
+      - "package.json"
+      - ".github/workflows/agentes-prospeccao.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agentes-prospeccao-tvb-${{ github.event.inputs.uf || 'RJ' }}
+  cancel-in-progress: false
+
+jobs:
+  captar-e-qualificar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Definir competência e UF
+        id: params
+        run: |
+          if [ -n "${{ github.event.inputs.competencia }}" ]; then
+            echo "competencia=${{ github.event.inputs.competencia }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "competencia=$(date -u -d 'last month' +%Y-%m)" >> "$GITHUB_OUTPUT"
+          fi
+          echo "uf=${{ github.event.inputs.uf || 'RJ' }}" >> "$GITHUB_OUTPUT"
+      - name: Validar banco de produção
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          test -n "$DATABASE_URL" || (echo "::error::DATABASE_URL ausente" && exit 1)
+      - name: Instalar dependências
+        run: |
+          python -m pip install duckdb==1.4.1
+          npm ci
+      - name: Captar lojas de vestuário com dados comerciais mínimos
+        run: |
+          python scripts/prospeccao/extrair-parquet-receita.py \
+            --competencia "${{ steps.params.outputs.competencia }}" \
+            --uf "${{ steps.params.outputs.uf }}" \
+            --saida dados/prospects-receita.csv
+      - name: Importar somente candidatos sem duplicar cadastros
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          npm run prospeccao:importar-receita -- \
+            --arquivo dados/prospects-receita.csv \
+            --competencia "${{ steps.params.outputs.competencia }}" \
+            --uf "${{ steps.params.outputs.uf }}" \
+            --apply
+      - name: Agentes pesquisam e atribuem fila no Radar
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          npm run prospeccao:qualificar -- --uf "${{ steps.params.outputs.uf }}" --limit 500 --apply
