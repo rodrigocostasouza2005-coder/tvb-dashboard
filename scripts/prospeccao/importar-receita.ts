@@ -140,6 +140,16 @@ async function main() {
   try {
     let inserted = 0;
     let citiesNormalized = 0;
+    // Não apresentar razão social (que pode ser nome de pessoa) como nome da loja.
+    const namesHidden = await prisma.$executeRaw`
+      UPDATE "AtacadoProspect"
+      SET "nomeFantasia" = 'NOME COMERCIAL NÃO IDENTIFICADO'
+      WHERE "origem" = 'receita_federal_dados_abertos'
+        AND "estado" = ${arg("--uf").toUpperCase()}
+        AND "nomeFantasia" = "razaoSocial"
+        AND "razaoSocial" IS NOT NULL
+    `;
+    console.log(`Nomes comerciais pendentes de pesquisa: ${namesHidden}`);
     // Corrige códigos TOM já importados para nomes de municípios, sem alterar UF/CNPJ.
     for (const [code, name] of municipalityMap) {
       const result = await prisma.atacadoProspect.updateMany({
