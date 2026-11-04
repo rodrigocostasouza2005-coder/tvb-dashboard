@@ -11,24 +11,33 @@ on:
         default: "RJ"
         type: choice
         options:
-          - RJ
-          - SP
-          - ES
-          - PR
-          - SC
-          - RS
-          - BA
-          - SE
+          - AC
           - AL
-          - PE
-          - PB
-          - RN
-          - CE
-          - PI
-          - MA
-          - PA
           - AP
+          - AM
+          - BA
+          - CE
+          - DF
+          - ES
+          - GO
+          - MA
+          - MT
+          - MS
           - MG
+          - PA
+          - PB
+          - PR
+          - PE
+          - PI
+          - RJ
+          - RN
+          - RS
+          - RO
+          - RR
+          - SC
+          - SP
+          - SE
+          - TO
       competencia:
         description: "Competência Receita Federal (AAAA-MM)"
         required: false
@@ -48,6 +57,8 @@ jobs:
       AWS_DEFAULT_REGION: ${{ secrets.PROSPECCAO_S3_REGION }}
       PROSPECCAO_S3_ENDPOINT: ${{ secrets.PROSPECCAO_S3_ENDPOINT }}
       PROSPECCAO_S3_BUCKET: ${{ secrets.PROSPECCAO_S3_BUCKET }}
+      INPUT_UF: ${{ inputs.uf }}
+      INPUT_COMPETENCIA: ${{ inputs.competencia }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -57,12 +68,12 @@ jobs:
         id: params
         shell: bash
         run: |
-          if [ -n "${{ github.event.inputs.competencia }}" ]; then
-            echo "competencia=${{ github.event.inputs.competencia }}" >> "$GITHUB_OUTPUT"
+          if [ -n "$INPUT_COMPETENCIA" ]; then
+            echo "competencia=$INPUT_COMPETENCIA" >> "$GITHUB_OUTPUT"
           else
             echo "competencia=$(date -u -d 'last month' +%Y-%m)" >> "$GITHUB_OUTPUT"
           fi
-          echo "uf=${{ github.event.inputs.uf }}" >> "$GITHUB_OUTPUT"
+          echo "uf=$INPUT_UF" >> "$GITHUB_OUTPUT"
       - name: Validar destino externo (S3 compatível)
         shell: bash
         run: |
@@ -74,16 +85,23 @@ jobs:
       - name: Instalar DuckDB
         run: python -m pip install duckdb==1.4.1
       - name: Exportar conjunto completo para Parquet compactado
+        env:
+          COMPETENCIA: ${{ steps.params.outputs.competencia }}
+          UF: ${{ steps.params.outputs.uf }}
         run: |
           python scripts/prospeccao/extrair-parquet-receita.py \
-            --competencia "${{ steps.params.outputs.competencia }}" \
-            --uf "${{ steps.params.outputs.uf }}" \
+            --competencia "$COMPETENCIA" \
+            --uf "$UF" \
             --saida dados/candidatos.parquet
       - name: Persistir fora do Neon em bucket S3 compatível
         shell: bash
+        env:
+          COMPETENCIA: ${{ steps.params.outputs.competencia }}
+          UF: ${{ steps.params.outputs.uf }}
         run: |
-          aws s3 cp dados/candidatos.parquet \
-            "s3://$PROSPECCAO_S3_BUCKET/receita-cnpj/competencia=${{ steps.params.outputs.competencia }}/uf=${{ steps.params.outputs.uf }}/candidatos.parquet" \
-            --endpoint-url "$PROSPECCAO_S3_ENDPOINT" \
-            --only-show-errors
-          echo "Arquivo persistido no bucket externo; nenhuma linha foi enviada ao Neon."
+          PREFIX="s3://$PROSPECCAO_S3_BUCKET/receita-cnpj/competencia=$COMPETENCIA/uf=$UF"
+          aws s3 cp dados/candidatos.parquet "$PREFIX/candidatos.parquet" \
+            --endpoint-url "$PROSPECCAO_S3_ENDPOINT" --only-show-errors
+          aws s3 cp dados/candidatos.parquet.manifest.json "$PREFIX/candidatos.parquet.manifest.json" \
+            --endpoint-url "$PROSPECCAO_S3_ENDPOINT" --only-show-errors
+          echo "Parquet e manifesto persistidos fora do Neon; nenhum registro operacional foi criado."
