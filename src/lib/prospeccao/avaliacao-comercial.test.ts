@@ -42,6 +42,15 @@ describe("avaliação de evidências comerciais", () => {
     expect(result.pendencias[0]).toContain("confirmar se o site pertence");
   });
 
+  it("não encaminha identidade apenas média, mesmo com evidência comercial completa", () => {
+    const result = avaliarEvidenciasComerciais({
+      nomeLoja: "Loja Teste", cidade: null, confiancaIdentidade: "MEDIA",
+      evidencia: evidence, situacaoCadastral: "ATIVA",
+    });
+    expect(result.situacao).toBe("EVIDENCIA_PARCIAL");
+    expect(result.pendencias.join(" ")).toContain("somente confiança ALTA");
+  });
+
   it("mantém cadastro inativo como pendência sem transformar isso em score comercial", () => {
     const active = avaliarEvidenciasComerciais({
       nomeLoja: "Loja Teste", cidade: null, confiancaIdentidade: "ALTA", evidencia: evidence, situacaoCadastral: "ATIVA",
