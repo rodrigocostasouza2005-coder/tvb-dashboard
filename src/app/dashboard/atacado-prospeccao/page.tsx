@@ -5,6 +5,7 @@ import { requireTabAccess } from "@/lib/tabs";
 import { criarProspectAction, atualizarStatusProspectAction, registrarInteracaoBruceAction } from "./actions";
 import { CsvImportPreview } from "./csv-import-preview";
 import { ProspeccaoRadarConsole } from "./prospeccao-radar-console";
+import { RevisaoCandidatosWeb } from "./revisao-candidatos-web";
 import { aprenderPerfis } from "@/lib/prospeccao/aprendizado-comercial";
 
 function classificarAderencia(observacoes: string | null) {
@@ -37,7 +38,7 @@ const STATUS: Record<string, string> = {
 export default async function AtacadoProspeccaoPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; grupo?: string; cidade?: string; uf?: string; erro?: string; criado?: string; importacao?: string; novos?: string; duplicados?: string; invalidos?: string; bruce?: string }>;
+  searchParams: Promise<{ status?: string; grupo?: string; cidade?: string; uf?: string; erro?: string; criado?: string; importacao?: string; novos?: string; duplicados?: string; invalidos?: string; bruce?: string; revisao?: string; novos?: string; duplicados?: string }>;
 }) {
   const user = await getSessionUser();
   if (!user) return null;
@@ -111,6 +112,11 @@ export default async function AtacadoProspeccaoPage({
       {params.bruce === "registrado" && <p role="status" className="rounded-md border border-green-600/40 px-3 py-2 text-sm text-green-700">Interação registrada no histórico do Radar.</p>}
       {params.bruce === "erro" && <p role="alert" className="rounded-md border border-red-500/40 px-3 py-2 text-sm text-red-600">Não foi possível registrar a interação. Confira os campos e tente novamente.</p>}
       <ProspeccaoRadarConsole total={total} novos={novos} emPesquisa={emPesquisa} qualificados={qualificados} contatados={contatados} />
+      {params.revisao === "concluida" && <p role="status" className="border border-green-600/40 px-3 py-2 text-sm text-green-700">Revisão concluída: {params.novos ?? "0"} candidatos incluídos na fila de qualificação; {params.duplicados ?? "0"} duplicados ignorados.</p>}
+      {params.revisao === "dados-invalidos" && <p role="alert" className="border border-red-500/40 px-3 py-2 text-sm text-red-600">Revise nome, CNPJ com dígitos verificadores, cidade e UF de cada candidato selecionado.</p>}
+      {params.revisao === "evidencia-invalida" && <p role="alert" className="border border-red-500/40 px-3 py-2 text-sm text-red-600">Um ou mais candidatos não possuem URL ou evidências comerciais mínimas válidas.</p>}
+      {params.revisao === "arquivo-invalido" && <p role="alert" className="border border-red-500/40 px-3 py-2 text-sm text-red-600">Arquivo de revisão inválido. Exporte novamente o CSV do agente de descoberta.</p>}
+      <RevisaoCandidatosWeb defaultUf={uf ?? "RJ"} />
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
         {([["A", grupoA], ["B", grupoB], ["C", grupoC], ["D", grupoD], ["Pendentes", total - grupoA - grupoB - grupoC - grupoD]] as const).map(([label, count]) => (
           <Link key={label} href={label === "Pendentes" ? "?grupo=PENDENTE" : `?grupo=${label}`} className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3 hover:border-[var(--series-1)]">
