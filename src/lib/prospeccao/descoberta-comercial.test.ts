@@ -22,6 +22,8 @@ describe("descoberta comercial", () => {
     const queries = gerarConsultasDescoberta([perfil], "rj", 8);
     expect(queries[0]).toContain("RJ");
     expect(queries[0]).toContain('"medio"');
+    expect(queries[0]).not.toContain("evidencia");
+    expect(queries[0]).not.toContain("publica");
     expect(new Set(queries).size).toBe(queries.length);
   });
   it("rejeita site sem evidência de moda masculina", () => {
