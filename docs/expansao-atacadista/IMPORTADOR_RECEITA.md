@@ -21,7 +21,8 @@ O script falha se encontrar linhas com menos colunas que o layout esperado. Font
 ## Piloto
 
 O script `scripts/prospeccao/gerar-prospects-rj.py` filtra:
-- UF RJ;
+- Uma UF com `--uf RJ` (compatibilidade) ou várias UFs com `--ufs RJ ES SP ...`;
+- UFs solicitadas, situação cadastral ativa;
 - situação cadastral ativa;
 - CNAEs iniciais de vestuário, calçados, artigos de viagem e bijuterias/acessórios.
 
@@ -42,7 +43,7 @@ python scripts/prospeccao/gerar-prospects-rj.py \
   --estabelecimentos /dados/Estabelecimentos0.csv /dados/Estabelecimentos1.csv \
   --empresas /dados/Empresas0.csv /dados/Empresas1.csv \
   --municipios /dados/Municipios.csv \
-  --uf RJ \
+  --ufs RJ ES SP \
   --competencia 2026-10 \
   --saida /dados/prospects-rj.csv
 ```
