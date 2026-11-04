@@ -35,6 +35,7 @@ def main() -> int:
     base = BASE.format(competencia=args.competencia)
     establishments = base + "/estabelecimentos/*.parquet"
     companies = base + "/empresas/*.parquet"
+    municipalities = base + "/municipios/*.parquet"
     cnaes = ", ".join("'" + code + "'" for code in CNAES)
 
     # Garante que o diretório de saída exista no runner limpo do GitHub Actions.
@@ -64,11 +65,11 @@ def main() -> int:
           )
       )
       SELECT
-        coalesce(nullif(trim(f.nome_fantasia), ''), nullif(trim(e.razao_social), ''),
-                 'Estabelecimento ' || f.cnpj_basico || f.cnpj_ordem || f.cnpj_dv) AS nome_fantasia,
+        coalesce(nullif(trim(f.nome_fantasia), ''), 'NOME COMERCIAL NÃO IDENTIFICADO') AS nome_fantasia,
         coalesce(e.razao_social, '') AS razao_social,
         f.cnpj_basico || f.cnpj_ordem || f.cnpj_dv AS cnpj,
-        coalesce(f.municipio, '') AS cidade,
+        coalesce(m.descricao, '') AS cidade,
+        coalesce(f.municipio, '') AS codigo_municipio,
         f.uf AS uf,
         coalesce(nullif(trim(coalesce(f.ddd1, '') || coalesce(f.telefone1, '')), ''),
                  nullif(trim(coalesce(f.ddd2, '') || coalesce(f.telefone2, '')), ''), '') AS telefone,
@@ -106,10 +107,21 @@ def main() -> int:
         '{args.competencia}' AS competencia
       FROM filtrados f
       LEFT JOIN read_parquet('{companies}') e USING (cnpj_basico)
+      LEFT JOIN read_parquet('{municipalities}') m
+        ON lpad(trim(CAST(f.municipio AS VARCHAR)), 4, '0') = lpad(trim(CAST(m.codigo AS VARCHAR)), 4, '0')
     ) TO '{Path(args.saida).as_posix()}' (HEADER, DELIMITER ';', QUOTE '"', ESCAPE '"');
     """
     try:
         con.execute(sql)
+        municipios_saida = str(Path(args.saida).with_name("municipios-receita.csv"))
+        con.execute(f"""
+          COPY (
+            SELECT trim(CAST(codigo AS VARCHAR)) AS codigo,
+                   trim(CAST(descricao AS VARCHAR)) AS descricao
+            FROM read_parquet('{municipalities}')
+          ) TO '{Path(municipios_saida).as_posix()}'
+          (HEADER, DELIMITER ';', QUOTE '"', ESCAPE '"');
+        """)
         count = con.execute(
             f"SELECT count(*) FROM read_csv('{Path(args.saida).as_posix()}', delim=';', header=true, all_varchar=true)"
         ).fetchone()[0]

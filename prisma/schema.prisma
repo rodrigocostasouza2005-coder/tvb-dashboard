@@ -756,8 +756,16 @@ model AtacadoProspect {
   nomeFantasia     String
   cnpj             String?  @unique
   cidade           String?
+  codigoMunicipio  String?
   estado           String?
   site             String?
+  instagram        String?
+  grupoComercial   String   @default("PENDENTE")
+  scoreComercial   Int?
+  justificativaGrupo String?
+  confiancaPesquisa String?
+  nomeComercialVerificado Boolean @default(false)
+  pesquisadoEm     DateTime?
   telefone         String?
   email            String?
   origem           String   @default("manual")

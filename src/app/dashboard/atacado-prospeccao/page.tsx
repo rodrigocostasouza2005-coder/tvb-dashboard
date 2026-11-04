@@ -35,7 +35,7 @@ const STATUS: Record<string, string> = {
 export default async function AtacadoProspeccaoPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; erro?: string; criado?: string; importacao?: string; novos?: string; duplicados?: string; invalidos?: string }>;
+  searchParams: Promise<{ status?: string; grupo?: string; cidade?: string; uf?: string; erro?: string; criado?: string; importacao?: string; novos?: string; duplicados?: string; invalidos?: string }>;
 }) {
   const user = await getSessionUser();
   if (!user) return null;
@@ -43,18 +43,33 @@ export default async function AtacadoProspeccaoPage({
 
   const params = await searchParams;
   const status = params.status && Object.hasOwn(STATUS, params.status) ? params.status : undefined;
+  const grupos = ["A", "B", "C", "D", "PENDENTE"];
+  const grupo = params.grupo && grupos.includes(params.grupo) ? params.grupo : undefined;
+  const uf = params.uf && /^[A-Z]{2}$/.test(params.uf.toUpperCase()) ? params.uf.toUpperCase() : undefined;
+  const cidade = params.cidade?.trim().slice(0, 100) || undefined;
+  const where = {
+    ...(status ? { status } : {}),
+    ...(grupo ? { grupoComercial: grupo } : {}),
+    ...(uf ? { estado: uf } : {}),
+    ...(cidade ? { cidade: { contains: cidade, mode: "insensitive" as const } } : {}),
+  };
   const prospects = await prisma.atacadoProspect.findMany({
-    where: status ? { status } : undefined,
+    where,
     orderBy: [{ updatedAt: "desc" }],
     take: 250,
     include: { activities: { orderBy: { createdAt: "desc" }, take: 1 } },
   });
 
-  const [total, novos, qualificados, contatados] = await Promise.all([
+  const [total, novos, qualificados, contatados, grupoA, grupoB, grupoC, grupoD, cidades] = await Promise.all([
     prisma.atacadoProspect.count(),
     prisma.atacadoProspect.count({ where: { status: "NOVO" } }),
     prisma.atacadoProspect.count({ where: { status: "QUALIFICADO" } }),
     prisma.atacadoProspect.count({ where: { status: "CONTATADO" } }),
+    prisma.atacadoProspect.count({ where: { grupoComercial: "A" } }),
+    prisma.atacadoProspect.count({ where: { grupoComercial: "B" } }),
+    prisma.atacadoProspect.count({ where: { grupoComercial: "C" } }),
+    prisma.atacadoProspect.count({ where: { grupoComercial: "D" } }),
+    prisma.atacadoProspect.findMany({ where: { estado: uf ?? "RJ" }, distinct: ["cidade"], select: { cidade: true }, orderBy: { cidade: "asc" }, take: 300 }),
   ]);
 
   const erro = params.erro;
@@ -91,6 +106,15 @@ export default async function AtacadoProspeccaoPage({
             <div className="text-xs text-[var(--text-muted)]">{label}</div>
             <div className="mt-1 text-2xl font-semibold tabular-nums">{count}</div>
           </div>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+        {([["A", grupoA], ["B", grupoB], ["C", grupoC], ["D", grupoD], ["Pendentes", total - grupoA - grupoB - grupoC - grupoD]] as const).map(([label, count]) => (
+          <Link key={label} href={label === "Pendentes" ? "?grupo=PENDENTE" : `?grupo=${label}`} className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3 hover:border-[var(--series-1)]">
+            <div className="text-xs text-[var(--text-muted)]">Grupo {label}</div>
+            <div className="mt-1 text-xl font-semibold tabular-nums">{count.toLocaleString("pt-BR")}</div>
+          </Link>
         ))}
       </div>
 
@@ -159,7 +183,17 @@ export default async function AtacadoProspeccaoPage({
       <section className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)]">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border)] px-4 py-3">
           <h2 className="text-sm font-semibold">Carteira de prospectos ({prospects.length}{total > 250 ? " de " + total : ""})</h2>
-          <form className="flex items-center gap-2" action="/dashboard/atacado-prospeccao">
+          <form className="flex flex-wrap items-center gap-2" action="/dashboard/atacado-prospeccao">
+            <label htmlFor="uf" className="text-xs text-[var(--text-muted)]">UF</label>
+            <input id="uf" name="uf" defaultValue={uf ?? ""} placeholder="RJ" maxLength={2} className="w-14 rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-sm" />
+            <label htmlFor="cidade" className="text-xs text-[var(--text-muted)]">Cidade</label>
+            <input id="cidade" name="cidade" list="cidades-prospects" defaultValue={cidade ?? ""} placeholder="Rio de Janeiro" className="w-40 rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-sm" />
+            <datalist id="cidades-prospects">{cidades.map((item) => item.cidade && <option key={item.cidade} value={item.cidade} />)}</datalist>
+            <label htmlFor="grupo" className="text-xs text-[var(--text-muted)]">Grupo</label>
+            <select id="grupo" name="grupo" defaultValue={grupo ?? ""} className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-sm">
+              <option value="">Todos</option>
+              {grupos.map((item) => <option key={item} value={item}>{item === "PENDENTE" ? "Pendente" : `Grupo ${item}`}</option>)}
+            </select>
             <label htmlFor="status" className="text-xs text-[var(--text-muted)]">Status</label>
             <select id="status" name="status" defaultValue={status ?? ""} className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-sm">
               <option value="">Todos</option>
@@ -185,12 +219,18 @@ export default async function AtacadoProspeccaoPage({
               {prospects.map((p) => (
                 <tr key={p.id} className="border-t border-[var(--border)] align-top">
                   <td className="px-4 py-3">
-                    <div className="font-medium">{p.nomeFantasia}</div>
+                    <div className="font-medium">{p.nomeFantasia === "NOME COMERCIAL NÃO IDENTIFICADO" ? "Nome comercial a pesquisar" : p.nomeFantasia}</div>
+                    {p.razaoSocial && <div className="mt-0.5 text-xs text-[var(--text-muted)]">Razão social: {p.razaoSocial}</div>}
+                    {p.instagram && <a href={p.instagram} target="_blank" rel="noreferrer" className="mt-1 block text-xs underline">Instagram</a>}
+                    {p.site && <a href={p.site} target="_blank" rel="noreferrer" className="mt-1 block text-xs underline">Site</a>}
                     {p.cnpj && <div className="mt-0.5 text-xs text-[var(--text-muted)]">{p.cnpj}</div>}
                     {p.evidenciaUrl && <a href={p.evidenciaUrl} target="_blank" rel="noreferrer" className="mt-1 inline-block text-xs underline text-[var(--text-secondary)]">Ver evidência</a>}
                   </td>
-                  <td className="px-4 py-3 text-[var(--text-secondary)]">{[p.cidade, p.estado].filter(Boolean).join(" / ") || "—"}</td>
+                  <td className="px-4 py-3 text-[var(--text-secondary)]">{[p.cidade, p.estado].filter(Boolean).join(" / ") || "Cidade não identificada"}</td>
                   <td className="px-4 py-3">
+                    <div className="mb-1 font-semibold">{p.grupoComercial === "PENDENTE" ? "Pendente" : `Grupo ${p.grupoComercial}`}</div>
+                    {p.scoreComercial !== null && <div className="text-[11px] text-[var(--text-muted)]">Score {p.scoreComercial}/100</div>}
+                    {p.justificativaGrupo && <div className="mt-1 max-w-48 text-[11px] text-[var(--text-muted)]">{p.justificativaGrupo}</div>}
                     {(() => {
                       const fit = classificarAderencia(p.observacoes);
                       return <div title={fit.detalhe} className="text-xs">

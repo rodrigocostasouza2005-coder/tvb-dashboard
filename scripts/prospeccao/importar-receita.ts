@@ -17,6 +17,7 @@ type ProspectRow = {
   razao_social: string;
   cnpj: string;
   cidade: string;
+  codigo_municipio: string;
   uf: string;
   telefone: string;
   email: string;
@@ -71,6 +72,7 @@ function parseCsv(raw: string): ProspectRow[] {
       razao_social: get("razao_social"),
       cnpj: get("cnpj").toUpperCase().replace(/[^A-Z0-9]/g, ""),
       cidade: get("cidade"),
+      codigo_municipio: get("codigo_municipio"),
       uf: get("uf").toUpperCase(),
       telefone: get("telefone"),
       email: get("email").toLowerCase(),
@@ -108,11 +110,21 @@ async function main() {
   const file = arg("--arquivo");
   const competence = arg("--competencia");
   const apply = args.includes("--apply");
+  const municipalitiesFile = arg("--municipios");
   if (!file || !/^20\d{2}-(0[1-9]|1[0-2])$/.test(competence)) {
     throw new Error("Uso: --arquivo <csv> --competencia AAAA-MM [--apply]");
   }
 
   const rows = parseCsv(await readFile(file, "utf8"));
+  const municipalityLines = municipalitiesFile
+    ? (await readFile(municipalitiesFile, "utf8")).replace(/^\uFEFF/, "").trim().split(/\r?\n/).slice(1)
+    : [];
+  const municipalityMap = new Map<string, string>();
+  for (const line of municipalityLines) {
+    const [code, ...nameParts] = parseCsvLine(line);
+    const name = nameParts.join(";").trim();
+    if (code && name) municipalityMap.set(code.trim().padStart(4, "0"), name);
+  }
   const unique = new Map<string, ProspectRow>();
   for (const row of rows) if (!unique.has(row.cnpj)) unique.set(row.cnpj, row);
   const deduped = [...unique.values()];
@@ -127,6 +139,26 @@ async function main() {
   const prisma = new PrismaClient();
   try {
     let inserted = 0;
+    let citiesNormalized = 0;
+    // Não apresentar razão social (que pode ser nome de pessoa) como nome da loja.
+    const namesHidden = await prisma.$executeRaw`
+      UPDATE "AtacadoProspect"
+      SET "nomeFantasia" = 'NOME COMERCIAL NÃO IDENTIFICADO'
+      WHERE "origem" = 'receita_federal_dados_abertos'
+        AND "estado" = ${arg("--uf").toUpperCase()}
+        AND "nomeFantasia" = "razaoSocial"
+        AND "razaoSocial" IS NOT NULL
+    `;
+    console.log(`Nomes comerciais pendentes de pesquisa: ${namesHidden}`);
+    // Corrige códigos TOM já importados para nomes de municípios, sem alterar UF/CNPJ.
+    for (const [code, name] of municipalityMap) {
+      const result = await prisma.atacadoProspect.updateMany({
+        where: { estado: arg("--uf").toUpperCase(), cidade: code },
+        data: { cidade: name, codigoMunicipio: code },
+      });
+      citiesNormalized += result.count;
+    }
+    console.log(`Municípios normalizados na UF ${arg("--uf") || "não informada"}: ${citiesNormalized}`);
     for (let offset = 0; offset < deduped.length; offset += 400) {
       const batch = deduped.slice(offset, offset + 400);
       const result = await prisma.atacadoProspect.createMany({
@@ -135,6 +167,7 @@ async function main() {
           razaoSocial: row.razao_social.slice(0, 180) || null,
           cnpj: row.cnpj,
           cidade: row.cidade.slice(0, 100) || null,
+          codigoMunicipio: row.codigo_municipio.slice(0, 10) || null,
           estado: row.uf,
           telefone: row.telefone.slice(0, 40) || null,
           email: row.email.slice(0, 180) || null,
@@ -148,6 +181,8 @@ async function main() {
             row.tipo_correspondencia === "PRINCIPAL" ? "Correspondência CNAE: atividade principal" : "Correspondência CNAE: atividade secundária — validar aderência comercial",
             row.cnae_descricao,
             row.porte ? `Porte cadastral: ${row.porte}` : "",
+            row.nome_fantasia === "NOME COMERCIAL NÃO IDENTIFICADO" ? "Nome fantasia ausente na Receita; razão social mantida separadamente e nome comercial pendente de pesquisa." : "",
+            "Grupo comercial pendente de pesquisa; CNAE não é suficiente para classificar A/B/C/D.",
             "Lead cadastral não verificado comercialmente.",
           ].filter(Boolean).join(" | "),
         })),
