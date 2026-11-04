@@ -81,7 +81,7 @@ class ReceitaProspectorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             rows = [establishment("11222333000181", uf="RJ"),
-                    establishment("11222333000262", uf="ES")]
+                    establishment("12ABC34501DE35", uf="ES")]
             result, output = self.run_script(root, rows, ufs=["RJ", "ES"])
             self.assertEqual(result.returncode, 0, result.stderr)
             with output.open(encoding="utf-8-sig", newline="") as f:
