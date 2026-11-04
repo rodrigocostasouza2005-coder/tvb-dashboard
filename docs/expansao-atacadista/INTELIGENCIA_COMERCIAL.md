@@ -36,5 +36,11 @@ Base: `/api/gpt/atacado`. Usa o Bearer token já existente no TVB Radar, sem cri
 - A API do Bruce é limitada à carteira de prospectos; não expõe vendas, estoque ou cadastro de clientes.
 - Não executar migration em produção antes de validar schema, CI e preview.
 
-## Estado
-Esta entrega cria os campos estruturados de feedback, migration e endpoint restrito. Ainda precisa conectar o Bruce à API e registrar resultados reais para produzir recomendações úteis. Não há aprendizado de pesos de modelo: o primeiro ciclo é análise transparente de resultados no banco, sem custo de inferência.
+## Agentes autônomos — primeira versão
+- **Captação:** o workflow `.github/workflows/agentes-prospeccao.yml` consulta o dump público da Receita Federal, limitando a primeira onda a estabelecimentos ativos com CNAE principal 4781400, nome fantasia e telefone ou e-mail. A carga é limitada a 500 candidatos por execução e registra a origem do agente.
+- **Qualificação cadastral:** `scripts/prospeccao/agente-qualificacao.ts` valida formato/dígitos do CNPJ, presença do CNAE principal, nome fantasia e contato; calcula score de completude cadastral e atribui a fila de validação no Radar.
+- **Validação comercial:** continua sendo uma etapa distinta. Receita Federal não comprova que a loja seja multimarcas, venda moda masculina, tenha posicionamento/preço aderente ou esteja aberta. Até haver evidência pública comercial, o grupo A/B/C/D fica PENDENTE e `nomeComercialVerificado=false`.
+- **Operação:** execução semanal automática para RJ e execução manual para RJ, SP, ES, PR, SC, RS, BA, SE, AL, PE, PB, RN, CE, PI, MA, PA, AP e MG. O lote de importação é limitado para evitar inundar a carteira.
+- **Bruce:** permanece somente no Radar, acompanhando oportunidades e registrando resultados. Não prospecta, não atribui leads e não acessa GPT externo.
+
+O score desta etapa mede completude/consistência cadastral, não potencial de compra nem probabilidade de conversão. O primeiro ciclo de aprendizado comercial só ganha força depois de interações reais registradas pelo Bruce.
