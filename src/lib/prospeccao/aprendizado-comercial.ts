@@ -27,7 +27,6 @@ export type PerfilAprendido = {
 
 const POSITIVOS = new Set(["INTERESSADO", "PEDIU_CATALOGO", "PEDIU_PRECO", "NEGOCIANDO", "PEDIDO_REALIZADO", "RECOMPRA"]);
 const NEGATIVOS = new Set(["RECUSOU", "SEM_ADERENCIA", "DADOS_INVALIDOS"]);
-const NEUTROS = new Set(["SEM_RESPOSTA", "OUTRO"]);
 
 function normalizar(v: string | null): string {
   return (v ?? "").trim().toLocaleUpperCase("pt-BR");
