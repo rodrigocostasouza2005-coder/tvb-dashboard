@@ -766,6 +766,17 @@ model AtacadoProspect {
   confiancaPesquisa String?
   nomeComercialVerificado Boolean @default(false)
   pesquisadoEm     DateTime?
+  // Resultado estruturado da consulta oficial Receita Federal/Serpro.
+  situacaoCadastral       String?
+  situacaoCadastralCodigo String?
+  situacaoCadastralData   DateTime?
+  cnaePrincipalCodigo     String?
+  cnaePrincipalDescricao  String?
+  cnaesSecundarios        String?
+  enderecoOficial         String?
+  cepOficial              String?
+  porteEmpresa            String?
+  dataAbertura            DateTime?
   // Atributos comerciais observáveis usados para aprender quais perfis avançam no funil.
   segmentoComercial String?
   perfilLoja        String?
