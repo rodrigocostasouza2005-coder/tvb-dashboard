@@ -21,7 +21,7 @@ export function ProspeccaoRadarConsole({
     { name: "Captura externa", detail: "27 UFs · bucket pendente", state: "pending" },
     { name: "Deduplicação", detail: "Etapa ainda não executada", state: "pending" },
     { name: "Pesquisa cadastral", detail: number(emPesquisa) + " em fila", state: emPesquisa ? "active" : "idle" },
-    { name: "Pesquisa comercial", detail: "Agente de pesquisa ainda não ativado", state: "pending" },
+    { name: "Pesquisa comercial", detail: "Script configurado · execução manual com --apply", state: "idle" },
     { name: "Revisão humana", detail: "Aprovação manual obrigatória", state: "pending" },
     { name: "Radar", detail: "Somente aprovados entram", state: "locked" },
   ] as const;
