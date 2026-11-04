@@ -62,6 +62,37 @@ describe("avaliação de evidências comerciais", () => {
     expect(inactive.pendencias).toContain("revisar situação cadastral: BAIXADA");
   });
 
+  for (const categoria of ["lingerie", "bijuterias", "loja de móveis", "restaurante"]) {
+    it("descarta atividade incompatível: " + categoria, () => {
+      const result = avaliarEvidenciasComerciais({
+        nomeLoja: "Loja Teste", cidade: null, confiancaIdentidade: "ALTA",
+        evidencia: { ...evidence, sinaisExclusao: [categoria] }, situacaoCadastral: "ATIVA",
+      });
+      expect(result.situacao).toBe("NAO_ADERENTE");
+      expect(result.scoreEvidencia).toBe(0);
+      expect(result.motivosDesqualificacao.join(" ")).toContain(categoria);
+    });
+  }
+
+  it("descarta loja de marca própria sem prova de revenda multimarcas", () => {
+    const result = avaliarEvidenciasComerciais({
+      nomeLoja: "Marca Própria", cidade: null, confiancaIdentidade: "ALTA",
+      evidencia: { ...evidence, sinaisMultimarcas: [], sinaisMarcaPropria: ["marca própria"], marcas: [] },
+      situacaoCadastral: "ATIVA",
+    });
+    expect(result.situacao).toBe("NAO_ADERENTE");
+    expect(result.motivosDesqualificacao.join(" ")).toContain("marca");
+  });
+
+  it("descarta loja exclusivamente feminina sem evidência masculina", () => {
+    const result = avaliarEvidenciasComerciais({
+      nomeLoja: "Loja Feminina", cidade: null, confiancaIdentidade: "ALTA",
+      evidencia: { ...evidence, sinaisModaMasculina: [], sinaisModaFeminina: ["moda feminina"] },
+      situacaoCadastral: "ATIVA",
+    });
+    expect(result.situacao).toBe("NAO_ADERENTE");
+  });
+
   it("não atribui aderência sem conteúdo de site", () => {
     const result = avaliarEvidenciasComerciais({
       nomeLoja: "Loja Teste", cidade: null, confiancaIdentidade: "BAIXA", evidencia: null, situacaoCadastral: null,
