@@ -102,3 +102,22 @@ python scripts/prospeccao/baixar_receita_cnpj.py --familias estabelecimentos emp
 Os arquivos são salvos em `dados/receita-cnpj/AAAA-MM`. O download usa arquivo temporário `.part`, tenta retomar via HTTP Range, valida tamanho informado pelo servidor e testa CRC do ZIP antes de renomear para o nome final. Arquivos já íntegros são reaproveitados. Se o servidor não suportar retomada, o download reinicia do começo.
 
 **Atenção:** o layout público da Receita pode mudar. A primeira execução deve ser feita em `--dry-run` para confirmar competência, nomes e tamanhos exibidos. O downloader não é executado no GitHub Actions/Vercel e não envia dados ao Neon. O caminho remoto padrão e o token público são configuráveis por `--remote-path` e `--token`. O limite é uma proteção operacional, não estimativa do tamanho futuro da base.
+
+
+## Importação da base gerada para o painel
+
+Após gerar o CSV com `gerar-prospects-rj.py`, execute primeiro a prévia (não grava dados):
+
+```bash
+npm run prospeccao:importar-receita -- --arquivo dados/prospects.csv --competencia 2026-10
+```
+
+Para gravar explicitamente no banco apontado por `DATABASE_URL`, acrescente `--apply`:
+
+```bash
+npm run prospeccao:importar-receita -- --arquivo dados/prospects.csv --competencia 2026-10 --apply
+```
+
+O importador exige nome fantasia, CNPJ e UF; remove CNPJs repetidos no próprio arquivo; grava em lotes de 400; ignora CNPJs já existentes sem atualizar cadastros revisados. Competência, CNAE e porte são preservados em observações. A origem fica marcada como `receita_federal_dados_abertos`. O modo padrão é prévia; `--apply` é obrigatório para gravar.
+
+**Atenção:** confirme que `DATABASE_URL` aponta para o ambiente desejado. Este comando não baixa nem extrai os arquivos da Receita e não comprova que o estabelecimento é uma multimarcas adequada à TVB.
