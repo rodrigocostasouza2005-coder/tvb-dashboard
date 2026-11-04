@@ -113,6 +113,7 @@ async function main() {
   await mkdir(outDir, { recursive: true });
   const slugCidade = cidade ? "-" + cidade.split(" ").join("-").toLowerCase() : "";
   const csvPath = join(outDir, `candidatos-${uf}${slugCidade}-${stamp}.csv`);
+  const jsonPath = join(outDir, `candidatos-${uf}${slugCidade}-${stamp}.json`);
   await writeFile(csvPath, gerarCsvDescoberta(candidates), "utf8");
   await writeFile(jsonPath, JSON.stringify({ schemaVersion: 1, generatedAt: new Date().toISOString(), uf, city: cidade || null, profilesUsed: profilesForUf.length, queries, candidates }, null, 2), "utf8");
   console.log(`Sites verificados: ${siteChecks}/${MAX_SITE_CHECKS}`);
