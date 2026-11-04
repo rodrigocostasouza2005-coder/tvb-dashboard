@@ -31,7 +31,7 @@ async function main() {
     },
     orderBy: [{ createdAt: "asc" }],
     take: limit,
-    select: { id: true, cnpj: true, nomeFantasia: true, razaoSocial: true, cidade: true, estado: true },
+    select: { id: true, cnpj: true, nomeFantasia: true, razaoSocial: true, observacoes: true, cidade: true, estado: true },
   });
 
   console.log("Consulta cadastral oficial Serpro | UF=" + uf + " | encontrados=" + prospects.length + " | limite=" + limit);
@@ -79,7 +79,7 @@ async function main() {
         ...(official.email ? { email: official.email.slice(0, 180) } : {}),
         confiancaPesquisa: "CADASTRAL_OFICIAL",
         pesquisadoEm: new Date(),
-        observacoes: [prospect.razaoSocial ? "Razão social anterior: " + prospect.razaoSocial : "", "Nome fantasia anterior: " + prospect.nomeFantasia, previous].filter(Boolean).join("\n\n").slice(0, 6000),
+        observacoes: [prospect.observacoes ?? "", prospect.razaoSocial ? "Razão social anterior: " + prospect.razaoSocial : "", "Nome fantasia anterior: " + prospect.nomeFantasia, previous].filter(Boolean).join("\n\n").slice(0, 6000),
       };
       await prisma.$transaction([
         prisma.atacadoProspect.update({ where: { id: prospect.id }, data }),
