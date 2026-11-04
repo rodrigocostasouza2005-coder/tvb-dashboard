@@ -91,8 +91,8 @@ const OPENAPI_SPEC = {
       },
       post: {
         operationId: "registrarInteracaoComercial",
-        summary: "Registra o resultado de uma interação comercial e atualiza o status se informado",
-        requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["prospectId", "descricao"], properties: { prospectId: { type: "string" }, descricao: { type: "string", maxLength: 1200 }, resultado: { type: "string", enum: ["INTERESSADO", "SEM_RESPOSTA", "RECUSOU", "PEDIU_CATALOGO", "PEDIU_PRECO", "NEGOCIANDO", "PEDIDO_REALIZADO", "RECOMPRA", "SEM_ADERENCIA", "DADOS_INVALIDOS", "OUTRO"] }, canal: { type: "string", enum: ["TELEFONE", "EMAIL", "INSTAGRAM", "WHATSAPP", "PRESENCIAL", "OUTRO"] }, status: { type: "string", enum: ["NOVO", "EM_QUALIFICACAO", "QUALIFICADO", "CONTATADO", "NEGOCIACAO", "CONVERTIDO", "DESCARTADO"] }, etapa: { type: "string", maxLength: 80 } } } } } },
+        summary: "Registra uma interação comercial; conversão exige confirmação do primeiro pedido no DAPIC",
+        requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["prospectId", "descricao"], properties: { prospectId: { type: "string" }, descricao: { type: "string", maxLength: 1200 }, resultado: { type: "string", enum: ["INTERESSADO", "SEM_RESPOSTA", "RECUSOU", "PEDIU_CATALOGO", "PEDIU_PRECO", "NEGOCIANDO", "PEDIDO_REALIZADO", "RECOMPRA", "SEM_ADERENCIA", "DADOS_INVALIDOS", "OUTRO"] }, canal: { type: "string", enum: ["TELEFONE", "EMAIL", "INSTAGRAM", "WHATSAPP", "PRESENCIAL", "OUTRO"] }, status: { type: "string", enum: ["NOVO", "EM_QUALIFICACAO", "QUALIFICADO", "CONTATADO", "NEGOCIACAO", "DESCARTADO"] }, etapa: { type: "string", maxLength: 80 } } } } } },
         responses: { "200": { description: "Interação registrada." }, "400": { description: "Dados inválidos." }, "401": { description: "Token ausente ou inválido." }, "404": { description: "Prospecto não encontrado." } },
       },
     },
