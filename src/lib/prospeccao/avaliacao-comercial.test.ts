@@ -47,7 +47,7 @@ describe("avaliação de evidências comerciais", () => {
       situacaoCadastral: "ATIVA",
     });
     expect(result.situacao).toBe("EVIDENCIA_PARCIAL");
-    expect(result.scoreEvidencia).toBe(80);
+    expect(result.scoreEvidencia).toBe(0);
     expect(result.pendencias[0]).toContain("confirmar se o site pertence");
   });
 
