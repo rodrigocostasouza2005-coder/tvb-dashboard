@@ -31,11 +31,11 @@ export async function GET(request: NextRequest) {
   if (resource === "inteligencia") {
     // Conta os resultados reais por perfil, sem inferir conversão a partir de mera resposta.
     const grouped = await prisma.atacadoProspect.groupBy({
-      by: ["segmentoComercial", "perfilLoja", "faixaPreco", "cidade", "estado", "status"],
+      by: ["segmentoComercial", "perfilLoja", "faixaPreco", "estado", "status"],
       _count: { _all: true },
       where: { status: { in: ["CONVERTIDO", "NEGOCIACAO", "CONTATADO", "DESCARTADO"] } },
     });
-    const key = (v: {segmentoComercial:string|null;perfilLoja:string|null;faixaPreco:string|null;cidade:string|null;estado:string|null}) => [v.segmentoComercial,v.perfilLoja,v.faixaPreco,v.cidade,v.estado].join("|");
+    const key = (v: {segmentoComercial:string|null;perfilLoja:string|null;faixaPreco:string|null;estado:string|null}) => [v.segmentoComercial,v.perfilLoja,v.faixaPreco,v.estado].join("|");
     const totals = new Map<string, {total:number;convertido:number;negociacao:number;descartado:number}>();
     for (const r of grouped) {
       const k=key(r); const v=totals.get(k) ?? {total:0,convertido:0,negociacao:0,descartado:0};
