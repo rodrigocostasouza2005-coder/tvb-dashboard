@@ -38,7 +38,7 @@ const STATUS: Record<string, string> = {
 export default async function AtacadoProspeccaoPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; grupo?: string; cidade?: string; uf?: string; erro?: string; criado?: string; importacao?: string; novos?: string; duplicados?: string; invalidos?: string; bruce?: string; revisao?: string; novos?: string; duplicados?: string }>;
+  searchParams: Promise<{ status?: string; grupo?: string; cidade?: string; uf?: string; erro?: string; criado?: string; importacao?: string; novos?: string; duplicados?: string; invalidos?: string; bruce?: string; revisao?: string }>;
 }) {
   const user = await getSessionUser();
   if (!user) return null;
