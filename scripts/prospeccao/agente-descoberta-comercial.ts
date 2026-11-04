@@ -67,8 +67,8 @@ async function main() {
   const uf = arg("--uf", "RJ").toUpperCase();
   const cidade = arg("--cidade", "").trim().split(" ").filter(Boolean).join(" ").slice(0, 100);
   const maxQueries = Math.max(1, Math.min(12, Number(arg("--max-queries", "8")) || 8));
-  const maxCandidates = Math.max(1, Math.min(100, Number(arg("--max-candidates", "40")) || 40));
-  if (!/^[A-Z]{2}$/.test(uf)) throw new Error("UF inválida.");
+  const maxCandidates = Math.max(1, Math.min(2, Number(arg("--max-candidates", "2")) || 2));
+  if (!/^[A-Z]{2}$/.test(uf)) throw new Error("UF inválida.");\n  if (!cidade) throw new Error("Informe --cidade. A prospecção de alta precisão é executada município por município, com no máximo duas lojas aprováveis por localidade.");
 
   const activities = await prisma.atacadoProspectActivity.findMany({
     where: { tipo: "INTERACAO_BRUCE", resultado: { not: null } },
@@ -83,7 +83,7 @@ async function main() {
   })));
   const profilesForUf = profiles.filter((p) => !p.atributos.estado || p.atributos.estado === uf);
   const queries = gerarConsultasDescoberta(profilesForUf, uf, maxQueries, cidade || undefined);
-  console.log(`RADAR DESCOBERTA | UF=${uf} | CIDADE=${cidade || "TODAS"} | perfis aprendidos=${profilesForUf.length} | consultas=${queries.length} | modo=ARQUIVOS PARA REVISÃO (somente leitura)`);
+  console.log(`RADAR SURFWEAR | UF=${uf} | MUNICÍPIO=${cidade} | TETO=2 LOJAS | perfis aprendidos=${profilesForUf.length} | consultas=${queries.length} | modo=ARQUIVOS PARA REVISÃO (somente leitura)`);
 
   const byDomain = new Map<string, CandidatoDescoberto>();
   let siteChecks = 0;
@@ -107,7 +107,7 @@ async function main() {
     }
   }
 
-  const candidates = [...byDomain.values()].sort((a, b) => b.pontuacaoEvidencia - a.pontuacaoEvidencia);
+  const candidates = [...byDomain.values()].sort((a, b) => b.pontuacaoEvidencia - a.pontuacaoEvidencia).slice(0, 2);
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const outDir = join(process.cwd(), "artifacts", "prospeccao-descoberta");
   await mkdir(outDir, { recursive: true });
@@ -121,7 +121,7 @@ async function main() {
   console.log(`Candidatos com evidência textual: ${candidates.length}`);
   console.log(`CSV: ${csvPath}`);
   console.log(`JSON: ${jsonPath}`);
-  console.log("Nenhum prospecto foi criado, atualizado, atribuído ou contatado. Revisão humana obrigatória.");
+  console.log("Teto de duas lojas por município. Nenhum prospecto foi criado, atualizado, atribuído ou contatado. Revisão humana obrigatória.");
 }
 
 main().catch((error) => { console.error("Falha na descoberta:", error instanceof Error ? error.message : error); process.exitCode = 1; }).finally(async () => { await prisma.$disconnect(); });
