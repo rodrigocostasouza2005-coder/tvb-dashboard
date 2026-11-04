@@ -14,7 +14,8 @@ import { extrairEvidenciasSite, extrairResultadosBusca, hostEhRedeSocial } from 
 
 const prisma = new PrismaClient();
 const UA = "TVB-Radar-Discovery/1.0";
-const TIMEOUT = 7000;\nconst MAX_SITE_CHECKS = 80;
+const TIMEOUT = 7000;
+const MAX_SITE_CHECKS = 80;
 
 async function html(url: string): Promise<{ body: string; finalUrl: string } | null> {
   try {
@@ -24,7 +25,18 @@ async function html(url: string): Promise<{ body: string; finalUrl: string } | n
   } catch { return null; }
 }
 
+function isSafePublicSite(url: string): boolean {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.toLowerCase();
+    if (u.protocol !== "https:" || isIP(host) || !host.includes(".")) return false;
+    if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal") || host.endsWith(".test")) return false;
+    return true;
+  } catch { return false; }
+}
+
 async function robotsAllows(url: string): Promise<boolean> {
+  if (!isSafePublicSite(url)) return false;
   try {
     const target = new URL(url);
     const response = await fetch(`${target.origin}/robots.txt`, { headers: { "user-agent": UA }, signal: AbortSignal.timeout(TIMEOUT), redirect: "error" });
@@ -73,7 +85,8 @@ async function main() {
   console.log(`RADAR DESCOBERTA | UF=${uf} | perfis aprendidos=${profilesForUf.length} | consultas=${queries.length} | modo=ARQUIVOS PARA REVISÃO (somente leitura)`);
 
   const byDomain = new Map<string, CandidatoDescoberto>();
-  for (let i = 0; i < queries.length && byDomain.size < maxCandidates; i++) {
+  let siteChecks = 0;
+  for (let i = 0; i < queries.length && byDomain.size < maxCandidates && siteChecks < MAX_SITE_CHECKS; i++) {
     const query = queries[i];
     const results = await search(query);
     console.log(`Busca ${i + 1}/${queries.length}: ${query} | resultados=${results.length}`);
@@ -81,9 +94,11 @@ async function main() {
       if (byDomain.size >= maxCandidates || hostEhRedeSocial(result.url)) continue;
       let domain: string;
       try { domain = new URL(result.url).hostname.toLowerCase().replace(/^www\./, ""); } catch { continue; }
-      if (byDomain.has(domain) || !await robotsAllows(result.url)) continue;
+      if (byDomain.has(domain) || !isSafePublicSite(result.url)) continue;
+      siteChecks++;
+      if (!await robotsAllows(result.url)) continue;
       const page = await html(result.url);
-      if (!page) continue;
+      if (!page || hostEhRedeSocial(page.finalUrl)) continue;
       const evidence = extrairEvidenciasSite(page.finalUrl, page.body);
       const profileReference = query;
       const candidate = avaliarCandidatoDescoberto(result, evidence, profileReference);
@@ -99,7 +114,8 @@ async function main() {
   const jsonPath = join(outDir, `candidatos-${uf}-${stamp}.json`);
   await writeFile(csvPath, gerarCsvDescoberta(candidates), "utf8");
   await writeFile(jsonPath, JSON.stringify({ schemaVersion: 1, generatedAt: new Date().toISOString(), uf, profilesUsed: profilesForUf.length, queries, candidates }, null, 2), "utf8");
-  console.log(`Sites verificados: ${siteChecks}/${MAX_SITE_CHECKS}`);\n  console.log(`Candidatos com evidência textual: ${candidates.length}`);
+  console.log(`Sites verificados: ${siteChecks}/${MAX_SITE_CHECKS}`);\n  console.log(`Sites verificados: ${siteChecks}/${MAX_SITE_CHECKS}`);
+  console.log(`Candidatos com evidência textual: ${candidates.length}`);
   console.log(`CSV: ${csvPath}`);
   console.log(`JSON: ${jsonPath}`);
   console.log("Nenhum prospecto foi criado, atualizado, atribuído ou contatado. Revisão humana obrigatória.");
