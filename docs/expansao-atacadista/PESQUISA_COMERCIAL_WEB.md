@@ -64,3 +64,17 @@ No GitHub, abra **Actions → Descoberta de novas lojas pelo Radar → Run workf
 - Redes sociais não são acessadas. Instagram aparece apenas no fluxo de pesquisa anterior como URL candidata em buscador, sem coleta de conteúdo.
 - Não há envio de mensagens, importação em massa, aprovação automática ou conversão automática.
 - A primeira versão descobre via busca pública e sites indexados; não varre a base bruta de 170 mil CNPJs nem substitui a captura cadastral externa.
+
+## Revisão humana dos candidatos descobertos
+
+Depois de executar **Actions → Descoberta de novas lojas pelo Radar**, baixe o artefato e extraia o CSV. Na Central de Prospecção, use a seção **Revisão de descoberta web** para carregar o CSV.
+
+Para cada loja que deseja incluir:
+1. Abra o site e confira se o nome e a operação correspondem à loja real.
+2. Marque a loja e confirme/edite o nome comercial.
+3. Informe CNPJ, cidade e UF.
+4. Aprove somente depois da conferência.
+
+O servidor valida o formato e os dígitos verificadores do CNPJ (incluindo a estrutura alfanumérica), rejeita dados inválidos e ignora duplicados por CNPJ ou site. Essa validação matemática **não confirma situação ativa, endereço, quadro societário ou atividade na Receita Federal**; essa consulta cadastral oficial continua sendo uma etapa separada.
+
+A aprovação coloca o registro como `NOVO`, com `grupoComercial=PENDENTE`, origem `pesquisa_web` e trilha de auditoria. Não o marca como qualificado, não atribui a Bruce e não envia contato. A qualificação comercial e a aprovação para a carteira seguem etapas posteriores.
