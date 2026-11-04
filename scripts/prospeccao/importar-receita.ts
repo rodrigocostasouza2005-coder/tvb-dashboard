@@ -161,8 +161,15 @@ async function main() {
     console.log(`Municípios normalizados na UF ${arg("--uf") || "não informada"}: ${citiesNormalized}`);
     for (let offset = 0; offset < deduped.length; offset += 400) {
       const batch = deduped.slice(offset, offset + 400);
+      const existing = await prisma.atacadoProspect.findMany({
+        where: { cnpj: { in: batch.map((row) => row.cnpj) } },
+        select: { cnpj: true },
+      });
+      const existingCnpjs = new Set(existing.map((row) => row.cnpj));
+      const novos = batch.filter((row) => !existingCnpjs.has(row.cnpj));
+      if (novos.length === 0) continue;
       const result = await prisma.atacadoProspect.createMany({
-        data: batch.map((row) => ({
+        data: novos.map((row) => ({
           nomeFantasia: row.nome_fantasia.slice(0, 160),
           razaoSocial: row.razao_social.slice(0, 180) || null,
           cnpj: row.cnpj,
@@ -173,6 +180,7 @@ async function main() {
           email: row.email.slice(0, 180) || null,
           site: safeUrl(row.site),
           origem: "receita_federal_dados_abertos",
+          origemAgente: "AGENTE_CAPTACAO_RECEITA_V1",
           evidenciaUrl: safeUrl(row.evidencia_url),
           observacoes: [
             `Coleta cadastral Receita Federal — competência ${competence}`,
@@ -189,6 +197,19 @@ async function main() {
         skipDuplicates: true,
       });
       inserted += result.count;
+      const insertedRows = await prisma.atacadoProspect.findMany({
+        where: { cnpj: { in: novos.map((row) => row.cnpj) } },
+        select: { id: true, cnpj: true },
+      });
+      await prisma.atacadoProspectActivity.createMany({
+        data: insertedRows.map((row) => ({
+          prospectId: row.id,
+          tipo: "AGENTE_CAPTACAO",
+          etapa: "CAPTACAO_RECEITA",
+          descricao: "Candidato captado da base pública da Receita Federal. Aguardando triagem cadastral e validação comercial.",
+          criadoPor: "AGENTE_CAPTACAO_RECEITA_V1",
+        })),
+      });
       console.log(`Lote ${Math.floor(offset / 400) + 1}: ${result.count} novos registros`);
     }
     console.log(`Concluído: ${inserted} inseridos; ${deduped.length - inserted} já existiam e foram preservados.`);
