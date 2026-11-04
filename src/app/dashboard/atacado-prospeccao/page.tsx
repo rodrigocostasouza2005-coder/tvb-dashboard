@@ -223,15 +223,20 @@ export default async function AtacadoProspeccaoPage({
                   </td>
                   <td className="px-4 py-3 text-xs">
                     <div className="flex flex-col items-start gap-1.5">
-                      {p.site && /^https?:\/\//i.test(p.site) ? <a href={p.site} target="_blank" rel="noopener noreferrer" className="font-medium text-[var(--series-1)] underline underline-offset-2">Abrir site ↗</a> : <span className="text-[var(--text-muted)]">Site não localizado</span>}
-                      {p.instagram && /^https?:\/\//i.test(p.instagram) ? <a href={p.instagram} target="_blank" rel="noopener noreferrer" className="font-medium text-[var(--series-1)] underline underline-offset-2">Abrir Instagram ↗</a> : <span className="text-[var(--text-muted)]">Instagram não localizado</span>}
+                      {p.site && /^https?:\/\//i.test(p.site)
+                        ? <a href={p.site} target="_blank" rel="noopener noreferrer" className="font-medium text-[var(--series-1)] underline underline-offset-2">Abrir site ↗</a>
+                        : <a href={`https://www.google.com/search?q=${encodeURIComponent(`${p.nomeFantasia} ${p.cidade ?? ""} ${p.estado ?? ""} site oficial`)}`} target="_blank" rel="noopener noreferrer" className="text-[var(--text-secondary)] underline underline-offset-2">Pesquisar site ↗</a>}
+                      {p.instagram && /^https?:\/\//i.test(p.instagram)
+                        ? <a href={p.instagram} target="_blank" rel="noopener noreferrer" className="font-medium text-[var(--series-1)] underline underline-offset-2">Abrir Instagram ↗</a>
+                        : <a href={`https://www.google.com/search?q=${encodeURIComponent(`site:instagram.com ${p.nomeFantasia} ${p.cidade ?? ""} ${p.estado ?? ""}`)}`} target="_blank" rel="noopener noreferrer" className="text-[var(--text-secondary)] underline underline-offset-2">Pesquisar Instagram ↗</a>}
                     </div>
                   </td>
                   <td className="px-4 py-3 text-xs text-[var(--text-secondary)]">
                     {p.enderecoOficial && <div className="max-w-64 font-medium text-[var(--text-primary)]">{p.enderecoOficial}</div>}
                     <div className={p.enderecoOficial ? "mt-1" : ""}>{[p.cidade, p.estado].filter(Boolean).join(" / ") || "Cidade não identificada"}</div>
                     {p.cepOficial && <div className="mt-0.5 text-[10px] text-[var(--text-muted)]">CEP {p.cepOficial}</div>}
-                    {!p.enderecoOficial && <div className="mt-0.5 text-[10px] text-[var(--text-muted)]">Rua não informada na base cadastral</div>}
+                    {!p.enderecoOficial && <div className="mt-0.5 text-[10px] text-[var(--text-muted)]">Rua ainda não consultada na Receita</div>}
+                    <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${p.nomeFantasia} ${p.cidade ?? ""} ${p.estado ?? ""}`)}`} target="_blank" rel="noopener noreferrer" className="mt-1 inline-block text-[10px] text-[var(--series-1)] underline underline-offset-2">Buscar endereço no mapa ↗</a>
                   </td>
                   <td className="px-4 py-3">
                     <div className="mb-1 font-semibold">{p.grupoComercial === "PENDENTE" ? "Pendente" : `Grupo ${p.grupoComercial}`}</div>
