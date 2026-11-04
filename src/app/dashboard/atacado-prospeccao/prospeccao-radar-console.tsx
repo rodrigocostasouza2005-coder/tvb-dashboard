@@ -72,13 +72,13 @@ export function ProspeccaoRadarConsole({
           {stages.map((stage, index) => (
             <div key={stage.name} className="min-w-0 px-3 py-3">
               <div className="flex items-center gap-2">
-                <span className={`flex h-5 w-5 shrink-0 items-center justify-center border text-[10px] font-mono ${stage.state === "ready" ? "border-emerald-600/50 text-emerald-600" : stage.state === "active" ? "border-amber-500 bg-amber-500/10 text-amber-600" : "border-[var(--border)] text-[var(--text-muted)]"}`}>
-                  {stage.state === "ready" ? "✓" : String(index + 1).padStart(2, "0")}
+                <span className={`flex h-5 w-5 shrink-0 items-center justify-center border text-[10px] font-mono ${stage.state === "active" ? "border-amber-500 bg-amber-500/10 text-amber-600" : "border-[var(--border)] text-[var(--text-muted)]"}`}>
+                  {stage.state === "active" ? "•" : String(index + 1).padStart(2, "0")}
                 </span>
                 <span className="truncate text-[11px] font-semibold text-[var(--text-primary)]">{stage.name}</span>
               </div>
               <p className="mt-2 min-h-8 text-[10px] leading-4 text-[var(--text-muted)]">{stage.detail}</p>
-              <div className={`mt-2 h-px w-full ${stage.state === "ready" ? "bg-emerald-600/60" : stage.state === "active" ? "bg-amber-500" : "bg-[var(--border)]"}`} />
+              <div className={`mt-2 h-px w-full ${stage.state === "active" ? "bg-amber-500" : "bg-[var(--border)]"}`} />
             </div>
           ))}
         </div>
