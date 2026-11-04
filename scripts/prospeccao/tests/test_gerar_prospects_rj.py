@@ -66,6 +66,36 @@ class ReceitaProspectorTests(unittest.TestCase):
             self.assertEqual(data[0]["telefone"], "2122223333")
             self.assertEqual(data[0]["competencia"], "2026-10")
 
+    def test_multi_uf_keeps_only_selected_company_roots(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            establishments = root / "Estabelecimentos.csv"
+            companies = root / "Empresas.csv"
+            municipalities = root / "Municipios.csv"
+            output = root / "saida.csv"
+            rows = [establishment(uf="RJ"), establishment("12ABC34501DE35", uf="ES")]
+            with establishments.open("w", encoding="latin-1", newline="") as f:
+                csv.writer(f, delimiter=";").writerows(rows)
+            with companies.open("w", encoding="latin-1", newline="") as f:
+                writer = csv.writer(f, delimiter=";")
+                writer.writerow(["11222333", "EMPRESA RJ", "2062", "49", "10000,00", "03", ""])
+                writer.writerow(["99999999", "EMPRESA NÃO SELECIONADA", "2062", "49", "10000,00", "03", ""])
+                writer.writerow(["12ABC345", "EMPRESA ES", "2062", "49", "10000,00", "03", ""])
+            with municipalities.open("w", encoding="latin-1", newline="") as f:
+                csv.writer(f, delimiter=";").writerow(["6001", "RIO DE JANEIRO"])
+            result = subprocess.run(
+                [sys.executable, str(SCRIPT), "--estabelecimentos", str(establishments),
+                 "--empresas", str(companies), "--municipios", str(municipalities),
+                 "--saida", str(output), "--ufs", "RJ", "ES", "--competencia", "2026-10"],
+                capture_output=True, text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            with output.open(encoding="utf-8-sig", newline="") as f:
+                data = list(csv.DictReader(f, delimiter=";"))
+            self.assertEqual({row["razao_social"] for row in data}, {"EMPRESA RJ", "EMPRESA ES"})
+            self.assertIn("ativos examinados=2", result.stderr)
+            self.assertIn("com CNAE-alvo=2", result.stderr)
+
     def test_deduplicates_repeated_cnpj(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
