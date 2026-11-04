@@ -78,6 +78,7 @@ export default async function AtacadoProspeccaoPage({
     : erro === "estado" ? "Informe a UF com duas letras."
     : erro === "url" ? "Use apenas endereços completos iniciados por http:// ou https://."
     : erro === "duplicado" ? "Já existe um prospecto cadastrado com esse CNPJ."
+    : erro === "conversao" ? "Conversão só é confirmada após o primeiro pedido aparecer no DAPIC."
     : erro === "status" ? "Status inválido."
     : erro === "nao-encontrado" ? "Prospecto não encontrado."
     : null;
@@ -197,7 +198,7 @@ export default async function AtacadoProspeccaoPage({
             <label htmlFor="status" className="text-xs text-[var(--text-muted)]">Status</label>
             <select id="status" name="status" defaultValue={status ?? ""} className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-sm">
               <option value="">Todos</option>
-              {Object.entries(STATUS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+              {Object.entries(STATUS).map(([key, label]) => <option key={key} value={key} disabled={key === "CONVERTIDO"}>{key === "CONVERTIDO" ? "Convertido (confirmação DAPIC)" : label}</option>)}
             </select>
             <button className="rounded-md border border-[var(--border)] px-3 py-1.5 text-xs">Filtrar</button>
           </form>
