@@ -43,3 +43,24 @@ O Radar usa a interação mais recente de cada loja (não soma contatos repetido
 - A confiança é baixa entre 5–9 lojas, média entre 10–19 e alta a partir de 20.
 - O agente de pesquisa prioriza, entre os prospects já capturados e ainda pendentes, os que compartilham atributos com perfis que tiveram melhor histórico. A pontuação é explicável (segmento, perfil, faixa de preço e UF) e não aprova nem descarta ninguém.
 - Se não houver amostra suficiente, não cria padrão nem altera a fila. Nenhum contato é enviado automaticamente.
+
+## Descoberta de lojas novas a partir dos padrões aprendidos
+
+O workflow manual `.github/workflows/descoberta-comercial-radar.yml` gera consultas de busca usando os perfis que o aprendizado do Bruce identificou na UF selecionada. Ele procura sites públicos, visita somente páginas permitidas por `robots.txt` e exige evidência textual de moda masculina e de operação multimarcas (ou pelo menos duas marcas reconhecidas) para listar um candidato.
+
+Execução local:
+```bash
+npm run prospeccao:descobrir -- --uf RJ --max-queries 8 --max-candidates 40
+```
+
+No GitHub, abra **Actions → Descoberta de novas lojas pelo Radar → Run workflow**, escolha a UF e baixe o artefato gerado. O artefato contém CSV e JSON com URL, domínio, trecho de busca, sinais encontrados, marcas mencionadas, pontuação de evidência e perfil que originou a busca. Fica disponível por 30 dias.
+
+### Limites e controles
+- O agente é somente leitura: consulta interações do Bruce no Neon, mas não cria, atualiza, atribui ou exclui registros. O código rejeita explicitamente `--apply`.
+- Use no secret `DATABASE_URL` uma credencial Postgres de leitura (SELECT) sempre que possível. Não reutilize credencial administrativa para esse workflow.
+- O resultado é uma lista de candidatos para revisão, não uma lista de lojas aprovadas. Pontuação mede evidência textual encontrada, não potencial financeiro, crédito, intenção de compra ou legitimidade cadastral.
+- A busca pode retornar diretórios, homônimos ou páginas desatualizadas. A equipe deve confirmar nome, cidade, CNPJ, operação ativa, contato comercial e aderência antes de cadastrar no Radar.
+- Sites sem evidência textual suficiente são descartados da lista; isso não prova que a loja não exista.
+- Redes sociais não são acessadas. Instagram aparece apenas no fluxo de pesquisa anterior como URL candidata em buscador, sem coleta de conteúdo.
+- Não há envio de mensagens, importação em massa, aprovação automática ou conversão automática.
+- A primeira versão descobre via busca pública e sites indexados; não varre a base bruta de 170 mil CNPJs nem substitui a captura cadastral externa.
