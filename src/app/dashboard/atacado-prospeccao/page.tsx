@@ -2,7 +2,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { requireTabAccess } from "@/lib/tabs";
-import { criarProspectAction, atualizarStatusProspectAction, registrarInteracaoBruceAction } from "./actions";
+import { criarProspectAction, atualizarStatusProspectAction, registrarInteracaoBruceAction, atualizarPresencaDigitalProspectAction } from "./actions";
 import { CsvImportPreview } from "./csv-import-preview";
 import { ProspeccaoRadarConsole } from "./prospeccao-radar-console";
 import { RevisaoCandidatosWeb } from "./revisao-candidatos-web";
@@ -40,7 +40,7 @@ const STATUS: Record<string, string> = {
 export default async function AtacadoProspeccaoPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; grupo?: string; cidade?: string; uf?: string; erro?: string; criado?: string; importacao?: string; novos?: string; duplicados?: string; invalidos?: string; bruce?: string; revisao?: string; cadastro?: string }>;
+  searchParams: Promise<{ status?: string; grupo?: string; cidade?: string; uf?: string; erro?: string; criado?: string; importacao?: string; novos?: string; duplicados?: string; invalidos?: string; bruce?: string; revisao?: string; cadastro?: string; presenca?: string }>;
 }) {
   const user = await getSessionUser();
   if (!user) return null;
@@ -98,6 +98,8 @@ export default async function AtacadoProspeccaoPage({
     <div className="space-y-6">
       {params.bruce === "registrado" && <p role="status" className="rounded-md border border-green-600/40 px-3 py-2 text-sm text-green-700">Interação registrada no histórico do Radar.</p>}
       {params.bruce === "erro" && <p role="alert" className="rounded-md border border-red-500/40 px-3 py-2 text-sm text-red-600">Não foi possível registrar a interação. Confira os campos e tente novamente.</p>}
+      {params.presenca === "salva" && <p role="status" className="rounded-md border border-green-600/40 px-3 py-2 text-sm text-green-700">Presença digital salva no cadastro da loja.</p>}
+      {params.presenca === "erro" && <p role="alert" className="rounded-md border border-red-500/40 px-3 py-2 text-sm text-red-600">Não foi possível salvar. Use URLs completas iniciadas por http:// ou https://.</p>}
       <ProspeccaoRadarConsole total={total} novos={novos} emPesquisa={emPesquisa} qualificados={qualificados} contatados={contatados} />
       <CoastalProspectingMap selectedUf={uf ?? ""} selectedCity={cidade ?? ""} cities={cidades.map((item) => item.cidade).filter((value): value is string => Boolean(value))} stateCounts={stateCounts} />
       {params.revisao === "concluida" && <p role="status" className="border border-green-600/40 px-3 py-2 text-sm text-green-700">Revisão concluída: {params.novos ?? "0"} candidatos incluídos na fila de qualificação; {params.duplicados ?? "0"} duplicados ignorados.</p>}
@@ -296,6 +298,16 @@ export default async function AtacadoProspeccaoPage({
                           >{p.instagram && /^https?:\/\//i.test(p.instagram) ? "Abrir Instagram ↗" : "Buscar Instagram ↗"}</a>
                         </div>
                         <p className="text-[10px] text-[var(--text-muted)]">Os links abrem em nova aba. Se ainda não houver endereço cadastrado, o Radar abre uma pesquisa para localizar o perfil ou site correto.</p>
+                        <form action={atualizarPresencaDigitalProspectAction} className="space-y-1.5 rounded-md border border-[var(--border)] p-2">
+                          <input type="hidden" name="prospectId" value={p.id} />
+                          <label className="block text-[10px] text-[var(--text-secondary)]">Salvar site oficial
+                            <input name="site" type="url" maxLength={500} defaultValue={p.site ?? ""} placeholder="https://www.loja.com.br" className="mt-0.5 w-full rounded border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-[11px]" />
+                          </label>
+                          <label className="block text-[10px] text-[var(--text-secondary)]">Salvar Instagram
+                            <input name="instagram" type="url" maxLength={500} defaultValue={p.instagram ?? ""} placeholder="https://www.instagram.com/loja/" className="mt-0.5 w-full rounded border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-[11px]" />
+                          </label>
+                          <button type="submit" className="w-full rounded border border-[var(--series-1)] px-2 py-1.5 text-[11px] font-medium">Salvar links no cadastro</button>
+                        </form>
                       </div>
                       <form action={registrarInteracaoBruceAction} className="mt-2 min-w-48 space-y-2">
                         <input type="hidden" name="prospectId" value={p.id} />
