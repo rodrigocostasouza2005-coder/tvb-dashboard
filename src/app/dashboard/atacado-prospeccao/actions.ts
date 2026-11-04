@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { requireTabAccess } from "@/lib/tabs";
+import { validarCnpj } from "@/lib/prospeccao/cnpj";
 
 function value(formData: FormData, key: string): string {
   return String(formData.get(key) ?? "").trim();
@@ -334,19 +335,6 @@ type CandidatoParaAprovacao = {
   perfilReferencia: string;
 };
 
-function validarCnpjCompleto(input: string): string | null {
-  const cnpj = normalizeCnpj(input);
-  if (!/^[A-Z0-9]{12}[0-9]{2}$/.test(cnpj) || cnpj.split("").every((char) => char === cnpj[0])) return null;
-  const valor = (char: string) => char.charCodeAt(0) - 48;
-  const calcular = (base: string, pesos: number[]) => {
-    const soma = [...base].reduce((total, char, i) => total + valor(char) * pesos[i], 0);
-    const resto = soma % 11;
-    return String(resto < 2 ? 0 : 11 - resto);
-  };
-  const digito1 = calcular(cnpj.slice(0, 12), [5,4,3,2,9,8,7,6,5,4,3,2]);
-  const digito2 = calcular(cnpj.slice(0, 12) + digito1, [6,5,4,3,2,9,8,7,6,5,4,3,2]);
-  return cnpj.slice(-2) === digito1 + digito2 ? cnpj : null;
-}
 
 export async function aprovarCandidatosDescobertosAction(formData: FormData) {
   const user = await getSessionUser();
@@ -374,7 +362,7 @@ export async function aprovarCandidatosDescobertosAction(formData: FormData) {
   }
 
   for (const candidato of candidatos) {
-    if (!candidato.nomeFantasia || !validarCnpjCompleto(candidato.cnpj) || !/^[A-Z]{2}$/.test(candidato.estado) || !candidato.cidade) {
+    if (!candidato.nomeFantasia || !validarCnpj(candidato.cnpj) || !/^[A-Z]{2}$/.test(candidato.estado) || !candidato.cidade) {
       redirect("/dashboard/atacado-prospeccao?revisao=dados-invalidos");
     }
     const site = normalizeHttpUrl(candidato.site);
@@ -386,7 +374,7 @@ export async function aprovarCandidatosDescobertosAction(formData: FormData) {
   let criados = 0;
   let duplicados = 0;
   for (const candidato of candidatos) {
-    const cnpj = validarCnpjCompleto(candidato.cnpj)!;
+    const cnpj = validarCnpj(candidato.cnpj)!;
     const site = normalizeHttpUrl(candidato.site)!;
     const existente = await prisma.atacadoProspect.findFirst({
       where: { OR: [{ cnpj }, { site }] },
