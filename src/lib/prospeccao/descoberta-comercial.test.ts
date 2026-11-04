@@ -9,18 +9,18 @@ const perfil: PerfilAprendido = {
   confianca: "BAIXA",
   atributos: { segmentoComercial: "MODA MASCULINA", perfilLoja: "MULTIMARCAS", faixaPreco: "MEDIO", estado: "RJ" },
 };
-const resultado = { url: "https://exemplo.com.br", titulo: "Loja Exemplo - Moda masculina", trecho: "Multimarcas no Rio" };
+const resultado = { url: "https://exemplo.com.br", titulo: "Surf Shop Exemplo - Moda masculina", trecho: "Multimarcas no Rio" };
 const evidencia = {
-  url: "https://exemplo.com.br/", titulo: "Loja Exemplo", descricao: "Moda masculina multimarcas",
+  url: "https://exemplo.com.br/", titulo: "Surf Shop Exemplo", descricao: "Moda masculina multimarcas surfwear",
   texto: "Reserva Aramis Osklen",
   marcas: ["Reserva", "Aramis", "Osklen"], sinaisModaMasculina: ["moda masculina"],
-  sinaisMultimarcas: ["multimarcas"],
+  sinaisMultimarcas: ["multimarcas"], sinaisSurfSkate: ["surfwear"],
 };
 
 describe("descoberta comercial", () => {
   it("gera buscas com atributos aprendidos e UF, sem duplicar consultas", () => {
     const queries = gerarConsultasDescoberta([perfil], "rj", 8);
-    expect(queries[0]).toContain("RJ");
+    expect(queries[0]).toContain("RJ");\n    expect(queries[0]).toContain("surf");
     expect(queries[0]).toContain('"medio"');
     expect(queries[0]).not.toContain("evidencia");
     expect(queries[0]).not.toContain("publica");
@@ -33,7 +33,7 @@ describe("descoberta comercial", () => {
     expect(queries[0]).toContain("Niterói");
     expect(queries[0]).toContain("RJ");
   });
-  it("rejeita site sem evidência de moda masculina", () => {
+  it("rejeita loja cujo nome não indica surf ou skate", () => {\n    expect(avaliarCandidatoDescoberto({ ...resultado, titulo: "Loja Exemplo - Moda masculina" }, evidencia, perfil.perfil)).toBeNull();\n  });\n  it("rejeita site sem evidência de moda masculina", () => {
     expect(avaliarCandidatoDescoberto(resultado, { ...evidencia, sinaisModaMasculina: [] }, perfil.perfil)).toBeNull();
   });
   it("exige sinal multimarcas ou ao menos duas marcas", () => {
@@ -43,9 +43,9 @@ describe("descoberta comercial", () => {
     expect(avaliarCandidatoDescoberto(resultado, { ...evidencia, sinaisExclusao: ["lingerie"] }, perfil.perfil)).toBeNull();
     expect(avaliarCandidatoDescoberto(resultado, { ...evidencia, sinaisExclusao: ["restaurante"] }, perfil.perfil)).toBeNull();
   });
-  it("rejeita marca própria sem evidência de revenda de terceiros", () => {
+  it("rejeita qualquer fabricante ou marca própria, mesmo se declarar multimarcas", () => {
     expect(avaliarCandidatoDescoberto(resultado, {
-      ...evidencia, sinaisMultimarcas: [], sinaisMarcaPropria: ["marca própria"], marcas: [],
+      ...evidencia, sinaisMarcaPropria: ["marca própria"],
     }, perfil.perfil)).toBeNull();
   });
   it("não aceita lista de marcas sem frase explícita de revenda multimarcas", () => {
