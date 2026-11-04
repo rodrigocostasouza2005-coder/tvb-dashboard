@@ -103,7 +103,11 @@ def main() -> int:
         count = con.execute(
             "SELECT count(*) FROM read_parquet(?)", [str(output_path)]
         ).fetchone()[0]
-        digest = hashlib.sha256(output_path.read_bytes()).hexdigest()
+        hasher = hashlib.sha256()
+        with output_path.open("rb") as parquet_file:
+            for chunk in iter(lambda: parquet_file.read(8 * 1024 * 1024), b""):
+                hasher.update(chunk)
+        digest = hasher.hexdigest()
         manifest = {
             "schema_version": 1,
             "source": "receita_federal_dados_abertos",
