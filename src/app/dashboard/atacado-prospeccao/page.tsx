@@ -6,7 +6,7 @@ import { criarProspectAction, atualizarStatusProspectAction, registrarInteracaoB
 import { CsvImportPreview } from "./csv-import-preview";
 import { ProspeccaoRadarConsole } from "./prospeccao-radar-console";
 import { RevisaoCandidatosWeb } from "./revisao-candidatos-web";
-import { aprenderPerfis } from "@/lib/prospeccao/aprendizado-comercial";
+import { ProspectFilters } from "./prospect-filters";
 
 function classificarAderencia(observacoes: string | null) {
   const texto = observacoes ?? "";
@@ -79,26 +79,6 @@ export default async function AtacadoProspeccaoPage({
     prisma.atacadoProspect.findMany({ where: { estado: uf ?? "RJ" }, distinct: ["cidade"], select: { cidade: true }, orderBy: { cidade: "asc" }, take: 300 }),
   ]);
 
-  const atividadesAprendizado = await prisma.atacadoProspectActivity.findMany({
-    where: { tipo: "INTERACAO_BRUCE", resultado: { not: null } },
-    orderBy: { createdAt: "desc" },
-    take: 5000,
-    select: {
-      prospectId: true,
-      resultado: true,
-      prospect: { select: { segmentoComercial: true, perfilLoja: true, faixaPreco: true, estado: true, status: true } },
-    },
-  });
-  const recomendacoesBruce = aprenderPerfis(atividadesAprendizado.map((atividade) => ({
-    prospectId: atividade.prospectId,
-    resultado: atividade.resultado as "INTERESSADO" | "SEM_RESPOSTA" | "RECUSOU" | "PEDIU_CATALOGO" | "PEDIU_PRECO" | "NEGOCIANDO" | "PEDIDO_REALIZADO" | "RECOMPRA" | "SEM_ADERENCIA" | "DADOS_INVALIDOS" | "OUTRO" | null,
-    segmentoComercial: atividade.prospect.segmentoComercial,
-    perfilLoja: atividade.prospect.perfilLoja,
-    faixaPreco: atividade.prospect.faixaPreco,
-    estado: atividade.prospect.estado,
-    status: atividade.prospect.status,
-  })));
-
   const erro = params.erro;
   const erroTexto = erro === "nome" ? "Informe o nome da loja."
     : erro === "cnpj" ? "Informe um CNPJ com 14 caracteres válidos."
@@ -128,32 +108,6 @@ export default async function AtacadoProspeccaoPage({
           </Link>
         ))}
       </div>
-
-      <section className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h2 className="text-sm font-semibold">Bruce · Inteligência comercial</h2>
-            <p className="mt-1 max-w-3xl text-xs text-[var(--text-muted)]">Bruce acompanha a carteira. O Radar considera a interação mais recente de cada loja, exige ao menos cinco lojas e três resultados conclusivos por perfil, e separa interesse comercial de conversão confirmada no DAPIC.</p>
-          </div>
-          <span className="text-xs text-[var(--text-muted)]">{recomendacoesBruce.length} padrões com amostra mínima</span>
-        </div>
-        {recomendacoesBruce.length > 0 ? (
-          <div className="mt-3 divide-y divide-[var(--border)]">
-            {recomendacoesBruce.map((item) => <div key={item.perfil} className="flex flex-wrap items-center justify-between gap-3 py-2 text-xs">
-              <div className="font-medium">{item.perfil}</div>
-              <div className="flex gap-3 text-[var(--text-secondary)]">
-                <span>{item.totalLojas} lojas</span>
-                <span>{item.sinaisPositivos}/{item.interacoesComSinal} sinais positivos</span>
-                <span>{item.convertidasDapic} pedidos DAPIC</span>
-                <span>{item.taxaConversaoDapic}% conversão DAPIC</span>
-                <span>confiança {item.confianca.toLowerCase()}</span>
-              </div>
-            </div>)}
-          </div>
-        ) : (
-          <p className="mt-3 rounded-md border border-dashed border-[var(--border)] px-3 py-3 text-xs text-[var(--text-muted)]">Ainda não há amostra suficiente. O Radar só exibirá um padrão quando houver pelo menos cinco lojas distintas no perfil e três resultados de interação que indiquem avanço ou recusa. “Pedido realizado” anotado pelo Bruce não conta como conversão: essa confirmação depende do DAPIC.</p>
-        )}
-      </section>
 
       <section className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
         <h2 className="mb-3 text-sm font-semibold">Cadastrar prospecto</h2>
@@ -220,35 +174,24 @@ export default async function AtacadoProspeccaoPage({
       <section className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)]">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border)] px-4 py-3">
           <h2 className="text-sm font-semibold">Carteira de prospectos ({prospects.length}{total > 250 ? " de " + total : ""})</h2>
-          <form className="flex flex-wrap items-center gap-2" action="/dashboard/atacado-prospeccao">
-            <label htmlFor="uf" className="text-xs text-[var(--text-muted)]">UF</label>
-            <input id="uf" name="uf" defaultValue={uf ?? ""} placeholder="RJ" maxLength={2} className="w-14 rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-sm" />
-            <label htmlFor="cidade" className="text-xs text-[var(--text-muted)]">Cidade</label>
-            <input id="cidade" name="cidade" list="cidades-prospects" defaultValue={cidade ?? ""} placeholder="Rio de Janeiro" className="w-40 rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-sm" />
-            <datalist id="cidades-prospects">{cidades.map((item) => item.cidade && <option key={item.cidade} value={item.cidade} />)}</datalist>
-            <label htmlFor="grupo" className="text-xs text-[var(--text-muted)]">Grupo</label>
-            <select id="grupo" name="grupo" defaultValue={grupo ?? ""} className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-sm">
-              <option value="">Todos</option>
-              {grupos.map((item) => <option key={item} value={item}>{item === "PENDENTE" ? "Pendente" : `Grupo ${item}`}</option>)}
-            </select>
-            <label htmlFor="status" className="text-xs text-[var(--text-muted)]">Status</label>
-            <select id="status" name="status" defaultValue={status ?? ""} className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-sm">
-              <option value="">Todos</option>
-              {Object.entries(STATUS).map(([key, label]) => <option key={key} value={key} disabled={key === "CONVERTIDO"}>{key === "CONVERTIDO" ? "Convertido (confirmação DAPIC)" : label}</option>)}
-            </select>
-            <label htmlFor="cadastro" className="text-xs text-[var(--text-muted)]">Receita</label>
-            <select id="cadastro" name="cadastro" defaultValue={cadastro ?? ""} className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-sm">
-              <option value="">Todas as situações</option>
-              {["ATIVA", "SUSPENSA", "INAPTA", "BAIXADA", "NULA", "NAO_INFORMADA"].map((item) => <option key={item} value={item}>{item.replaceAll("_", " ")}</option>)}
-            </select>
-            <button className="rounded-md border border-[var(--border)] px-3 py-1.5 text-xs">Filtrar</button>
-          </form>
+          <ProspectFilters
+            uf={uf ?? ""}
+            cidade={cidade ?? ""}
+            grupo={grupo ?? ""}
+            status={status ?? ""}
+            cadastro={cadastro ?? ""}
+            grupos={grupos}
+            statusOptions={Object.entries(STATUS)}
+            cadastroOptions={cadastroValores}
+            cidades={cidades.map((item) => item.cidade).filter((value): value is string => Boolean(value))}
+          />
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="text-left text-xs text-[var(--text-muted)]">
               <tr>
                 <th className="px-4 py-3 font-medium">Loja</th>
+                <th className="px-4 py-3 font-medium">Presença digital</th>
                 <th className="px-4 py-3 font-medium">Localização</th>
                 <th className="px-4 py-3 font-medium">Aderência</th>
                 <th className="px-4 py-3 font-medium">Contato</th>
@@ -263,8 +206,6 @@ export default async function AtacadoProspeccaoPage({
                   <td className="px-4 py-3">
                     <div className="font-medium">{p.nomeFantasia === "NOME COMERCIAL NÃO IDENTIFICADO" ? "Nome comercial a pesquisar" : p.nomeFantasia}</div>
                     {p.razaoSocial && <div className="mt-0.5 text-xs text-[var(--text-muted)]">Razão social: {p.razaoSocial}</div>}
-                    {p.instagram && <a href={p.instagram} target="_blank" rel="noreferrer" className="mt-1 block text-xs underline">Instagram</a>}
-                    {p.site && <a href={p.site} target="_blank" rel="noreferrer" className="mt-1 block text-xs underline">Site</a>}
                     {p.cnpj && <div className="mt-0.5 text-xs text-[var(--text-muted)]">{p.cnpj}</div>}
                     {p.situacaoCadastral && <div className={`mt-1 inline-flex rounded px-1.5 py-0.5 text-[10px] font-semibold ${p.situacaoCadastral === "ATIVA" ? "bg-green-100 text-green-800" : "bg-amber-100 text-amber-800"}`}>Receita: {p.situacaoCadastral}</div>}
                     {p.situacaoCadastral && <details className="mt-1">
@@ -280,7 +221,18 @@ export default async function AtacadoProspeccaoPage({
                     </details>}
                     {p.evidenciaUrl && <a href={p.evidenciaUrl} target="_blank" rel="noreferrer" className="mt-1 inline-block text-xs underline text-[var(--text-secondary)]">Ver evidência</a>}
                   </td>
-                  <td className="px-4 py-3 text-[var(--text-secondary)]">{[p.cidade, p.estado].filter(Boolean).join(" / ") || "Cidade não identificada"}</td>
+                  <td className="px-4 py-3 text-xs">
+                    <div className="flex flex-col items-start gap-1.5">
+                      {p.site && /^https?:\/\//i.test(p.site) ? <a href={p.site} target="_blank" rel="noopener noreferrer" className="font-medium text-[var(--series-1)] underline underline-offset-2">Abrir site ↗</a> : <span className="text-[var(--text-muted)]">Site não localizado</span>}
+                      {p.instagram && /^https?:\/\//i.test(p.instagram) ? <a href={p.instagram} target="_blank" rel="noopener noreferrer" className="font-medium text-[var(--series-1)] underline underline-offset-2">Abrir Instagram ↗</a> : <span className="text-[var(--text-muted)]">Instagram não localizado</span>}
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-xs text-[var(--text-secondary)]">
+                    {p.enderecoOficial && <div className="max-w-64 font-medium text-[var(--text-primary)]">{p.enderecoOficial}</div>}
+                    <div className={p.enderecoOficial ? "mt-1" : ""}>{[p.cidade, p.estado].filter(Boolean).join(" / ") || "Cidade não identificada"}</div>
+                    {p.cepOficial && <div className="mt-0.5 text-[10px] text-[var(--text-muted)]">CEP {p.cepOficial}</div>}
+                    {!p.enderecoOficial && <div className="mt-0.5 text-[10px] text-[var(--text-muted)]">Rua não informada na base cadastral</div>}
+                  </td>
                   <td className="px-4 py-3">
                     <div className="mb-1 font-semibold">{p.grupoComercial === "PENDENTE" ? "Pendente" : `Grupo ${p.grupoComercial}`}</div>
                     {p.scoreComercial !== null && <div className="text-[11px] text-[var(--text-muted)]">{p.justificativaGrupo?.startsWith("EVIDÊNCIA COMERCIAL") ? "Evidência comercial" : "Score cadastral"} {p.scoreComercial}/100{p.justificativaGrupo?.startsWith("EVIDÊNCIA COMERCIAL") ? " · não é aprovação" : ""}</div>}
@@ -344,7 +296,7 @@ export default async function AtacadoProspeccaoPage({
                   <td className="whitespace-nowrap px-4 py-3 text-xs text-[var(--text-muted)]">{p.updatedAt.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" })}</td>
                 </tr>
               ))}
-              {prospects.length === 0 && <tr><td colSpan={7} className="px-4 py-8 text-center text-sm text-[var(--text-muted)]">Nenhum prospecto cadastrado. Comece adicionando uma loja ou importe uma base numa próxima etapa.</td></tr>}
+              {prospects.length === 0 && <tr><td colSpan={8} className="px-4 py-8 text-center text-sm text-[var(--text-muted)]">Nenhum prospecto cadastrado. Comece adicionando uma loja ou importe uma base numa próxima etapa.</td></tr>}
             </tbody>
           </table>
         </div>
