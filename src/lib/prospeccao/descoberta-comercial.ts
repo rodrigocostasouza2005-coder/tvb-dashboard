@@ -51,7 +51,7 @@ export function avaliarCandidatoDescoberto(
   } catch { return null; }
   const masculino = evidencia.sinaisModaMasculina;
   const nomeLoja = `${resultado.titulo} ${evidencia.titulo}`.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-  const nomeSegmento = /\b(surf|surfwear|surf\s*shop|skate|skateshop|streetwear|boardshop)\b/.test(nomeLoja);
+  const nomeSegmento = /\b(surf|surfwear|surf\s*shop|skate|skateshop|boardshop)\b/.test(nomeLoja);
   const multi = evidencia.sinaisMultimarcas;
   const marcas = evidencia.marcas;
   const exclusoes = evidencia.sinaisExclusao ?? [];
