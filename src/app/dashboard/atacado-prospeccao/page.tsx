@@ -60,9 +60,10 @@ export default async function AtacadoProspeccaoPage({
     include: { activities: { orderBy: { createdAt: "desc" }, take: 1 } },
   });
 
-  const [total, novos, qualificados, contatados, grupoA, grupoB, grupoC, grupoD, cidades] = await Promise.all([
+  const [total, novos, emPesquisa, qualificados, contatados, grupoA, grupoB, grupoC, grupoD, cidades] = await Promise.all([
     prisma.atacadoProspect.count(),
     prisma.atacadoProspect.count({ where: { status: "NOVO" } }),
+    prisma.atacadoProspect.count({ where: { status: "EM_QUALIFICACAO" } }),
     prisma.atacadoProspect.count({ where: { status: "QUALIFICADO" } }),
     prisma.atacadoProspect.count({ where: { status: "CONTATADO" } }),
     prisma.atacadoProspect.count({ where: { grupoComercial: "A" } }),
@@ -100,6 +101,7 @@ export default async function AtacadoProspeccaoPage({
         {[
           ["Prospectos", total],
           ["Novos", novos],
+          ["Em pesquisa", emPesquisa],
           ["Qualificados", qualificados],
           ["Contatados", contatados],
         ].map(([label, count]) => (
@@ -232,6 +234,8 @@ export default async function AtacadoProspeccaoPage({
                     <div className="mb-1 font-semibold">{p.grupoComercial === "PENDENTE" ? "Pendente" : `Grupo ${p.grupoComercial}`}</div>
                     {p.scoreComercial !== null && <div className="text-[11px] text-[var(--text-muted)]">Score {p.scoreComercial}/100</div>}
                     {p.justificativaGrupo && <div className="mt-1 max-w-48 text-[11px] text-[var(--text-muted)]">{p.justificativaGrupo}</div>}
+                    {p.responsavel && <div className="mt-1 text-[11px] font-medium text-[var(--series-1)]">Fila: {p.responsavel.replaceAll("_", " ")}</div>}
+                    {p.confiancaPesquisa === "CADASTRAL" && <div className="mt-0.5 text-[10px] text-[var(--text-muted)]">Fonte cadastral oficial; perfil comercial ainda não verificado</div>}
                     {(() => {
                       const fit = classificarAderencia(p.observacoes);
                       return <div title={fit.detalhe} className="text-xs">
