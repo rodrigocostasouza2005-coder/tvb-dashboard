@@ -72,4 +72,6 @@ jobs:
           npm run prospeccao:importar-receita -- \
             --arquivo dados/prospects-receita.csv \
             --competencia "${{ inputs.competencia }}" \
+            --municipios dados/municipios-receita.csv \
+            --uf "${{ inputs.uf }}" \
             --apply
