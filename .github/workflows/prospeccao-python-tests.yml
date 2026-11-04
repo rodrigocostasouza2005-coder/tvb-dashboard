@@ -7,7 +7,7 @@ on:
       - ".github/workflows/prospeccao-python-tests.yml"
   push:
     branches:
-      - feature/expansao-atacadista
+      - "feature/**"
     paths:
       - "scripts/prospeccao/**"
       - ".github/workflows/prospeccao-python-tests.yml"
