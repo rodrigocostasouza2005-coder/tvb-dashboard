@@ -18,7 +18,7 @@ import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
 
-SHARE_TOKEN = "YggdBLfdninEJX9"
+SHARE_TOKEN = os.environ.get("RECEITA_CNPJ_SHARE_TOKEN", "").strip()
 BASE = "https://arquivos.receitafederal.gov.br/public.php/dav/files"
 DEFAULT_REMOTE = "Dados/Cadastros/CNPJ"
 FAMILY_PATTERNS = {
@@ -97,7 +97,7 @@ def download_file(url: str, destination: Path, expected_size: int, retries: int 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--token", default=SHARE_TOKEN)
+    parser.add_argument("--token", default=SHARE_TOKEN, help="token WebDAV; prefira RECEITA_CNPJ_SHARE_TOKEN no ambiente")
     parser.add_argument("--remote-path", default=DEFAULT_REMOTE)
     parser.add_argument("--competencia", default="latest", help="latest ou AAAA-MM")
     parser.add_argument("--familias", nargs="+", choices=FAMILY_PATTERNS, default=["estabelecimentos", "empresas", "municipios"])
@@ -106,6 +106,8 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="somente lista arquivos e tamanhos (padrão)")
     parser.add_argument("--download", action="store_true", help="confirma o download")
     args = parser.parse_args()
+    if not args.token:
+        parser.error("Informe RECEITA_CNPJ_SHARE_TOKEN no ambiente ou --token; não armazene tokens no código.")
     if args.dry_run and args.download:
         parser.error("use --dry-run ou --download, não ambos")
     if not args.dry_run and not args.download:
