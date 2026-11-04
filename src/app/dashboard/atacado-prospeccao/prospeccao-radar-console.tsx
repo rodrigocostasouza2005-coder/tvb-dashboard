@@ -6,7 +6,6 @@ type Props = {
   emPesquisa: number;
   qualificados: number;
   contatados: number;
-  aguardandoAprovacao: number;
 };
 
 const number = (value: number) => value.toLocaleString("pt-BR");
@@ -17,14 +16,13 @@ export function ProspeccaoRadarConsole({
   emPesquisa,
   qualificados,
   contatados,
-  aguardandoAprovacao,
 }: Props) {
   const stages = [
-    { name: "Captura externa", detail: "27 UFs disponíveis", state: "ready" },
-    { name: "Deduplicação", detail: "CNPJ como chave", state: "ready" },
+    { name: "Captura externa", detail: "27 UFs · bucket pendente", state: "pending" },
+    { name: "Deduplicação", detail: "Etapa ainda não executada", state: "pending" },
     { name: "Pesquisa cadastral", detail: number(emPesquisa) + " em fila", state: emPesquisa ? "active" : "idle" },
-    { name: "Pesquisa comercial", detail: "Evidências ainda precisam ser verificadas", state: "pending" },
-    { name: "Revisão humana", detail: number(aguardandoAprovacao) + " aguardando", state: aguardandoAprovacao ? "active" : "pending" },
+    { name: "Pesquisa comercial", detail: "Agente de pesquisa ainda não ativado", state: "pending" },
+    { name: "Revisão humana", detail: "Aprovação manual obrigatória", state: "pending" },
     { name: "Radar", detail: "Somente aprovados entram", state: "locked" },
   ] as const;
 
