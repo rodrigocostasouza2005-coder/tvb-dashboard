@@ -268,7 +268,7 @@ export default async function AtacadoProspeccaoPage({
                       <summary className="cursor-pointer text-[10px] text-[var(--text-secondary)] underline">Dados cadastrais oficiais</summary>
                       <div className="mt-1 space-y-0.5 text-[10px] text-[var(--text-muted)]">
                         <div>CNAE principal: {[p.cnaePrincipalCodigo, p.cnaePrincipalDescricao].filter(Boolean).join(" · ") || "Não informado"}</div>
-                        {p.cnaesSecundarios && <div>CNAEs secundários: {p.cnaesSecundarios.split("\\n").join("; ")}</div>}
+                        {p.cnaesSecundarios && <div>CNAEs secundários: {p.cnaesSecundarios.split("\n").join("; ")}</div>}
                         <div>Endereço: {[p.enderecoOficial, p.cidade, p.estado, p.cepOficial].filter(Boolean).join(" · ") || "Não informado"}</div>
                         <div>Porte: {p.porteEmpresa ?? "Não informado"}</div>
                         <div>Data de abertura: {p.dataAbertura?.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" }) ?? "Não informada"}</div>
