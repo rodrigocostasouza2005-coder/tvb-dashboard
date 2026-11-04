@@ -54,10 +54,12 @@ export async function criarProspectAction(formData: FormData) {
   const cnpj = cnpjRaw ? normalizeCnpj(cnpjRaw) : null;
   const estado = value(formData, "estado").toUpperCase();
   const site = value(formData, "site");
+  const instagram = value(formData, "instagram");
   const evidenciaRaw = value(formData, "evidenciaUrl");
   const evidenciaUrl = normalizeHttpUrl(evidenciaRaw);
   const siteUrl = normalizeHttpUrl(site);
-  if (site && !siteUrl) redirect("/dashboard/atacado-prospeccao?erro=url");
+  const instagramUrl = normalizeHttpUrl(instagram);
+  if ((site && !siteUrl) || (instagram && !instagramUrl)) redirect("/dashboard/atacado-prospeccao?erro=url");
   if (evidenciaRaw && !evidenciaUrl) redirect("/dashboard/atacado-prospeccao?erro=url");
 
   if (!nomeFantasia) redirect("/dashboard/atacado-prospeccao?erro=nome");
@@ -73,6 +75,7 @@ export async function criarProspectAction(formData: FormData) {
         cidade: value(formData, "cidade") || null,
         estado: estado || null,
         site: siteUrl,
+        instagram: instagramUrl,
         telefone: value(formData, "telefone") || null,
         email: value(formData, "email") || null,
         origem: value(formData, "origem") || "manual",
@@ -205,7 +208,8 @@ export async function importarProspectosCsvAction(formData: FormData) {
     estado: findIndex("uf", "estado"),
     telefone: findIndex("telefone", "telefonecomercial", "celular", "fone"),
     email: findIndex("email", "emailcomercial"),
-    site: findIndex("site", "instagram", "website"),
+    site: findIndex("site", "website", "siteoficial"),
+    instagram: findIndex("instagram", "perfilinstagram", "instagramurl"),
     evidencia: findIndex("evidenciaurl", "origemurl", "url", "fonte"),
   };
   if (columns.nome < 0) redirect("/dashboard/atacado-prospeccao?importacao=cabecalho");
@@ -239,6 +243,7 @@ export async function importarProspectosCsvAction(formData: FormData) {
           telefone: get(columns.telefone).slice(0, 40) || null,
           email: get(columns.email).slice(0, 180) || null,
           site: normalizeHttpUrl(get(columns.site).slice(0, 500)),
+          instagram: normalizeHttpUrl(get(columns.instagram).slice(0, 500)),
           evidenciaUrl: normalizeHttpUrl(get(columns.evidencia).slice(0, 1000)),
           evidenciaEm: normalizeHttpUrl(get(columns.evidencia)) ? new Date() : null,
           origem: "importacao",
