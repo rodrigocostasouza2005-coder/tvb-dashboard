@@ -21,21 +21,25 @@ CNAES = {
     "4789001": "Comércio varejista de suvenires, bijuterias e artesanatos",
 }
 BASE = "hf://datasets/cnpjaberto/cnpj-dados-receita-brasil-{competencia}"
+ESTADOS_LITORANEOS = {"AL", "AP", "BA", "CE", "ES", "MA", "PA", "PB", "PE", "PI", "PR", "RJ", "RN", "RS", "SC", "SE", "SP"}
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--competencia", default="2026-10")
-    parser.add_argument("--uf", default="RJ")
+    parser.add_argument("--uf", default=None, help="UF única (compatibilidade)")
+    parser.add_argument("--ufs", nargs="+", default=None, help="Uma ou mais UFs litorâneas")
     parser.add_argument("--saida", default="dados/prospects-receita.parquet")
     parser.add_argument("--limite", type=int, default=0, help="limite opcional para testes; 0 = sem limite")
     args = parser.parse_args()
 
     if not re.fullmatch(r"20\d{2}-(0[1-9]|1[0-2])", args.competencia):
         parser.error("Competência inválida; use AAAA-MM.")
-    uf = args.uf.upper()
-    if not re.fullmatch(r"[A-Z]{2}", uf):
-        parser.error("UF inválida.")
+    ufs = {item.upper() for item in (args.ufs or ([args.uf] if args.uf else ["RJ"]))}
+    invalidas = ufs - ESTADOS_LITORANEOS
+    if not ufs or invalidas:
+        parser.error("Informe somente UFs litorâneas válidas: " + ", ".join(sorted(ESTADOS_LITORANEOS)))
+    ufs_sql = ", ".join(chr(39) + uf + chr(39) for uf in sorted(ufs))
     if args.limite < 0:
         parser.error("--limite não pode ser negativo.")
     limit_sql = f"LIMIT {args.limite}" if args.limite else ""
@@ -60,7 +64,7 @@ def main() -> int:
           s.uf, s.municipio, s.ddd1, s.telefone1, s.ddd2, s.telefone2,
           s.correio_eletronico
         FROM read_parquet('{establishments}') s
-        WHERE s.uf = '{uf}'
+        WHERE s.uf IN ({ufs_sql})
           AND s.situacao_cadastral = '02'
           -- Filtro inicial: vestuário como CNAE principal, nome fantasia e contato.
           AND s.cnae_fiscal_principal = '4781400'
@@ -108,12 +112,17 @@ def main() -> int:
             for chunk in iter(lambda: parquet_file.read(8 * 1024 * 1024), b""):
                 hasher.update(chunk)
         digest = hasher.hexdigest()
+        by_uf = con.execute(
+            "SELECT uf, count(*) FROM read_parquet(?) GROUP BY uf ORDER BY uf",
+            [str(output_path)],
+        ).fetchall()
         manifest = {
             "schema_version": 1,
             "source": "receita_federal_dados_abertos",
             "competencia": args.competencia,
-            "uf": uf,
+            "ufs": sorted(ufs),
             "rows": count,
+            "rows_by_uf": {uf: rows for uf, rows in by_uf},
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "sha256": digest,
             "filter": {
@@ -128,7 +137,7 @@ def main() -> int:
         }
         manifest_path = output_path.with_suffix(output_path.suffix + ".manifest.json")
         manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        print(f"Competência={args.competencia} | UF={uf} | candidatos={count} | parquet={output_path} | sha256={digest}")
+        print(f"Competência={args.competencia} | UFs={sorted(ufs)} | candidatos={count} | parquet={output_path} | sha256={digest}")
     finally:
         con.close()
     return 0
