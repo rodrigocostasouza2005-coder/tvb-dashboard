@@ -270,7 +270,7 @@ export default async function AtacadoProspeccaoPage({
                       </div>
                     </details>
                     <details className="mt-2">
-                      <summary className="cursor-pointer text-[11px] font-medium text-[var(--series-1)] underline">Bruce · Registrar interação</summary>
+                      <summary className="cursor-pointer text-[11px] font-medium text-[var(--series-1)] underline">Registrar interação</summary>
                       <form action={registrarInteracaoBruceAction} className="mt-2 min-w-48 space-y-2">
                         <input type="hidden" name="prospectId" value={p.id} />
                         <textarea name="descricao" required maxLength={1200} rows={2} placeholder="O que aconteceu na conversa?" className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-xs" />
