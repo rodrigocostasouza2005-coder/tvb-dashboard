@@ -17,7 +17,7 @@ describe("avaliação de evidências comerciais", () => {
       nomeLoja: "Loja Teste",
       cidade: "Rio de Janeiro",
       confiancaIdentidade: "ALTA",
-      evidencia,
+      evidencia: evidence,
       situacaoCadastral: "ATIVA",
     });
     expect(result.situacao).toBe("PRONTA_PARA_REVISAO_HUMANA");
@@ -43,7 +43,7 @@ describe("avaliação de evidências comerciais", () => {
       nomeLoja: "Loja Teste",
       cidade: "Rio de Janeiro",
       confiancaIdentidade: "BAIXA",
-      evidencia,
+      evidencia: evidence,
       situacaoCadastral: "ATIVA",
     });
     expect(result.situacao).toBe("EVIDENCIA_PARCIAL");
@@ -53,10 +53,10 @@ describe("avaliação de evidências comerciais", () => {
 
   it("mantém cadastro inativo como pendência sem transformar isso em score comercial", () => {
     const active = avaliarEvidenciasComerciais({
-      nomeLoja: "Loja Teste", cidade: null, confiancaIdentidade: "ALTA", evidencia, situacaoCadastral: "ATIVA",
+      nomeLoja: "Loja Teste", cidade: null, confiancaIdentidade: "ALTA", evidencia: evidence, situacaoCadastral: "ATIVA",
     });
     const inactive = avaliarEvidenciasComerciais({
-      nomeLoja: "Loja Teste", cidade: null, confiancaIdentidade: "ALTA", evidencia, situacaoCadastral: "BAIXADA",
+      nomeLoja: "Loja Teste", cidade: null, confiancaIdentidade: "ALTA", evidencia: evidence, situacaoCadastral: "BAIXADA",
     });
     expect(inactive.scoreEvidencia).toBe(active.scoreEvidencia);
     expect(inactive.pendencias).toContain("revisar situação cadastral: BAIXADA");
