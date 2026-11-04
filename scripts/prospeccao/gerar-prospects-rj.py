@@ -96,13 +96,31 @@ def main() -> int:
     for _, _, row in read_csv([args.municipios], 2):
         municipios[row[0].strip()] = row[1].strip()
 
-    # Empresa: raiz, razão social, natureza, qualificação, capital, porte, ente.
+    # Primeira passagem: descobrir somente as raízes de empresas que podem
+    # virar prospect. Evita carregar milhões de empresas sem relação com o filtro.
+    wanted_roots: set[str] = set()
+    count_active = 0
+    count_cnae = 0
+    for _, _, row in read_csv(args.estabelecimentos, 30):
+        uf = row[19].strip().upper()
+        if uf not in ufs or row[5].strip() != SITUACAO_ATIVA:
+            continue
+        count_active += 1
+        principal = digits(row[11])
+        secundarias = {digits(item) for item in row[12].split(",") if digits(item)}
+        if principal in CNAES_ALVO or any(code in CNAES_ALVO for code in secundarias):
+            count_cnae += 1
+            wanted_roots.add(row[0].strip())
+
+    # Empresas: carregar apenas as raízes identificadas na primeira passagem.
     empresas = {}
     for _, _, row in read_csv(args.empresas, 7):
-        empresas[row[0].strip()] = {
-            "razao_social": row[1].strip(),
-            "porte": row[5].strip(),
-        }
+        root = row[0].strip()
+        if root in wanted_roots:
+            empresas[root] = {
+                "razao_social": row[1].strip(),
+                "porte": row[5].strip(),
+            }
 
     output = Path(args.saida)
     output.parent.mkdir(parents=True, exist_ok=True)
