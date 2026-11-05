@@ -44,9 +44,10 @@ export type TabKey =
   | "analytics-site"
   | "analises-promocao"
   | "custo-familia"
-  | "atacado-custo-familia";
+  | "atacado-custo-familia"
+  | "black-friday";
 
-export type TabGroup = "visao-geral" | "resumo-dia" | "vendas" | "estoque" | "atacado" | "clientes" | "marketing" | "pesquisa" | "lamina" | "performance";
+export type TabGroup = "visao-geral" | "resumo-dia" | "vendas" | "estoque" | "atacado" | "clientes" | "marketing" | "pesquisa" | "lamina" | "performance" | "black-friday";
 
 export type TabEntry =
   | { key: TabKey; label: string; href: string; group: TabGroup; todo?: false }
@@ -61,6 +62,11 @@ export const TABS: TabEntry[] = [
 
   // lamina mensal (direct link, like visao-geral)
   { key: "lamina-mensal", label: "Lâmina Mensal", href: "/dashboard/lamina-mensal", group: "lamina" },
+
+  // Central Black Friday (direct link, like visao-geral) — missão 2026-11-05, visão própria
+  // (não cabe em "vendas" nem em "marketing" sozinha: mistura venda por canal, mídia/CAC e
+  // produtos num painel único e temporário pro período).
+  { key: "black-friday", label: "Central Black Friday", href: "/dashboard/black-friday", group: "black-friday" },
 
   // vendas
   { key: "vendas", label: "Família/produto/tamanho", href: "/dashboard/vendas", group: "vendas" },
@@ -127,6 +133,7 @@ export const GROUPS: { key: TabGroup; label: string; single?: boolean }[] = [
   { key: "visao-geral", label: "Visão Geral", single: true },
   { key: "resumo-dia", label: "Resumo do Dia", single: true },
   { key: "lamina", label: "Lâmina Mensal", single: true },
+  { key: "black-friday", label: "Central Black Friday", single: true },
   { key: "vendas", label: "Vendas" },
   { key: "estoque", label: "Estoque" },
   { key: "atacado", label: "Atacado" },
@@ -139,6 +146,10 @@ export const GROUPS: { key: TabGroup; label: string; single?: boolean }[] = [
 const BLOCKED_BY_DEFAULT_FOR_VENDEDOR: TabKey[] = [
   "clientes", "clientes-segmentacao", "clientes-ficha", "clientes-produto", "clientes-produtos-entrada", "vendedores", "estoque-minimo", "contatos-vendedores", "marketing-templates",
   "performance", "analise-performance",
+  // Central Black Friday mistura CAC/investimento em mídia e dado por canal — mesma régua de
+  // "informação financeira/estratégica" que já esconde Performance/Análise de Performance do
+  // VENDEDOR por padrão. Admin libera manualmente em /dashboard/admin se quiser.
+  "black-friday",
 ];
 
 export function defaultAllowedTabs(role: Role): TabKey[] {

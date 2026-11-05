@@ -19,6 +19,7 @@ import {
   getStatusPorNomeAnuncio,
   type MetaInsight,
 } from "@/lib/connectors/meta-ads";
+import { after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { requireTabAccess } from "@/lib/tabs";
@@ -114,6 +115,38 @@ export default async function AnalyticsSitePage({
     });
 
   await Promise.all([ga4Promise, metaInsightsPromise]);
+
+  // Missão Black Friday (2026-11, continuação): até aqui Meta Ads/GA4 não tinham SyncSource
+  // próprio em SyncLog (ver enum em schema.prisma e getSyncStatusDetalhado em sync-runner.ts) —
+  // sem jeito de saber, só olhando o banco, se a ÚLTIMA busca real falhou. Grava aqui, no ponto
+  // exato que representa "os dados estão atualizados" (as chamadas acima, já resolvidas) — nunca
+  // no fetch de fotos/status de criativo mais abaixo, que é só cache de exibição. `after()` (igual
+  // ao self-heal em dashboard/layout.tsx) pra não atrasar a resposta da página por uma escrita que
+  // é só auditoria/telemetria, nunca crítica pro que o usuário está vendo. Best-effort: falha ao
+  // gravar o log não pode derrubar nada, só perde esse registro.
+  after(() =>
+    Promise.all([
+      prisma.syncLog.create({
+        data: {
+          source: "GA4",
+          status: erro ? "FAILED" : "SUCCESS",
+          message: erro,
+          recordsSynced: sessoesPorDia.length,
+          finishedAt: new Date(),
+        },
+      }),
+      prisma.syncLog.create({
+        data: {
+          source: "META_ADS",
+          status: erroMetaAds ? "FAILED" : "SUCCESS",
+          message: erroMetaAds,
+          recordsSynced: insightsPorConjunto.size + insightsPorAnuncio.size,
+          finishedAt: new Date(),
+        },
+      }),
+    ]).catch(() => {})
+  );
+
   // Top 15 conjuntos/criativos por gasto (visão de investimento, diferente do top por sessão do
   // GA4 acima). Toggle entre os dois na tela — ver investimento-meta-ads.tsx.
   const investimentoPorConjunto = [...insightsPorConjunto.entries()]

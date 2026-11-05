@@ -9,6 +9,9 @@ const storeCreate = vi.fn();
 const syncLockFindMany = vi.fn();
 const syncLockUpsert = vi.fn();
 const syncLockUpdate = vi.fn().mockResolvedValue(undefined);
+const syncLockFindUnique = vi.fn().mockResolvedValue(null);
+const syncLogFindFirst = vi.fn().mockResolvedValue(null);
+const priceCatalogCacheFindFirst = vi.fn().mockResolvedValue(null);
 const parcelaDeleteMany = vi.fn();
 const parcelaCreateMany = vi.fn();
 const giftFindMany = vi.fn();
@@ -74,6 +77,7 @@ const mockPrisma = {
     findMany: (...a: unknown[]) => syncLockFindMany(...a),
     upsert: (...a: unknown[]) => syncLockUpsert(...a),
     update: (...a: unknown[]) => syncLockUpdate(...a),
+    findUnique: (...a: unknown[]) => syncLockFindUnique(...a),
   },
   parcela: {
     deleteMany: (...a: unknown[]) => parcelaDeleteMany(...a),
@@ -92,6 +96,10 @@ const mockPrisma = {
   },
   syncLog: {
     create: (...a: unknown[]) => syncLogCreate(...a),
+    findFirst: (...a: unknown[]) => syncLogFindFirst(...a),
+  },
+  priceCatalogCache: {
+    findFirst: (...a: unknown[]) => priceCatalogCacheFindFirst(...a),
   },
   $executeRaw: (...a: unknown[]) => executeRaw(...a),
   $transaction: async (fn: (tx: unknown) => unknown) => fn(mockPrisma),
@@ -145,6 +153,9 @@ beforeEach(() => {
   syncLockFindMany.mockReset().mockResolvedValue([]);
   syncLockUpsert.mockReset();
   syncLockUpdate.mockReset().mockResolvedValue(undefined);
+  syncLockFindUnique.mockReset().mockResolvedValue(null);
+  syncLogFindFirst.mockReset().mockResolvedValue(null);
+  priceCatalogCacheFindFirst.mockReset().mockResolvedValue(null);
   parcelaDeleteMany.mockReset();
   parcelaCreateMany.mockReset().mockResolvedValue({ count: 0 });
   giftFindMany.mockReset().mockResolvedValue([]);
@@ -735,5 +746,75 @@ describe("runSync — falha TOTAL de 1 loja não derruba as outras (integração
     expect(body.falhasParciais).toHaveLength(1);
     expect(body.falhasParciais[0]).toContain("loja-b");
     expect(body.falhasParciais[0]).toContain("armazenadores");
+  });
+});
+
+// Missão Black Friday (2026-11, continuação) — fecha a lacuna já documentada no relatório
+// anterior (achado #3): Meta Ads/GA4 agora têm SyncSource próprio (META_ADS/GA4, ver
+// prisma/schema.prisma) e analytics-site/page.tsx grava um SyncLog por fonte a cada carregamento
+// real da aba. getSyncStatusDetalhado() precisa ler esse SyncLog de verdade, não mais devolver o
+// placeholder `rastreiaErro: false` fixo de antes.
+describe("getSyncStatusDetalhado — Meta Ads/GA4 usam SyncLog de verdade (não mais placeholder)", () => {
+  it("META_ADS com último SyncLog FAILED -> status/message refletem a falha real, não um placeholder fixo", async () => {
+    syncLogFindFirst.mockImplementation(({ where }: { where: { source: string } }) => {
+      if (where.source === "META_ADS") {
+        return Promise.resolve({
+          status: "FAILED",
+          finishedAt: new Date("2026-11-05T09:00:00.000Z"),
+          recordsSynced: 0,
+          message: "Meta Ads API: token expirado",
+        });
+      }
+      return Promise.resolve(null);
+    });
+
+    const { getSyncStatusDetalhado } = await import("../sync-runner");
+    const detalhado = await getSyncStatusDetalhado();
+
+    expect(detalhado.metaAds).toEqual(
+      expect.objectContaining({
+        source: "META_ADS",
+        status: "FAILED",
+        message: "Meta Ads API: token expirado",
+        finishedAt: "2026-11-05T09:00:00.000Z",
+      })
+    );
+  });
+
+  it("GA4 com último SyncLog SUCCESS -> status SUCCESS refletido (antes era sempre rastreiaErro:false, nunca refletia sucesso nem falha de verdade)", async () => {
+    syncLogFindFirst.mockImplementation(({ where }: { where: { source: string } }) => {
+      if (where.source === "GA4") {
+        return Promise.resolve({ status: "SUCCESS", finishedAt: new Date("2026-11-05T09:30:00.000Z"), recordsSynced: 30, message: null });
+      }
+      return Promise.resolve(null);
+    });
+
+    const { getSyncStatusDetalhado } = await import("../sync-runner");
+    const detalhado = await getSyncStatusDetalhado();
+
+    expect(detalhado.ga4).toEqual(
+      expect.objectContaining({ source: "GA4", status: "SUCCESS", recordsSynced: 30, ultimaAtualizacaoCache: null })
+    );
+  });
+
+  it("nenhum SyncLog ainda pra META_ADS/GA4 (aba Analytics nunca foi aberta) -> status null, não erro", async () => {
+    syncLogFindFirst.mockResolvedValue(null);
+
+    const { getSyncStatusDetalhado } = await import("../sync-runner");
+    const detalhado = await getSyncStatusDetalhado();
+
+    expect(detalhado.metaAds.status).toBeNull();
+    expect(detalhado.ga4.status).toBeNull();
+  });
+
+  it("metaAds.ultimaAtualizacaoCache continua vindo do PriceCatalogCache (frescor de foto/status, ortogonal ao SyncLog de insight)", async () => {
+    syncLogFindFirst.mockResolvedValue(null);
+    priceCatalogCacheFindFirst.mockResolvedValue({ updatedAt: new Date("2026-11-04T08:00:00.000Z") });
+
+    const { getSyncStatusDetalhado } = await import("../sync-runner");
+    const detalhado = await getSyncStatusDetalhado();
+
+    expect(detalhado.metaAds.ultimaAtualizacaoCache).toBe("2026-11-04T08:00:00.000Z");
+    expect(detalhado.ga4.ultimaAtualizacaoCache).toBeNull(); // GA4 nunca teve cache de dado equivalente
   });
 });
