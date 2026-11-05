@@ -442,3 +442,210 @@ describe("getInsightsPorConjunto / getInsightsPorAnuncio — identidade por id, 
     );
   });
 });
+
+// ============================================================================
+// Preparado pelo agente de QA da missão Black Friday (2026-11-05) — cenários pedidos
+// explicitamente pela missão, contra o comportamento ATUAL do conector (que outro agente, em
+// paralelo, ainda vai mudar). Os testes abaixo codificam o contrato CORRETO esperado — quando
+// marcados "falha hoje: ver bug", é esperado que falhem contra o código de hoje; documentam o
+// bug até ser corrigido, não erro de quem escreveu o teste.
+// ============================================================================
+describe("getFotosPorNomeAnuncio — duas campanhas com anúncios de MESMO nome e IDs diferentes", () => {
+  beforeEach(() => {
+    findUnique.mockReset();
+    upsert.mockReset();
+    vi.stubGlobal("fetch", vi.fn());
+    process.env.META_AD_ACCOUNT_ID = "123";
+    process.env.META_ACCESS_TOKEN = "token-fake";
+  });
+
+  // falha hoje: ver bug — getFotosPorNomeAnuncio indexa tudo por NOME (idPorNome = Map<nome,id>,
+  // só guarda o 1º id visto por nome — ver "for (const a of ads) if (!idPorNome.has(a.name))...“
+  // em meta-ads.ts). Dois anúncios DE VERDADE diferentes ("id-1" numa campanha, "id-2" em outra)
+  // que por coincidência têm o mesmo nome ("Black Friday" é um nome de criativo bem provável de
+  // repetir entre campanhas) colidem: a foto do 2º nunca é buscada nem aparece — sobrescrita em
+  // silêncio pela do 1º, exatamente o cenário que a missão pede pra nunca acontecer. Como o
+  // próprio tipo de retorno já é Map<string, string[]> (suporta mais de 1 foto por nome, igual
+  // fetchFotosAtivas já faz por conjunto), o contrato correto é mesclar as fotos dos dois
+  // anúncios sob o mesmo nome, não descartar uma delas.
+  it("falha hoje: ver bug — fotos de dois anúncios distintos com nome igual não deveriam se sobrescrever (hoje a 2ª é descartada em silêncio)", async () => {
+    findUnique.mockImplementation(({ where }: { where: { clientLabel: string } }) => {
+      if (where.clientLabel === "meta-ads-fotos-criativo") return Promise.resolve(null);
+      return Promise.resolve({
+        data: [
+          { id: "id-1", name: "Black Friday", status: "ACTIVE" },
+          { id: "id-2", name: "Black Friday", status: "ACTIVE" },
+        ],
+        updatedAt: new Date(),
+      });
+    });
+
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    fetchMock.mockImplementation((url: string) => {
+      const foto = url.includes("id-1") ? "https://fbcdn.net/campanha1.jpg" : "https://fbcdn.net/campanha2.jpg";
+      return Promise.resolve({ json: () => Promise.resolve({ creative: { thumbnail_url: foto } }) });
+    });
+
+    const { getFotosPorNomeAnuncio } = await import("../meta-ads");
+    const result = await getFotosPorNomeAnuncio(mockPrisma(), ["Black Friday"]);
+
+    expect(result.get("Black Friday")).toEqual(
+      expect.arrayContaining(["https://fbcdn.net/campanha1.jpg", "https://fbcdn.net/campanha2.jpg"])
+    );
+  });
+});
+
+describe("getStatusPorNomeConjunto / getFotosPorNomeConjunto — dois conjuntos com nome igual, IDs diferentes", () => {
+  beforeEach(() => {
+    findUnique.mockReset();
+    upsert.mockReset();
+    vi.stubGlobal("fetch", vi.fn());
+    process.env.META_AD_ACCOUNT_ID = "123";
+    process.env.META_ACCESS_TOKEN = "token-fake";
+  });
+
+  // falha hoje: ver bug — mesmo problema estrutural do teste acima, mas pior: as DUAS funções que
+  // leem o mesmo tipo de colisão (nome de conjunto repetido) resolvem a disputa de jeitos
+  // diferentes e nenhum preserva o dado de verdade.
+  //   - getStatusPorNomeConjunto usa `new Map(adsets.map(a => [a.name, a.status === "ACTIVE"]))`
+  //     — Map padrão, ÚLTIMA entrada do array vence. Com adset-2 (PAUSED) depois de adset-1
+  //     (ACTIVE) no array, o nome fica marcado como pausado mesmo tendo um conjunto ativo de
+  //     verdade com esse nome.
+  //   - getFotosPorNomeConjunto usa `adsets.find(a => a.name === nome)` — PRIMEIRA entrada vence,
+  //     o oposto do critério acima. Nunca busca foto do 2º conjunto.
+  // Contrato esperado (consistente com o critério que fetchFotosAtivas já usa dentro de 1 único
+  // conjunto: prioriza ACTIVE sobre PAUSED): se QUALQUER conjunto com aquele nome está ativo, o
+  // nome deve contar como ativo — e as fotos dos conjuntos ativos com aquele nome deveriam
+  // aparecer todas, não só a do que por acaso é o 1º do array.
+  it("falha hoje: ver bug — status deveria priorizar ACTIVE quando dois conjuntos colidem no nome (hoje depende só da ordem do array, não de qual está de fato ativo)", async () => {
+    findUnique.mockImplementation(({ where }: { where: { clientLabel: string } }) => {
+      if (where.clientLabel === "meta-ads-adsets-raw") {
+        return Promise.resolve({
+          data: [
+            { id: "adset-1", name: "BOHO Conjunto", status: "ACTIVE" },
+            { id: "adset-2", name: "BOHO Conjunto", status: "PAUSED" },
+          ],
+          updatedAt: new Date(),
+        });
+      }
+      return Promise.resolve(null);
+    });
+
+    const { getStatusPorNomeConjunto } = await import("../meta-ads");
+    const status = await getStatusPorNomeConjunto(mockPrisma(), ["BOHO Conjunto"]);
+
+    expect(status.get("BOHO Conjunto")).toBe(true);
+  });
+
+  it("falha hoje: ver bug — fotos dos dois conjuntos com nome igual deveriam aparecer juntas (hoje só o 1º do array é buscado, o 2º nunca é tocado)", async () => {
+    findUnique.mockImplementation(({ where }: { where: { clientLabel: string } }) => {
+      if (where.clientLabel === "meta-ads-adsets-raw") {
+        return Promise.resolve({
+          data: [
+            { id: "adset-1", name: "BOHO Conjunto", status: "ACTIVE" },
+            { id: "adset-2", name: "BOHO Conjunto", status: "PAUSED" },
+          ],
+          updatedAt: new Date(),
+        });
+      }
+      return Promise.resolve(null); // cache de fotos vazio
+    });
+
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    fetchMock.mockImplementation((url: string) => {
+      const foto = url.includes("adset-1") ? "https://fbcdn.net/adset1.jpg" : "https://fbcdn.net/adset2.jpg";
+      return Promise.resolve({
+        json: () => Promise.resolve({ data: [{ id: "x", status: "ACTIVE", creative: { thumbnail_url: foto } }] }),
+      });
+    });
+
+    const { getFotosPorNomeConjunto } = await import("../meta-ads");
+    const fotos = await getFotosPorNomeConjunto(mockPrisma(), ["BOHO Conjunto"]);
+
+    expect(fotos.get("BOHO Conjunto")).toEqual(
+      expect.arrayContaining(["https://fbcdn.net/adset1.jpg", "https://fbcdn.net/adset2.jpg"])
+    );
+  });
+});
+
+describe("fetchAllPages (via getInsightsPorConjunto) — paginação e erro de API", () => {
+  beforeEach(() => {
+    vi.stubGlobal("fetch", vi.fn());
+    process.env.META_AD_ACCOUNT_ID = "123";
+    process.env.META_ACCESS_TOKEN = "token-fake";
+  });
+
+  it("segue paging.next até não ter mais página, juntando os dados de TODAS as páginas (não só a 1ª)", async () => {
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    fetchMock
+      .mockResolvedValueOnce({
+        json: () =>
+          Promise.resolve({
+            data: [{ adset_name: "Conjunto 1", spend: "100" }],
+            paging: { next: "https://graph.facebook.com/v21.0/act_123/insights?after=XYZ" },
+          }),
+      })
+      .mockResolvedValueOnce({
+        json: () => Promise.resolve({ data: [{ adset_name: "Conjunto 2", spend: "200" }] }),
+      });
+
+    const { getInsightsPorConjunto } = await import("../meta-ads");
+    const result = await getInsightsPorConjunto({ since: "2026-11-01", until: "2026-11-04" });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.get("Conjunto 1")?.gasto).toBe(100);
+    expect(result.get("Conjunto 2")?.gasto).toBe(200);
+  });
+
+  it("erro retornado pela Graph API (token expirado, rate limit etc) propaga como exceção — NUNCA resolve silenciosamente pra Map vazio (zero gasto/investimento não pode significar 'a API falhou')", async () => {
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    fetchMock.mockResolvedValue({
+      json: () => Promise.resolve({ error: { message: "Error validating access token" } }),
+    });
+
+    const { getInsightsPorConjunto } = await import("../meta-ads");
+    await expect(getInsightsPorConjunto({ since: "2026-11-01", until: "2026-11-04" })).rejects.toThrow(
+      /Error validating access token/
+    );
+  });
+});
+
+describe("getFotosPorNomeAnuncio — erro de API buscando creative não pode virar 'sem foto' em silêncio", () => {
+  beforeEach(() => {
+    findUnique.mockReset();
+    upsert.mockReset();
+    vi.stubGlobal("fetch", vi.fn());
+    process.env.META_AD_ACCOUNT_ID = "123";
+    process.env.META_ACCESS_TOKEN = "token-fake";
+  });
+
+  // falha hoje: ver bug — fetchCreativesPorIds (meta-ads.ts) lê `json.error` em NENHUM lugar:
+  // `const json = await res.json(); const foto = extrairFoto(json.creative); if (foto) ...`. Se a
+  // Graph API devolver {error: {...}} pra um ID específico (rate limit pontual, permissão,
+  // criativo arquivado etc), json.creative vem undefined, extrairFoto devolve undefined, e o
+  // resultado final é idêntico ao de um anúncio que genuinamente não tem foto — [] sem nenhum
+  // sinal de que algo falhou. Mesma classe de bug que o comentário em page.tsx já reconhece pro
+  // catch silencioso de investimento (getInsightsPorConjunto/Anuncio) — aqui é mais sutil porque
+  // nem precisa de um catch: a própria função nunca verifica o campo de erro.
+  it("falha hoje: ver bug — erro da Graph API ao buscar creative de um anúncio fica indistinguível de 'esse anúncio não tem foto'", async () => {
+    findUnique.mockImplementation(({ where }: { where: { clientLabel: string } }) => {
+      if (where.clientLabel === "meta-ads-fotos-criativo") return Promise.resolve(null);
+      return Promise.resolve({
+        data: [{ id: "id-err", name: "Anuncio Com Erro", status: "ACTIVE" }],
+        updatedAt: new Date(),
+      });
+    });
+
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    fetchMock.mockResolvedValue({
+      json: () => Promise.resolve({ error: { message: "Please reduce the amount of data you're asking for" } }),
+    });
+
+    const { getFotosPorNomeAnuncio } = await import("../meta-ads");
+
+    // Contrato esperado: um erro real da API nunca deveria se disfarçar de "sem foto" (dado
+    // legítimo vazio) — deveria pelo menos propagar, pra quem chama poder diferenciar os dois
+    // casos (hoje resolve [] normalmente, sem exceção nenhuma).
+    await expect(getFotosPorNomeAnuncio(mockPrisma(), ["Anuncio Com Erro"])).rejects.toThrow();
+  });
+});
