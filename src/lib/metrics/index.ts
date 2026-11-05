@@ -10,3 +10,4 @@ export * from "./promocao";
 export * from "./custo";
 export * from "./compras-inteligencia";
 export * from "./distribuicao-estoque";
+export * from "./cac";

@@ -94,9 +94,14 @@ export default async function AnalyticsSitePage({
       erro = e instanceof Error ? e.message : "Erro desconhecido buscando dados do Google Analytics.";
     });
 
-  // Meta Ads (investimento) — busca separada da GA4, com try/catch próprio: se o Meta Ads falhar
-  // (token vencido, credencial faltando etc), a página continua mostrando o resto dos dados do
-  // GA4 normalmente, só sem essa parte (fallback silencioso).
+  // Meta Ads (investimento) — busca separada da GA4: se o Meta Ads falhar (token vencido,
+  // credencial faltando, rate limit etc), a página continua mostrando o resto dos dados do GA4
+  // normalmente, só sem essa seção. Correção 2026-11-05: o catch antigo engolia a mensagem de
+  // erro de verdade (ex: "Meta Ads API: ..." lançado por fetchAllPages) e deixava as duas tabelas
+  // de investimento silenciosamente vazias — indistinguível de "sem gasto no período" pro
+  // Rodrigo. Agora guarda a mensagem em `erroMetaAds` pra mostrar um aviso visível, em vez de só
+  // zerar sem explicação.
+  let erroMetaAds: string | null = null;
   const metaInsightsPromise = Promise.all([
     getInsightsPorConjunto({ since: from, until: to }),
     getInsightsPorAnuncio({ since: from, until: to }),
@@ -104,8 +109,8 @@ export default async function AnalyticsSitePage({
     .then((r) => {
       [insightsPorConjunto, insightsPorAnuncio] = r;
     })
-    .catch(() => {
-      // sem investimento — não quebra a página.
+    .catch((e) => {
+      erroMetaAds = e instanceof Error ? e.message : "Erro desconhecido buscando investimento do Meta Ads.";
     });
 
   await Promise.all([ga4Promise, metaInsightsPromise]);
@@ -126,17 +131,30 @@ export default async function AnalyticsSitePage({
   let fotosPorAnuncio = new Map<string, string[]>();
   let statusPorConjunto = new Map<string, boolean>();
   let statusPorAnuncio = new Map<string, boolean>();
-  try {
-    const nomesParaFoto = [...new Set([...anuncios.map((a) => a.anuncio), ...investimentoPorConjunto.map((i) => i.conjunto)])];
-    [fotosPorConjunto, fotosPorAnuncio, statusPorConjunto, statusPorAnuncio] = await Promise.all([
-      getFotosPorNomeConjunto(prisma, nomesParaFoto),
-      getFotosPorNomeAnuncio(prisma, investimentoPorAnuncio.map((i) => i.anuncio)),
-      getStatusPorNomeConjunto(prisma, investimentoPorConjunto.map((i) => i.conjunto)),
-      getStatusPorNomeAnuncio(prisma, investimentoPorAnuncio.map((i) => i.anuncio)),
-    ]);
-  } catch {
-    // sem foto/status — não quebra a página.
-  }
+  // Correção 2026-11-05 (o comentário em fetchTodosAnuncios, meta-ads.ts, já apontava esse bug):
+  // isso era um `Promise.all` com UM catch só — se qualquer uma das 4 chamadas falhasse (ex:
+  // getFotosPorNomeAnuncio batendo o limite da Graph API), o catch descartava o resultado das
+  // OUTRAS TRÊS também, mesmo tendo tido sucesso. Status/foto de conjunto ficavam vazios só
+  // porque a busca de foto por anúncio individual falhou — sucesso de uma chamada sendo
+  // escondido pelo erro de outra. `Promise.allSettled` isola cada chamada: uma falha não derruba
+  // as que deram certo, e os erros reais ficam visíveis (ver `errosFotoStatus` abaixo) em vez de
+  // se perderem num catch silencioso.
+  const [fotosConjuntoR, fotosAnuncioR, statusConjuntoR, statusAnuncioR] = await Promise.allSettled([
+    getFotosPorNomeConjunto(prisma, [...new Set([...anuncios.map((a) => a.anuncio), ...investimentoPorConjunto.map((i) => i.conjunto)])]),
+    getFotosPorNomeAnuncio(prisma, investimentoPorAnuncio.map((i) => i.anuncio)),
+    getStatusPorNomeConjunto(prisma, investimentoPorConjunto.map((i) => i.conjunto)),
+    getStatusPorNomeAnuncio(prisma, investimentoPorAnuncio.map((i) => i.anuncio)),
+  ]);
+  const errosFotoStatus: string[] = [];
+  const motivo = (r: PromiseRejectedResult) => (r.reason instanceof Error ? r.reason.message : "erro desconhecido");
+  if (fotosConjuntoR.status === "fulfilled") fotosPorConjunto = fotosConjuntoR.value;
+  else errosFotoStatus.push(`fotos por conjunto (${motivo(fotosConjuntoR)})`);
+  if (fotosAnuncioR.status === "fulfilled") fotosPorAnuncio = fotosAnuncioR.value;
+  else errosFotoStatus.push(`fotos por anúncio (${motivo(fotosAnuncioR)})`);
+  if (statusConjuntoR.status === "fulfilled") statusPorConjunto = statusConjuntoR.value;
+  else errosFotoStatus.push(`status por conjunto (${motivo(statusConjuntoR)})`);
+  if (statusAnuncioR.status === "fulfilled") statusPorAnuncio = statusAnuncioR.value;
+  else errosFotoStatus.push(`status por anúncio (${motivo(statusAnuncioR)})`);
 
   const investimentoRowsConjunto: InvestimentoRow[] = investimentoPorConjunto.map((i) => ({
     ...i,
@@ -307,6 +325,16 @@ export default async function AnalyticsSitePage({
             </table>
           </section>
 
+          {erroMetaAds && (
+            <p className="mb-4 rounded-lg border border-[var(--status-critical)] bg-[var(--surface-1)] p-3 text-xs text-[var(--text-secondary)]">
+              Investimento do Meta Ads indisponível agora (não é falta de gasto no período, é um erro real): {erroMetaAds}
+            </p>
+          )}
+          {errosFotoStatus.length > 0 && (
+            <p className="mb-4 rounded-lg border border-[var(--status-critical)] bg-[var(--surface-1)] p-3 text-xs text-[var(--text-secondary)]">
+              Algumas fotos/status de anúncios do Meta Ads não carregaram agora: {errosFotoStatus.join(" · ")}
+            </p>
+          )}
           <InvestimentoMetaAds porConjunto={investimentoRowsConjunto} porCriativo={investimentoRowsCriativo} />
 
           {/* ── Público: quem visita ── */}

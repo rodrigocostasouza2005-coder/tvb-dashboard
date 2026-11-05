@@ -13,6 +13,10 @@ const parcelaDeleteMany = vi.fn();
 const parcelaCreateMany = vi.fn();
 const giftFindMany = vi.fn();
 const saleFindMany = vi.fn();
+const saleUpdateMany = vi.fn().mockResolvedValue({ count: 0 });
+const returnFindMany = vi.fn().mockResolvedValue([]);
+const returnUpdateMany = vi.fn().mockResolvedValue({ count: 0 });
+const syncLogCreate = vi.fn().mockResolvedValue({});
 const executeRaw = vi.fn().mockResolvedValue(undefined);
 const sendTelegramMessageMock = vi.fn().mockResolvedValue(undefined);
 
@@ -80,6 +84,14 @@ const mockPrisma = {
   },
   sale: {
     findMany: (...a: unknown[]) => saleFindMany(...a),
+    updateMany: (...a: unknown[]) => saleUpdateMany(...a),
+  },
+  return: {
+    findMany: (...a: unknown[]) => returnFindMany(...a),
+    updateMany: (...a: unknown[]) => returnUpdateMany(...a),
+  },
+  syncLog: {
+    create: (...a: unknown[]) => syncLogCreate(...a),
   },
   $executeRaw: (...a: unknown[]) => executeRaw(...a),
   $transaction: async (fn: (tx: unknown) => unknown) => fn(mockPrisma),
@@ -92,12 +104,26 @@ vi.mock("@/lib/telegram", () => ({ sendTelegramMessage: (...a: unknown[]) => sen
 // do pedido do Rodrigo: "garantir que uma sincronização em andamento não seja considerada
 // parada") — createDapicClients é o primeiro passo real de doSync(); se ele for chamado, a sync
 // tentou rodar de novo por cima da que já está rodando.
-const createDapicClientsMock = vi.fn(() => {
+// Tipado explicitamente (não inferido do throw) — sem isso, TS infere o retorno como `never` e o
+// `.mockImplementationOnce(() => [clientA, clientB])` do teste de integração mais abaixo não compila.
+const createDapicClientsMock = vi.fn<() => DapicClient[]>(() => {
   throw new Error("createDapicClients NÃO deveria ser chamado quando o lock já está ativo");
 });
 vi.mock("@/lib/connectors/dapic", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/connectors/dapic")>();
-  return { ...actual, createDapicClients: () => createDapicClientsMock() };
+  // sleep real (escalonamento de 2s entre tokens, ver STAGGER_MS em sync-runner.ts) deixaria o
+  // teste de integração "falha de 1 loja não derruba as outras" (abaixo) esperando segundos de
+  // verdade — sem valor nenhum pro teste, só mais lento. Tempo é a única coisa sobrescrita aqui.
+  return { ...actual, createDapicClients: () => createDapicClientsMock(), sleep: () => Promise.resolve() };
+});
+
+// fetchPriceCatalogCached bate em prisma.priceCatalogCache (modelo não usado em mais nenhum outro
+// teste deste arquivo) — mockado pra devolver um catálogo vazio direto, sem precisar simular esse
+// model só pro teste de integração abaixo. inferTabelaPreco (usado meio a meio dentro do sync)
+// continua sendo a implementação real.
+vi.mock("@/lib/connectors/tabela-preco", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/connectors/tabela-preco")>();
+  return { ...actual, fetchPriceCatalogCached: async () => new Map() };
 });
 
 function fakeClient(label: string, armazenadores: { Id: number; Descricao: string }[]): DapicClient {
@@ -123,6 +149,10 @@ beforeEach(() => {
   parcelaCreateMany.mockReset().mockResolvedValue({ count: 0 });
   giftFindMany.mockReset().mockResolvedValue([]);
   saleFindMany.mockReset().mockResolvedValue([]);
+  saleUpdateMany.mockReset().mockResolvedValue({ count: 0 });
+  returnFindMany.mockReset().mockResolvedValue([]);
+  returnUpdateMany.mockReset().mockResolvedValue({ count: 0 });
+  syncLogCreate.mockReset().mockResolvedValue({});
   executeRaw.mockClear();
   sendTelegramMessageMock.mockClear();
   createDapicClientsMock.mockClear();
@@ -635,5 +665,75 @@ describe("Ponto D — integridade: idempotência real (ON CONFLICT) e classifica
     );
     expect(resultado).toEqual(expect.objectContaining({ faltando: 1, divergente: 0, total: 3 }));
     expect(resultado?.exemplos[0]).toContain("::2::");
+  });
+});
+
+// ============================================================================
+// Preparado pelo agente de QA da missão Black Friday (2026-11-05) — cobertura pedida: "falha
+// parcial de uma fonte não derruba as outras" exercitada de ponta a ponta (runSync -> doSync ->
+// syncOneClient por token), não só os blocos isolados acima (storeId=null, Telegram falhando).
+// ============================================================================
+describe("runSync — falha TOTAL de 1 loja não derruba as outras (integração via doSync)", () => {
+  it("loja B falha em fetchArmazenadores -> loja A sincroniza normalmente, resultado final soma o que A produziu sem zerar por causa de B", async () => {
+    storeFindFirst.mockResolvedValue(null); // nenhum Store pré-existente
+    storeCreate.mockImplementation(({ data }: { data: { code: string } }) => Promise.resolve({ id: `store-${data.code}` }));
+
+    const clientA = {
+      label: "loja-a",
+      fetchArmazenadores: () => Promise.resolve([{ Id: 1, Descricao: "Loja A" }]),
+      fetchEstoqueTodosArmazenadores: () =>
+        Promise.resolve([
+          { IdArmazenador: 1, IdGradeProduto: 500, Produto: "Camisa X", Grupo: "Camisas", QuantidadeReal: 10 },
+        ]),
+      fetchVendasPdv: () =>
+        Promise.resolve([
+          {
+            Id: 777,
+            Status: "Fechada",
+            DataFechamento: "2026-11-01T10:00:00",
+            Codigo: "V777",
+            Cliente: "Cliente Qualquer",
+            Vendedor: "Vendedor X",
+            Cidade: null,
+            Produtos: [
+              {
+                Tipo: "Venda",
+                IdGradeProduto: 500,
+                Produto: "Camisa X",
+                Grupo: "Camisas",
+                Quantidade: 1,
+                ValorLiquido: 100,
+                ValorUnitario: 100,
+              },
+            ],
+          },
+        ]),
+      fetchVendaPdvDetalhe: () => Promise.resolve(null),
+      fetchVendasPdvModificadas: () => Promise.resolve([]),
+    } as unknown as DapicClient;
+
+    const clientB = {
+      label: "loja-b",
+      // Simula um token com login/rede fora do ar — falha ANTES de qualquer dado da loja B ser
+      // tocado (nenhum dos outros métodos de clientB é chamado, de propósito: documenta que a
+      // falha é travada já no 1º passo de syncOneClient, "armazenadores").
+      fetchArmazenadores: () => Promise.reject(new Error("DAPIC: token da loja B expirou")),
+    } as unknown as DapicClient;
+
+    createDapicClientsMock.mockImplementationOnce(() => [clientA, clientB]);
+
+    const { runSync } = await import("../sync-runner");
+    const response = await runSync({ silent: true });
+    const body = await response.json();
+
+    expect(body.ok).toBe(true);
+    // O resultado agregado não "zera" o que a loja A produziu de verdade por causa da falha de B.
+    expect(body.estoque).toBeGreaterThanOrEqual(1);
+    expect(body.vendas).toBeGreaterThanOrEqual(1);
+    // A falha de B aparece isolada e identificada — nunca silenciosa, nunca misturada com o
+    // resultado de A.
+    expect(body.falhasParciais).toHaveLength(1);
+    expect(body.falhasParciais[0]).toContain("loja-b");
+    expect(body.falhasParciais[0]).toContain("armazenadores");
   });
 });
