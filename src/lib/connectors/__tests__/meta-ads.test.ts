@@ -122,4 +122,323 @@ describe("getFotosPorNomeAnuncio — não zera fotos já cacheadas quando o Top 
     expect(result.get("X")).toEqual(["https://fbcdn.net/x.jpg"]);
     expect(result.get("Y")).toEqual(["https://fbcdn.net/y.jpg"]);
   });
+
+  it("bug de colisão de nome (missão Black Friday 2026-11-05): dois ANÚNCIOS diferentes (ids distintos) com o MESMO nome não podem se sobrescrever — foto final é a união das duas", async () => {
+    findUnique.mockImplementation(({ where }: { where: { clientLabel: string } }) => {
+      if (where.clientLabel === "meta-ads-fotos-criativo") return Promise.resolve(null);
+      // Dois anúncios reais, ids diferentes, nome IGUAL — cenário real (campanha reaproveitando
+      // nome de criativo, ou nome genérico tipo "Anúncio 1").
+      return Promise.resolve({
+        data: [
+          { id: "id-dup-1", name: "Mesmo Nome", status: "ACTIVE" },
+          { id: "id-dup-2", name: "Mesmo Nome", status: "PAUSED" },
+        ],
+        updatedAt: new Date(),
+      });
+    });
+
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    fetchMock.mockImplementation((url: string) => {
+      const foto = url.includes("id-dup-1") ? "https://fbcdn.net/dup1.jpg" : "https://fbcdn.net/dup2.jpg";
+      return Promise.resolve({ json: () => Promise.resolve({ creative: { thumbnail_url: foto } }) });
+    });
+
+    const { getFotosPorNomeAnuncio } = await import("../meta-ads");
+    const result = await getFotosPorNomeAnuncio(mockPrisma(), ["Mesmo Nome"]);
+
+    // Antes da correção, só a foto do PRIMEIRO id ficava (ou nenhuma, dependendo da ordem) — a
+    // versão corrigida nunca perde nenhuma das duas veiculações legítimas por causa do nome igual.
+    expect(result.get("Mesmo Nome")).toEqual(
+      expect.arrayContaining(["https://fbcdn.net/dup1.jpg", "https://fbcdn.net/dup2.jpg"])
+    );
+    expect(result.get("Mesmo Nome")).toHaveLength(2);
+  });
+});
+
+describe("getStatusPorNomeConjunto / getStatusPorNomeAnuncio — colisão de nome não perde status ativo", () => {
+  beforeEach(() => {
+    findUnique.mockReset();
+    upsert.mockReset();
+    vi.stubGlobal("fetch", vi.fn());
+    process.env.META_AD_ACCOUNT_ID = "123";
+    process.env.META_ACCESS_TOKEN = "token-fake";
+  });
+
+  it("dois CONJUNTOS com o mesmo nome, um ACTIVE e outro PAUSED — status reportado é ativo (nenhuma veiculação real é escondida)", async () => {
+    findUnique.mockResolvedValue({
+      data: [
+        { id: "id1", name: "Conjunto X", status: "PAUSED" },
+        { id: "id2", name: "Conjunto X", status: "ACTIVE" },
+      ],
+      updatedAt: new Date(),
+    });
+
+    const { getStatusPorNomeConjunto } = await import("../meta-ads");
+    const result = await getStatusPorNomeConjunto(mockPrisma(), ["Conjunto X"]);
+
+    expect(result.get("Conjunto X")).toBe(true);
+  });
+
+  it("dois ANÚNCIOS com o mesmo nome, ambos PAUSED — status reportado é pausado (não inventa ativo)", async () => {
+    findUnique.mockResolvedValue({
+      data: [
+        { id: "id1", name: "Anúncio Y", status: "PAUSED" },
+        { id: "id2", name: "Anúncio Y", status: "PAUSED" },
+      ],
+      updatedAt: new Date(),
+    });
+
+    const { getStatusPorNomeAnuncio } = await import("../meta-ads");
+    const result = await getStatusPorNomeAnuncio(mockPrisma(), ["Anúncio Y"]);
+
+    expect(result.get("Anúncio Y")).toBe(false);
+  });
+});
+
+describe("getFotosPorNomeConjunto — colisão de nome não perde foto de nenhum conjunto", () => {
+  beforeEach(() => {
+    findUnique.mockReset();
+    upsert.mockReset();
+    vi.stubGlobal("fetch", vi.fn());
+    process.env.META_AD_ACCOUNT_ID = "123";
+    process.env.META_ACCESS_TOKEN = "token-fake";
+  });
+
+  it("dois conjuntos (ids diferentes) com o mesmo nome — fotos das duas veiculações aparecem, nenhuma é descartada", async () => {
+    findUnique.mockImplementation(({ where }: { where: { clientLabel: string } }) => {
+      if (where.clientLabel === "meta-ads-fotos") return Promise.resolve(null);
+      // meta-ads-adsets-raw: dois conjuntos reais, ids diferentes, nome igual.
+      return Promise.resolve({
+        data: [
+          { id: "id1", name: "Conjunto X", status: "ACTIVE" },
+          { id: "id2", name: "Conjunto X", status: "ACTIVE" },
+        ],
+        updatedAt: new Date(),
+      });
+    });
+
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    fetchMock.mockImplementation((url: string) => {
+      if (url.includes("/id1/ads")) {
+        return Promise.resolve({
+          json: () =>
+            Promise.resolve({ data: [{ id: "ad1", status: "ACTIVE", creative: { thumbnail_url: "https://fbcdn.net/x1.jpg" } }] }),
+        });
+      }
+      return Promise.resolve({
+        json: () =>
+          Promise.resolve({ data: [{ id: "ad2", status: "ACTIVE", creative: { thumbnail_url: "https://fbcdn.net/x2.jpg" } }] }),
+      });
+    });
+
+    const { getFotosPorNomeConjunto } = await import("../meta-ads");
+    const result = await getFotosPorNomeConjunto(mockPrisma(), ["Conjunto X"]);
+
+    expect(result.get("Conjunto X")).toEqual(
+      expect.arrayContaining(["https://fbcdn.net/x1.jpg", "https://fbcdn.net/x2.jpg"])
+    );
+    expect(result.get("Conjunto X")).toHaveLength(2);
+  });
+});
+
+describe("getInsightsPorConjunto / getInsightsPorAnuncio — identidade por id, nunca por nome", () => {
+  beforeEach(() => {
+    vi.stubGlobal("fetch", vi.fn());
+    process.env.META_AD_ACCOUNT_ID = "123";
+    process.env.META_ACCESS_TOKEN = "token-fake";
+  });
+
+  it("bug de colisão de nome (missão Black Friday 2026-11-05): dois CONJUNTOS reais (adset_id diferente) com o mesmo adset_name são SOMADOS corretamente, nunca um sobrescreve o outro", async () => {
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    fetchMock.mockResolvedValue({
+      json: () =>
+        Promise.resolve({
+          data: [
+            {
+              adset_id: "id1",
+              adset_name: "Promo BF",
+              spend: "100",
+              impressions: "1000",
+              reach: "900",
+              clicks: "20",
+              actions: [{ action_type: "purchase", value: "2" }],
+              purchase_roas: [{ action_type: "omni_purchase", value: "3" }],
+            },
+            {
+              adset_id: "id2",
+              adset_name: "Promo BF",
+              spend: "50",
+              impressions: "500",
+              reach: "450",
+              clicks: "10",
+              actions: [{ action_type: "purchase", value: "1" }],
+              purchase_roas: [{ action_type: "omni_purchase", value: "2" }],
+            },
+          ],
+        }),
+    });
+
+    const { getInsightsPorConjunto } = await import("../meta-ads");
+    const result = await getInsightsPorConjunto({ since: "2026-11-01", until: "2026-11-05" });
+
+    expect(result.size).toBe(1); // um nome só no retorno (ponte GA4), mas com os dois somados
+    const insight = result.get("Promo BF")!;
+    expect(insight.gasto).toBe(150);
+    expect(insight.impressoes).toBe(1500);
+    expect(insight.alcance).toBe(1350);
+    expect(insight.cliques).toBe(30);
+    expect(insight.compras).toBe(3);
+    expect(insight.ctrPct).toBeCloseTo((30 / 1500) * 100, 5);
+    expect(insight.cpc).toBeCloseTo(150 / 30, 5);
+    expect(insight.cpm).toBeCloseTo((150 / 1500) * 1000, 5);
+    expect(insight.custoPorCompra).toBeCloseTo(150 / 3, 5);
+    // receita total = 3*100 + 2*50 = 400 -> roas agregado = 400/150, não a média simples (2.5) nem
+    // um dos dois ratios escolhido arbitrariamente.
+    expect(insight.roas).toBeCloseTo(400 / 150, 5);
+  });
+
+  it("mesma colisão, mas nível ANÚNCIO (ad_id/ad_name) — soma correta, não overwrite", async () => {
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    fetchMock.mockResolvedValue({
+      json: () =>
+        Promise.resolve({
+          data: [
+            {
+              ad_id: "ad1",
+              ad_name: "Criativo Genérico",
+              spend: "40",
+              impressions: "400",
+              reach: "380",
+              clicks: "8",
+              actions: [{ action_type: "purchase", value: "1" }],
+              purchase_roas: [{ action_type: "omni_purchase", value: "4" }],
+            },
+            {
+              ad_id: "ad2",
+              ad_name: "Criativo Genérico",
+              spend: "60",
+              impressions: "600",
+              reach: "550",
+              clicks: "12",
+              actions: [{ action_type: "purchase", value: "2" }],
+              purchase_roas: [{ action_type: "omni_purchase", value: "1" }],
+            },
+          ],
+        }),
+    });
+
+    const { getInsightsPorAnuncio } = await import("../meta-ads");
+    const result = await getInsightsPorAnuncio({ since: "2026-11-01", until: "2026-11-05" });
+
+    expect(result.size).toBe(1);
+    const insight = result.get("Criativo Genérico")!;
+    expect(insight.gasto).toBe(100);
+    expect(insight.compras).toBe(3);
+    // receita = 4*40 + 1*60 = 220 -> roas = 220/100 = 2.2
+    expect(insight.roas).toBeCloseTo(2.2, 5);
+  });
+
+  it("não perde dados reais quando NÃO há colisão — dois conjuntos com nomes diferentes continuam separados", async () => {
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    fetchMock.mockResolvedValue({
+      json: () =>
+        Promise.resolve({
+          data: [
+            {
+              adset_id: "id1",
+              adset_name: "Conjunto A",
+              spend: "10",
+              impressions: "100",
+              reach: "90",
+              clicks: "5",
+              actions: [],
+              purchase_roas: [],
+            },
+            {
+              adset_id: "id2",
+              adset_name: "Conjunto B",
+              spend: "20",
+              impressions: "200",
+              reach: "180",
+              clicks: "7",
+              actions: [],
+              purchase_roas: [],
+            },
+          ],
+        }),
+    });
+
+    const { getInsightsPorConjunto } = await import("../meta-ads");
+    const result = await getInsightsPorConjunto({ since: "2026-11-01", until: "2026-11-05" });
+
+    expect(result.size).toBe(2);
+    expect(result.get("Conjunto A")!.gasto).toBe(10);
+    expect(result.get("Conjunto B")!.gasto).toBe(20);
+  });
+
+  it("paginação: duas páginas da API (paging.next) são concatenadas, nenhum registro se perde", async () => {
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    let chamada = 0;
+    fetchMock.mockImplementation(() => {
+      chamada++;
+      if (chamada === 1) {
+        return Promise.resolve({
+          json: () =>
+            Promise.resolve({
+              data: [
+                {
+                  adset_id: "id1",
+                  adset_name: "Página 1",
+                  spend: "10",
+                  impressions: "100",
+                  reach: "90",
+                  clicks: "5",
+                  actions: [],
+                  purchase_roas: [],
+                },
+              ],
+              paging: { next: "https://graph.facebook.com/v21.0/act_123/insights?after=cursor2" },
+            }),
+        });
+      }
+      return Promise.resolve({
+        json: () =>
+          Promise.resolve({
+            data: [
+              {
+                adset_id: "id2",
+                adset_name: "Página 2",
+                spend: "20",
+                impressions: "200",
+                reach: "180",
+                clicks: "7",
+                actions: [],
+                purchase_roas: [],
+              },
+            ],
+            // sem paging.next -> fim da paginação
+          }),
+      });
+    });
+
+    const { getInsightsPorConjunto } = await import("../meta-ads");
+    const result = await getInsightsPorConjunto({ since: "2026-11-01", until: "2026-11-05" });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.size).toBe(2);
+    expect(result.get("Página 1")!.gasto).toBe(10);
+    expect(result.get("Página 2")!.gasto).toBe(20);
+  });
+
+  it("erro real da API (json.error) propaga como exceção — NUNCA vira silenciosamente um Map vazio/zerado", async () => {
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    fetchMock.mockResolvedValue({
+      json: () => Promise.resolve({ error: { message: "Error validating access token." } }),
+    });
+
+    const { getInsightsPorConjunto } = await import("../meta-ads");
+    await expect(getInsightsPorConjunto({ since: "2026-11-01", until: "2026-11-05" })).rejects.toThrow(
+      /Meta Ads API: Error validating access token\./
+    );
+  });
 });

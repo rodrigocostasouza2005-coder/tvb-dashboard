@@ -50,6 +50,24 @@ async function fetchAllPages<T>(url: string): Promise<T[]> {
   return results;
 }
 
+// Correção 2026-11-05 (missão Black Friday — bug real encontrado lendo o código): todas as
+// funções abaixo que recebem uma lista de entidades do Meta (conjuntos/anúncios) e precisam
+// achar "a entidade com esse nome" faziam isso com `.find()`/sobrescrita de Map por `name` —
+// se DUAS entidades reais (ids diferentes) tiverem o mesmo nome (campanha reaproveitando nome,
+// nome genérico tipo "Anúncio 1"), uma pisava silenciosamente na outra (status, foto ou
+// insight de uma das duas simplesmente desaparecia, sem erro nenhum). `agruparPorNome` junta
+// TODAS as entidades que compartilham um nome, pra quem for agregar decidir explicitamente como
+// combinar (nunca por acidente/overwrite).
+function agruparPorNome<T extends { name: string }>(itens: T[]): Map<string, T[]> {
+  const grupos = new Map<string, T[]>();
+  for (const item of itens) {
+    const lista = grupos.get(item.name);
+    if (lista) lista.push(item);
+    else grupos.set(item.name, [item]);
+  }
+  return grupos;
+}
+
 type MetaAdSet = { id: string; name: string; status: string };
 // thumbnail_url cobre a esmagadora maioria dos criativos (confirmado em 2026-10-13: amostra de 40
 // anúncios ativos/pausados da conta real, incluindo vídeo/Reels/carrossel dinâmico, 0 sem
@@ -110,15 +128,22 @@ async function fetchAdSetsCached(prisma: PrismaClient): Promise<MetaAdSet[]> {
 // gasto no período do insight (um conjunto pausado hoje pode ter gastado a semana toda).
 export async function getStatusPorNomeConjunto(prisma: PrismaClient, nomesConjuntos: string[]): Promise<Map<string, boolean>> {
   const adsets = await fetchAdSetsCached(prisma);
-  const porNome = new Map(adsets.map((a) => [a.name, a.status === "ACTIVE"]));
-  return new Map(nomesConjuntos.map((n) => [n, porNome.get(n) ?? false]));
+  // Correção 2026-11-05: antes era `new Map(adsets.map(a => [a.name, ...]))` — se dois conjuntos
+  // (ids diferentes) tiverem o mesmo nome, o Map sobrescrevia o status do primeiro com o do
+  // segundo. Agora: ativo se QUALQUER um dos conjuntos com esse nome estiver ACTIVE (reflete a
+  // realidade de "tem veiculação rodando com esse nome agora", sem perder nenhum dos dois).
+  const porNome = agruparPorNome(adsets);
+  return new Map(nomesConjuntos.map((n) => [n, (porNome.get(n) ?? []).some((a) => a.status === "ACTIVE")]));
 }
 
 export async function getStatusPorNomeAnuncio(prisma: PrismaClient, nomesAnuncios: string[]): Promise<Map<string, boolean>> {
   const ads = await fetchTodosAnunciosCached(prisma);
-  const porNome = new Map<string, boolean>();
-  for (const a of ads) if (!porNome.has(a.name)) porNome.set(a.name, a.status === "ACTIVE");
-  return new Map(nomesAnuncios.map((n) => [n, porNome.get(n) ?? false]));
+  // Mesma correção 2026-11-05 de getStatusPorNomeConjunto acima — antes pegava só o status do
+  // PRIMEIRO anúncio daquele nome (`if (!porNome.has(...))`), podia reportar "pausado" com outro
+  // anúncio do mesmo nome ativo de verdade. Agora: ativo se qualquer um dos ids com esse nome
+  // estiver ACTIVE.
+  const porNome = agruparPorNome(ads);
+  return new Map(nomesAnuncios.map((n) => [n, (porNome.get(n) ?? []).some((a) => a.status === "ACTIVE")]));
 }
 
 // Prioriza anúncios ACTIVE do conjunto ("o que tá no ar agora") — só cai pra PAUSED (com foto)
@@ -161,11 +186,17 @@ export async function getFotosPorNomeConjunto(
   }
 
   const adsets = await fetchAdSetsCached(prisma);
+  // Correção 2026-11-05: `.find()` pegava só o PRIMEIRO conjunto com esse nome — se existisse um
+  // segundo conjunto (id diferente) com o mesmo nome, as fotos dele nunca apareciam, mesmo tendo
+  // criativo de verdade disponível. Agora busca fotos de TODOS os conjuntos com esse nome e junta
+  // (concat) — nunca perde veiculação legítima só por nome repetido.
+  const porNome = agruparPorNome(adsets);
   const nomesParaBuscar = isFresh ? faltando : nomesConjuntos;
   const novosDados: Record<string, string[]> = { ...cachedData };
   for (const nome of nomesParaBuscar) {
-    const adset = adsets.find((a) => a.name === nome);
-    novosDados[nome] = adset ? await fetchFotosAtivas(adset.id) : [];
+    const grupos = porNome.get(nome) ?? [];
+    const fotosPorGrupo = await Promise.all(grupos.map((a) => fetchFotosAtivas(a.id)));
+    novosDados[nome] = fotosPorGrupo.flat();
   }
 
   await prisma.priceCatalogCache.upsert({
@@ -198,44 +229,112 @@ export type MetaInsight = {
 
 type MetaAction = { action_type: string; value: string };
 type MetaAdSetInsightRow = {
+  adset_id: string;
   adset_name: string;
   spend?: string;
   impressions?: string;
   reach?: string;
   clicks?: string;
-  ctr?: string;
-  cpc?: string;
-  cpm?: string;
   actions?: MetaAction[];
   purchase_roas?: MetaAction[];
 };
 
+// Acumulador bruto usado pra somar insights de entidades DIFERENTES (ids diferentes) que
+// compartilham o mesmo nome, antes de derivar as métricas finais (ctr/cpc/cpm/roas) — nunca soma
+// as métricas já calculadas (média de percentual estaria errada), sempre os valores brutos.
+// `receita` é reconstruída como `roas * gasto` (o Meta só devolve o ratio já pronto, não a receita
+// em si) só pra poder recalcular um ROAS agregado correto (receita total ÷ gasto total).
+type RawInsightAcumulado = {
+  gasto: number;
+  impressoes: number;
+  alcance: number;
+  cliques: number;
+  compras: number;
+  receita: number;
+};
+
+type MetaInsightFields = {
+  spend?: string;
+  impressions?: string;
+  reach?: string;
+  clicks?: string;
+  actions?: MetaAction[];
+  purchase_roas?: MetaAction[];
+};
+
+function parseRawInsight(r: MetaInsightFields): RawInsightAcumulado {
+  const gasto = Number(r.spend ?? 0);
+  const compras = Number(r.actions?.find((a) => a.action_type === "purchase")?.value ?? 0);
+  const roasEntry = r.purchase_roas?.find((p) => p.action_type === "omni_purchase") ?? r.purchase_roas?.[0];
+  const roas = roasEntry ? Number(roasEntry.value) : null;
+  return {
+    gasto,
+    impressoes: Number(r.impressions ?? 0),
+    alcance: Number(r.reach ?? 0),
+    cliques: Number(r.clicks ?? 0),
+    compras,
+    receita: roas != null ? roas * gasto : 0,
+  };
+}
+
+function somarRawInsight(a: RawInsightAcumulado, b: RawInsightAcumulado): RawInsightAcumulado {
+  return {
+    gasto: a.gasto + b.gasto,
+    impressoes: a.impressoes + b.impressoes,
+    alcance: a.alcance + b.alcance,
+    cliques: a.cliques + b.cliques,
+    compras: a.compras + b.compras,
+    receita: a.receita + b.receita,
+  };
+}
+
+function finalizarInsight(r: RawInsightAcumulado): MetaInsight {
+  return {
+    gasto: r.gasto,
+    impressoes: r.impressoes,
+    alcance: r.alcance,
+    cliques: r.cliques,
+    ctrPct: r.impressoes > 0 ? (r.cliques / r.impressoes) * 100 : 0,
+    cpc: r.cliques > 0 ? r.gasto / r.cliques : 0,
+    cpm: r.impressoes > 0 ? (r.gasto / r.impressoes) * 1000 : 0,
+    compras: r.compras,
+    roas: r.gasto > 0 ? r.receita / r.gasto : null,
+    custoPorCompra: r.compras > 0 ? r.gasto / r.compras : null,
+  };
+}
+
+// Correção 2026-11-05 (bug real encontrado lendo o código, missão Black Friday): a versão
+// anterior fazia `map.set(r.adset_name, {...})` — se dois CONJUNTOS DIFERENTES (ids diferentes,
+// ex: campanha reaproveitando nome) aparecessem na resposta do Meta com o mesmo `adset_name`, o
+// insight do segundo SOBRESCREVIA o do primeiro inteiro, perdendo gasto/compras/ROAS de uma das
+// duas veiculações silenciosamente — sem erro, sem log, só um número errado na tela.
+//
+// Agora agrega em duas etapas: 1) por `adset_id` (identidade real do Meta, nunca colide) — cada
+// linha da API já é uma entidade única nesse nível; 2) por nome, SOMANDO os valores brutos de
+// todos os ids que compartilham nome (gasto, impressões, cliques, compras, receita), e só então
+// recalculando ctr/cpc/cpm/ROAS a partir dos totais somados — nunca escolhe um id arbitrariamente
+// nem perde o outro. O Map por nome continua sendo o retorno público porque é o que a ponte com o
+// GA4 precisa (GA4 só rastreia `sessionManualAdContent`, nunca o id real do Meta — ver
+// google-analytics.ts).
 export async function getInsightsPorConjunto(range: { since: string; until: string }): Promise<Map<string, MetaInsight>> {
   const { accountId, accessToken } = getCredentials();
   const timeRange = encodeURIComponent(JSON.stringify(range));
-  const fields = "adset_name,spend,impressions,reach,clicks,ctr,cpc,cpm,actions,purchase_roas";
+  const fields = "adset_id,adset_name,spend,impressions,reach,clicks,actions,purchase_roas";
   const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/act_${accountId}/insights?level=adset&fields=${fields}&time_range=${timeRange}&limit=200&access_token=${accessToken}`;
   const rows = await fetchAllPages<MetaAdSetInsightRow>(url);
 
-  const map = new Map<string, MetaInsight>();
+  const porId = new Map<string, { nome: string; raw: RawInsightAcumulado }>();
   for (const r of rows) {
-    const gasto = Number(r.spend ?? 0);
-    const compras = Number(r.actions?.find((a) => a.action_type === "purchase")?.value ?? 0);
-    const roasEntry = r.purchase_roas?.find((p) => p.action_type === "omni_purchase") ?? r.purchase_roas?.[0];
-    map.set(r.adset_name, {
-      gasto,
-      impressoes: Number(r.impressions ?? 0),
-      alcance: Number(r.reach ?? 0),
-      cliques: Number(r.clicks ?? 0),
-      ctrPct: Number(r.ctr ?? 0),
-      cpc: Number(r.cpc ?? 0),
-      cpm: Number(r.cpm ?? 0),
-      compras,
-      roas: roasEntry ? Number(roasEntry.value) : null,
-      custoPorCompra: compras > 0 ? gasto / compras : null,
-    });
+    porId.set(r.adset_id, { nome: r.adset_name, raw: parseRawInsight(r) });
   }
-  return map;
+
+  const porNome = new Map<string, RawInsightAcumulado>();
+  for (const { nome, raw } of porId.values()) {
+    const atual = porNome.get(nome);
+    porNome.set(nome, atual ? somarRawInsight(atual, raw) : raw);
+  }
+
+  return new Map([...porNome].map(([nome, raw]) => [nome, finalizarInsight(raw)]));
 }
 
 // Mesma coisa, mas level=ad — pedido do Rodrigo em 2026-09-28 pra poder ver investimento por
@@ -243,44 +342,38 @@ export async function getInsightsPorConjunto(range: { since: string; until: stri
 // GA4/utm_content — diferente da tabela "Anúncios" acima, que é limitada ao nível de conjunto
 // porque é isso que o link rastreado carrega).
 type MetaAdInsightRow = {
+  ad_id: string;
   ad_name: string;
   spend?: string;
   impressions?: string;
   reach?: string;
   clicks?: string;
-  ctr?: string;
-  cpc?: string;
-  cpm?: string;
   actions?: MetaAction[];
   purchase_roas?: MetaAction[];
 };
 
+// Mesma correção 2026-11-05 de getInsightsPorConjunto acima: agrega por `ad_id` (identidade real)
+// antes de somar por `ad_name` — dois anúncios com o mesmo nome (ids diferentes) tinham seu
+// insight sobrescrito silenciosamente pela versão anterior (`map.set(r.ad_name, ...)`).
 export async function getInsightsPorAnuncio(range: { since: string; until: string }): Promise<Map<string, MetaInsight>> {
   const { accountId, accessToken } = getCredentials();
   const timeRange = encodeURIComponent(JSON.stringify(range));
-  const fields = "ad_name,spend,impressions,reach,clicks,ctr,cpc,cpm,actions,purchase_roas";
+  const fields = "ad_id,ad_name,spend,impressions,reach,clicks,actions,purchase_roas";
   const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/act_${accountId}/insights?level=ad&fields=${fields}&time_range=${timeRange}&limit=500&access_token=${accessToken}`;
   const rows = await fetchAllPages<MetaAdInsightRow>(url);
 
-  const map = new Map<string, MetaInsight>();
+  const porId = new Map<string, { nome: string; raw: RawInsightAcumulado }>();
   for (const r of rows) {
-    const gasto = Number(r.spend ?? 0);
-    const compras = Number(r.actions?.find((a) => a.action_type === "purchase")?.value ?? 0);
-    const roasEntry = r.purchase_roas?.find((p) => p.action_type === "omni_purchase") ?? r.purchase_roas?.[0];
-    map.set(r.ad_name, {
-      gasto,
-      impressoes: Number(r.impressions ?? 0),
-      alcance: Number(r.reach ?? 0),
-      cliques: Number(r.clicks ?? 0),
-      ctrPct: Number(r.ctr ?? 0),
-      cpc: Number(r.cpc ?? 0),
-      cpm: Number(r.cpm ?? 0),
-      compras,
-      roas: roasEntry ? Number(roasEntry.value) : null,
-      custoPorCompra: compras > 0 ? gasto / compras : null,
-    });
+    porId.set(r.ad_id, { nome: r.ad_name, raw: parseRawInsight(r) });
   }
-  return map;
+
+  const porNome = new Map<string, RawInsightAcumulado>();
+  for (const { nome, raw } of porId.values()) {
+    const atual = porNome.get(nome);
+    porNome.set(nome, atual ? somarRawInsight(atual, raw) : raw);
+  }
+
+  return new Map([...porNome].map(([nome, raw]) => [nome, finalizarInsight(raw)]));
 }
 
 // Foto de cada anúncio/criativo individual (1 conta inteira, diferente de fetchFotosAtivas que é
@@ -368,15 +461,16 @@ export async function getFotosPorNomeAnuncio(
     return new Map(nomesAnuncios.map((n) => [n, cachedData[n] ?? []]));
   }
 
-  // fetchTodosAnunciosCached não traz creative (ver comentário em fetchTodosAnuncios) — acha só
-  // o ID de cada anúncio pelo nome, depois busca creative num lote só pra essa fração pequena.
+  // fetchTodosAnunciosCached não traz creative (ver comentário em fetchTodosAnuncios) — acha os
+  // IDs de cada anúncio pelo nome, depois busca creative num lote só pra essa fração pequena.
+  // Correção 2026-11-05: a versão anterior guardava só o PRIMEIRO id de cada nome
+  // (`if (!idPorNome.has(a.name))`) — se dois anúncios reais (ids diferentes) tivessem o mesmo
+  // nome, a foto do segundo nunca era buscada nem mostrada. Agora `idsPorNome` guarda TODOS os
+  // ids de cada nome, e a foto final é a união das fotos de todos eles.
   const ads = await fetchTodosAnunciosCached(prisma);
-  const idPorNome = new Map<string, string>();
-  for (const a of ads) if (!idPorNome.has(a.name)) idPorNome.set(a.name, a.id);
+  const idsPorNome = agruparPorNome(ads);
   const nomesParaBuscar = isFresh ? faltando : nomesAnuncios;
-  const idsParaBuscar = nomesParaBuscar
-    .map((n) => idPorNome.get(n))
-    .filter((id): id is string => !!id);
+  const idsParaBuscar = nomesParaBuscar.flatMap((n) => (idsPorNome.get(n) ?? []).map((a) => a.id));
   const creativePorId = await fetchCreativesPorIds(idsParaBuscar);
 
   // Bug corrigido em 2026-10-13 (achado real em produção: Carrossel_Dinamico, Loja_Reels_Mai24 e
@@ -391,9 +485,10 @@ export async function getFotosPorNomeAnuncio(
   // lote desta chamada.
   const novosDados: Record<string, string[]> = { ...cachedData };
   for (const nome of nomesParaBuscar) {
-    const id = idPorNome.get(nome);
-    const url = id ? creativePorId.get(id) : undefined;
-    novosDados[nome] = url ? [url] : [];
+    const ids = idsPorNome.get(nome) ?? [];
+    novosDados[nome] = ids
+      .map((a) => creativePorId.get(a.id))
+      .filter((url): url is string => !!url);
   }
 
   await prisma.priceCatalogCache.upsert({
