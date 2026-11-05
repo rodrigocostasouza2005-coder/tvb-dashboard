@@ -33,8 +33,17 @@ export function FonteStatus({ status }: { status: SyncStatusDetalhado }) {
           </span>
         </span>
       ))}
-      <span title={status.metaAds.nota}>
-        Meta Ads (cache): <span className="text-[var(--text-secondary)]">{formatDateTime(status.metaAds.ultimaAtualizacaoCache)}</span>
+      <span title={status.metaAds.message ?? undefined}>
+        Meta Ads:{" "}
+        <span className={status.metaAds.status === "FAILED" ? "text-[var(--status-critical)]" : "text-[var(--text-secondary)]"}>
+          {status.metaAds.status === "FAILED" ? "falhou" : formatDateTime(status.metaAds.finishedAt ?? status.metaAds.ultimaAtualizacaoCache)}
+        </span>
+      </span>
+      <span title={status.ga4.message ?? undefined}>
+        GA4:{" "}
+        <span className={status.ga4.status === "FAILED" ? "text-[var(--status-critical)]" : "text-[var(--text-secondary)]"}>
+          {status.ga4.status === "FAILED" ? "falhou" : formatDateTime(status.ga4.finishedAt ?? status.ga4.ultimaAtualizacaoCache)}
+        </span>
       </span>
     </div>
   );
