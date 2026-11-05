@@ -11,3 +11,4 @@ export * from "./custo";
 export * from "./compras-inteligencia";
 export * from "./distribuicao-estoque";
 export * from "./cac";
+export * from "./black-friday";
