@@ -146,7 +146,13 @@ import {
 // (usado pela Visão Geral pra respeitar a restrição de loja do usuário — ver
 // getNovosERecorrentesClientes). ClienteCadastro.primeiraCompraExterna não tem loja (dado do
 // site antigo pré-DAPIC), então continua sempre global independente de storeIds.
-async function getPrimeiraCompraGlobalPorCliente(
+// Exportada (2026-11-05) pro módulo de CAC (metrics/cac.ts) — precisa da 1ª compra GLOBAL (sem
+// nenhum storeIds, nem o do e-commerce) pra decidir se um comprador do site é "novo pra empresa"
+// de verdade, não só "novo pra esse canal". Passar storeIds aqui restringe TAMBÉM a busca da 1ª
+// compra a essas lojas (ver comentário abaixo) — é o comportamento certo pra Visão Geral (respeitar
+// restrição de permissão do usuário), mas seria o comportamento ERRADO pro CAC: um cliente que já
+// comprou na Leblon antes não pode contar como "novo" só porque essa é a 1ª compra dele no site.
+export async function getPrimeiraCompraGlobalPorCliente(
   nomesNormalizados: string[],
   storeIds?: string[]
 ): Promise<Map<string, Date>> {
