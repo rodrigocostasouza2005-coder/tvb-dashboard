@@ -703,6 +703,16 @@ enum SyncSource {
   RETURNS
   PRODUCTION
   GIFTS
+  // Adicionados na missão Black Friday (2026-11): até aqui, Meta Ads e GA4 não tinham SyncSource
+  // próprio — getSyncStatusDetalhado() só conseguia expor frescor de CACHE de dado pro Meta Ads
+  // (PriceCatalogCache, só atualiza em sucesso) e nada pro GA4, sem jeito de saber se a ÚLTIMA
+  // tentativa de buscar qualquer um dos dois falhou. Gravado por analytics-site/page.tsx (não
+  // meta-ads.ts/google-analytics.ts, que são owned por outro agente nesta missão) a cada
+  // carregamento real da aba Analytics — só nas chamadas que representam "os dados estão
+  // atualizados" (getInsightsPorConjunto/getInsightsPorAnuncio, funções de GA4), nunca no fetch
+  // de fotos/cache de criativo.
+  META_ADS
+  GA4
 }
 
 enum SyncStatus {
