@@ -158,20 +158,45 @@ export async function getOrigemTrafego(range: Ga4DateRange): Promise<Ga4OrigemTr
 export type Ga4PaginaMaisVista = { caminho: string; titulo: string; visualizacoes: number };
 
 export async function getPaginasMaisVistas(range: Ga4DateRange, limit = 20): Promise<Ga4PaginaMaisVista[]> {
+  // Bug real (auditoria Black Friday 2026-11-05, mesmo padrão do bug de indexação por nome do
+  // Meta Ads): o GA4 devolve uma linha por combinação ÚNICA de (pagePath, pageTitle) — se o
+  // título de uma página mudar durante o período (teste de SEO, ajuste de copy, locale), a MESMA
+  // página vira duas linhas com visualizações fragmentadas entre elas. Antes, o `limit` do
+  // Rodrigo (ex: 20) era passado direto pra API *antes* de qualquer agrupamento — ou seja, uma
+  // página que deveria estar no Top 20 somada podia ficar de fora porque nenhuma das suas linhas
+  // individuais (por título) entrava no corte isoladamente. Correção: busca um lote bem maior de
+  // linhas cruas (10.000 — o máximo que o GA4 devolve sem paginação explícita via offset) e
+  // agrupa por pagePath em memória ANTES de aplicar o `limit` de exibição.
   const [response] = await getClient().runReport({
     property: getPropertyPath(),
     dateRanges: [range],
     dimensions: [{ name: "pagePath" }, { name: "pageTitle" }],
     metrics: [{ name: "screenPageViews" }],
     orderBys: [{ metric: { metricName: "screenPageViews" }, desc: true }],
-    limit,
+    limit: 10000,
   });
 
-  return (response.rows ?? []).map((r) => ({
-    caminho: r.dimensionValues?.[0].value ?? "",
-    titulo: r.dimensionValues?.[1].value ?? "",
-    visualizacoes: Number(r.metricValues?.[0].value ?? 0),
-  }));
+  const porCaminho = new Map<string, { titulo: string; visualizacoes: number }>();
+  for (const r of response.rows ?? []) {
+    const caminho = r.dimensionValues?.[0].value ?? "";
+    const titulo = r.dimensionValues?.[1].value ?? "";
+    const visualizacoes = Number(r.metricValues?.[0].value ?? 0);
+    const atual = porCaminho.get(caminho);
+    if (atual) {
+      atual.visualizacoes += visualizacoes;
+      // Mantém o título já guardado se ele existir; só usa o título desta linha se o anterior
+      // estava vazio (nunca descarta um título válido já encontrado por causa de uma linha com
+      // menos visualizações).
+      if (!atual.titulo) atual.titulo = titulo;
+    } else {
+      porCaminho.set(caminho, { titulo, visualizacoes });
+    }
+  }
+
+  return Array.from(porCaminho.entries())
+    .map(([caminho, v]) => ({ caminho, titulo: v.titulo, visualizacoes: v.visualizacoes }))
+    .sort((a, b) => b.visualizacoes - a.visualizacoes)
+    .slice(0, limit);
 }
 
 const DISPOSITIVO_TRADUZIDO: Record<string, string> = {
