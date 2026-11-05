@@ -39,12 +39,9 @@ export function FonteStatus({ status }: { status: SyncStatusDetalhado }) {
           {status.metaAds.status === "FAILED" ? "falhou" : formatDateTime(status.metaAds.finishedAt ?? status.metaAds.ultimaAtualizacaoCache)}
         </span>
       </span>
-      <span title={status.ga4.message ?? undefined}>
-        GA4:{" "}
-        <span className={status.ga4.status === "FAILED" ? "text-[var(--status-critical)]" : "text-[var(--text-secondary)]"}>
-          {status.ga4.status === "FAILED" ? "falhou" : formatDateTime(status.ga4.finishedAt ?? status.ga4.ultimaAtualizacaoCache)}
-        </span>
-      </span>
+      {/* GA4 removido daqui em 2026-11-05 (auditoria de indicadores): nenhum número desta página
+          vem do GA4 — mostrar o status dele sugeria uma dependência que não existe. Se esta página
+          passar a consumir GA4, adicione de volta. */}
     </div>
   );
 }

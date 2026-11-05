@@ -167,14 +167,18 @@ export type ProdutoBlackFriday = {
   divergente: boolean;
 };
 
-export async function getTopProdutosBlackFriday(filters: DashboardFilters, limit = 20): Promise<ProdutoBlackFriday[]> {
-  const [vendas, devolucoes, classificacoes] = await Promise.all([
-    getSalesByGrupoProduto(filters),
-    getReturnsByGrupoProduto(filters),
-    getClassificacaoPorProduto(),
-  ]);
-  const liquido = netByReturns(vendas, devolucoes);
-
+// Função PURA (sem Prisma) — monta o ranking a partir da venda líquida já calculada e do Map de
+// classificação já resolvido. Separada pra ser testável sem banco (mesmo padrão de
+// montarVendasPorCanal, acima): a classificação SÓ pode vir de uma linha existente em
+// `classificacoes` (que reflete ClassificacaoProduto, mantida via revisão humana no Mapa de
+// Compras — ver getClassificacaoPorProduto em compras-inteligencia.ts); produto sem linha lá
+// SEMPRE cai em SEM_CLASSIFICACAO. Nunca inventar BEST_SELLER/DROP por receita/volume de venda
+// aqui — essa é a regra inegociável desta função, ver __tests__/blackFriday.test.ts.
+export function montarProdutosBlackFriday(
+  liquido: { grupo: string; key: string; unitsSold: number; revenue: number }[],
+  classificacoes: Map<string, { tipoCompra: "BEST_SELLER" | "DROP"; divergente: boolean }>,
+  limit = 20
+): ProdutoBlackFriday[] {
   return liquido
     .map((v) => {
       const entry = classificacoes.get(`${v.grupo}::${v.key}`);
@@ -189,4 +193,15 @@ export async function getTopProdutosBlackFriday(filters: DashboardFilters, limit
     })
     .sort((a, b) => b.revenue - a.revenue)
     .slice(0, limit);
+}
+
+export async function getTopProdutosBlackFriday(filters: DashboardFilters, limit = 20): Promise<ProdutoBlackFriday[]> {
+  const [vendas, devolucoes, classificacoes] = await Promise.all([
+    getSalesByGrupoProduto(filters),
+    getReturnsByGrupoProduto(filters),
+    getClassificacaoPorProduto(),
+  ]);
+  const liquido = netByReturns(vendas, devolucoes);
+
+  return montarProdutosBlackFriday(liquido, classificacoes, limit);
 }

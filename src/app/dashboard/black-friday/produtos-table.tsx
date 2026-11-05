@@ -1,10 +1,19 @@
 import type { ProdutoBlackFriday } from "@/lib/metrics";
 import { formatBRL, formatNumber } from "@/lib/format";
 
-const BADGE: Record<ProdutoBlackFriday["classificacao"], { label: string; className: string }> = {
+const BADGE: Record<ProdutoBlackFriday["classificacao"], { label: string; className: string; title?: string }> = {
   BEST_SELLER: { label: "Best Seller", className: "bg-[var(--status-good)]/15 text-[var(--status-good)]" },
   DROP: { label: "Drop", className: "bg-[var(--series-1)]/15 text-[var(--series-1)]" },
-  SEM_CLASSIFICACAO: { label: "Sem classificação", className: "bg-[var(--text-muted)]/15 text-[var(--text-muted)]" },
+  // Best Seller/Drop são mantidos à mão no Mapa de Compras (revisão humana, ClassificacaoProduto
+  // — ver getClassificacaoPorProduto/getFilaRevisaoClassificacao em compras-inteligencia.ts); não
+  // existe fonte automática disso no DAPIC. "Sem classificação" portanto não é bug de sincronização
+  // — é literalmente "ainda não revisado". Nunca inferir uma classificação por volume/receita de
+  // venda aqui (essa tabela só exibe o que já foi revisado, não antecipa revisão).
+  SEM_CLASSIFICACAO: {
+    label: "Não revisado no Mapa de Compras",
+    className: "bg-[var(--status-warning)]/15 text-[var(--status-warning)]",
+    title: "Classificação Best Seller/Drop é mantida manualmente no Mapa de Compras. Este produto ainda não passou por revisão — não é uma classificação automática ausente por erro.",
+  },
 };
 
 // Item 4 da missão: reaproveita a classificação BEST SELLER/DROP já existente em
@@ -34,7 +43,7 @@ export function ProdutosTable({ rows, showFinancials }: { rows: ProdutoBlackFrid
                   <div className="text-xs text-[var(--text-muted)]">{r.grupo}</div>
                 </td>
                 <td className="px-4 py-2">
-                  <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${badge.className}`}>{badge.label}</span>
+                  <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${badge.className}`} title={badge.title}>{badge.label}</span>
                   {r.divergente && (
                     <span className="ml-1 text-xs text-[var(--text-muted)]" title="Os tamanhos deste produto têm classificação divergente entre si">
                       *
