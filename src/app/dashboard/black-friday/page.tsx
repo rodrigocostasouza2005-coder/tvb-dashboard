@@ -12,7 +12,8 @@ import {
   getCacPorCampanha,
   type DashboardFilters,
 } from "@/lib/metrics";
-import { getInsightsPorConjunto, getInsightsPorAnuncio, type MetaInsight } from "@/lib/connectors/meta-ads";
+import { getInsightsPorConjunto, getInsightsPorAnuncio, getFotosPorNomeAnuncio, type MetaInsight } from "@/lib/connectors/meta-ads";
+import { prisma } from "@/lib/prisma";
 import { getSyncStatusDetalhado } from "@/lib/sync-runner";
 import { todayBrasiliaStr } from "@/lib/filters";
 import { formatBRL, formatNumber, formatPercent } from "@/lib/format";
@@ -76,12 +77,26 @@ export default async function BlackFridayPage({
   let erroMetaAds: string | null = null;
   let insightsPorConjunto = new Map<string, MetaInsight>();
   let insightsPorAnuncio = new Map<string, MetaInsight>();
+  // Fotos (refinamento visual da missão 2026-11-05, escopo exclusivo da tabela "Por anúncio") —
+  // Map vazio por padrão: se a busca de foto falhar, a tabela continua de pé com o fallback
+  // visual local (AnuncioFotoCell), nunca com imagem quebrada nem linha vazia.
+  let fotosPorAnuncio = new Map<string, string[]>();
   const metaAdsPromise = Promise.all([
     getInsightsPorConjunto({ since: todayBrasiliaStr(filters.from), until: todayBrasiliaStr(filters.to) }),
     getInsightsPorAnuncio({ since: todayBrasiliaStr(filters.from), until: todayBrasiliaStr(filters.to) }),
   ])
-    .then((r) => {
+    .then(async (r) => {
       [insightsPorConjunto, insightsPorAnuncio] = r;
+      // Só busca foto pros nomes que de fato vão aparecer na tabela (top 15 por gasto, mesmo
+      // corte de mapInsights abaixo) — mesmo padrão de analytics-site/page.tsx. Isolado em try
+      // próprio: erro buscando foto (rate limit, token vencido) não pode derrubar o investimento/
+      // CTR/ROAS que já carregaram certinho — só fica sem foto.
+      const nomesTopAnuncios = mapInsights(insightsPorAnuncio, 15).map((row) => row.nome);
+      try {
+        fotosPorAnuncio = await getFotosPorNomeAnuncio(prisma, nomesTopAnuncios);
+      } catch {
+        // Sem foto agora — AnuncioFotoCell já trata Map vazio/sem entrada com fallback visual.
+      }
     })
     .catch((e) => {
       erroMetaAds = e instanceof Error ? e.message : "Erro desconhecido buscando investimento do Meta Ads.";
@@ -209,7 +224,7 @@ export default async function BlackFridayPage({
       )}
       <section className="mb-10 flex flex-col gap-6">
         <CampanhaTable titulo="Por conjunto de anúncios" nomeColuna="Conjunto" rows={campanhasPorConjunto} />
-        <CampanhaTable titulo="Por anúncio" nomeColuna="Anúncio" rows={campanhasPorAnuncio} />
+        <CampanhaTable titulo="Por anúncio" nomeColuna="Anúncio" rows={campanhasPorAnuncio} fotos={fotosPorAnuncio} />
       </section>
 
       {/* ── Produtos ── */}
