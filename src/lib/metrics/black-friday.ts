@@ -87,9 +87,28 @@ export type CanalVendasRow = {
   ticketMedio: number | null;
 };
 
-// Ordem fixa de exibição pedida na missão — qualquer loja fora dessa lista (ex: armazém novo)
-// aparece depois, em ordem alfabética, nunca escondida.
-const ORDEM_CANAL = ["CD", "Leblon", "Rio Sul", "Barra", "ATACADO"];
+// Lista explícita de canais comerciais reais — também usada como ALLOWLIST de filtro em
+// getVendasPorCanal (não só ordem de exibição). Mesmo padrão já usado em
+// CODES_LOJAS_VAREJO (distribuicao-estoque.ts): decidir "é canal de venda" por uma allowlist
+// própria do recurso, nunca por Store.sellsProducts.
+//
+// Achado real na missão de refinamento (2026-11-05): getVendasPorCanal usava
+// `where: { sellsProducts: true }`, e Store.sellsProducts é calculado em armazenadores.ts por um
+// regex de EXCLUSÃO (NAO_VENDE) pensado pra decidir se um armazém tem estoque sellável de verdade
+// — ele NÃO garante "é canal de venda". "Uniformes", "Produtos acabados" e "Matérias-primas" são
+// estágios de manufatura com sellsProducts=true (de propósito — eles têm estoque sellável real,
+// usado em outras telas de estoque/vendas, ver estoque.ts/vendas.ts/core.ts) mas apareciam como
+// "canal" na Central Black Friday por engano. Rejeitei a correção alternativa de estreitar o
+// regex de sellsProducts: esse flag é usado em 7+ arquivos (estoque.ts, vendas.ts, core.ts,
+// páginas de performance) — mudar o regex mudaria comportamento em telas que não têm nada a ver
+// com "canal de Black Friday", e já existe teste deliberado (armazenadores.test.ts) documentando
+// que esses 3 nomes DEVEM passar por sellsProducts. A allowlist abaixo resolve só o problema real
+// (identificação de CANAL), sem efeito colateral em estoque/vendas gerais.
+//
+// Se um canal comercial legítimo novo abrir (ex: nova loja física), adicionar o Store.code aqui
+// manualmente — não existe hoje um jeito confiável de detectar "é canal de venda de verdade" só
+// pelos dados do DAPIC (sellsProducts é sobre estoque, não sobre canal).
+export const ORDEM_CANAL = ["CD", "Leblon", "Rio Sul", "Barra", "ATACADO"];
 
 function nomeCanal(code: string, nome: string): string {
   if (code === "CD") return "Site (CD)";
@@ -137,7 +156,7 @@ export function montarVendasPorCanal(
 export async function getVendasPorCanal(filters: DashboardFilters): Promise<CanalVendasRow[]> {
   const where = saleWhere(filters);
   const [stores, salesRows, returnRows, pedidosRows] = await Promise.all([
-    prisma.store.findMany({ where: { sellsProducts: true }, select: { id: true, code: true, name: true } }),
+    prisma.store.findMany({ where: { code: { in: ORDEM_CANAL } }, select: { id: true, code: true, name: true } }),
     prisma.sale.groupBy({ by: ["storeId"], where, _sum: { quantidade: true, valorTotalLiquido: true } }),
     prisma.return.groupBy({ by: ["storeId"], where: returnWhere(filters), _sum: { quantidade: true, valorTotal: true } }),
     prisma.sale.groupBy({ by: ["storeId", "dapicVendaId"], where }),
@@ -167,14 +186,18 @@ export type ProdutoBlackFriday = {
   divergente: boolean;
 };
 
-export async function getTopProdutosBlackFriday(filters: DashboardFilters, limit = 20): Promise<ProdutoBlackFriday[]> {
-  const [vendas, devolucoes, classificacoes] = await Promise.all([
-    getSalesByGrupoProduto(filters),
-    getReturnsByGrupoProduto(filters),
-    getClassificacaoPorProduto(),
-  ]);
-  const liquido = netByReturns(vendas, devolucoes);
-
+// Função PURA (sem Prisma) — monta o ranking a partir da venda líquida já calculada e do Map de
+// classificação já resolvido. Separada pra ser testável sem banco (mesmo padrão de
+// montarVendasPorCanal, acima): a classificação SÓ pode vir de uma linha existente em
+// `classificacoes` (que reflete ClassificacaoProduto, mantida via revisão humana no Mapa de
+// Compras — ver getClassificacaoPorProduto em compras-inteligencia.ts); produto sem linha lá
+// SEMPRE cai em SEM_CLASSIFICACAO. Nunca inventar BEST_SELLER/DROP por receita/volume de venda
+// aqui — essa é a regra inegociável desta função, ver __tests__/blackFriday.test.ts.
+export function montarProdutosBlackFriday(
+  liquido: { grupo: string; key: string; unitsSold: number; revenue: number }[],
+  classificacoes: Map<string, { tipoCompra: "BEST_SELLER" | "DROP"; divergente: boolean }>,
+  limit = 20
+): ProdutoBlackFriday[] {
   return liquido
     .map((v) => {
       const entry = classificacoes.get(`${v.grupo}::${v.key}`);
@@ -189,4 +212,15 @@ export async function getTopProdutosBlackFriday(filters: DashboardFilters, limit
     })
     .sort((a, b) => b.revenue - a.revenue)
     .slice(0, limit);
+}
+
+export async function getTopProdutosBlackFriday(filters: DashboardFilters, limit = 20): Promise<ProdutoBlackFriday[]> {
+  const [vendas, devolucoes, classificacoes] = await Promise.all([
+    getSalesByGrupoProduto(filters),
+    getReturnsByGrupoProduto(filters),
+    getClassificacaoPorProduto(),
+  ]);
+  const liquido = netByReturns(vendas, devolucoes);
+
+  return montarProdutosBlackFriday(liquido, classificacoes, limit);
 }
