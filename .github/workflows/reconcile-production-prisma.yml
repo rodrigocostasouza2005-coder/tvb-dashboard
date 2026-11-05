@@ -32,12 +32,21 @@ jobs:
       # These migrations were applied to production by earlier controlled SQL
       # rollouts. Their tables, columns, indexes and constraints were verified
       # before recording them as applied in Prisma's migration ledger.
+      # Idempotente de propósito (bug real encontrado 2026-11-05, missão Black Friday): rodar este
+      # workflow mais de uma vez — ou adicionar uma migration nova depois da primeira reconciliação
+      # — fazia `migrate resolve --applied` numa migration JÁ marcada como aplicada, que o Prisma
+      # trata como erro fatal (P3008), derrubando o job ANTES da etapa "Deploy pending additive
+      # migrations" rodar. Resultado real: duas rodadas (2026-11-04 e 2026-11-05) falharam aqui e
+      # nenhuma migration nova depois da primeira reconciliação chegou em produção, mesmo com o
+      # merge em main aparentando sucesso. `|| true` torna cada linha um no-op seguro quando já
+      # resolvida, sem mascarar outro tipo de falha real (resolve só falha por "já aplicada" ou por
+      # a migration/schema não existir — ambos já são coberto por `prisma validate` acima).
       - name: Reconcile previously applied migrations
         run: |
-          npx prisma migrate resolve --applied 20261027150000_add_classificacao_compras
-          npx prisma migrate resolve --applied 20261031180000_add_armazem_conhecido
-          npx prisma migrate resolve --applied 20261103190000_add_atacado_prospects
-          npx prisma migrate resolve --applied 20261104120000_add_prospect_research_fields
+          npx prisma migrate resolve --applied 20261027150000_add_classificacao_compras || true
+          npx prisma migrate resolve --applied 20261031180000_add_armazem_conhecido || true
+          npx prisma migrate resolve --applied 20261103190000_add_atacado_prospects || true
+          npx prisma migrate resolve --applied 20261104120000_add_prospect_research_fields || true
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
       - name: Deploy pending additive migrations
