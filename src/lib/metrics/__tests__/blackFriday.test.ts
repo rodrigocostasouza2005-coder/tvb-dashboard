@@ -1,5 +1,23 @@
 import { describe, it, expect } from "vitest";
-import { montarVendasPorCanal, montarProdutosBlackFriday, periodoAnterior } from "../black-friday";
+import { montarVendasPorCanal, montarProdutosBlackFriday, periodoAnterior, ORDEM_CANAL } from "../black-friday";
+
+// Regressão real (missão de refinamento, 2026-11-05): getVendasPorCanal usava
+// `where: { sellsProducts: true }` — "Uniformes"/"Produtos acabados"/"Matérias-primas" são
+// estágios de manufatura com sellsProducts=true de propósito (estoque sellável real, usado em
+// estoque.ts/vendas.ts) e apareciam como "canal" por engano. A allowlist explícita (ORDEM_CANAL,
+// também usada como filtro da query, não só ordem) é a proteção real — este teste trava que
+// ninguém re-adicione um nome de estágio de manufatura aqui por acidente.
+describe("ORDEM_CANAL — allowlist de canais comerciais reais", () => {
+  it("nunca inclui estágio de manufatura/estoque (Uniformes, Produtos acabados, Matérias-primas)", () => {
+    for (const nome of ["Uniformes", "Produtos acabados", "Matérias-primas"]) {
+      expect(ORDEM_CANAL).not.toContain(nome);
+    }
+  });
+
+  it("inclui exatamente os 5 canais comerciais reais", () => {
+    expect(ORDEM_CANAL).toEqual(["CD", "Leblon", "Rio Sul", "Barra", "ATACADO"]);
+  });
+});
 
 const stores = [
   { id: "s-cd", code: "CD", name: "TVB Site e Atacado" },
