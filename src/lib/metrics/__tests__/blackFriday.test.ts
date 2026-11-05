@@ -88,54 +88,47 @@ describe("montarVendasPorCanal", () => {
   });
 });
 
-describe("montarProdutosBlackFriday", () => {
-  it("produto sem linha em ClassificacaoProduto cai em SEM_CLASSIFICACAO, nunca inventa por volume/receita", () => {
+describe("montarProdutosBlackFriday — classificação por Coleção (Sale.colecao)", () => {
+  it("produto sem nenhuma venda com coleção preenchida cai em SEM_CLASSIFICACAO, nunca inventa por volume/receita", () => {
     const liquido = [
       { grupo: "Camisa", key: "Camisa Classic", unitsSold: 500, revenue: 50000 }, // alto volume/receita
       { grupo: "Shorts", key: "Shorts Liso", unitsSold: 1, revenue: 10 }, // baixo volume/receita
     ];
-    const classificacoes = new Map(); // nenhum produto revisado no Mapa de Compras
-    const rows = montarProdutosBlackFriday(liquido, classificacoes);
+    const colecoes = new Map<string, string[]>(); // nenhuma coleção vista no período
+    const rows = montarProdutosBlackFriday(liquido, colecoes);
     for (const r of rows) {
       expect(r.classificacao).toBe("SEM_CLASSIFICACAO");
-      expect(r.divergente).toBe(false);
     }
   });
 
-  it("produto COM linha em ClassificacaoProduto preserva exatamente o tipoCompra cadastrado, não reclassifica por receita/volume", () => {
+  it("coleção 'Bestseller' (case-insensitive) classifica BEST_SELLER; qualquer outra coleção classifica DROP", () => {
     const liquido = [
-      // Receita/volume altos, mas cadastrado como DROP no Mapa de Compras — tem que continuar DROP.
       { grupo: "Camisa", key: "Camisa Classic", unitsSold: 500, revenue: 50000 },
-      // Receita/volume baixos, mas cadastrado como BEST_SELLER — tem que continuar BEST_SELLER.
       { grupo: "Shorts", key: "Shorts Liso", unitsSold: 1, revenue: 10 },
     ];
-    const classificacoes = new Map<string, { tipoCompra: "BEST_SELLER" | "DROP"; divergente: boolean }>([
-      ["Camisa::Camisa Classic", { tipoCompra: "DROP", divergente: false }],
-      ["Shorts::Shorts Liso", { tipoCompra: "BEST_SELLER", divergente: false }],
+    const colecoes = new Map<string, string[]>([
+      ["Camisa::Camisa Classic", ["Drop1 Inverno.26"]],
+      ["Shorts::Shorts Liso", ["bestseller"]], // minúsculo de propósito — precisa normalizar
     ]);
-    const rows = montarProdutosBlackFriday(liquido, classificacoes);
+    const rows = montarProdutosBlackFriday(liquido, colecoes);
     const camisa = rows.find((r) => r.produto === "Camisa Classic");
     const shorts = rows.find((r) => r.produto === "Shorts Liso");
     expect(camisa?.classificacao).toBe("DROP");
     expect(shorts?.classificacao).toBe("BEST_SELLER");
   });
 
-  it("só usa a classificação quando a chave grupo::produto bate exatamente — não casa parcial nem por produto isolado", () => {
+  it("só usa a coleção quando a chave grupo::produto bate exatamente — não casa parcial nem por produto isolado", () => {
     const liquido = [{ grupo: "Camisa", key: "Camisa Classic", unitsSold: 10, revenue: 1000 }];
-    const classificacoes = new Map<string, { tipoCompra: "BEST_SELLER" | "DROP"; divergente: boolean }>([
-      ["OutroGrupo::Camisa Classic", { tipoCompra: "BEST_SELLER", divergente: false }],
-    ]);
-    const rows = montarProdutosBlackFriday(liquido, classificacoes);
+    const colecoes = new Map<string, string[]>([["OutroGrupo::Camisa Classic", ["BESTSELLER"]]]);
+    const rows = montarProdutosBlackFriday(liquido, colecoes);
     expect(rows[0].classificacao).toBe("SEM_CLASSIFICACAO");
   });
 
-  it("propaga o flag divergente tal como veio da classificação, sem recalcular", () => {
+  it("produto com vendas em mais de uma coleção no período é BEST_SELLER se QUALQUER uma delas for Bestseller", () => {
     const liquido = [{ grupo: "Camisa", key: "Camisa Classic", unitsSold: 10, revenue: 1000 }];
-    const classificacoes = new Map<string, { tipoCompra: "BEST_SELLER" | "DROP"; divergente: boolean }>([
-      ["Camisa::Camisa Classic", { tipoCompra: "BEST_SELLER", divergente: true }],
-    ]);
-    const rows = montarProdutosBlackFriday(liquido, classificacoes);
-    expect(rows[0].divergente).toBe(true);
+    const colecoes = new Map<string, string[]>([["Camisa::Camisa Classic", ["Verão 27", "BESTSELLER"]]]);
+    const rows = montarProdutosBlackFriday(liquido, colecoes);
+    expect(rows[0].classificacao).toBe("BEST_SELLER");
   });
 });
 

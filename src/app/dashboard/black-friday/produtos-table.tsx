@@ -4,21 +4,20 @@ import { formatBRL, formatNumber } from "@/lib/format";
 const BADGE: Record<ProdutoBlackFriday["classificacao"], { label: string; className: string; title?: string }> = {
   BEST_SELLER: { label: "Best Seller", className: "bg-[var(--status-good)]/15 text-[var(--status-good)]" },
   DROP: { label: "Drop", className: "bg-[var(--series-1)]/15 text-[var(--series-1)]" },
-  // Best Seller/Drop são mantidos à mão no Mapa de Compras (revisão humana, ClassificacaoProduto
-  // — ver getClassificacaoPorProduto/getFilaRevisaoClassificacao em compras-inteligencia.ts); não
-  // existe fonte automática disso no DAPIC. "Sem classificação" portanto não é bug de sincronização
-  // — é literalmente "ainda não revisado". Nunca inferir uma classificação por volume/receita de
-  // venda aqui (essa tabela só exibe o que já foi revisado, não antecipa revisão).
+  // Classificação vem da Coleção real do produto (Sale.colecao, campo do DAPIC) — coleção
+  // "Bestseller" = Best Seller, qualquer outra coleção = Drop (regra pedida pelo Rodrigo em
+  // 2026-11-05, ver montarProdutosBlackFriday em black-friday.ts). "Sem classificação" só
+  // acontece quando o produto não tem NENHUMA venda com coleção preenchida no período — nunca é
+  // inferida por volume/receita.
   SEM_CLASSIFICACAO: {
-    label: "Não revisado no Mapa de Compras",
+    label: "Sem coleção no período",
     className: "bg-[var(--status-warning)]/15 text-[var(--status-warning)]",
-    title: "Classificação Best Seller/Drop é mantida manualmente no Mapa de Compras. Este produto ainda não passou por revisão — não é uma classificação automática ausente por erro.",
+    title: "Nenhuma venda deste produto no período tem a Coleção preenchida — não há como classificar Best Seller/Drop sem esse dado.",
   },
 };
 
-// Item 4 da missão: reaproveita a classificação BEST SELLER/DROP já existente em
-// compras-inteligencia.ts (getClassificacaoPorProduto) — não recalcula nada, só rotula o ranking
-// de venda do período com o que já está cadastrado lá.
+// Item 4 da missão: classificação por Coleção (ver black-friday.ts) — não recalcula nada aqui,
+// só rotula o ranking de venda do período com a classificação já resolvida.
 export function ProdutosTable({ rows, showFinancials }: { rows: ProdutoBlackFriday[]; showFinancials: boolean }) {
   return (
     <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
@@ -44,11 +43,6 @@ export function ProdutosTable({ rows, showFinancials }: { rows: ProdutoBlackFrid
                 </td>
                 <td className="px-4 py-2">
                   <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${badge.className}`} title={badge.title}>{badge.label}</span>
-                  {r.divergente && (
-                    <span className="ml-1 text-xs text-[var(--text-muted)]" title="Os tamanhos deste produto têm classificação divergente entre si">
-                      *
-                    </span>
-                  )}
                 </td>
                 <td className="px-4 py-2 text-right tabular-nums">{formatNumber(r.unitsSold)}</td>
                 {showFinancials && <td className="px-4 py-2 text-right tabular-nums">{formatBRL(r.revenue)}</td>}

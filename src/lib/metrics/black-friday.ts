@@ -9,7 +9,6 @@
 import { prisma } from "@/lib/prisma";
 import { saleWhere, returnWhere, netByReturns, type DashboardFilters } from "./core";
 import { getSalesByGrupoProduto, getReturnsByGrupoProduto } from "./vendas";
-import { getClassificacaoPorProduto } from "./compras-inteligencia";
 import { getInsightsPorConjunto } from "@/lib/connectors/meta-ads";
 import { todayBrasiliaStr } from "@/lib/filters";
 
@@ -183,44 +182,74 @@ export type ProdutoBlackFriday = {
   unitsSold: number;
   revenue: number;
   classificacao: "BEST_SELLER" | "DROP" | "SEM_CLASSIFICACAO";
-  divergente: boolean;
 };
 
-// Função PURA (sem Prisma) — monta o ranking a partir da venda líquida já calculada e do Map de
-// classificação já resolvido. Separada pra ser testável sem banco (mesmo padrão de
-// montarVendasPorCanal, acima): a classificação SÓ pode vir de uma linha existente em
-// `classificacoes` (que reflete ClassificacaoProduto, mantida via revisão humana no Mapa de
-// Compras — ver getClassificacaoPorProduto em compras-inteligencia.ts); produto sem linha lá
-// SEMPRE cai em SEM_CLASSIFICACAO. Nunca inventar BEST_SELLER/DROP por receita/volume de venda
-// aqui — essa é a regra inegociável desta função, ver __tests__/blackFriday.test.ts.
+// Regra de classificação pedida pelo Rodrigo em 2026-11-05 (substitui a leitura do Mapa de
+// Compras/ClassificacaoProduto pra esta tela): classificação vem da Coleção real do DAPIC
+// (Sale.colecao) — se a coleção for "Bestseller", o produto é BEST_SELLER; qualquer outra coleção
+// é DROP. Valores reais confirmados no banco: "BESTSELLER" (exata, case variável possível em
+// produção) e várias coleções sazonais (ex: "Drop1 Inverno.26", "Verão 27") que todas caem em DROP
+// por essa regra — "Drop" aqui não depende do texto da coleção conter a palavra "drop", é
+// literalmente "não é a coleção Bestseller". SEM_CLASSIFICACAO só quando o produto não tem NENHUMA
+// venda com coleção preenchida no período (Sale.colecao é opcional) — nunca inventa Best
+// Seller/Drop por volume/receita.
+const NOME_COLECAO_BESTSELLER = "BESTSELLER";
+
+function normalizarColecao(colecao: string): string {
+  return colecao.trim().toUpperCase();
+}
+
+// Função PURA (sem Prisma) — monta o ranking a partir da venda líquida já calculada e das
+// coleções distintas vistas por produto no período. Testável sem banco, ver
+// __tests__/blackFriday.test.ts.
 export function montarProdutosBlackFriday(
   liquido: { grupo: string; key: string; unitsSold: number; revenue: number }[],
-  classificacoes: Map<string, { tipoCompra: "BEST_SELLER" | "DROP"; divergente: boolean }>,
+  colecoesPorProduto: Map<string, string[]>,
   limit = 20
 ): ProdutoBlackFriday[] {
   return liquido
     .map((v) => {
-      const entry = classificacoes.get(`${v.grupo}::${v.key}`);
+      const colecoes = colecoesPorProduto.get(`${v.grupo}::${v.key}`) ?? [];
+      const temBestseller = colecoes.some((c) => normalizarColecao(c) === NOME_COLECAO_BESTSELLER);
+      const classificacao: ProdutoBlackFriday["classificacao"] =
+        colecoes.length === 0 ? "SEM_CLASSIFICACAO" : temBestseller ? "BEST_SELLER" : "DROP";
       return {
         grupo: v.grupo,
         produto: v.key,
         unitsSold: v.unitsSold,
         revenue: v.revenue,
-        classificacao: entry?.tipoCompra ?? "SEM_CLASSIFICACAO",
-        divergente: entry?.divergente ?? false,
+        classificacao,
       } satisfies ProdutoBlackFriday;
     })
     .sort((a, b) => b.revenue - a.revenue)
     .slice(0, limit);
 }
 
+// Coleções distintas (não-nulas) vistas por grupo::produto, dentro do mesmo filtro/período da
+// tela — uma consulta de agregação só, sem carregar linha a linha.
+async function getColecoesPorProduto(filters: DashboardFilters): Promise<Map<string, string[]>> {
+  const rows = await prisma.sale.groupBy({
+    by: ["grupo", "produto", "colecao"],
+    where: { ...saleWhere(filters), colecao: { not: null } },
+  });
+  const map = new Map<string, string[]>();
+  for (const r of rows) {
+    if (!r.colecao) continue;
+    const key = `${r.grupo}::${r.produto}`;
+    const arr = map.get(key) ?? [];
+    arr.push(r.colecao);
+    map.set(key, arr);
+  }
+  return map;
+}
+
 export async function getTopProdutosBlackFriday(filters: DashboardFilters, limit = 20): Promise<ProdutoBlackFriday[]> {
-  const [vendas, devolucoes, classificacoes] = await Promise.all([
+  const [vendas, devolucoes, colecoesPorProduto] = await Promise.all([
     getSalesByGrupoProduto(filters),
     getReturnsByGrupoProduto(filters),
-    getClassificacaoPorProduto(),
+    getColecoesPorProduto(filters),
   ]);
   const liquido = netByReturns(vendas, devolucoes);
 
-  return montarProdutosBlackFriday(liquido, classificacoes, limit);
+  return montarProdutosBlackFriday(liquido, colecoesPorProduto, limit);
 }
