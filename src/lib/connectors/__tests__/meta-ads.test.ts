@@ -581,12 +581,12 @@ describe("fetchAllPages (via getInsightsPorConjunto) — paginação e erro de A
       .mockResolvedValueOnce({
         json: () =>
           Promise.resolve({
-            data: [{ adset_name: "Conjunto 1", spend: "100" }],
+            data: [{ adset_id: "1", adset_name: "Conjunto 1", spend: "100" }],
             paging: { next: "https://graph.facebook.com/v21.0/act_123/insights?after=XYZ" },
           }),
       })
       .mockResolvedValueOnce({
-        json: () => Promise.resolve({ data: [{ adset_name: "Conjunto 2", spend: "200" }] }),
+        json: () => Promise.resolve({ data: [{ adset_id: "2", adset_name: "Conjunto 2", spend: "200" }] }),
       });
 
     const { getInsightsPorConjunto } = await import("../meta-ads");

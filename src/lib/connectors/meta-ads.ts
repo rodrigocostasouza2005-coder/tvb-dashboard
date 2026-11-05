@@ -420,6 +420,9 @@ async function fetchCreativesPorIds(ids: string[]): Promise<Map<string, string>>
       const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/${id}?fields=${fields}&access_token=${accessToken}`;
       const res = await fetch(url);
       const json: { creative?: MetaCreative; error?: { message: string } } = await res.json();
+      // Correção 2026-11-05: erro real da Graph API (token expirado, rate limit) virava "sem foto"
+      // em silêncio — indistinguível de um anúncio que genuinamente não tem criativo.
+      if (json.error) throw new Error(`Meta Ads API: ${json.error.message}`);
       const foto = extrairFoto(json.creative);
       if (foto) map.set(id, foto);
     }
