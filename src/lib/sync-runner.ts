@@ -1638,6 +1638,98 @@ export async function getLastSyncAt(): Promise<{ at: string | null; source: "ful
   return { at: candidatos[0].at.toISOString(), source: candidatos[0].source };
 }
 
+const DAPIC_SOURCES = ["SALES", "STOCK", "RETURNS", "PRODUCTION", "GIFTS"] as const;
+
+export type StatusFonteDapic = {
+  source: (typeof DAPIC_SOURCES)[number];
+  status: "SUCCESS" | "FAILED" | null; // null = essa fonte nunca teve um SyncLog com finishedAt
+  finishedAt: string | null;
+  recordsSynced: number | null;
+  message: string | null;
+};
+
+// Status de uma fonte que NÃO passa pelo sync-runner (Meta Ads, GA4) — buscadas ao vivo a cada
+// carregamento de página (ver connectors/meta-ads.ts e connectors/google-analytics.ts), sem
+// SyncLog próprio. `ultimaAtualizacaoCache` é só o `updatedAt` do cache de DADO (quando existe:
+// PriceCatalogCache, TTL 12h), tocado SÓ em sucesso — nunca atualiza numa falha de fetch, então é
+// um proxy de frescor, não um status de erro de verdade. `rastreiaErro` é sempre false hoje —
+// documentado aqui pra deixar explícita a lacuna real (ver relatório da tarefa de sync/infra,
+// 2026-11, achado #3): não existe hoje nenhum jeito de saber, só olhando o banco, se a última
+// tentativa de buscar Meta Ads/GA4 falhou. Fechar essa lacuna de verdade (sucesso/erro
+// persistido, não só frescor de cache) exigiria estender o enum SyncSource (schema.prisma) com
+// META_ADS/GA4 e escrever nesses dois conectores a cada chamada — fora do escopo desta função
+// (não edita schema.prisma nem meta-ads.ts/google-analytics.ts) e decisão do coordenador da missão.
+export type StatusFonteExterna = {
+  ultimaAtualizacaoCache: string | null;
+  rastreiaErro: false;
+  nota: string;
+};
+
+export type SyncStatusDetalhado = {
+  dapic: StatusFonteDapic[];
+  locks: { sync: boolean; cancelamentos: boolean };
+  metaAds: StatusFonteExterna;
+  ga4: StatusFonteExterna;
+};
+
+// Etapa 3 do plano de atualização rápida (missão Black Friday, 2026-11): "Atualizado: HH:mm" no
+// cabeçalho (getLastSyncAt, acima) só diz UM horário agregado — não distingue "estoque sincronizou
+// mas vendas falharam" nem expõe Meta Ads/GA4. Esta função é a base pra uma visão por fonte (DAPIC
+// vendas/estoque/devoluções/produção/brindes + o que existe pras duas fontes externas), reaproveitando
+// só o que já existe (SyncLog, SyncLock) — nenhuma tabela nova, nenhuma migration.
+export async function getSyncStatusDetalhado(): Promise<SyncStatusDetalhado> {
+  const dapic = await Promise.all(
+    DAPIC_SOURCES.map(async (source): Promise<StatusFonteDapic> => {
+      const ultimo = await prisma.syncLog.findFirst({
+        where: { source, finishedAt: { not: null } },
+        orderBy: { finishedAt: "desc" },
+        select: { status: true, finishedAt: true, recordsSynced: true, message: true },
+      });
+      return {
+        source,
+        status: ultimo?.status ?? null,
+        finishedAt: ultimo?.finishedAt ? ultimo.finishedAt.toISOString() : null,
+        recordsSynced: ultimo?.recordsSynced ?? null,
+        message: ultimo?.message ?? null,
+      };
+    })
+  );
+
+  const [syncLock, cancelamentosLock] = await Promise.all([
+    prisma.syncLock.findUnique({ where: { id: SYNC_LOCK_ID }, select: { startedAt: true, finishedAt: true } }),
+    prisma.syncLock.findUnique({ where: { id: CANCELAMENTOS_LOCK_ID }, select: { startedAt: true, finishedAt: true } }),
+  ]);
+  const emAndamento = (lock: { startedAt: Date; finishedAt: Date | null } | null, staleMin: number) =>
+    !!lock && lock.finishedAt === null && lock.startedAt.getTime() > Date.now() - staleMin * 60_000;
+
+  // Labels de cache lidos aqui são literais (não importados de meta-ads.ts de propósito — esse
+  // arquivo é owned por outro agente nesta missão, não deve ser editado/tocado por esta tarefa).
+  // Se o nome do label mudar lá, esse read-only aqui só volta a ficar sempre null — não quebra nada.
+  const metaAdsCache = await prisma.priceCatalogCache.findFirst({
+    where: { clientLabel: { in: ["meta-ads-adsets-raw", "meta-ads-anuncios-raw", "meta-ads-fotos", "meta-ads-fotos-criativo"] } },
+    orderBy: { updatedAt: "desc" },
+    select: { updatedAt: true },
+  });
+
+  return {
+    dapic,
+    locks: {
+      sync: emAndamento(syncLock, SYNC_LOCK_STALE_MIN),
+      cancelamentos: emAndamento(cancelamentosLock, CANCELAMENTOS_LOCK_STALE_MIN),
+    },
+    metaAds: {
+      ultimaAtualizacaoCache: metaAdsCache?.updatedAt ? metaAdsCache.updatedAt.toISOString() : null,
+      rastreiaErro: false,
+      nota: "Sem SyncLog próprio — buscado ao vivo a cada carregamento de página. Este timestamp é só o cache de dado (TTL 12h), tocado apenas em sucesso; uma falha de fetch não aparece aqui.",
+    },
+    ga4: {
+      ultimaAtualizacaoCache: null,
+      rastreiaErro: false,
+      nota: "Sem cache e sem SyncLog — buscado ao vivo a cada carregamento de página, sem nenhum registro persistido de sucesso/erro.",
+    },
+  };
+}
+
 export async function runSync(options: { silent?: boolean; retryBudgetMs?: number; checkDuplicates?: boolean } = {}) {
   const { silent = false, retryBudgetMs = 0, checkDuplicates = false } = options;
 
