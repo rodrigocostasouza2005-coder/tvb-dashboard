@@ -1639,6 +1639,15 @@ export async function getLastSyncAt(): Promise<{ at: string | null; source: "ful
 }
 
 const DAPIC_SOURCES = ["SALES", "STOCK", "RETURNS", "PRODUCTION", "GIFTS"] as const;
+// Fechado na missão Black Friday (2026-11, continuação): até aqui Meta Ads/GA4 não tinham
+// SyncSource próprio (enum estendido em prisma/schema.prisma, migration
+// 20261105120000_add_meta_ads_ga4_sync_source) — essa lacuna já estava documentada no relatório
+// anterior (achado #3). analytics-site/page.tsx agora grava 1 SyncLog por fonte a cada
+// carregamento real da aba (depois de getInsightsPorConjunto/getInsightsPorAnuncio resolverem, e
+// depois das 10 chamadas de GA4 resolverem) — nunca no fetch de fotos/status de criativo (esse
+// continua sem rastreio, é só cache visual). Esta função não escreve em meta-ads.ts/
+// google-analytics.ts (owned por outro agente) — só lê o SyncLog que a página grava.
+const EXTERNAL_SOURCES = ["META_ADS", "GA4"] as const;
 
 export type StatusFonteDapic = {
   source: (typeof DAPIC_SOURCES)[number];
@@ -1648,21 +1657,18 @@ export type StatusFonteDapic = {
   message: string | null;
 };
 
-// Status de uma fonte que NÃO passa pelo sync-runner (Meta Ads, GA4) — buscadas ao vivo a cada
-// carregamento de página (ver connectors/meta-ads.ts e connectors/google-analytics.ts), sem
-// SyncLog próprio. `ultimaAtualizacaoCache` é só o `updatedAt` do cache de DADO (quando existe:
-// PriceCatalogCache, TTL 12h), tocado SÓ em sucesso — nunca atualiza numa falha de fetch, então é
-// um proxy de frescor, não um status de erro de verdade. `rastreiaErro` é sempre false hoje —
-// documentado aqui pra deixar explícita a lacuna real (ver relatório da tarefa de sync/infra,
-// 2026-11, achado #3): não existe hoje nenhum jeito de saber, só olhando o banco, se a última
-// tentativa de buscar Meta Ads/GA4 falhou. Fechar essa lacuna de verdade (sucesso/erro
-// persistido, não só frescor de cache) exigiria estender o enum SyncSource (schema.prisma) com
-// META_ADS/GA4 e escrever nesses dois conectores a cada chamada — fora do escopo desta função
-// (não edita schema.prisma nem meta-ads.ts/google-analytics.ts) e decisão do coordenador da missão.
+// Mesmo formato de StatusFonteDapic (status/finishedAt/recordsSynced/message vêm do SyncLog
+// gravado por analytics-site/page.tsx) + `ultimaAtualizacaoCache`, que só existe pro Meta Ads
+// (updatedAt do PriceCatalogCache de foto/status de criativo, TTL 12h — frescor de CACHE de
+// exibição, ortogonal ao sucesso/erro da busca de insight que o SyncLog agora rastreia). GA4 não
+// tem cache de dado equivalente, sempre null.
 export type StatusFonteExterna = {
+  source: (typeof EXTERNAL_SOURCES)[number];
+  status: "SUCCESS" | "FAILED" | null;
+  finishedAt: string | null;
+  recordsSynced: number | null;
+  message: string | null;
   ultimaAtualizacaoCache: string | null;
-  rastreiaErro: false;
-  nota: string;
 };
 
 export type SyncStatusDetalhado = {
@@ -1672,44 +1678,46 @@ export type SyncStatusDetalhado = {
   ga4: StatusFonteExterna;
 };
 
+async function buscarStatusFonte(source: (typeof DAPIC_SOURCES)[number] | (typeof EXTERNAL_SOURCES)[number]) {
+  const ultimo = await prisma.syncLog.findFirst({
+    where: { source, finishedAt: { not: null } },
+    orderBy: { finishedAt: "desc" },
+    select: { status: true, finishedAt: true, recordsSynced: true, message: true },
+  });
+  return {
+    status: ultimo?.status ?? null,
+    finishedAt: ultimo?.finishedAt ? ultimo.finishedAt.toISOString() : null,
+    recordsSynced: ultimo?.recordsSynced ?? null,
+    message: ultimo?.message ?? null,
+  };
+}
+
 // Etapa 3 do plano de atualização rápida (missão Black Friday, 2026-11): "Atualizado: HH:mm" no
 // cabeçalho (getLastSyncAt, acima) só diz UM horário agregado — não distingue "estoque sincronizou
 // mas vendas falharam" nem expõe Meta Ads/GA4. Esta função é a base pra uma visão por fonte (DAPIC
-// vendas/estoque/devoluções/produção/brindes + o que existe pras duas fontes externas), reaproveitando
-// só o que já existe (SyncLog, SyncLock) — nenhuma tabela nova, nenhuma migration.
+// vendas/estoque/devoluções/produção/brindes + Meta Ads/GA4, agora com SyncLog de verdade),
+// reaproveitando só o que já existe (SyncLog, SyncLock) — nenhuma tabela nova.
 export async function getSyncStatusDetalhado(): Promise<SyncStatusDetalhado> {
   const dapic = await Promise.all(
-    DAPIC_SOURCES.map(async (source): Promise<StatusFonteDapic> => {
-      const ultimo = await prisma.syncLog.findFirst({
-        where: { source, finishedAt: { not: null } },
-        orderBy: { finishedAt: "desc" },
-        select: { status: true, finishedAt: true, recordsSynced: true, message: true },
-      });
-      return {
-        source,
-        status: ultimo?.status ?? null,
-        finishedAt: ultimo?.finishedAt ? ultimo.finishedAt.toISOString() : null,
-        recordsSynced: ultimo?.recordsSynced ?? null,
-        message: ultimo?.message ?? null,
-      };
-    })
+    DAPIC_SOURCES.map(async (source): Promise<StatusFonteDapic> => ({ source, ...(await buscarStatusFonte(source)) }))
   );
 
-  const [syncLock, cancelamentosLock] = await Promise.all([
+  const [syncLock, cancelamentosLock, metaAdsStatus, ga4Status, metaAdsCache] = await Promise.all([
     prisma.syncLock.findUnique({ where: { id: SYNC_LOCK_ID }, select: { startedAt: true, finishedAt: true } }),
     prisma.syncLock.findUnique({ where: { id: CANCELAMENTOS_LOCK_ID }, select: { startedAt: true, finishedAt: true } }),
+    buscarStatusFonte("META_ADS"),
+    buscarStatusFonte("GA4"),
+    // Label de cache lido aqui é literal (não importado de meta-ads.ts de propósito — esse arquivo
+    // é owned por outro agente nesta missão, não deve ser editado/tocado por esta tarefa). Se o
+    // nome do label mudar lá, esse read-only aqui só volta a ficar sempre null — não quebra nada.
+    prisma.priceCatalogCache.findFirst({
+      where: { clientLabel: { in: ["meta-ads-adsets-raw", "meta-ads-anuncios-raw", "meta-ads-fotos", "meta-ads-fotos-criativo"] } },
+      orderBy: { updatedAt: "desc" },
+      select: { updatedAt: true },
+    }),
   ]);
   const emAndamento = (lock: { startedAt: Date; finishedAt: Date | null } | null, staleMin: number) =>
     !!lock && lock.finishedAt === null && lock.startedAt.getTime() > Date.now() - staleMin * 60_000;
-
-  // Labels de cache lidos aqui são literais (não importados de meta-ads.ts de propósito — esse
-  // arquivo é owned por outro agente nesta missão, não deve ser editado/tocado por esta tarefa).
-  // Se o nome do label mudar lá, esse read-only aqui só volta a ficar sempre null — não quebra nada.
-  const metaAdsCache = await prisma.priceCatalogCache.findFirst({
-    where: { clientLabel: { in: ["meta-ads-adsets-raw", "meta-ads-anuncios-raw", "meta-ads-fotos", "meta-ads-fotos-criativo"] } },
-    orderBy: { updatedAt: "desc" },
-    select: { updatedAt: true },
-  });
 
   return {
     dapic,
@@ -1718,14 +1726,14 @@ export async function getSyncStatusDetalhado(): Promise<SyncStatusDetalhado> {
       cancelamentos: emAndamento(cancelamentosLock, CANCELAMENTOS_LOCK_STALE_MIN),
     },
     metaAds: {
+      source: "META_ADS",
+      ...metaAdsStatus,
       ultimaAtualizacaoCache: metaAdsCache?.updatedAt ? metaAdsCache.updatedAt.toISOString() : null,
-      rastreiaErro: false,
-      nota: "Sem SyncLog próprio — buscado ao vivo a cada carregamento de página. Este timestamp é só o cache de dado (TTL 12h), tocado apenas em sucesso; uma falha de fetch não aparece aqui.",
     },
     ga4: {
+      source: "GA4",
+      ...ga4Status,
       ultimaAtualizacaoCache: null,
-      rastreiaErro: false,
-      nota: "Sem cache e sem SyncLog — buscado ao vivo a cada carregamento de página, sem nenhum registro persistido de sucesso/erro.",
     },
   };
 }
