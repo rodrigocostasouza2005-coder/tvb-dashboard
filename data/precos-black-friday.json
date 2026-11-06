@@ -1,0 +1,1746 @@
+[
+ {
+  "grupo": "Classic Lisa",
+  "produto": "Classic Verde",
+  "colecao": "BESTSELLER",
+  "precoCheio": 297,
+  "desconto": 0.15,
+  "precoComDesconto": 252.45
+ },
+ {
+  "grupo": "Classic Lisa",
+  "produto": "Classic Black",
+  "colecao": "BESTSELLER",
+  "precoCheio": 297,
+  "desconto": 0.15,
+  "precoComDesconto": 252.45
+ },
+ {
+  "grupo": "Classic Lisa",
+  "produto": "Classic Blue",
+  "colecao": "BESTSELLER",
+  "precoCheio": 297,
+  "desconto": 0.1,
+  "precoComDesconto": 267.3
+ },
+ {
+  "grupo": "Ultra Light",
+  "produto": "Ultra Light Sunset",
+  "colecao": "BESTSELLER",
+  "precoCheio": 367,
+  "desconto": 0.1,
+  "precoComDesconto": 330.3
+ },
+ {
+  "grupo": "Ultra Light",
+  "produto": "Ultra Light Treko",
+  "colecao": "BESTSELLER",
+  "precoCheio": 367,
+  "desconto": 0.1,
+  "precoComDesconto": 330.3
+ },
+ {
+  "grupo": "Ultra Light",
+  "produto": "Ultra Light Black",
+  "colecao": "BESTSELLER",
+  "precoCheio": 367,
+  "desconto": 0.2,
+  "precoComDesconto": 293.6
+ },
+ {
+  "grupo": "Classic Dry",
+  "produto": "Classic Dry Black",
+  "colecao": "BESTSELLER",
+  "precoCheio": 347,
+  "desconto": 0.15,
+  "precoComDesconto": 294.95
+ },
+ {
+  "grupo": "Classic Lisa",
+  "produto": "Classic Vinho",
+  "colecao": "AV 27",
+  "precoCheio": 277,
+  "desconto": 0.2,
+  "precoComDesconto": 221.60000000000002
+ },
+ {
+  "grupo": "Classic Dry",
+  "produto": "Classic Dry Captain",
+  "colecao": "BESTSELLER",
+  "precoCheio": 347,
+  "desconto": 0.3,
+  "precoComDesconto": 242.89999999999998
+ },
+ {
+  "grupo": "Classic Lisa",
+  "produto": "Classic Marinho",
+  "colecao": "Verão 27",
+  "precoCheio": 297,
+  "desconto": 0.3,
+  "precoComDesconto": 207.89999999999998
+ },
+ {
+  "grupo": "Classic Lisa",
+  "produto": "Classic Jungle",
+  "colecao": "Verão 27",
+  "precoCheio": 297,
+  "desconto": 0.2,
+  "precoComDesconto": 237.60000000000002
+ },
+ {
+  "grupo": "Classic Duo",
+  "produto": "Classic Girassol",
+  "colecao": "Verão 27",
+  "precoCheio": 297,
+  "desconto": 0.4,
+  "precoComDesconto": 178.2
+ },
+ {
+  "grupo": "Jam Sesh",
+  "produto": "Jam Sesh Jungle",
+  "colecao": "BESTSELLER",
+  "precoCheio": 267,
+  "desconto": 0.2,
+  "precoComDesconto": 213.60000000000002
+ },
+ {
+  "grupo": "Jam Sesh",
+  "produto": "Jam Sesh Black",
+  "colecao": "BESTSELLER",
+  "precoCheio": 267,
+  "desconto": 0.2,
+  "precoComDesconto": 213.60000000000002
+ },
+ {
+  "grupo": "Code",
+  "produto": "Code Short Marrocos",
+  "colecao": "Verão 27",
+  "precoCheio": 287,
+  "desconto": 0.4,
+  "precoComDesconto": 172.2
+ },
+ {
+  "grupo": "Classic Blend",
+  "produto": "Classic Terra Blend",
+  "colecao": "Verão 27",
+  "precoCheio": 297,
+  "desconto": 0.3,
+  "precoComDesconto": 207.89999999999998
+ },
+ {
+  "grupo": "Ultra Light",
+  "produto": "Ultra Light Desert",
+  "colecao": "Verão 27",
+  "precoCheio": 367,
+  "desconto": 0.3,
+  "precoComDesconto": 256.9
+ },
+ {
+  "grupo": "Classic Lisa",
+  "produto": "Classic Desert",
+  "colecao": "Verão 27",
+  "precoCheio": 297,
+  "desconto": 0.2,
+  "precoComDesconto": 237.60000000000002
+ },
+ {
+  "grupo": "Classic Lisa",
+  "produto": "Classic Soft Black",
+  "colecao": "Verão 27",
+  "precoCheio": 297,
+  "desconto": 0.45,
+  "precoComDesconto": 163.35000000000002
+ },
+ {
+  "grupo": "Classic Lisa",
+  "produto": "Classic Soft Vintage",
+  "colecao": "Verão 27",
+  "precoCheio": 297,
+  "desconto": 0.45,
+  "precoComDesconto": 163.35000000000002
+ },
+ {
+  "grupo": "Classic Lisa",
+  "produto": "Classic Soft Jungle",
+  "colecao": "Verão 27",
+  "precoCheio": 297,
+  "desconto": 0.45,
+  "precoComDesconto": 163.35000000000002
+ },
+ {
+  "grupo": "Classic Lisa",
+  "produto": "Classic Cacau",
+  "colecao": "Verão 27",
+  "precoCheio": 297,
+  "desconto": 0.2,
+  "precoComDesconto": 237.60000000000002
+ },
+ {
+  "grupo": "Classic Dry",
+  "produto": "Classic Dry Choco",
+  "colecao": "Verão 27",
+  "precoCheio": 347,
+  "desconto": 0.2,
+  "precoComDesconto": 277.6
+ },
+ {
+  "grupo": "Boné",
+  "produto": "Boné 5 Panel Cafe com Leite",
+  "colecao": "AV 27",
+  "precoCheio": 179,
+  "desconto": 0.1,
+  "precoComDesconto": 161.1
+ },
+ {
+  "grupo": "Code",
+  "produto": "Code Short Canyon",
+  "colecao": "Verão 27",
+  "precoCheio": 287,
+  "desconto": 0.4,
+  "precoComDesconto": 172.2
+ },
+ {
+  "grupo": "Boné",
+  "produto": "Boné 5 Panel Black",
+  "colecao": "BESTSELLER",
+  "precoCheio": 179,
+  "desconto": 0.1,
+  "precoComDesconto": 161.1
+ },
+ {
+  "grupo": "Classic Duo",
+  "produto": "Classic Tie Dye Azul",
+  "colecao": "Verão 27",
+  "precoCheio": 297,
+  "desconto": 0.3,
+  "precoComDesconto": 207.89999999999998
+ },
+ {
+  "grupo": "High Five",
+  "produto": "High Five Black",
+  "colecao": "BESTSELLER",
+  "precoCheio": 277,
+  "desconto": 0.1,
+  "precoComDesconto": 249.3
+ },
+ {
+  "grupo": "Boné",
+  "produto": "Boné 5 Panel Areia",
+  "colecao": "Verão 27",
+  "precoCheio": 179,
+  "desconto": 0.1,
+  "precoComDesconto": 161.1
+ },
+ {
+  "grupo": "Classic Duo",
+  "produto": "Classic Sunrise",
+  "colecao": "Drop 2 Inverno 26",
+  "precoCheio": 297,
+  "desconto": 0.4,
+  "precoComDesconto": 178.2
+ },
+ {
+  "grupo": "Boné",
+  "produto": "Boné 5 Panel Forest",
+  "colecao": "AV 27",
+  "precoCheio": 179,
+  "desconto": 0.1,
+  "precoComDesconto": 161.1
+ },
+ {
+  "grupo": "Ultra Light",
+  "produto": "Ultra Light Treko Reverso",
+  "colecao": "Verão 27",
+  "precoCheio": 367,
+  "desconto": 0.2,
+  "precoComDesconto": 293.6
+ },
+ {
+  "grupo": "Code",
+  "produto": "Code Short Hossegor",
+  "colecao": "Drop 2 Inverno 26",
+  "precoCheio": 297,
+  "desconto": 0.4,
+  "precoComDesconto": 178.2
+ },
+ {
+  "grupo": "Boné",
+  "produto": "Boné 5 Panel Green",
+  "colecao": "BESTSELLER",
+  "precoCheio": 179,
+  "desconto": 0.1,
+  "precoComDesconto": 161.1
+ },
+ {
+  "grupo": "Classic Blend",
+  "produto": "Classic Blend Mar",
+  "colecao": "Verão 27",
+  "precoCheio": 297,
+  "desconto": 0.4,
+  "precoComDesconto": 178.2
+ },
+ {
+  "grupo": "Camisetas",
+  "produto": "T-Shirt Ilha Azul Oversized",
+  "colecao": "Verão 27",
+  "precoCheio": 229,
+  "desconto": 0.4,
+  "precoComDesconto": 137.4
+ },
+ {
+  "grupo": "Veludo",
+  "produto": "Veludo Black",
+  "colecao": "Drop1 Inverno.26",
+  "precoCheio": 387,
+  "desconto": 0.2,
+  "precoComDesconto": 309.6
+ },
+ {
+  "grupo": "Classic Duo",
+  "produto": "Classic Tie Dye Verde",
+  "colecao": "Verão 27",
+  "precoCheio": 297,
+  "desconto": 0.3,
+  "precoComDesconto": 207.89999999999998
+ },
+ {
+  "grupo": "Ultra Light",
+  "produto": "Ultra Light Tie Dye Azul",
+  "colecao": "Verão 27",
+  "precoCheio": 367,
+  "desconto": 0.3,
+  "precoComDesconto": 256.9
+ },
+ {
+  "grupo": "Boné",
+  "produto": "Boné 5 Panel Marinho",
+  "colecao": "BESTSELLER",
+  "precoCheio": 179,
+  "desconto": 0.1,
+  "precoComDesconto": 161.1
+ },
+ {
+  "grupo": "Ultra Light",
+  "produto": "Ultra Light Marrocos",
+  "colecao": "Verão 27",
+  "precoCheio": 367,
+  "desconto": 0.4,
+  "precoComDesconto": 220.2
+ },
+ {
+  "grupo": "Classic Dry",
+  "produto": "Classic Dry Café com Leite",
+  "colecao": "Drop 2 Inverno 26",
+  "precoCheio": 347,
+  "desconto": 0.3,
+  "precoComDesconto": 242.89999999999998
+ },
+ {
+  "grupo": "Code",
+  "produto": "Code Short Vert",
+  "colecao": "Drop 2 Inverno 26",
+  "precoCheio": 297,
+  "desconto": 0.3,
+  "precoComDesconto": 207.89999999999998
+ },
+ {
+  "grupo": "Code",
+  "produto": "Code Short Samurai",
+  "colecao": "Drop 2 Inverno 26",
+  "precoCheio": 297,
+  "desconto": 0.3,
+  "precoComDesconto": 207.89999999999998
+ },
+ {
+  "grupo": "Classic Duo",
+  "produto": "Classic Izaa",
+  "colecao": "Drop 2 Inverno 26",
+  "precoCheio": 297,
+  "desconto": 0.4,
+  "precoComDesconto": 178.2
+ },
+ {
+  "grupo": "Camisetas",
+  "produto": "T-Shirt Bad Road Verde",
+  "colecao": "Verão 27",
+  "precoCheio": 199,
+  "desconto": 0.3,
+  "precoComDesconto": 139.29999999999998
+ },
+ {
+  "grupo": "Camisetas",
+  "produto": "Veranico Manga Longa Preto",
+  "colecao": "Drop 2 Inverno 26",
+  "precoCheio": 219,
+  "desconto": 0.4,
+  "precoComDesconto": 131.4
+ },
+ {
+  "grupo": "Code",
+  "produto": "Code Short Tie Dye Verde",
+  "colecao": "Verão 27",
+  "precoCheio": 297,
+  "desconto": 0.3,
+  "precoComDesconto": 207.89999999999998
+ },
+ {
+  "grupo": "Camisetas",
+  "produto": "T-Shirt Ilha Preta Oversized",
+  "colecao": "Verão 27",
+  "precoCheio": 229,
+  "desconto": 0.4,
+  "precoComDesconto": 137.4
+ },
+ {
+  "grupo": "Jam Sesh",
+  "produto": "Jam Sesh Caqui",
+  "colecao": "Verão 27",
+  "precoCheio": 267,
+  "desconto": 0.3,
+  "precoComDesconto": 186.89999999999998
+ },
+ {
+  "grupo": "Camisetas",
+  "produto": "Canto da Sereia Manga Longa Preto",
+  "colecao": "Drop 2 Inverno 26",
+  "precoCheio": 219,
+  "desconto": 0.4,
+  "precoComDesconto": 131.4
+ },
+ {
+  "grupo": "High Five",
+  "produto": "High Five Camelo",
+  "colecao": "V26.1",
+  "precoCheio": 257,
+  "desconto": 0,
+  "precoComDesconto": 257
+ },
+ {
+  "grupo": "Casacos",
+  "produto": "Hoodie Good Friends / Preto",
+  "colecao": "Drop 2 Inverno 26",
+  "precoCheio": 399,
+  "desconto": 0.4,
+  "precoComDesconto": 239.39999999999998
+ },
+ {
+  "grupo": "Veludo",
+  "produto": "Veludo Marinho",
+  "colecao": "Drop1 Inverno.26",
+  "precoCheio": 387,
+  "desconto": 0.2,
+  "precoComDesconto": 309.6
+ },
+ {
+  "grupo": "High Five",
+  "produto": "High Five Girassol",
+  "colecao": "Verão 27",
+  "precoCheio": 277,
+  "desconto": 0.4,
+  "precoComDesconto": 166.2
+ },
+ {
+  "grupo": "Camisetas",
+  "produto": "T-Shirt Flower Preto Oversized",
+  "colecao": "Verão 27",
+  "precoCheio": 229,
+  "desconto": 0.4,
+  "precoComDesconto": 137.4
+ },
+ {
+  "grupo": "Classic Lisa",
+  "produto": "Classic Soft Caqui",
+  "colecao": "Drop 2 Inverno 26",
+  "precoCheio": 297,
+  "desconto": 0.45,
+  "precoComDesconto": 163.35000000000002
+ },
+ {
+  "grupo": "Camisetas",
+  "produto": "T-Shirt Bad Road Off White",
+  "colecao": "Verão 27",
+  "precoCheio": 199,
+  "desconto": 0.2,
+  "precoComDesconto": 159.20000000000002
+ },
+ {
+  "grupo": "Cruiser",
+  "produto": "Cruiser Canyon",
+  "colecao": "Verão 27",
+  "precoCheio": 327,
+  "desconto": 0.2,
+  "precoComDesconto": 261.6
+ },
+ {
+  "grupo": "Classic Lisa",
+  "produto": "Classic Explorer",
+  "colecao": "Drop 2 Inverno 26",
+  "precoCheio": 297,
+  "desconto": 0.4,
+  "precoComDesconto": 178.2
+ },
+ {
+  "grupo": "Classic Blend",
+  "produto": "Classic Blend Areia",
+  "colecao": "Drop 2 Inverno 26",
+  "precoCheio": 297,
+  "desconto": 0.4,
+  "precoComDesconto": 178.2
+ },
+ {
+  "grupo": "Classic Blend",
+  "produto": "Classic Blend Coffee",
+  "colecao": "Drop 2 Inverno 26",
+  "precoCheio": 297,
+  "desconto": 0.4,
+  "precoComDesconto": 178.2
+ },
+ {
+  "grupo": "Code",
+  "produto": "Code Short Garden",
+  "colecao": "Drop1 Inverno.26",
+  "precoCheio": 297,
+  "desconto": 0.4,
+  "precoComDesconto": 178.2
+ },
+ {
+  "grupo": "Ultra Light",
+  "produto": "Ultra Light Tie Dye Verde",
+  "colecao": "Verão 27",
+  "precoCheio": 367,
+  "desconto": 0.3,
+  "precoComDesconto": 256.9
+ },
+ {
+  "grupo": "Casacos",
+  "produto": "Hoodie Surf Therapy/ Azul petroleo",
+  "colecao": "Drop 2 Inverno 26",
+  "precoCheio": 399,
+  "desconto": 0.4,
+  "precoComDesconto": 239.39999999999998
+ },
+ {
+  "grupo": "High Five",
+  "produto": "High Five Safari",
+  "colecao": "Verão 27",
+  "precoCheio": 257,
+  "desconto": 0.1,
+  "precoComDesconto": 231.3
+ },
+ {
+  "grupo": "Camisetas",
+  "produto": "T-Shirt Flower Off White Oversized",
+  "colecao": "Verão 27",
+  "precoCheio": 229,
+  "desconto": 0.4,
+  "precoComDesconto": 137.4
+ },
+ {
+  "grupo": "Classic Dry",
+  "produto": "Classic Dry Areia",
+  "colecao": "Drop 2 Inverno 26",
+  "precoCheio": 347,
+  "desconto": 0.4,
+  "precoComDesconto": 208.2
+ },
+ {
+  "grupo": "Classic Lisa",
+  "produto": "Classic Veranico",
+  "colecao": "Drop 2 Inverno 26",
+  "precoCheio": 297,
+  "desconto": 0.4,
+  "precoComDesconto": 178.2
+ },
+ {
+  "grupo": "Camisetas",
+  "produto": "T-Shirt Flag Marinho",
+  "colecao": "Verão 27",
+  "precoCheio": 199,
+  "desconto": 0.3,
+  "precoComDesconto": 139.29999999999998
+ },
+ {
+  "grupo": "High Five",
+  "produto": "High Five Blue",
+  "colecao": "BESTSELLER",
+  "precoCheio": 257,
+  "desconto": 0.1,
+  "precoComDesconto": 231.3
+ },
+ {
+  "grupo": "Calça",
+  "produto": "Calça Confort Safari",
+  "colecao": "Drop 2 Inverno 26",
+  "precoCheio": 367,
+  "desconto": 0.4,
+  "precoComDesconto": 220.2
+ },
+ {
+  "grupo": "Runner",
+  "produto": "Runner Safari",
+  "colecao": "Drop 2 Inverno 26",
+  "precoCheio": 297,
+  "desconto": 0.3,
+  "precoComDesconto": 207.89999999999998
+ },
+ {
+  "grupo": "Code",
+  "produto": "Code Short Explorer",
+  "colecao": "Drop1 Inverno.26",
+  "precoCheio": 297,
+  "desconto": 0.4,
+  "precoComDesconto": 178.2
+ },
+ {
+  "grupo": "Camisetas",
+  "produto": "T-Shirt Cachoeira Preta",
+  "colecao": "Verão 27",
+  "precoCheio": 199,
+  "desconto": 0.3,
+  "precoComDesconto": 139.29999999999998
+ },
+ {
+  "grupo": "Pochet",
+  "produto": "Pochet Black",
+  "colecao": "Verão 27",
+  "precoCheio": 199,
+  "desconto": 0.2,
+  "precoComDesconto": 159.20000000000002
+ },
+ {
+  "grupo": "Classic Lisa",
+  "produto": "Classic Soft Rosa",
+  "colecao": "Drop 2 Inverno 26",
+  "precoCheio": 297,
+  "desconto": 0.45,
+  "precoComDesconto": 163.35000000000002
+ },
+ {
+  "grupo": "Camisetas",
+  "produto": "T-Shirt TVB Preta",
+  "colecao": "Verão 27",
+  "precoCheio": 179,
+  "desconto": 0.2,
+  "precoComDesconto": 143.20000000000002
+ },
+ {
+  "grupo": "Cruiser",
+  "produto": "Cruiser Stone",
+  "colecao": "Verão 27",
+  "precoCheio": 327,
+  "desconto": 0.2,
+  "precoComDesconto": 261.6
+ },
+ {
+  "grupo": "Boné",
+  "produto": "Boné 5 Panel Safari",
+  "colecao": "AV 27",
+  "precoCheio": 179,
+  "desconto": 0.1,
+  "precoComDesconto": 161.1
+ },
+ {
+  "grupo": "Code",
+  "produto": "Code Short Black Jaguar",
+  "colecao": "Drop1 Inverno.26",
+  "precoCheio": 297,
+  "desconto": 0.4,
+  "precoComDesconto": 178.2
+ },
+ {
+  "grupo": "Jam Sesh",
+  "produto": "Jam Sesh Vegan",
+  "colecao": "V26.1",
+  "precoCheio": 267,
+  "desconto": 0.4,
+  "precoComDesconto": 160.2
+ },
+ {
+  "grupo": "Cruiser",
+  "produto": "Cruiser Veranico",
+  "colecao": "Drop 2 Inverno 26",
+  "precoCheio": 327,
+  "desconto": 0.3,
+  "precoComDesconto": 228.89999999999998
+ },
+ {
+  "grupo": "Classic Lisa",
+  "produto": "Classic Caramelo",
+  "colecao": "V26.1",
+  "precoCheio": 277,
+  "desconto": 0.4,
+  "precoComDesconto": 166.2
+ },
+ {
+  "grupo": "Casacos",
+  "produto": "Hoodie Offline Conection/ Preto",
+  "colecao": "Drop1 Inverno.26",
+  "precoCheio": 399,
+  "desconto": 0.4,
+  "precoComDesconto": 239.39999999999998
+ },
+ {
+  "grupo": "Jam Sesh",
+  "produto": "Jam Sesh Areia",
+  "colecao": "Drop 2 Inverno 26",
+  "precoCheio": 267,
+  "desconto": 0.3,
+  "precoComDesconto": 186.89999999999998
+ },
+ {
+  "grupo": "Boné",
+  "produto": "Boné 5 Panel Terra",
+  "colecao": "AV 27",
+  "precoCheio": 179,
+  "desconto": 0.1,
+  "precoComDesconto": 161.1
+ },
+ {
+  "grupo": "Camisetas",
+  "produto": "T-Shirt Cachoeira Off White",
+  "colecao": "Verão 27",
+  "precoCheio": 199,
+  "desconto": 0.3,
+  "precoComDesconto": 139.29999999999998
+ },
+ {
+  "grupo": "Camisetas",
+  "produto": "T-Shirt TVB Marrom",
+  "colecao": "Verão 27",
+  "precoCheio": 179,
+  "desconto": 0.2,
+  "precoComDesconto": 143.20000000000002
+ },
+ {
+  "grupo": "Boné",
+  "produto": "Boné 5 Panel Atlantico",
+  "colecao": "Verão 27",
+  "precoCheio": 179,
+  "desconto": 0.1,
+  "precoComDesconto": 161.1
+ },
+ {
+  "grupo": "High Five",
+  "produto": "Mini Jungle",
+  "colecao": "Verão 27",
+  "precoCheio": 257,
+  "desconto": 0.3,
+  "precoComDesconto": 179.89999999999998
+ },
+ {
+  "grupo": "Camisetas",
+  "produto": "T-Shirt Flag Off White",
+  "colecao": "Verão 27",
+  "precoCheio": 199,
+  "desconto": 0.3,
+  "precoComDesconto": 139.29999999999998
+ },
+ {
+  "grupo": "Camisetas",
+  "produto": "T-Shirt Traveller Preta",
+  "colecao": "Verão 27",
+  "precoCheio": 199,
+  "desconto": 0.3,
+  "precoComDesconto": 139.29999999999998
+ },
+ {
+  "grupo": "Casacos",
+  "produto": "Moletom Careca Tropicaos/ Preto",
+  "colecao": "Drop 2 Inverno 26",
+  "precoCheio": 359,
+  "desconto": 0.4,
+  "precoComDesconto": 215.4
+ },
+ {
+  "grupo": "Classic Lisa",
+  "produto": "Classic Soft Castanho",
+  "colecao": "Drop 2 Inverno 26",
+  "precoCheio": 297,
+  "desconto": 0.45,
+  "precoComDesconto": 163.35000000000002
+ },
+ {
+  "grupo": "Camisetas",
+  "produto": "T-Shirt Attols Azul Oversized",
+  "colecao": "Verão 27",
+  "precoCheio": 229,
+  "desconto": 0.2,
+  "precoComDesconto": 183.20000000000002
+ },
+ {
+  "grupo": "Camisetas",
+  "produto": "T-Shirt Attols Preta Oversized",
+  "colecao": "Verão 27",
+  "precoCheio": 229,
+  "desconto": 0.2,
+  "precoComDesconto": 183.20000000000002
+ },
+ {
+  "grupo": "Boné",
+  "produto": "Boné 5 Panel Vert",
+  "colecao": "Verão 27",
+  "precoCheio": 179,
+  "desconto": 0.1,
+  "precoComDesconto": 161.1
+ },
+ {
+  "grupo": "Code",
+  "produto": "Code Short Army",
+  "colecao": "Drop1 Inverno.26",
+  "precoCheio": 297,
+  "desconto": 0.4,
+  "precoComDesconto": 178.2
+ },
+ {
+  "grupo": "Runner",
+  "produto": "Runner Jungle",
+  "colecao": "Drop 2 Inverno 26",
+  "precoCheio": 297,
+  "desconto": 0.3,
+  "precoComDesconto": 207.89999999999998
+ },
+ {
+  "grupo": "High Five",
+  "produto": "Mini Black",
+  "colecao": "Verão 27",
+  "precoCheio": 257,
+  "desconto": 0.2,
+  "precoComDesconto": 205.60000000000002
+ },
+ {
+  "grupo": "Boné",
+  "produto": "Boné 5 Panel Sandstone",
+  "colecao": "Verão 27",
+  "precoCheio": 179,
+  "desconto": 0.1,
+  "precoComDesconto": 161.1
+ },
+ {
+  "grupo": "High Five Blend",
+  "produto": "High Five Blend Vegan",
+  "colecao": "V26.1",
+  "precoCheio": 277,
+  "desconto": 0.4,
+  "precoComDesconto": 166.2
+ },
+ {
+  "grupo": "Classic Blend",
+  "produto": "Classic Indigo Blend",
+  "colecao": "Drop 2 Inverno 26",
+  "precoCheio": 297,
+  "desconto": 0.4,
+  "precoComDesconto": 178.2
+ },
+ {
+  "grupo": "Classic Duo",
+  "produto": "Classic Aduo",
+  "colecao": "V26.1",
+  "precoCheio": 297,
+  "desconto": 0.4,
+  "precoComDesconto": 178.2
+ },
+ {
+  "grupo": "Jam Sesh",
+  "produto": "Jam Sesh Terra",
+  "colecao": "AV 27",
+  "precoCheio": 267,
+  "desconto": 0.4,
+  "precoComDesconto": 160.2
+ },
+ {
+  "grupo": "Cruiser",
+  "produto": "Cruiser Forest",
+  "colecao": "Drop 2 Inverno 26",
+  "precoCheio": 327,
+  "desconto": 0.3,
+  "precoComDesconto": 228.89999999999998
+ },
+ {
+  "grupo": "Classic Blend",
+  "produto": "Classic Blend Mostarda",
+  "colecao": "V26.1",
+  "precoCheio": 297,
+  "desconto": 0.4,
+  "precoComDesconto": 178.2
+ },
+ {
+  "grupo": "High Five",
+  "produto": "High Five Vinho",
+  "colecao": "V26.1",
+  "precoCheio": 257,
+  "desconto": 0.4,
+  "precoComDesconto": 154.2
+ },
+ {
+  "grupo": "Ultra Light",
+  "produto": "Ultra Light Jungle",
+  "colecao": "Drop 2 Inverno 26",
+  "precoCheio": 367,
+  "desconto": 0.4,
+  "precoComDesconto": 220.2
+ },
+ {
+  "grupo": "Veludo",
+  "produto": "Veludo Off White",
+  "colecao": "Drop1 Inverno.26",
+  "precoCheio": 387,
+  "desconto": 0.2,
+  "precoComDesconto": 309.6
+ },
+ {
+  "grupo": "High Five",
+  "produto": "High Five Garden",
+  "colecao": "Drop 2 Inverno 26",
+  "precoCheio": 257,
+  "desconto": 0.4,
+  "precoComDesconto": 154.2
+ },
+ {
+  "grupo": "High Five Blend",
+  "produto": "High Five Blend Terra",
+  "colecao": "V26.1",
+  "precoCheio": 277,
+  "desconto": 0.4,
+  "precoComDesconto": 166.2
+ },
+ {
+  "grupo": "Classic Duo",
+  "produto": "Classic Duo Areia",
+  "colecao": "V26.1",
+  "precoCheio": 297,
+  "desconto": 0.4,
+  "precoComDesconto": 178.2
+ },
+ {
+  "grupo": "High Five",
+  "produto": "High Five Canyon",
+  "colecao": "Verão 27",
+  "precoCheio": 257,
+  "desconto": 0.3,
+  "precoComDesconto": 179.89999999999998
+ },
+ {
+  "grupo": "Camisetas",
+  "produto": "T-Shirt Flag Lilas",
+  "colecao": "Verão 27",
+  "precoCheio": 199,
+  "desconto": 0.3,
+  "precoComDesconto": 139.29999999999998
+ },
+ {
+  "grupo": "Camisetas",
+  "produto": "T-Shirt Traveller Marrom",
+  "colecao": "Verão 27",
+  "precoCheio": 199,
+  "desconto": 0.3,
+  "precoComDesconto": 139.29999999999998
+ },
+ {
+  "grupo": "Casacos",
+  "produto": "Jaqueta Black",
+  "colecao": "Drop1 Inverno.26",
+  "precoCheio": 687,
+  "desconto": 0.2,
+  "precoComDesconto": 549.6
+ },
+ {
+  "grupo": "Ultra Light",
+  "produto": "Ultra Light Burple",
+  "colecao": "Drop 2 Inverno 26",
+  "precoCheio": 367,
+  "desconto": 0.4,
+  "precoComDesconto": 220.2
+ },
+ {
+  "grupo": "Classic Lisa",
+  "produto": "Classic Marrocos",
+  "colecao": "Drop1 Inverno.26",
+  "precoCheio": 277,
+  "desconto": 0.4,
+  "precoComDesconto": 166.2
+ },
+ {
+  "grupo": "Runner",
+  "produto": "Runner Black",
+  "colecao": "Drop 2 Inverno 26",
+  "precoCheio": 297,
+  "desconto": 0.3,
+  "precoComDesconto": 207.89999999999998
+ },
+ {
+  "grupo": "Classic Blend",
+  "produto": "Classic Blend CInza",
+  "colecao": "Drop1 Inverno.26",
+  "precoCheio": 297,
+  "desconto": 0.4,
+  "precoComDesconto": 178.2
+ },
+ {
+  "grupo": "High Five Blend",
+  "produto": "High Five Blend Air",
+  "colecao": "V26.1",
+  "precoCheio": 277,
+  "desconto": 0.4,
+  "precoComDesconto": 166.2
+ },
+ {
+  "grupo": "Classic Dry",
+  "produto": "Classic Dry Deep Blue",
+  "colecao": "Drop 2 Inverno 26",
+  "precoCheio": 347,
+  "desconto": 0.4,
+  "precoComDesconto": 208.2
+ },
+ {
+  "grupo": "Classic Dry",
+  "produto": "Classic Dry Green",
+  "colecao": "BESTSELLER",
+  "precoCheio": 347,
+  "desconto": 0.4,
+  "precoComDesconto": 208.2
+ },
+ {
+  "grupo": "Calça",
+  "produto": "Calça Confort Black",
+  "colecao": "Drop 2 Inverno 26",
+  "precoCheio": 367,
+  "desconto": 0.4,
+  "precoComDesconto": 220.2
+ },
+ {
+  "grupo": "High Five",
+  "produto": "Mini Blue",
+  "colecao": "Verão 27",
+  "precoCheio": 257,
+  "desconto": 0.2,
+  "precoComDesconto": 205.60000000000002
+ },
+ {
+  "grupo": "Classic Blend",
+  "produto": "Classic Vert Blend",
+  "colecao": "Drop 2 Inverno 26",
+  "precoCheio": 297,
+  "desconto": 0.4,
+  "precoComDesconto": 178.2
+ },
+ {
+  "grupo": "Classic Lisa",
+  "produto": "Classic Dias Epicos Verde",
+  "colecao": "V26.1",
+  "precoCheio": 277,
+  "desconto": 0.4,
+  "precoComDesconto": 166.2
+ },
+ {
+  "grupo": "High Five",
+  "produto": "High Five Areia",
+  "colecao": "Drop1 Inverno.26",
+  "precoCheio": 257,
+  "desconto": 0.4,
+  "precoComDesconto": 154.2
+ },
+ {
+  "grupo": "Casacos",
+  "produto": "Hoodie Veranico/off white",
+  "colecao": "Drop1 Inverno.26",
+  "precoCheio": 399,
+  "desconto": 0.4,
+  "precoComDesconto": 239.39999999999998
+ },
+ {
+  "grupo": "High Five",
+  "produto": "High Five Explorer",
+  "colecao": "Drop 2 Inverno 26",
+  "precoCheio": 257,
+  "desconto": 0.4,
+  "precoComDesconto": 154.2
+ },
+ {
+  "grupo": "Casacos",
+  "produto": "Jaqueta Lev",
+  "colecao": "Drop1 Inverno.26",
+  "precoCheio": 687,
+  "desconto": 0.2,
+  "precoComDesconto": 549.6
+ },
+ {
+  "grupo": "Code",
+  "produto": "Code Short Croc",
+  "colecao": "V26.1",
+  "precoCheio": 297,
+  "desconto": 0.4,
+  "precoComDesconto": 178.2
+ },
+ {
+  "grupo": "Jam Sesh",
+  "produto": "Jam Sesh Off White",
+  "colecao": "V26.1",
+  "precoCheio": 267,
+  "desconto": 0.4,
+  "precoComDesconto": 160.2
+ },
+ {
+  "grupo": "Ultra Light",
+  "produto": "Ultra Light Mono",
+  "colecao": "Drop 2 Inverno 26",
+  "precoCheio": 367,
+  "desconto": 0.4,
+  "precoComDesconto": 220.2
+ },
+ {
+  "grupo": "Classic Dry",
+  "produto": "Classic Dry Verde",
+  "colecao": "Drop 2 Inverno 26",
+  "precoCheio": 347,
+  "desconto": 0.4,
+  "precoComDesconto": 208.2
+ },
+ {
+  "grupo": "Casacos",
+  "produto": "Jaqueta Safari",
+  "colecao": "Drop1 Inverno.26",
+  "precoCheio": 687,
+  "desconto": 0.2,
+  "precoComDesconto": 549.6
+ },
+ {
+  "grupo": "Classic Duo",
+  "produto": "Classic Duo Air",
+  "colecao": "V26.1",
+  "precoCheio": 297,
+  "desconto": 0.4,
+  "precoComDesconto": 178.2
+ },
+ {
+  "grupo": "Casacos",
+  "produto": "Jaqueta Verde",
+  "colecao": "Drop1 Inverno.26",
+  "precoCheio": 687,
+  "desconto": 0.2,
+  "precoComDesconto": 549.6
+ },
+ {
+  "grupo": "Classic Blend",
+  "produto": "Classic Blend Dark",
+  "colecao": "Drop1 Inverno.26",
+  "precoCheio": 297,
+  "desconto": 0.4,
+  "precoComDesconto": 178.2
+ },
+ {
+  "grupo": "Code",
+  "produto": "Code Short Brisa",
+  "colecao": "Drop1 Inverno.26",
+  "precoCheio": 297,
+  "desconto": 0.4,
+  "precoComDesconto": 178.2
+ },
+ {
+  "grupo": "Code",
+  "produto": "Code Short Rider",
+  "colecao": "V26.1",
+  "precoCheio": 297,
+  "desconto": 0.4,
+  "precoComDesconto": 178.2
+ },
+ {
+  "grupo": "Bola",
+  "produto": "BOLA FT-5BKY COURO SINTETICO LAMINADO AMARELO E PRETO",
+  "colecao": "BESTSELLER",
+  "precoCheio": 599.9,
+  "desconto": 0.1,
+  "precoComDesconto": 539.91
+ },
+ {
+  "grupo": "Jam Sesh",
+  "produto": "Jam Sesh Rosa",
+  "colecao": "V26.1",
+  "precoCheio": 267,
+  "desconto": 0.4,
+  "precoComDesconto": 160.2
+ },
+ {
+  "grupo": "Classic Dry",
+  "produto": "Classic Dry Safari",
+  "colecao": "Verão 27",
+  "precoCheio": 347,
+  "desconto": 0.2,
+  "precoComDesconto": 277.6
+ },
+ {
+  "grupo": "High Five",
+  "produto": "High Five Jungle",
+  "colecao": "AV 27",
+  "precoCheio": 257,
+  "desconto": 0.4,
+  "precoComDesconto": 154.2
+ },
+ {
+  "grupo": "Classic Duo",
+  "produto": "Classic Duo Forest",
+  "colecao": "V26.1",
+  "precoCheio": 297,
+  "desconto": 0.4,
+  "precoComDesconto": 178.2
+ },
+ {
+  "grupo": "Code",
+  "produto": "Code Short Vegan",
+  "colecao": "V26.1",
+  "precoCheio": 287,
+  "desconto": 0.4,
+  "precoComDesconto": 172.2
+ },
+ {
+  "grupo": "Ultra Light",
+  "produto": "Ultra Light Explorer",
+  "colecao": "Drop 2 Inverno 26",
+  "precoCheio": 367,
+  "desconto": 0.4,
+  "precoComDesconto": 220.2
+ },
+ {
+  "grupo": "Cruiser",
+  "produto": "Cruiser Explorer",
+  "colecao": "Drop 2 Inverno 26",
+  "precoCheio": 327,
+  "desconto": 0.3,
+  "precoComDesconto": 228.89999999999998
+ },
+ {
+  "grupo": "Casacos",
+  "produto": "Jaqueta Coffee",
+  "colecao": "Drop1 Inverno.26",
+  "precoCheio": 687,
+  "desconto": 0.2,
+  "precoComDesconto": 549.6
+ },
+ {
+  "grupo": "Classic Blend",
+  "produto": "Classic Blend Red",
+  "colecao": "V26.1",
+  "precoCheio": 297,
+  "desconto": 0.4,
+  "precoComDesconto": 178.2
+ },
+ {
+  "grupo": "Classic Lisa",
+  "produto": "Classic Café com Leite",
+  "colecao": "Drop1 Inverno.26",
+  "precoCheio": 277,
+  "desconto": 0.4,
+  "precoComDesconto": 166.2
+ },
+ {
+  "grupo": "Classic Lisa",
+  "produto": "Classic Safari",
+  "colecao": "Drop1 Inverno.26",
+  "precoCheio": 277,
+  "desconto": 0.4,
+  "precoComDesconto": 166.2
+ },
+ {
+  "grupo": "Ultra Light",
+  "produto": "Ultra Light Bra",
+  "colecao": "Drop1 Inverno.26",
+  "precoCheio": 367,
+  "desconto": 0.4,
+  "precoComDesconto": 220.2
+ },
+ {
+  "grupo": "Classic Blend",
+  "produto": "Classic Silver Blend",
+  "colecao": "Drop 2 Inverno 26",
+  "precoCheio": 297,
+  "desconto": 0.4,
+  "precoComDesconto": 178.2
+ },
+ {
+  "grupo": "High Five Blend",
+  "produto": "High Five Blend Areia",
+  "colecao": "BESTSELLER",
+  "precoCheio": 277,
+  "desconto": 0.4,
+  "precoComDesconto": 166.2
+ },
+ {
+  "grupo": "Classic Lisa",
+  "produto": "Classic Dias Epicos Marine",
+  "colecao": "V26.1",
+  "precoCheio": 277,
+  "desconto": 0.4,
+  "precoComDesconto": 166.2
+ },
+ {
+  "grupo": "Classic Lisa",
+  "produto": "Classic Dias Epicos Black",
+  "colecao": "V26.1",
+  "precoCheio": 277,
+  "desconto": 0.4,
+  "precoComDesconto": 166.2
+ },
+ {
+  "grupo": "Classic Blend",
+  "produto": "Classic Blend Golden",
+  "colecao": "Drop1 Inverno.26",
+  "precoCheio": 297,
+  "desconto": 0.4,
+  "precoComDesconto": 178.2
+ },
+ {
+  "grupo": "Classic Lisa",
+  "produto": "Classic Amazon",
+  "colecao": "V26.1",
+  "precoCheio": 277,
+  "desconto": 0.4,
+  "precoComDesconto": 166.2
+ },
+ {
+  "grupo": "Boné",
+  "produto": "Boné 5 Panel Epic Trip",
+  "colecao": "Verão 27",
+  "precoCheio": 179,
+  "desconto": 0.1,
+  "precoComDesconto": 161.1
+ },
+ {
+  "grupo": "Bola",
+  "produto": "BOLA FT-5 COURO SINTETICO LAMINADO BRANCO E PRETO",
+  "colecao": "BESTSELLER",
+  "precoCheio": 599.9,
+  "desconto": 0.1,
+  "precoComDesconto": 539.91
+ },
+ {
+  "grupo": "Classic Lisa",
+  "produto": "Classic Rosa",
+  "colecao": "V26.1",
+  "precoCheio": 277,
+  "desconto": 0.4,
+  "precoComDesconto": 166.2
+ },
+ {
+  "grupo": "Boné",
+  "produto": "Boné 5 Panel Dry Areia",
+  "colecao": "Drop1 Inverno.26",
+  "precoCheio": 219,
+  "desconto": 0.1,
+  "precoComDesconto": 197.1
+ },
+ {
+  "grupo": "Ultra Light",
+  "produto": "Ultra Light Vinho",
+  "colecao": "V26.1",
+  "precoCheio": 367,
+  "desconto": 0.4,
+  "precoComDesconto": 220.2
+ },
+ {
+  "grupo": "Code",
+  "produto": "Code Short Sandstone",
+  "colecao": "V26.1",
+  "precoCheio": 287,
+  "desconto": 0.4,
+  "precoComDesconto": 172.2
+ },
+ {
+  "grupo": "Classic Blend",
+  "produto": "Classic Uaradei Blend Chumbo",
+  "colecao": "V26.1",
+  "precoCheio": 327,
+  "desconto": 0.4,
+  "precoComDesconto": 196.2
+ },
+ {
+  "grupo": "Classic Lisa",
+  "produto": "Classic Uaradei Verde",
+  "colecao": "V26.1",
+  "precoCheio": 307,
+  "desconto": 0.4,
+  "precoComDesconto": 184.2
+ },
+ {
+  "grupo": "Code",
+  "produto": "Code Short Jaguar",
+  "colecao": "V26.1",
+  "precoCheio": 297,
+  "desconto": 0.4,
+  "precoComDesconto": 178.2
+ },
+ {
+  "grupo": "Boné",
+  "produto": "Boné 5 Panel Explorer",
+  "colecao": "Drop1 Inverno.26",
+  "precoCheio": 179,
+  "desconto": 0.1,
+  "precoComDesconto": 161.1
+ },
+ {
+  "grupo": "Boné",
+  "produto": "Boné Dad Hat Uaradei Areia",
+  "colecao": "V26.1",
+  "precoCheio": 199,
+  "desconto": 0.1,
+  "precoComDesconto": 179.1
+ },
+ {
+  "grupo": "Pochet",
+  "produto": "Pochet Forest",
+  "colecao": "V26.1",
+  "precoCheio": 199,
+  "desconto": 0.3,
+  "precoComDesconto": 139.29999999999998
+ },
+ {
+  "grupo": "Classic Lisa",
+  "produto": "Classic Grafite",
+  "colecao": "AV 27",
+  "precoCheio": 277,
+  "desconto": 0.4,
+  "precoComDesconto": 166.2
+ },
+ {
+  "grupo": "Classic Dry",
+  "produto": "Classic Dry Brown",
+  "colecao": "V26.1",
+  "precoCheio": 347,
+  "desconto": 0.4,
+  "precoComDesconto": 208.2
+ },
+ {
+  "grupo": "Code",
+  "produto": "Code Short Eclipse",
+  "colecao": "V26.1",
+  "precoCheio": 287,
+  "desconto": 0.4,
+  "precoComDesconto": 172.2
+ },
+ {
+  "grupo": "Boné",
+  "produto": "Boné 5 Panel Samurai",
+  "colecao": "Verão 27",
+  "precoCheio": 179,
+  "desconto": 0.1,
+  "precoComDesconto": 161.1
+ },
+ {
+  "grupo": "Pochet",
+  "produto": "Pochet Hossegor",
+  "colecao": "V26.1",
+  "precoCheio": 199,
+  "desconto": 0.3,
+  "precoComDesconto": 139.29999999999998
+ },
+ {
+  "grupo": "Ultra Light",
+  "produto": "Ultra Light Café com Leite",
+  "colecao": "Drop 2 Inverno 26",
+  "precoCheio": 367,
+  "desconto": 0.4,
+  "precoComDesconto": 220.2
+ },
+ {
+  "grupo": "Classic Lisa",
+  "produto": "Classic Uaradei Black",
+  "colecao": "V26.1",
+  "precoCheio": 307,
+  "desconto": 0.4,
+  "precoComDesconto": 184.2
+ },
+ {
+  "grupo": "Code",
+  "produto": "Code Short Marine",
+  "colecao": "V26.1",
+  "precoCheio": 267,
+  "desconto": 0.4,
+  "precoComDesconto": 160.2
+ },
+ {
+  "grupo": "Boné",
+  "produto": "Boné 5 Panel Verde",
+  "colecao": "Drop1 Inverno.26",
+  "precoCheio": 179,
+  "desconto": 0.1,
+  "precoComDesconto": 161.1
+ },
+ {
+  "grupo": "Ultra Light",
+  "produto": "Ultra Light Areia",
+  "colecao": "V26.1",
+  "precoCheio": 367,
+  "desconto": 0.4,
+  "precoComDesconto": 220.2
+ },
+ {
+  "grupo": "Ultra Light",
+  "produto": "Ultra Light Vert",
+  "colecao": "V26.1",
+  "precoCheio": 367,
+  "desconto": 0.4,
+  "precoComDesconto": 220.2
+ },
+ {
+  "grupo": "Jam Sesh",
+  "produto": "Jam Sesh Chumbo",
+  "colecao": "BESTSELLER",
+  "precoCheio": 267,
+  "desconto": 0.4,
+  "precoComDesconto": 160.2
+ },
+ {
+  "grupo": "Classic Blend",
+  "produto": "Classic Blend Vegan",
+  "colecao": "V26.1",
+  "precoCheio": 297,
+  "desconto": 0.4,
+  "precoComDesconto": 178.2
+ },
+ {
+  "grupo": "Code",
+  "produto": "Code Short Lev",
+  "colecao": "V26.1",
+  "precoCheio": 287,
+  "desconto": 0.4,
+  "precoComDesconto": 172.2
+ },
+ {
+  "grupo": "Pochet",
+  "produto": "Pochet Veludo Terra",
+  "colecao": "V26.1",
+  "precoCheio": 199,
+  "desconto": 0.3,
+  "precoComDesconto": 139.29999999999998
+ },
+ {
+  "grupo": "Boné",
+  "produto": "Boné Dad Hat Uaradei Veludo Verde",
+  "colecao": "V26.1",
+  "precoCheio": 199,
+  "desconto": 0.1,
+  "precoComDesconto": 179.1
+ },
+ {
+  "grupo": "Code",
+  "produto": "Code Short Black",
+  "colecao": "V26.1",
+  "precoCheio": 267,
+  "desconto": 0.4,
+  "precoComDesconto": 160.2
+ },
+ {
+  "grupo": "Boné",
+  "produto": "Boné 5 Panel Dry Black",
+  "colecao": "Drop1 Inverno.26",
+  "precoCheio": 219,
+  "desconto": 0.1,
+  "precoComDesconto": 197.1
+ },
+ {
+  "grupo": "Ultra Light",
+  "produto": "Ultra Light Blue",
+  "colecao": "V26.1",
+  "precoCheio": 367,
+  "desconto": 0.4,
+  "precoComDesconto": 220.2
+ },
+ {
+  "grupo": "Ultra Light",
+  "produto": "Ultra Light Caramelo",
+  "colecao": "V26.1",
+  "precoCheio": 367,
+  "desconto": 0.4,
+  "precoComDesconto": 220.2
+ },
+ {
+  "grupo": "Code",
+  "produto": "Code Short Zebra",
+  "colecao": "V26.1",
+  "precoCheio": 297,
+  "desconto": 0.4,
+  "precoComDesconto": 178.2
+ },
+ {
+  "grupo": "Classic Blend",
+  "produto": "Classic Blend Air",
+  "colecao": "V26.1",
+  "precoCheio": 297,
+  "desconto": 0.4,
+  "precoComDesconto": 178.2
+ },
+ {
+  "grupo": "Code",
+  "produto": "Code Short Aqua",
+  "colecao": "V26.1",
+  "precoCheio": 287,
+  "desconto": 0.4,
+  "precoComDesconto": 172.2
+ },
+ {
+  "grupo": "Code",
+  "produto": "Code Short Verde",
+  "colecao": "V26.1",
+  "precoCheio": 267,
+  "desconto": 0.4,
+  "precoComDesconto": 160.2
+ },
+ {
+  "grupo": "Classic Lisa",
+  "produto": "Classic Nuvem",
+  "colecao": "V26.1",
+  "precoCheio": 277,
+  "desconto": 0.4,
+  "precoComDesconto": 166.2
+ },
+ {
+  "grupo": "Boné",
+  "produto": "Boné 5 Panel Uaradei Caqui",
+  "colecao": "V26.1",
+  "precoCheio": 199,
+  "desconto": 0.1,
+  "precoComDesconto": 179.1
+ },
+ {
+  "grupo": "Boné",
+  "produto": "Boné 5 Panel Cliff",
+  "colecao": "Drop1 Inverno.26",
+  "precoCheio": 179,
+  "desconto": 0.1,
+  "precoComDesconto": 161.1
+ },
+ {
+  "grupo": "Boné",
+  "produto": "Boné 5 Panel Veludo Verde",
+  "colecao": "V26.1",
+  "precoCheio": 179,
+  "desconto": 0.1,
+  "precoComDesconto": 161.1
+ },
+ {
+  "grupo": "Boné",
+  "produto": "Boné Dad Hat Black V",
+  "colecao": "V26.1",
+  "precoCheio": 179,
+  "desconto": 0.1,
+  "precoComDesconto": 161.1
+ },
+ {
+  "grupo": "Code",
+  "produto": "Code Short Dust",
+  "colecao": "AV 27",
+  "precoCheio": null,
+  "desconto": 0.4,
+  "precoComDesconto": 0
+ },
+ {
+  "grupo": "Boné",
+  "produto": "Boné Dad Hat Epic Hunt",
+  "colecao": "V26.1",
+  "precoCheio": 179,
+  "desconto": 0.1,
+  "precoComDesconto": 161.1
+ },
+ {
+  "grupo": "Code",
+  "produto": "Code Short Rally",
+  "colecao": "AV 27",
+  "precoCheio": null,
+  "desconto": 0.4,
+  "precoComDesconto": 0
+ },
+ {
+  "grupo": "Boné",
+  "produto": "Boné 5 Panel Amazon",
+  "colecao": "V26.1",
+  "precoCheio": 179,
+  "desconto": 0.1,
+  "precoComDesconto": 161.1
+ },
+ {
+  "grupo": "Boné",
+  "produto": "Boné 5 Panel Brown Light",
+  "colecao": "V26.1",
+  "precoCheio": 179,
+  "desconto": 0.1,
+  "precoComDesconto": 161.1
+ },
+ {
+  "grupo": "Boné",
+  "produto": "Boné Dad Hat Rider Verde",
+  "colecao": "V26.1",
+  "precoCheio": 179,
+  "desconto": 0.1,
+  "precoComDesconto": 161.1
+ },
+ {
+  "grupo": "Boné",
+  "produto": "Boné 5 Panel Epic Light",
+  "colecao": "V26.1",
+  "precoCheio": 179,
+  "desconto": 0.1,
+  "precoComDesconto": 161.1
+ },
+ {
+  "grupo": "Boné",
+  "produto": "Boné Dad Hat Uaradei Veludo Black",
+  "colecao": "V26.1",
+  "precoCheio": 199,
+  "desconto": 0.1,
+  "precoComDesconto": 179.1
+ },
+ {
+  "grupo": "Boné",
+  "produto": "Boné Girassol Off-White",
+  "colecao": "V26.1",
+  "precoCheio": 179,
+  "desconto": 0.1,
+  "precoComDesconto": 161.1
+ },
+ {
+  "grupo": "Boné",
+  "produto": "Boné Girassol Blue",
+  "colecao": "V26.1",
+  "precoCheio": 179,
+  "desconto": 0.1,
+  "precoComDesconto": 161.1
+ },
+ {
+  "grupo": "Boné",
+  "produto": "Boné 5 Panel Uaradei Black",
+  "colecao": "V26.1",
+  "precoCheio": 199,
+  "desconto": 0.1,
+  "precoComDesconto": 179.1
+ },
+ {
+  "grupo": "Boné",
+  "produto": "Boné 5 Panel Tropical",
+  "colecao": "V26.1",
+  "precoCheio": 179,
+  "desconto": 0.1,
+  "precoComDesconto": 161.1
+ },
+ {
+  "grupo": "Boné",
+  "produto": "Boné 5 Panel Veludo Terra",
+  "colecao": "V26.1",
+  "precoCheio": 179,
+  "desconto": 0.1,
+  "precoComDesconto": 161.1
+ },
+ {
+  "grupo": "Boné",
+  "produto": "Boné 5 Panel Mar",
+  "colecao": "V26.1",
+  "precoCheio": 179,
+  "desconto": 0.1,
+  "precoComDesconto": 161.1
+ },
+ {
+  "grupo": "Boné",
+  "produto": "Boné Dad Hat Uaradei Black",
+  "colecao": "V26.1",
+  "precoCheio": 199,
+  "desconto": 0.1,
+  "precoComDesconto": 179.1
+ }
+]

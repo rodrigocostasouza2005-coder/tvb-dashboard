@@ -22,7 +22,10 @@ import { PrismaClient } from "@prisma/client";
 import * as XLSX from "xlsx";
 import path from "path";
 import fs from "fs";
+import { upsertPrecosBlackFriday } from "../../src/lib/precos-black-friday";
 
+// upsertPrecosBlackFriday usa seu próprio client (src/lib/prisma) — essa instância aqui serve só
+// pro count()/disconnect() finais deste script.
 const prisma = new PrismaClient();
 
 const DEFAULT_PATH = path.join("C:", "Users", "Dell", "Desktop", "CLAUDE", "Preços Black Friday.xlsx");
@@ -84,36 +87,9 @@ async function main() {
   const linhas: LinhaPlanilha[] = XLSX.utils.sheet_to_json(wb.Sheets[primeiraAba], { defval: null });
 
   const { validas, ignoradas } = parsePlanilha(linhas);
+  const semPrecoCheio = validas.filter((v) => v.precoCheio == null).length;
 
-  let criadas = 0;
-  let atualizadas = 0;
-  let semPrecoCheio = 0;
-
-  for (const v of validas) {
-    if (v.precoCheio == null) semPrecoCheio++;
-    const existing = await prisma.precoBlackFriday.findUnique({
-      where: { grupo_produto: { grupo: v.grupo, produto: v.produto } },
-    });
-    await prisma.precoBlackFriday.upsert({
-      where: { grupo_produto: { grupo: v.grupo, produto: v.produto } },
-      create: {
-        grupo: v.grupo,
-        produto: v.produto,
-        colecao: v.colecao,
-        precoCheio: v.precoCheio,
-        desconto: v.desconto,
-        precoComDesconto: v.precoComDesconto,
-      },
-      update: {
-        colecao: v.colecao,
-        precoCheio: v.precoCheio,
-        desconto: v.desconto,
-        precoComDesconto: v.precoComDesconto,
-      },
-    });
-    if (existing) atualizadas++;
-    else criadas++;
-  }
+  const { criadas, atualizadas } = await upsertPrecosBlackFriday(validas);
 
   const total = await prisma.precoBlackFriday.count();
   console.log(`Linhas na planilha: ${linhas.length} | válidas: ${validas.length} | ignoradas (sem grupo/produto/desconto): ${ignoradas}`);

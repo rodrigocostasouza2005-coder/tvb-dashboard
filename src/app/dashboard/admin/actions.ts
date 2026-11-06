@@ -9,6 +9,8 @@ import { TABS, type TabKey } from "@/lib/tabs";
 import { generateApiToken, getApiToken } from "@/lib/api-token";
 import { runSync, recuperarVendasRecentes } from "@/lib/sync-runner";
 import { setBannerModoManual, getBannerStatus, type ModoManual } from "@/lib/black-friday-banner";
+import { upsertPrecosBlackFriday, type PrecoBlackFridayInput } from "@/lib/precos-black-friday";
+import precosBlackFridayData from "../../../../data/precos-black-friday.json";
 import type { Role } from "@prisma/client";
 
 async function requireAdmin() {
@@ -298,4 +300,25 @@ export async function desativarBannerBlackFridayAction() {
 // correto de "override temporário" pedido pelo Rodrigo.
 export async function voltarAutomaticoBannerAction() {
   return setModoManualBanner(null);
+}
+
+// Importa/atualiza PrecoBlackFriday a partir de data/precos-black-friday.json (commitado no
+// repo, gerado 1x da planilha real do Rodrigo "Preços Black Friday.xlsx" — ver
+// scripts/black-friday/importar-precos.ts, que gera esse mesmo JSON a partir do .xlsx original).
+// Rodada aqui (dentro do processo do servidor, com acesso real a DATABASE_URL de produção) porque
+// a env var de produção está marcada "Sensitive" na Vercel — não dá pra rodar o script local
+// apontando pra produção sem ela. Quando o Rodrigo mandar uma planilha de preço atualizada,
+// regenerar data/precos-black-friday.json (reaproveitando o parser do script) e clicar de novo —
+// upsert por grupo+produto, idempotente, seguro repetir.
+export async function importarPrecosBlackFridayAction(): Promise<{ ok: boolean; message: string }> {
+  await requireAdmin();
+
+  try {
+    const { criadas, atualizadas } = await upsertPrecosBlackFriday(
+      precosBlackFridayData as PrecoBlackFridayInput[]
+    );
+    return { ok: true, message: `Importado: ${criadas} criados, ${atualizadas} atualizados.` };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : "Erro desconhecido ao importar." };
+  }
 }
