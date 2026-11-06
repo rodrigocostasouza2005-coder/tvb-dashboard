@@ -14,6 +14,7 @@ import { prisma } from "@/lib/prisma";
 import { saleWhere, returnWhere, netByReturns, type DashboardFilters } from "./core";
 import { getSalesByGrupoProduto, getReturnsByGrupoProduto, getSalesByDay } from "./vendas";
 import { getEcommerceStoreId } from "./cac";
+import { getVarejoPriceMap } from "./estoque";
 import { getInsightsPorConjunto } from "@/lib/connectors/meta-ads";
 import { todayBrasiliaStr } from "@/lib/filters";
 
@@ -594,4 +595,307 @@ export async function getComparativoMetaDiariaBlackFriday(
   }));
 
   return montarComparativoMetaDiariaBlackFriday(metas, receitaRealPorDia, todayBrasiliaStr(new Date()));
+}
+
+// ===== Mapa de estados — e-commerce (Store "CD" apenas) =====
+//
+// Pedido do Rodrigo (2026-11-06): o mesmo mapa de estados já usado na aba Vendas (BrazilMap, ver
+// brazil-map.tsx + getSiteVarejoCidades em vendas.ts, que alimenta o uso atual), só que escopado
+// ao e-commerce dentro do período da campanha (filters já vem com o range da Black Friday, igual
+// ao resto desta tela — ver black-friday-banner.ts/defaultFiltroBlackFridayStr, aplicado na
+// página, não aqui). Esse recorte é MAIS ESTREITO que o resto da Central Black Friday (que é
+// "todas as lojas menos Atacado": CD+Leblon+Rio Sul+Barra, ver getFiltrosSemAtacado) — aqui é só
+// a loja CD, mesmo Store resolvido por getEcommerceStoreId (cac.ts), igual ao numerador do ROAS em
+// getFaturamentoEcommerce acima. Por isso esta função recebe `filters` (não
+// `filtrosSemAtacado`) e força storeIds=[cdStoreId] por conta própria — excluir Atacado da lista
+// de lojas não faz diferença nenhuma aqui, já que só CD entra de qualquer forma.
+//
+// Mesma regra de permissão de getFaturamentoEcommerce: se a loja CD não existe no ambiente, ou o
+// usuário não tem permissão pra vê-la (filters.storeIds já veio restrito sem incluir CD), devolve
+// `disponivel: false` — nunca calcula um número com loja que o usuário não pode ver, nem finge
+// "zero vendas" (que pareceria "e-commerce não vendeu nada" em vez de "você não tem acesso").
+//
+// Return não tem campo estado/cidade (ver prisma/schema.prisma) — mesma limitação já documentada
+// em getSiteVarejoCidades (vendas.ts): não dá pra ratear devolução por estado/cidade. As linhas
+// por estado/cidade aqui são BRUTAS (venda, sem descontar devolução); a devolução do período entra
+// só como `devolucaoTotal`, agregada pra loja CD inteira — quem consome decide se mostra ao lado
+// do mapa (nunca dentro dele, BrazilMap não tem noção de devolução).
+//
+// Pedidos sem UF identificada (Sale.estado null) NUNCA são distribuídos entre os estados
+// conhecidos (pedido explícito do Rodrigo) — ficam isolados em `semEstado`, uma categoria própria
+// que fica de fora das linhas passadas pro BrazilMap (que só entende UF real).
+export type VendaPorEstadoEcommerce = {
+  estado: string;
+  receita: number;
+  unidades: number;
+  pedidos: number;
+  ticketMedio: number | null;
+};
+
+export type CidadePorEstadoEcommerce = { cidade: string; receita: number; unidades: number };
+
+export type VendasPorEstadoEcommerceResult = {
+  // false quando a loja CD não existe no ambiente ou o usuário não tem permissão de vê-la — ver
+  // comentário acima. Quando false, todo o resto do objeto vem zerado/vazio (nunca um número
+  // calculado sem acesso).
+  disponivel: boolean;
+  rows: VendaPorEstadoEcommerce[];
+  citiesByState: Map<string, CidadePorEstadoEcommerce[]>;
+  semEstado: { receita: number; unidades: number; pedidos: number };
+  receitaBrutaTotal: number; // soma de rows + semEstado — denominador de participação % por estado
+  devolucaoTotal: number; // total do período (loja CD), não rateável por estado — ver comentário acima
+};
+
+function resultVazio(disponivel: boolean): VendasPorEstadoEcommerceResult {
+  return {
+    disponivel,
+    rows: [],
+    citiesByState: new Map(),
+    semEstado: { receita: 0, unidades: 0, pedidos: 0 },
+    receitaBrutaTotal: 0,
+    devolucaoTotal: 0,
+  };
+}
+
+// Função PURA (sem Prisma) — monta estado/cidade/sem-estado a partir das linhas já agregadas do
+// banco. `porCidadeEstado` é o groupBy por (estado, cidade); `pedidosPorEstadoRaw` é uma linha por
+// (estado, dapicVendaId) distinto, só pra contar pedido (igual ao padrão de
+// getResumoBlackFriday/getVendasPorCanal — groupBy por id de pedido + contar linhas, não dá pra
+// contar distinct direto no Prisma). Testável sem banco, ver __tests__/blackFriday.test.ts.
+export function montarVendasPorEstadoEcommerce(
+  porCidadeEstado: { estado: string | null; cidade: string | null; unidades: number; receita: number }[],
+  pedidosPorEstadoRaw: { estado: string | null }[],
+  devolucaoTotal: number
+): Omit<VendasPorEstadoEcommerceResult, "disponivel"> {
+  const estadoMap = new Map<string, { receita: number; unidades: number }>();
+  const citiesByState = new Map<string, CidadePorEstadoEcommerce[]>();
+  let semEstadoReceita = 0;
+  let semEstadoUnidades = 0;
+
+  for (const r of porCidadeEstado) {
+    if (!r.estado) {
+      semEstadoReceita += r.receita;
+      semEstadoUnidades += r.unidades;
+      continue;
+    }
+    const prev = estadoMap.get(r.estado) ?? { receita: 0, unidades: 0 };
+    estadoMap.set(r.estado, { receita: prev.receita + r.receita, unidades: prev.unidades + r.unidades });
+    if (r.cidade) {
+      const cidades = citiesByState.get(r.estado) ?? [];
+      cidades.push({ cidade: r.cidade, receita: r.receita, unidades: r.unidades });
+      citiesByState.set(r.estado, cidades);
+    }
+  }
+
+  const pedidosPorEstado = new Map<string, number>();
+  let semEstadoPedidos = 0;
+  for (const r of pedidosPorEstadoRaw) {
+    if (!r.estado) {
+      semEstadoPedidos++;
+      continue;
+    }
+    pedidosPorEstado.set(r.estado, (pedidosPorEstado.get(r.estado) ?? 0) + 1);
+  }
+
+  const rows: VendaPorEstadoEcommerce[] = [...estadoMap.entries()].map(([estado, v]) => {
+    const pedidos = pedidosPorEstado.get(estado) ?? 0;
+    return {
+      estado,
+      receita: v.receita,
+      unidades: v.unidades,
+      pedidos,
+      ticketMedio: pedidos > 0 ? v.receita / pedidos : null,
+    };
+  });
+
+  const receitaBrutaTotal = rows.reduce((sum, r) => sum + r.receita, 0) + semEstadoReceita;
+
+  return {
+    rows,
+    citiesByState,
+    semEstado: { receita: semEstadoReceita, unidades: semEstadoUnidades, pedidos: semEstadoPedidos },
+    receitaBrutaTotal,
+    devolucaoTotal,
+  };
+}
+
+export async function getVendasPorEstadoEcommerce(filters: DashboardFilters): Promise<VendasPorEstadoEcommerceResult> {
+  const cdStoreId = await getEcommerceStoreId();
+  if (!cdStoreId) return resultVazio(false);
+  if (filters.storeIds !== undefined && !filters.storeIds.includes(cdStoreId)) return resultVazio(false);
+
+  const filtrosCd: DashboardFilters = { ...filters, storeIds: [cdStoreId] };
+  const where = saleWhere(filtrosCd);
+
+  const [porCidadeEstadoRaw, pedidosPorEstadoRaw, devolucaoAgg] = await Promise.all([
+    prisma.sale.groupBy({
+      by: ["estado", "cidade"],
+      where,
+      _sum: { quantidade: true, valorTotalLiquido: true },
+    }),
+    prisma.sale.groupBy({ by: ["estado", "dapicVendaId"], where }),
+    prisma.return.aggregate({ where: returnWhere(filtrosCd), _sum: { valorTotal: true } }),
+  ]);
+
+  const porCidadeEstado = porCidadeEstadoRaw.map((r) => ({
+    estado: r.estado,
+    cidade: r.cidade,
+    unidades: r._sum.quantidade ?? 0,
+    receita: r._sum.valorTotalLiquido ?? 0,
+  }));
+
+  return {
+    disponivel: true,
+    ...montarVendasPorEstadoEcommerce(porCidadeEstado, pedidosPorEstadoRaw, devolucaoAgg._sum.valorTotal ?? 0),
+  };
+}
+
+// ===== Top 20 produtos por SKU, com desconto REAL (preço de referência vs. preço efetivo vendido) =====
+//
+// Painel complementar ao de "Por faixa de desconto real" acima — aquele agrega por grupo+produto
+// contra o desconto CADASTRADO manualmente na planilha de BF (PrecoBlackFriday.desconto, grain
+// grupo+produto). Este aqui é um ranking dos TOP 20 produtos individuais por SKU (Sale.cod =
+// IdGradeProduto, a mesma chave usada por StockSnapshot.cod — grão de grade/tamanho/cor real, não
+// "produto" genérico) com um desconto CALCULADO, não cadastrado:
+//   % desconto = (precoReferencia - precoEfetivoVendido) / precoReferencia × 100
+// onde precoEfetivoVendido = receita líquida do SKU no período / unidades líquidas vendidas.
+// Nunca lê PrecoBlackFriday aqui — é um número diferente (desconto de campanha cadastrado à mão),
+// pra um painel diferente (esse, FaixaDescontoRow, já existe e continua intocado).
+//
+// Fonte do preço de referência (2026-11-06, confirmado com o Rodrigo): hoje usa o catálogo de
+// preços do DAPIC em cache (PriceCatalogCache, mantido pelo sync — ver connectors/tabela-preco.ts)
+// via getVarejoPriceMap() (estoque.ts, já usado pelo valor de venda estimado da aba Estoque
+// Atual) — pega a "Tabela varejo" por cod, a mesma noção de "preço cheio" que a aba de estoque já
+// usa. Rodrigo avisou que pretende trocar essa fonte por uma tabela de preço dedicada no futuro
+// ("hoje em dia sim, já já vai ter outra tabela de preço") — por isso a troca fica isolada: só
+// getVarejoPriceMap (ou o que vier a substituí-la) precisa mudar; getTop20ProdutosComDesconto e
+// montarTop20ProdutosComDesconto abaixo não sabem nem precisam saber de onde o preço vem, só
+// recebem um Map<cod, precoReferencia> já pronto.
+export type Top20ProdutoDesconto = {
+  cod: string;
+  grupo: string;
+  produto: string;
+  tamanho: string | null;
+  cor: string | null;
+  unitsSold: number;
+  revenue: number;
+  // null = preço de referência não encontrado no catálogo (SKU novo, sem tabela varejo cadastrada
+  // etc) — nunca 0, nunca um preço inventado.
+  precoReferencia: number | null;
+  // null só quando unitsSold <= 0 (não deveria ocorrer pós-filtro de venda líquida positiva, mas
+  // nunca divide por zero).
+  precoEfetivo: number | null;
+  // null quando precoReferencia é null/<=0 ou precoEfetivo é null — nunca fabrica uma % com dado
+  // que falta, nunca mostra 0% como se fosse desconto zero real.
+  descontoPct: number | null;
+  // participação deste SKU na receita líquida TOTAL do período filtrado (não só na soma dos top
+  // 20) — reaproveita o mesmo total que a Visão Geral já mostra (getResumoBlackFriday.faturamento
+  // passado pelo chamador), pra nunca divergir do que o Rodrigo já vê no topo da página.
+  participacaoFaturamentoPct: number | null;
+};
+
+// Função PURA (sem Prisma) — recebe a venda líquida já agregada por SKU (netByReturns) e o mapa
+// de preço de referência por cod, e monta o ranking. Testável sem banco, ver
+// __tests__/blackFriday.test.ts.
+export function montarTop20ProdutosComDesconto(
+  liquido: {
+    cod: string;
+    grupo: string;
+    produto: string;
+    tamanho: string | null;
+    cor: string | null;
+    unitsSold: number;
+    revenue: number;
+  }[],
+  precoReferenciaPorCod: Map<string, number>,
+  faturamentoTotalPeriodo: number,
+  ordenarPor: "revenue" | "unidades" = "revenue",
+  limit = 20
+): Top20ProdutoDesconto[] {
+  return liquido
+    .map((v) => {
+      const precoReferencia = precoReferenciaPorCod.get(v.cod) ?? null;
+      const precoEfetivo = v.unitsSold > 0 ? v.revenue / v.unitsSold : null;
+      const descontoPct =
+        precoReferencia != null && precoReferencia > 0 && precoEfetivo != null
+          ? ((precoReferencia - precoEfetivo) / precoReferencia) * 100
+          : null;
+      const participacaoFaturamentoPct =
+        faturamentoTotalPeriodo > 0 ? (v.revenue / faturamentoTotalPeriodo) * 100 : null;
+      return {
+        cod: v.cod,
+        grupo: v.grupo,
+        produto: v.produto,
+        tamanho: v.tamanho,
+        cor: v.cor,
+        unitsSold: v.unitsSold,
+        revenue: v.revenue,
+        precoReferencia,
+        precoEfetivo,
+        descontoPct,
+        participacaoFaturamentoPct,
+      } satisfies Top20ProdutoDesconto;
+    })
+    .sort((a, b) => (ordenarPor === "unidades" ? b.unitsSold - a.unitsSold : b.revenue - a.revenue))
+    .slice(0, limit);
+}
+
+// Venda líquida por SKU (Sale.cod) — grão diferente de getSalesByGrupoProduto (grupo+produto):
+// aqui cada linha é um cod/grade real (inclui tamanho/cor), por isso entram também no groupBy
+// pra virem prontos sem precisar de um 2º round-trip pra "representante" de cada cod.
+async function getSalesBySku(filters: DashboardFilters) {
+  const rows = await prisma.sale.groupBy({
+    by: ["cod", "grupo", "produto", "tamanho", "cor"],
+    where: saleWhere(filters),
+    _sum: { quantidade: true, valorTotalLiquido: true },
+  });
+  return rows.map((r) => ({
+    key: r.cod,
+    cod: r.cod,
+    grupo: r.grupo,
+    produto: r.produto,
+    tamanho: r.tamanho,
+    cor: r.cor,
+    unitsSold: r._sum.quantidade ?? 0,
+    revenue: r._sum.valorTotalLiquido ?? 0,
+  }));
+}
+
+// Devolução por SKU — só por cod (não precisa de grupo/produto/tamanho/cor aqui, netByReturns só
+// usa `key` pra casar com a venda e descontar unidades/valor).
+async function getReturnsBySku(filters: DashboardFilters) {
+  const rows = await prisma.return.groupBy({
+    by: ["cod"],
+    where: returnWhere(filters),
+    _sum: { quantidade: true, valorTotal: true },
+  });
+  return rows.map((r) => ({
+    key: r.cod,
+    unitsReturned: r._sum.quantidade ?? 0,
+    value: r._sum.valorTotal ?? 0,
+  }));
+}
+
+// faturamentoTotalPeriodo: SEMPRE vem de fora (o chamador já tem getResumoBlackFriday(filtros)
+// calculado pra Visão Geral da página — ver page.tsx) — esta função nunca recalcula esse total
+// sozinha, pra nunca divergir do número que o Rodrigo já vê no topo da tela.
+export async function getTop20ProdutosComDesconto(
+  filters: DashboardFilters,
+  faturamentoTotalPeriodo: number,
+  options?: { ordenarPor?: "revenue" | "unidades"; limit?: number }
+): Promise<Top20ProdutoDesconto[]> {
+  const [vendas, devolucoes, precoReferenciaPorCod] = await Promise.all([
+    getSalesBySku(filters),
+    getReturnsBySku(filters),
+    getVarejoPriceMap(),
+  ]);
+  const liquido = netByReturns(vendas, devolucoes);
+
+  return montarTop20ProdutosComDesconto(
+    liquido,
+    precoReferenciaPorCod,
+    faturamentoTotalPeriodo,
+    options?.ordenarPor ?? "revenue",
+    options?.limit ?? 20
+  );
 }
