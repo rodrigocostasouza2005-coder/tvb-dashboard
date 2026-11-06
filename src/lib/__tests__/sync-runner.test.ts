@@ -19,6 +19,10 @@ const saleFindMany = vi.fn();
 const saleUpdateMany = vi.fn().mockResolvedValue({ count: 0 });
 const returnFindMany = vi.fn().mockResolvedValue([]);
 const returnUpdateMany = vi.fn().mockResolvedValue({ count: 0 });
+// Carregado 1x por syncVendas/syncFaturas pra resolver Sale.clienteCadastroId (ver
+// cliente-cadastro-link.ts) — vazio por padrão aqui, os testes deste arquivo não cobrem esse
+// vínculo especificamente (ver src/lib/__tests__/cliente-cadastro-link.test.ts pra lógica pura).
+const clienteCadastroFindMany = vi.fn().mockResolvedValue([]);
 const syncLogCreate = vi.fn().mockResolvedValue({});
 const executeRaw = vi.fn().mockResolvedValue(undefined);
 const sendTelegramMessageMock = vi.fn().mockResolvedValue(undefined);
@@ -85,6 +89,9 @@ const mockPrisma = {
   },
   gift: {
     findMany: (...a: unknown[]) => giftFindMany(...a),
+  },
+  clienteCadastro: {
+    findMany: (...a: unknown[]) => clienteCadastroFindMany(...a),
   },
   sale: {
     findMany: (...a: unknown[]) => saleFindMany(...a),
@@ -159,6 +166,7 @@ beforeEach(() => {
   parcelaDeleteMany.mockReset();
   parcelaCreateMany.mockReset().mockResolvedValue({ count: 0 });
   giftFindMany.mockReset().mockResolvedValue([]);
+  clienteCadastroFindMany.mockReset().mockResolvedValue([]);
   saleFindMany.mockReset().mockResolvedValue([]);
   saleUpdateMany.mockReset().mockResolvedValue({ count: 0 });
   returnFindMany.mockReset().mockResolvedValue([]);

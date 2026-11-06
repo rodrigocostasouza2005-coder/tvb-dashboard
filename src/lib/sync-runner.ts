@@ -12,6 +12,7 @@ import { fetchPriceCatalogCached, inferTabelaPreco, type PriceCatalog } from "@/
 import { sendTelegramMessage } from "@/lib/telegram";
 import { getTopParaIncentivar, getTopVendidosPorLoja, getPromotionRows, getB2BClienteNomes, classifySaleChannel, sincronizarAtribuicoesComVendaReal } from "@/lib/metrics";
 import { brasiliaDayStart, brasiliaDayEnd, todayBrasiliaStr } from "@/lib/filters";
+import { buildClienteCadastroIndex, resolverClienteCadastro, type ClienteCadastroIndex } from "@/lib/cliente-cadastro-link";
 
 // Lógica compartilhada pelas duas rotas de sync (/api/sync e /api/sync-evening) — precisam ser
 // arquivos de rota separados (paths diferentes) porque o plano Hobby da Vercel só permite um
@@ -20,6 +21,16 @@ import { brasiliaDayStart, brasiliaDayEnd, todayBrasiliaStr } from "@/lib/filter
 
 function toDateStr(d: Date) {
   return d.toISOString().slice(0, 10);
+}
+
+// Carrega o índice de ClienteCadastro 1x por chamada de syncVendas/syncFaturas (não 1x por
+// venda) — ver cliente-cadastro-link.ts pro porquê do índice O(1) em vez de escanear a tabela
+// inteira (26k+ linhas) item a item. Resolve Sale.clienteCadastroId/clienteCadastroMatchConfianca
+// pra venda NOVA, de agora em diante (histórico anterior a esta migration é responsabilidade do
+// backfill, ver scripts/clientes/backfill-clientecadastro-link.ts).
+async function carregarClienteCadastroIndex(): Promise<ClienteCadastroIndex> {
+  const candidatos = await prisma.clienteCadastro.findMany({ select: { id: true, dapicId: true, nome: true } });
+  return buildClienteCadastroIndex(candidatos);
 }
 
 export async function syncArmazenadores(client: DapicClient) {
@@ -208,7 +219,10 @@ export async function syncVendas(
   if (!storeId) return { vendas: 0, devolucoes: 0, brindes: 0, vendedorCorrigido: [] as VendedorCorrigido[], divergencias: [] as DivergenciaReconciliacao[] };
   const siteStoreId: string = storeId;
   const contaVendaDoPdv = client.label !== "cd-atacado";
-  const b2bClientes = atacadoStoreId ? await getB2BClienteNomes() : new Set<string>();
+  const [b2bClientes, clienteCadastroIndex] = await Promise.all([
+    atacadoStoreId ? getB2BClienteNomes() : Promise.resolve(new Set<string>()),
+    carregarClienteCadastroIndex(),
+  ]);
   const hoje = new Date();
   const inicio = new Date(hoje);
   inicio.setDate(inicio.getDate() - dias);
@@ -261,6 +275,9 @@ export async function syncVendas(
         const tabelaPreco =
           tabelaPrecoRealPorVenda.get(venda.Id) ??
           inferTabelaPrecoComFallbackCliente(cod, item.ValorUnitario, priceCatalog, venda.Cliente ?? null, b2bClientes);
+        // /vendaspdv nunca expõe identificador de cliente (só o nome em texto livre) — ver
+        // cliente-cadastro-link.ts. Resolução aqui só pode chegar em confianca "NOME" (ou null).
+        const resolucaoCliente = resolverClienteCadastro({ clienteNome: venda.Cliente ?? null }, clienteCadastroIndex);
         saleData.push({
           storeId: resolveStoreId(tabelaPreco),
           dapicVendaId: venda.Id,
@@ -273,6 +290,8 @@ export async function syncVendas(
           marca: item.Marca ?? null,
           colecao: item.Colecao ?? null,
           clienteNome: venda.Cliente ?? null,
+          clienteCadastroId: resolucaoCliente?.clienteCadastroId ?? null,
+          clienteCadastroMatchConfianca: resolucaoCliente?.confianca ?? null,
           vendedor: venda.Vendedor ?? null,
           cidade: venda.Cidade?.Nome ?? null,
           estado: venda.Cidade?.Estado ?? null,
@@ -489,7 +508,7 @@ export async function upsertSalesComVendedorAtualizavel(saleData: Prisma.SaleCre
       ${randomUUID()}, ${s.storeId}, ${s.cod}, ${s.produto}, ${s.grupo}, ${s.cor ?? null}, ${s.tamanho ?? null},
       ${s.colecao ?? null}, ${s.marca ?? null}, ${s.clienteNome ?? null}, ${s.vendedor ?? null}, ${s.tabelaPreco ?? null},
       ${s.cidade ?? null}, ${s.estado ?? null}, ${s.quantidade}, ${s.valorTotalLiquido}, ${s.saleDate},
-      ${s.dapicVendaId}, ${s.itemIndex}
+      ${s.dapicVendaId}, ${s.itemIndex}, ${s.clienteCadastroId ?? null}, ${s.clienteCadastroMatchConfianca ?? null}
     )`
   );
 
@@ -498,11 +517,16 @@ export async function upsertSalesComVendedorAtualizavel(saleData: Prisma.SaleCre
       "id", "storeId", "cod", "produto", "grupo", "cor", "tamanho",
       "colecao", "marca", "clienteNome", "vendedor", "tabelaPreco",
       "cidade", "estado", "quantidade", "valorTotalLiquido", "saleDate",
-      "dapicVendaId", "itemIndex"
+      "dapicVendaId", "itemIndex", "clienteCadastroId", "clienteCadastroMatchConfianca"
     )
     VALUES ${Prisma.join(values)}
     ON CONFLICT ("storeId", "dapicVendaId", "itemIndex") DO UPDATE SET
-      "vendedor" = EXCLUDED."vendedor"
+      "vendedor" = EXCLUDED."vendedor",
+      -- Recalculado a cada sync a partir do ClienteCadastro atual — nunca pior do que o que já
+      -- estava: ou mantém a mesma resolução, ou melhora (ex: ClienteCadastro daquele cliente foi
+      -- sincronizado/corrigido depois da 1ª vez que esta venda foi gravada).
+      "clienteCadastroId" = EXCLUDED."clienteCadastroId",
+      "clienteCadastroMatchConfianca" = EXCLUDED."clienteCadastroMatchConfianca"
   `;
 
   const corrigidos: VendedorCorrigido[] = [];
@@ -597,7 +621,10 @@ export async function syncFaturas(
   priceCatalog: PriceCatalog
 ) {
   if (!storeId || client.label !== "cd-atacado") return { vendas: 0, brindes: 0, divergencias: [] as DivergenciaReconciliacao[] };
-  const b2bClientes = atacadoStoreId ? await getB2BClienteNomes() : new Set<string>();
+  const [b2bClientes, clienteCadastroIndex] = await Promise.all([
+    atacadoStoreId ? getB2BClienteNomes() : Promise.resolve(new Set<string>()),
+    carregarClienteCadastroIndex(),
+  ]);
   const hoje = new Date();
   const inicio = new Date(hoje);
   inicio.setDate(inicio.getDate() - dias);
@@ -618,6 +645,13 @@ export async function syncFaturas(
     const itemIndexes = stableItemIndexes(
       produtos,
       (p) => `${p.IdGradeProduto}::${p.Quantidade}::${p.Valores.ValorTotal.toFixed(2)}::${p.Tipo}`
+    );
+    // /faturas EXPÕE IdCliente (achado nesta migration, não capturado antes) — mesmo espaço de Id
+    // de /clientes, bate 1:1 com ClienteCadastro.dapicId. Resolução aqui pode chegar em confianca
+    // "ID" (sem comparação de nome nenhuma) — ver cliente-cadastro-link.ts.
+    const resolucaoCliente = resolverClienteCadastro(
+      { dapicIdCliente: fatura.IdCliente ?? null, clienteNome: fatura.Cliente ?? null },
+      clienteCadastroIndex
     );
 
     produtos.forEach((item, pos) => {
@@ -663,6 +697,8 @@ export async function syncFaturas(
         marca: item.Marca ?? null,
         colecao: item.Colecao ?? null,
         clienteNome: fatura.Cliente ?? null,
+        clienteCadastroId: resolucaoCliente?.clienteCadastroId ?? null,
+        clienteCadastroMatchConfianca: resolucaoCliente?.confianca ?? null,
         cidade: fatura.Cidade ?? null,
         estado: fatura.Estado ?? null,
         quantidade: item.Quantidade,
