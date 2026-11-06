@@ -116,3 +116,16 @@ body {
   color: var(--foreground);
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
 }
+
+/* Faixa promocional de Black Friday (ver black-friday-banner.tsx) — marquee horizontal contínuo,
+   direita pra esquerda, sem cortes. O conteúdo é renderizado em duplicata exata (2x a mesma
+   sequência) dentro da trilha; animar só até -50% faz o segundo bloco colar perfeitamente onde o
+   primeiro terminou, looping sem salto nem gap visível. */
+@keyframes bf-marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}

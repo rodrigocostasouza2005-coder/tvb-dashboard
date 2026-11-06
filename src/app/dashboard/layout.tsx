@@ -10,6 +10,7 @@ import { TabNav } from "./tab-nav";
 import { TABS, defaultAllowedTabs } from "@/lib/tabs";
 import { PhoneModeProvider, PhoneModeToggle } from "./phone-mode";
 import { SyncStatusIndicator } from "./sync-status-indicator";
+import { BlackFridayBanner } from "./black-friday-banner";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const user = await getSessionUser();
@@ -66,6 +67,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
             <TabNav visibleKeys={visibleKeys} isAdmin={user.role === "ADMIN"} />
           </Suspense>
         </header>
+        <BlackFridayBanner />
         <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6">{children}</main>
       </div>
     </PhoneModeProvider>

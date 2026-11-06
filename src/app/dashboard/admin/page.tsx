@@ -10,6 +10,8 @@ import { SuccessBanner } from "./success-banner";
 import { ApiTokenSection } from "./api-token-section";
 import { VendedorToggle } from "./vendedor-toggle";
 import { getApiTokenStatus } from "@/lib/api-token";
+import { BlackFridayBannerSection } from "./black-friday-banner-section";
+import { getBannerStatus } from "@/lib/black-friday-banner";
 
 // A sincronização manual (ForceSyncButton) chama runSync() direto, que pode levar minutos
 // (estoque de 4 lojas + faturas) — sem isso a Server Action tomaria timeout no plano padrão.
@@ -95,13 +97,14 @@ export default async function AdminPage({
   if (user.role !== "ADMIN") redirect("/dashboard");
   const { ok } = await searchParams;
 
-  const [users, stores, marcas, tabelasPreco, apiTokenStatus, vendedores] = await Promise.all([
+  const [users, stores, marcas, tabelasPreco, apiTokenStatus, vendedores, bannerStatus] = await Promise.all([
     prisma.user.findMany({ orderBy: { createdAt: "asc" } }),
     getRawStores(),
     getMarcas(),
     getTabelasPreco(),
     getApiTokenStatus(),
     prisma.vendedor.findMany({ include: { store: true }, orderBy: [{ store: { name: "asc" } }, { nome: "asc" }] }),
+    getBannerStatus(),
   ]);
   const vendedoresPorLoja = new Map<string, typeof vendedores>();
   for (const v of vendedores) {
@@ -137,6 +140,8 @@ export default async function AdminPage({
           <RecuperarVendasButton />
         </div>
       </section>
+
+      <BlackFridayBannerSection initialLabel={bannerStatus.label} />
 
       <ApiTokenSection
         hasToken={apiTokenStatus.exists}

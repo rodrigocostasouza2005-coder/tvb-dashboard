@@ -8,6 +8,7 @@ import { hashPassword, getSessionUser } from "@/lib/auth";
 import { TABS, type TabKey } from "@/lib/tabs";
 import { generateApiToken, getApiToken } from "@/lib/api-token";
 import { runSync, recuperarVendasRecentes } from "@/lib/sync-runner";
+import { setBannerModoManual, getBannerStatus, type ModoManual } from "@/lib/black-friday-banner";
 import type { Role } from "@prisma/client";
 
 async function requireAdmin() {
@@ -267,4 +268,34 @@ export async function desativarVendedorAction(formData: FormData): Promise<{ ok:
     ok: true,
     message: `${vendedor.nome} desativado. ${clientesDoVendedor.length} cliente(s) redistribuído(s) entre ${restantes.length} vendedor(es) ativo(s).`,
   };
+}
+
+// Override manual do banner de Black Friday (ver lib/black-friday-banner.ts) — botão de clique
+// único, efeito imediato (pedido do Rodrigo: controle inline, não formulário à parte). Grava no
+// BlackFridayBannerConfig (DB), não em memória/env — sobrevive a reload/novo login/restart do
+// servidor. `revalidatePath` nas páginas do dashboard pra qualquer aba já aberta pegar o status
+// novo no próximo request (o layout é quem lê o status, não a página em si).
+async function setModoManualBanner(modoManual: ModoManual): Promise<{ ok: boolean; message: string; label: string }> {
+  const admin = await requireAdmin();
+  await setBannerModoManual(modoManual, admin.email);
+  revalidatePath("/dashboard", "layout");
+  const status = await getBannerStatus();
+  return { ok: true, message: "Status do banner atualizado.", label: status.label };
+}
+
+export async function ativarBannerBlackFridayAction() {
+  return setModoManualBanner("ATIVO");
+}
+
+export async function desativarBannerBlackFridayAction() {
+  return setModoManualBanner("INATIVO");
+}
+
+// Limpa o override manual (volta pro automático) — único jeito de sair de "Forçado ATIVO/INATIVO"
+// de volta pra "Automático" sem editar o banco na mão. Sem isso, um "Desativar" clicado por engano
+// (ou esquecido) depois de 01/12 esconderia o banner pra sempre mesmo fora da janela, e um
+// "Ativar agora" esquecido o manteria ligado pra sempre — nenhum dos dois é o comportamento
+// correto de "override temporário" pedido pelo Rodrigo.
+export async function voltarAutomaticoBannerAction() {
+  return setModoManualBanner(null);
 }
