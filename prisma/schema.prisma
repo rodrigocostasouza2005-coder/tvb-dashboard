@@ -991,3 +991,34 @@ model PrecoBlackFriday {
   @@unique([grupo, produto])
   @@index([desconto])
 }
+
+// Meta diária de faturamento da Black Friday (planilha "Plano BF 2026.xlsx" do Rodrigo, importada
+// por scripts/black-friday/importar-meta-diaria.ts) — alimenta o painel "Meta vs. Real" da Central
+// Black Friday (ver getComparativoMetaDiariaBlackFriday em src/lib/metrics/black-friday.ts).
+// Escopo deliberadamente restrito ao PERÍODO DA CAMPANHA (pedido explícito do Rodrigo, 2026-11-06:
+// "só o periodo da black") — não é um sistema de meta anual, uma linha por dia só existe pra cada
+// dia que a planilha de fato cobre.
+//
+// `data` é meia-noite de Brasília daquele dia (mesma convenção de brasiliaDayStart em
+// lib/filters.ts), pra bater exatamente com o "day" (YYYY-MM-DD) que getSalesByDay devolve na
+// hora de cruzar meta/real por dia.
+//
+// `receitaReal2025` é nullable: a planilha real (confirmada em 2026-11-06) tem valor em todas as
+// 30 linhas hoje, mas o campo fica honesto pro caso de uma atualização futura vir com dia faltando
+// — nunca mostra 0%/crescimento fabricado pra um dia sem dado 2025 (ver comentário da função que
+// consome isso).
+//
+// `canais` é um blob JSON cru das colunas de canal da planilha (Segmentação, E-mail Mkt/Whatsapp/
+// SMS, Instagram/TikTok, Mídia Paga, Lojas, mais Ação 2025/%participação do bloco comparativo) —
+// essas colunas são só informativas/exibição, não entram em nenhum cálculo, então não compensa
+// normalizar em colunas próprias (mesma lógica de "Json quando é só pra mostrar" já usada em
+// outros lugares do schema).
+model MetaDiariaBlackFriday {
+  id               String   @id @default(cuid())
+  data             DateTime @unique
+  metaReceita2026  Float
+  receitaReal2025  Float?
+  acao             String?
+  canais           Json?
+  updatedAt        DateTime @updatedAt
+}

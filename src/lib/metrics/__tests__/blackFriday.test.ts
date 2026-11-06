@@ -5,6 +5,8 @@ const saleAggregate = vi.fn();
 const saleGroupBy = vi.fn();
 const returnAggregate = vi.fn();
 const getInsightsPorConjunto = vi.fn();
+const metaDiariaBlackFridayFindMany = vi.fn();
+const getSalesByDay = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -14,6 +16,7 @@ vi.mock("@/lib/prisma", () => ({
       groupBy: (...a: unknown[]) => saleGroupBy(...a),
     },
     return: { aggregate: (...a: unknown[]) => returnAggregate(...a) },
+    metaDiariaBlackFriday: { findMany: (...a: unknown[]) => metaDiariaBlackFridayFindMany(...a) },
   },
 }));
 
@@ -21,10 +24,23 @@ vi.mock("@/lib/connectors/meta-ads", () => ({
   getInsightsPorConjunto: (...a: unknown[]) => getInsightsPorConjunto(...a),
 }));
 
+// "./vendas" só é mockado aqui pra testar getComparativoMetaDiariaBlackFriday (abaixo) sem bater
+// no banco de verdade — nenhum outro teste deste arquivo chama a versão async de
+// getTopProdutosBlackFriday/getVendasPorFaixaDesconto (só as versões PURAS montarX), então mockar
+// o módulo inteiro aqui não afeta os demais.
+vi.mock("../vendas", () => ({
+  getSalesByGrupoProduto: vi.fn(),
+  getReturnsByGrupoProduto: vi.fn(),
+  getSalesByDay: (...a: unknown[]) => getSalesByDay(...a),
+}));
+
 import {
   montarVendasPorCanal,
   montarProdutosBlackFriday,
   montarVendasPorFaixaDesconto,
+  montarComparativoMetaDiariaBlackFriday,
+  encontrarDiaPorData,
+  getComparativoMetaDiariaBlackFriday,
   montarVendasPorEstadoEcommerce,
   montarTop20ProdutosComDesconto,
   periodoAnterior,
@@ -388,6 +404,165 @@ describe("getResumoBlackFriday — roas usa só a receita do e-commerce (CD), n�
 
     expect(r.investimentoIndisponivel).toBe(true);
     expect(r.roas).toBeNull();
+  });
+});
+
+// Painel "Meta vs. Real" da campanha (pedido do Rodrigo, 2026-11-06, "só o periodo da black") —
+// cruza a meta diária/real 2025 da planilha (MetaDiariaBlackFriday) com o faturamento real 2026
+// (getSalesByDay). montarComparativoMetaDiariaBlackFriday é a função PURA que faz a matemática;
+// getComparativoMetaDiariaBlackFriday (testado em describe próprio abaixo) é só o encanamento de
+// banco em volta dela.
+describe("montarComparativoMetaDiariaBlackFriday", () => {
+  it("calcula % atingimento, diferença em R$ e crescimento anual com fixtures realistas", () => {
+    const metas = [
+      { data: "2026-11-10", metaReceita2026: 175000, receitaReal2025: 3929.55, acao: "Lançamento Oficial" },
+    ];
+    const receitaRealPorDia = new Map([["2026-11-10", 200000]]);
+
+    const resumo = montarComparativoMetaDiariaBlackFriday(metas, receitaRealPorDia);
+
+    expect(resumo.dias).toHaveLength(1);
+    const dia = resumo.dias[0];
+    expect(dia.receitaReal2026).toBe(200000);
+    expect(dia.atingimentoPct).toBeCloseTo((200000 / 175000) * 100, 5); // ~114.29%
+    expect(dia.diferencaReal).toBe(200000 - 175000); // 25000, bateu a meta
+    expect(dia.crescimentoAnualPct).toBeCloseTo(((200000 - 3929.55) / 3929.55) * 100, 5); // crescimento gigante, mas é o real
+  });
+
+  it("dia sem venda registrada ainda conta como 0 de receita real (não null) — abaixo da meta, nunca quebra", () => {
+    const metas = [{ data: "2026-11-15", metaReceita2026: 53000, receitaReal2025: 38899.13, acao: null }];
+    const resumo = montarComparativoMetaDiariaBlackFriday(metas, new Map()); // nenhuma venda ainda nesse dia
+
+    const dia = resumo.dias[0];
+    expect(dia.receitaReal2026).toBe(0);
+    expect(dia.atingimentoPct).toBe(0);
+    expect(dia.diferencaReal).toBe(-53000);
+  });
+
+  it("dia SEM dado de 2025 na planilha mostra indisponível (null), nunca fabrica 0% de crescimento", () => {
+    const metas = [{ data: "2026-11-20", metaReceita2026: 30000, receitaReal2025: null, acao: null }];
+    const receitaRealPorDia = new Map([["2026-11-20", 25000]]);
+
+    const resumo = montarComparativoMetaDiariaBlackFriday(metas, receitaRealPorDia);
+
+    const dia = resumo.dias[0];
+    expect(dia.receitaReal2025).toBeNull();
+    expect(dia.crescimentoAnualPct).toBeNull(); // nunca "caiu 100%" ou qualquer número inventado
+    // mas o atingimento da meta 2026 (que não depende de 2025) continua calculado normalmente.
+    expect(dia.atingimentoPct).toBeCloseTo((25000 / 30000) * 100, 5);
+  });
+
+  it("acumulado soma todos os dias cadastrados (meta, real, diferença) e calcula % atingimento acumulado", () => {
+    const metas = [
+      { data: "2026-11-01", metaReceita2026: 5000, receitaReal2025: 2927.08, acao: null },
+      { data: "2026-11-02", metaReceita2026: 5000, receitaReal2025: 1800.72, acao: null },
+    ];
+    const receitaRealPorDia = new Map([
+      ["2026-11-01", 6000],
+      ["2026-11-02", 2000],
+    ]);
+
+    const resumo = montarComparativoMetaDiariaBlackFriday(metas, receitaRealPorDia);
+
+    expect(resumo.acumulado.metaReceita2026).toBe(10000);
+    expect(resumo.acumulado.receitaReal2026).toBe(8000);
+    expect(resumo.acumulado.diferencaReal).toBe(-2000);
+    expect(resumo.acumulado.atingimentoPct).toBeCloseTo(80, 5);
+  });
+
+  it("ordena os dias por data mesmo que as metas cheguem fora de ordem", () => {
+    const metas = [
+      { data: "2026-11-02", metaReceita2026: 5000, receitaReal2025: null, acao: null },
+      { data: "2026-11-01", metaReceita2026: 5000, receitaReal2025: null, acao: null },
+    ];
+    const resumo = montarComparativoMetaDiariaBlackFriday(metas, new Map());
+    expect(resumo.dias.map((d) => d.data)).toEqual(["2026-11-01", "2026-11-02"]);
+  });
+
+  it("hojeStr resolve o bloco 'hoje' quando a data cai dentro da janela cadastrada", () => {
+    const metas = [
+      { data: "2026-11-10", metaReceita2026: 175000, receitaReal2025: 3929.55, acao: "Lançamento Oficial" },
+      { data: "2026-11-11", metaReceita2026: 130000, receitaReal2025: 133335.47, acao: null },
+    ];
+    const resumo = montarComparativoMetaDiariaBlackFriday(metas, new Map([["2026-11-11", 140000]]), "2026-11-11");
+    expect(resumo.hoje?.data).toBe("2026-11-11");
+    expect(resumo.hoje?.receitaReal2026).toBe(140000);
+  });
+
+  it("hojeStr fora da janela cadastrada (campanha não começou/já terminou) -> hoje é null, nunca inventa um dia", () => {
+    const metas = [{ data: "2026-11-10", metaReceita2026: 175000, receitaReal2025: 3929.55, acao: null }];
+    const resumo = montarComparativoMetaDiariaBlackFriday(metas, new Map(), "2026-10-01");
+    expect(resumo.hoje).toBeNull();
+  });
+
+  it("sem hojeStr (não informado) -> hoje é null por padrão", () => {
+    const metas = [{ data: "2026-11-10", metaReceita2026: 175000, receitaReal2025: 3929.55, acao: null }];
+    const resumo = montarComparativoMetaDiariaBlackFriday(metas, new Map());
+    expect(resumo.hoje).toBeNull();
+  });
+});
+
+describe("encontrarDiaPorData", () => {
+  it("acha a linha cuja data bate exatamente", () => {
+    const dias = [
+      { data: "2026-11-01", metaReceita2026: 5000, receitaReal2026: 6000, atingimentoPct: 120, diferencaReal: 1000, receitaReal2025: null, crescimentoAnualPct: null, acao: null },
+      { data: "2026-11-02", metaReceita2026: 5000, receitaReal2026: 2000, atingimentoPct: 40, diferencaReal: -3000, receitaReal2025: null, crescimentoAnualPct: null, acao: null },
+    ];
+    expect(encontrarDiaPorData(dias, "2026-11-02")?.receitaReal2026).toBe(2000);
+    expect(encontrarDiaPorData(dias, "2026-12-25")).toBeNull();
+  });
+});
+
+// getComparativoMetaDiariaBlackFriday (versão async) — só confirma o encanamento: usa a janela
+// MIN/MAX de MetaDiariaBlackFriday (não o período do seletor da página) e repassa `filters`
+// (storeIds já SEM Atacado, decidido por quem chama) pra getSalesByDay sem alterar storeIds —
+// mesmo contrato de getResumoBlackFriday/getVendasPorFaixaDesconto nesta mesma tela (ver
+// comentário da função). A matemática em si já está cobrida por montarComparativoMetaDiariaBlackFriday
+// acima.
+describe("getComparativoMetaDiariaBlackFriday — encanamento (janela da planilha, Atacado passa intacto)", () => {
+  beforeEach(() => {
+    metaDiariaBlackFridayFindMany.mockReset();
+    getSalesByDay.mockReset();
+  });
+
+  it("usa a janela min/max de MetaDiariaBlackFriday pra chamar getSalesByDay, não o from/to do filtro recebido", async () => {
+    metaDiariaBlackFridayFindMany.mockResolvedValue([
+      { data: new Date("2026-11-01T03:00:00.000Z"), metaReceita2026: 5000, receitaReal2025: 2927.08, acao: null },
+      { data: new Date("2026-11-02T03:00:00.000Z"), metaReceita2026: 5000, receitaReal2025: 1800.72, acao: null },
+    ]);
+    getSalesByDay.mockResolvedValue([{ day: "2026-11-01", unitsSold: 1, revenue: 6000 }]);
+
+    // filters.from/to é um período qualquer do seletor da página, bem diferente da janela da
+    // planilha — a função deve ignorar esse from/to e usar a janela cadastrada.
+    const filtrosSemAtacado: DashboardFilters = {
+      from: new Date("2025-01-01T00:00:00-03:00"),
+      to: new Date("2025-01-31T23:59:59-03:00"),
+      storeIds: ["s-cd", "s-leblon", "s-riosul", "s-barra"], // já sem ATACADO
+    };
+
+    const resumo = await getComparativoMetaDiariaBlackFriday(filtrosSemAtacado);
+
+    expect(getSalesByDay).toHaveBeenCalledTimes(1);
+    const filtrosRecebidos = getSalesByDay.mock.calls[0][0] as DashboardFilters;
+    expect(filtrosRecebidos.from.toISOString()).toBe("2026-11-01T03:00:00.000Z");
+    expect(filtrosRecebidos.to.getTime()).toBeGreaterThan(new Date("2026-11-02T03:00:00.000Z").getTime());
+    // Atacado continua excluído — storeIds repassado INTACTO, não resolvido/expandido de novo aqui.
+    expect(filtrosRecebidos.storeIds).toEqual(["s-cd", "s-leblon", "s-riosul", "s-barra"]);
+
+    expect(resumo.dias).toHaveLength(2);
+    expect(resumo.dias[0].receitaReal2026).toBe(6000);
+    expect(resumo.dias[1].receitaReal2026).toBe(0); // 2026-11-02 sem venda no mock -> 0, não quebra
+  });
+
+  it("nenhuma meta cadastrada ainda -> devolve vazio sem nunca chamar getSalesByDay", async () => {
+    metaDiariaBlackFridayFindMany.mockResolvedValue([]);
+
+    const resumo = await getComparativoMetaDiariaBlackFriday({ from: new Date(), to: new Date() });
+
+    expect(resumo.dias).toEqual([]);
+    expect(resumo.hoje).toBeNull();
+    expect(resumo.acumulado).toEqual({ metaReceita2026: 0, receitaReal2026: 0, atingimentoPct: null, diferencaReal: 0 });
+    expect(getSalesByDay).not.toHaveBeenCalled();
   });
 });
 

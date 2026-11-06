@@ -1,0 +1,452 @@
+[
+ {
+  "data": "2026-11-01",
+  "metaReceita2026": 5000,
+  "receitaReal2025": 2927.08,
+  "acao": null,
+  "canais": {
+   "segmentacao": null,
+   "emailMktWhatsappSms": null,
+   "instagramTiktok": null,
+   "midiaPaga": null,
+   "lojas": null,
+   "acao2025": null,
+   "participacao2025": null
+  }
+ },
+ {
+  "data": "2026-11-02",
+  "metaReceita2026": 5000,
+  "receitaReal2025": 1800.72,
+  "acao": null,
+  "canais": {
+   "segmentacao": null,
+   "emailMktWhatsappSms": null,
+   "instagramTiktok": null,
+   "midiaPaga": null,
+   "lojas": null,
+   "acao2025": null,
+   "participacao2025": null
+  }
+ },
+ {
+  "data": "2026-11-03",
+  "metaReceita2026": 5000,
+  "receitaReal2025": 1436.69,
+  "acao": null,
+  "canais": {
+   "segmentacao": null,
+   "emailMktWhatsappSms": null,
+   "instagramTiktok": null,
+   "midiaPaga": null,
+   "lojas": null,
+   "acao2025": null,
+   "participacao2025": null
+  }
+ },
+ {
+  "data": "2026-11-04",
+  "metaReceita2026": 5000,
+  "receitaReal2025": 5844.63,
+  "acao": null,
+  "canais": {
+   "segmentacao": null,
+   "emailMktWhatsappSms": null,
+   "instagramTiktok": null,
+   "midiaPaga": null,
+   "lojas": null,
+   "acao2025": null,
+   "participacao2025": null
+  }
+ },
+ {
+  "data": "2026-11-05",
+  "metaReceita2026": 5000,
+  "receitaReal2025": 3800.76,
+  "acao": null,
+  "canais": {
+   "segmentacao": null,
+   "emailMktWhatsappSms": null,
+   "instagramTiktok": null,
+   "midiaPaga": null,
+   "lojas": null,
+   "acao2025": null,
+   "participacao2025": null
+  }
+ },
+ {
+  "data": "2026-11-06",
+  "metaReceita2026": 5000,
+  "receitaReal2025": 2252.32,
+  "acao": null,
+  "canais": {
+   "segmentacao": null,
+   "emailMktWhatsappSms": null,
+   "instagramTiktok": null,
+   "midiaPaga": null,
+   "lojas": null,
+   "acao2025": null,
+   "participacao2025": null
+  }
+ },
+ {
+  "data": "2026-11-07",
+  "metaReceita2026": 5000,
+  "receitaReal2025": 3024.33,
+  "acao": null,
+  "canais": {
+   "segmentacao": null,
+   "emailMktWhatsappSms": null,
+   "instagramTiktok": null,
+   "midiaPaga": null,
+   "lojas": null,
+   "acao2025": null,
+   "participacao2025": null
+  }
+ },
+ {
+  "data": "2026-11-08",
+  "metaReceita2026": 5000,
+  "receitaReal2025": 3962.91,
+  "acao": "Lista vip",
+  "canais": {
+   "segmentacao": "Vip",
+   "emailMktWhatsappSms": null,
+   "instagramTiktok": null,
+   "midiaPaga": null,
+   "lojas": null,
+   "acao2025": null,
+   "participacao2025": null
+  }
+ },
+ {
+  "data": "2026-11-09",
+  "metaReceita2026": 5000,
+  "receitaReal2025": 3426.34,
+  "acao": "Lista vip",
+  "canais": {
+   "segmentacao": "Vip",
+   "emailMktWhatsappSms": null,
+   "instagramTiktok": null,
+   "midiaPaga": null,
+   "lojas": null,
+   "acao2025": null,
+   "participacao2025": null
+  }
+ },
+ {
+  "data": "2026-11-10",
+  "metaReceita2026": 175000,
+  "receitaReal2025": 3929.55,
+  "acao": "Lançamento Oficial",
+  "canais": {
+   "segmentacao": "Todos",
+   "emailMktWhatsappSms": "Lançamento Oficial",
+   "instagramTiktok": "Lançamento Oficial",
+   "midiaPaga": "Lançamento Oficial",
+   "lojas": "Sinalização Lojas",
+   "acao2025": null,
+   "participacao2025": null
+  }
+ },
+ {
+  "data": "2026-11-11",
+  "metaReceita2026": 130000,
+  "receitaReal2025": 133335.47,
+  "acao": null,
+  "canais": {
+   "segmentacao": null,
+   "emailMktWhatsappSms": null,
+   "instagramTiktok": null,
+   "midiaPaga": "Compilado de imagens",
+   "lojas": null,
+   "acao2025": null,
+   "participacao2025": 0.15471937032577063
+  }
+ },
+ {
+  "data": "2026-11-12",
+  "metaReceita2026": 65000,
+  "receitaReal2025": 93542.91,
+  "acao": "Frete Gratis Rio",
+  "canais": {
+   "segmentacao": "Todos",
+   "emailMktWhatsappSms": "Maiores Descontos",
+   "instagramTiktok": "preço DE/POR",
+   "midiaPaga": "gif preço DE/POR",
+   "lojas": null,
+   "acao2025": null,
+   "participacao2025": 0.10854501156849136
+  }
+ },
+ {
+  "data": "2026-11-13",
+  "metaReceita2026": 75000,
+  "receitaReal2025": 43105.35,
+  "acao": "Frete Gratis Rio",
+  "canais": {
+   "segmentacao": "Pessoas do Rio",
+   "emailMktWhatsappSms": "Frete Gratis Rio",
+   "instagramTiktok": "Frete Gratis Rio",
+   "midiaPaga": "video humanizado praia",
+   "lojas": "Café do Boca",
+   "acao2025": null,
+   "participacao2025": 0.05001844302699017
+  }
+ },
+ {
+  "data": "2026-11-14",
+  "metaReceita2026": 60000,
+  "receitaReal2025": 49996.47,
+  "acao": null,
+  "canais": {
+   "segmentacao": null,
+   "emailMktWhatsappSms": null,
+   "instagramTiktok": null,
+   "midiaPaga": null,
+   "lojas": null,
+   "acao2025": "Frete gratis Rio",
+   "participacao2025": 0.05801473799065831
+  }
+ },
+ {
+  "data": "2026-11-15",
+  "metaReceita2026": 53000,
+  "receitaReal2025": 38899.13,
+  "acao": null,
+  "canais": {
+   "segmentacao": "Cliente da familia",
+   "emailMktWhatsappSms": "Grupo Produto",
+   "instagramTiktok": null,
+   "midiaPaga": null,
+   "lojas": null,
+   "acao2025": null,
+   "participacao2025": 0.04513764341791643
+  }
+ },
+ {
+  "data": "2026-11-16",
+  "metaReceita2026": 40000,
+  "receitaReal2025": 35407.95,
+  "acao": null,
+  "canais": {
+   "segmentacao": null,
+   "emailMktWhatsappSms": null,
+   "instagramTiktok": "Lifestyle",
+   "midiaPaga": null,
+   "lojas": null,
+   "acao2025": null,
+   "participacao2025": 0.04108655955183096
+  }
+ },
+ {
+  "data": "2026-11-17",
+  "metaReceita2026": 45000,
+  "receitaReal2025": 26599.7,
+  "acao": null,
+  "canais": {
+   "segmentacao": "Cliente da tamanho",
+   "emailMktWhatsappSms": "Compre por tamanho",
+   "instagramTiktok": null,
+   "midiaPaga": null,
+   "lojas": null,
+   "acao2025": null,
+   "participacao2025": 0.030865671639019994
+  }
+ },
+ {
+  "data": "2026-11-18",
+  "metaReceita2026": 30000,
+  "receitaReal2025": 28727.88,
+  "acao": null,
+  "canais": {
+   "segmentacao": null,
+   "emailMktWhatsappSms": null,
+   "instagramTiktok": "Lifestyle",
+   "midiaPaga": null,
+   "lojas": null,
+   "acao2025": null,
+   "participacao2025": 0.0333351620869848
+  }
+ },
+ {
+  "data": "2026-11-19",
+  "metaReceita2026": 30000,
+  "receitaReal2025": 19935.74,
+  "acao": null,
+  "canais": {
+   "segmentacao": "Todos",
+   "emailMktWhatsappSms": "Escolha dos atletas",
+   "instagramTiktok": "Escolha dos atletas",
+   "midiaPaga": null,
+   "lojas": null,
+   "acao2025": null,
+   "participacao2025": 0.023132967842527413
+  }
+ },
+ {
+  "data": "2026-11-20",
+  "metaReceita2026": 30000,
+  "receitaReal2025": 17567.71,
+  "acao": null,
+  "canais": {
+   "segmentacao": null,
+   "emailMktWhatsappSms": null,
+   "instagramTiktok": "Lifestyle",
+   "midiaPaga": null,
+   "lojas": null,
+   "acao2025": null,
+   "participacao2025": 0.020385161047287294
+  }
+ },
+ {
+  "data": "2026-11-21",
+  "metaReceita2026": 30000,
+  "receitaReal2025": 17528.61,
+  "acao": null,
+  "canais": {
+   "segmentacao": "Todos",
+   "emailMktWhatsappSms": "Oferta Relampago",
+   "instagramTiktok": "Oferta Relampago",
+   "midiaPaga": null,
+   "lojas": null,
+   "acao2025": null,
+   "participacao2025": 0.020339790319005187
+  }
+ },
+ {
+  "data": "2026-11-22",
+  "metaReceita2026": 35000,
+  "receitaReal2025": 18960.11,
+  "acao": null,
+  "canais": {
+   "segmentacao": null,
+   "emailMktWhatsappSms": null,
+   "instagramTiktok": "Lifestyle",
+   "midiaPaga": null,
+   "lojas": null,
+   "acao2025": null,
+   "participacao2025": 0.022000869539870727
+  }
+ },
+ {
+  "data": "2026-11-23",
+  "metaReceita2026": 40000,
+  "receitaReal2025": 22293.26,
+  "acao": null,
+  "canais": {
+   "segmentacao": "Todos",
+   "emailMktWhatsappSms": "Review do Big Boss",
+   "instagramTiktok": "Review do Big Boss",
+   "midiaPaga": "Review do Big Boss",
+   "lojas": null,
+   "acao2025": null,
+   "participacao2025": 0.02586857907883543
+  }
+ },
+ {
+  "data": "2026-11-24",
+  "metaReceita2026": 45000,
+  "receitaReal2025": 27089.57,
+  "acao": null,
+  "canais": {
+   "segmentacao": null,
+   "emailMktWhatsappSms": null,
+   "instagramTiktok": null,
+   "midiaPaga": null,
+   "lojas": null,
+   "acao2025": null,
+   "participacao2025": 0.031434105364430684
+  }
+ },
+ {
+  "data": "2026-11-25",
+  "metaReceita2026": 48000,
+  "receitaReal2025": 30261.79,
+  "acao": null,
+  "canais": {
+   "segmentacao": "Todos",
+   "emailMktWhatsappSms": "Review do Treko",
+   "instagramTiktok": "Review do Treko",
+   "midiaPaga": "Review do Treko",
+   "lojas": null,
+   "acao2025": null,
+   "participacao2025": 0.03511507548389564
+  }
+ },
+ {
+  "data": "2026-11-26",
+  "metaReceita2026": 50000,
+  "receitaReal2025": 31707.33,
+  "acao": null,
+  "canais": {
+   "segmentacao": null,
+   "emailMktWhatsappSms": null,
+   "instagramTiktok": null,
+   "midiaPaga": null,
+   "lojas": null,
+   "acao2025": null,
+   "participacao2025": 0.036792446393382174
+  }
+ },
+ {
+  "data": "2026-11-27",
+  "metaReceita2026": 105000,
+  "receitaReal2025": 32730.14,
+  "acao": "frete gratis Brasil",
+  "canais": {
+   "segmentacao": "Todos",
+   "emailMktWhatsappSms": null,
+   "instagramTiktok": "frete gratis Brasil",
+   "midiaPaga": null,
+   "lojas": null,
+   "acao2025": null,
+   "participacao2025": 0.03797929126791482
+  }
+ },
+ {
+  "data": "2026-11-28",
+  "metaReceita2026": 53000,
+  "receitaReal2025": 69542.03,
+  "acao": "frete gratis Brasil",
+  "canais": {
+   "segmentacao": "Todos",
+   "emailMktWhatsappSms": null,
+   "instagramTiktok": "frete gratis Brasil",
+   "midiaPaga": null,
+   "lojas": null,
+   "acao2025": "frete gratis Brasil",
+   "participacao2025": 0.08069495005924418
+  }
+ },
+ {
+  "data": "2026-11-29",
+  "metaReceita2026": 86000,
+  "receitaReal2025": 35008.96,
+  "acao": "frete gratis Brasil",
+  "canais": {
+   "segmentacao": "Todos",
+   "emailMktWhatsappSms": null,
+   "instagramTiktok": "frete gratis Brasil",
+   "midiaPaga": null,
+   "lojas": null,
+   "acao2025": "frete gratis Brasil",
+   "participacao2025": 0.04062358085931741
+  }
+ },
+ {
+  "data": "2026-11-30",
+  "metaReceita2026": 30000,
+  "receitaReal2025": 57143.68,
+  "acao": "Cyber Monday",
+  "canais": {
+   "segmentacao": "Todos",
+   "emailMktWhatsappSms": "Ultima Oportunidade",
+   "instagramTiktok": null,
+   "midiaPaga": null,
+   "lojas": null,
+   "acao2025": "frete gratis Brasil",
+   "participacao2025": 0.06630819381892404
+  }
+ }
+]

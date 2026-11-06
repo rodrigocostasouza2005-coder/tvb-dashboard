@@ -13,6 +13,7 @@ import { getApiTokenStatus } from "@/lib/api-token";
 import { BlackFridayBannerSection } from "./black-friday-banner-section";
 import { getBannerStatus } from "@/lib/black-friday-banner";
 import { ImportarPrecosBfButton } from "./importar-precos-bf-button";
+import { ImportarMetaDiariaBfButton } from "./importar-meta-diaria-bf-button";
 
 // A sincronização manual (ForceSyncButton) chama runSync() direto, que pode levar minutos
 // (estoque de 4 lojas + faturas) — sem isso a Server Action tomaria timeout no plano padrão.
@@ -152,6 +153,16 @@ export default async function AdminPage({
           uma vez — atualiza quem já existe, não duplica.
         </p>
         <ImportarPrecosBfButton />
+      </section>
+
+      <section className="mb-8 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
+        <h2 className="mb-2 text-sm font-semibold text-[var(--text-primary)]">Meta diária Black Friday</h2>
+        <p className="mb-3 text-xs text-[var(--text-secondary)]">
+          Importa/atualiza a meta diária de faturamento (e o real de 2025 pra comparação) do
+          painel &quot;Meta vs. Real&quot; da Central Black Friday a partir da planilha mais recente.
+          Seguro clicar mais de uma vez — atualiza quem já existe, não duplica.
+        </p>
+        <ImportarMetaDiariaBfButton />
       </section>
 
       <ApiTokenSection
