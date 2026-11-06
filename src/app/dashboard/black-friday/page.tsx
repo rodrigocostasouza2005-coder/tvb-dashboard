@@ -1,7 +1,7 @@
 import { getSessionUser } from "@/lib/auth";
 import { requireTabAccess } from "@/lib/tabs";
 import { canSeeFinancials, getStoreRestriction } from "@/lib/permissions";
-import { parseFilters, defaultRecentRangeStr, type RawSearchParams } from "@/lib/filters";
+import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import {
   getResumoBlackFriday,
   periodoAnterior,
@@ -25,6 +25,7 @@ import {
 import { prisma } from "@/lib/prisma";
 import { getSyncStatusDetalhado } from "@/lib/sync-runner";
 import { todayBrasiliaStr } from "@/lib/filters";
+import { defaultFiltroBlackFridayStr } from "@/lib/black-friday-banner";
 import { formatBRL, formatNumber, formatPercent } from "@/lib/format";
 import { StatTile } from "../stat-tile";
 import { GetForm } from "../get-form";
@@ -66,7 +67,11 @@ export default async function BlackFridayPage({
 
   const showFinancials = canSeeFinancials(user);
   const rawParams = await searchParams;
-  const defaults = defaultRecentRangeStr(30);
+  // Pedido do Rodrigo (2026-11-06): a partir do início real da campanha, o filtro PADRÃO desta
+  // aba passa a sempre começar no dia da campanha (ver defaultFiltroBlackFridayStr,
+  // black-friday-banner.ts) — Rodrigo pode mudar manualmente a qualquer momento (rawParams.from/
+  // to abaixo sempre tem prioridade sobre o padrão).
+  const defaults = defaultFiltroBlackFridayStr();
   const fromStr = typeof rawParams.from === "string" && rawParams.from ? rawParams.from : defaults.from;
   const toStr = typeof rawParams.to === "string" && rawParams.to ? rawParams.to : defaults.to;
   const allowedStoreIds = getStoreRestriction(user);

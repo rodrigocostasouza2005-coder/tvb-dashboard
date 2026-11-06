@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { todayBrasiliaStr, defaultRecentRangeStr } from "@/lib/filters";
 
 // Janela automática do banner "É BLACK FRIDAYYYYYYY!!!!!!!" — pedido do Rodrigo em 2026-11-05.
 // Fixa no código (não editável pelo admin, de propósito). Mesma convenção de brasiliaDayStart em
@@ -51,6 +52,27 @@ export async function getBannerModoManual(): Promise<ModoManual> {
 export async function getBannerStatus(): Promise<BannerStatus> {
   const modoManual = await getBannerModoManual();
   return resolveBannerVisibility(modoManual, new Date());
+}
+
+// Pedido do Rodrigo (2026-11-06): a partir do dia real de início da campanha (BANNER_INICIO_BRT,
+// 10/11/2026), o filtro PADRÃO da Central Black Friday passa a começar sempre em 10/11/2026 —
+// não mais "últimos 30 dias" — porque o que importa a partir daí é o desempenho da campanha
+// inteira, não uma janela rolante. Antes da data real, continua "últimos 30 dias" (a regra só
+// entra em vigor na data real, não retroage pra hoje). Só afeta o VALOR PADRÃO — se o usuário já
+// escolheu um período manualmente (query string), isso sempre tem prioridade (ver black-
+// friday/page.tsx). Específico desta página — nenhuma outra aba do Radar muda de regra.
+//
+// Pura (testável sem Date.now() implícito) — mesmo padrão de isWithinAutomaticWindow acima.
+export function defaultFiltroBlackFridayStrPura(now: Date): { from: string; to: string } {
+  const hojeStr = todayBrasiliaStr(now);
+  const inicioStr = todayBrasiliaStr(BANNER_INICIO_BRT);
+  return hojeStr >= inicioStr ? { from: inicioStr, to: hojeStr } : defaultRecentRangeStr(30);
+}
+
+// Resolve o `now` real — chamada direto da página (Server Component, que não pode chamar
+// `new Date()` por conta própria, eslint react-hooks/purity) — mesmo padrão de getBannerStatus().
+export function defaultFiltroBlackFridayStr(): { from: string; to: string } {
+  return defaultFiltroBlackFridayStrPura(new Date());
 }
 
 export async function setBannerModoManual(modoManual: ModoManual, updatedByEmail: string | null): Promise<void> {

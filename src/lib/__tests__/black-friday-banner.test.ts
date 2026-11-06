@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   isWithinAutomaticWindow,
   resolveBannerVisibility,
+  defaultFiltroBlackFridayStrPura,
   BANNER_INICIO_BRT,
   BANNER_FIM_BRT,
 } from "../black-friday-banner";
@@ -86,5 +87,35 @@ describe("resolveBannerVisibility (override manual vs. janela automática)", () 
     const depoisDoFim = new Date("2026-12-15T12:00:00.000-03:00");
     // Desativando o override (null) depois do fim real, o automático já esconde sozinho.
     expect(resolveBannerVisibility(null, depoisDoFim).visible).toBe(false);
+  });
+});
+
+// Pedido do Rodrigo (2026-11-06): filtro padrão da Central Black Friday passa a começar sempre
+// em 10/11/2026 a partir da data real de início da campanha — antes disso, continua "últimos 30
+// dias" como já era.
+describe("defaultFiltroBlackFridayStrPura", () => {
+  it("antes de 10/11/2026, continua 'últimos 30 dias' (comportamento antigo, sem mudança)", () => {
+    const antes = new Date("2026-11-06T12:00:00.000-03:00");
+    const { from, to } = defaultFiltroBlackFridayStrPura(antes);
+    expect(to).toBe("2026-11-06");
+    expect(from).toBe("2026-10-07"); // 30 dias antes de 06/11
+  });
+
+  it("exatamente no dia 10/11/2026, já passa a começar fixo em 2026-11-10", () => {
+    const { from, to } = defaultFiltroBlackFridayStrPura(new Date("2026-11-10T06:00:00.000-03:00"));
+    expect(from).toBe("2026-11-10");
+    expect(to).toBe("2026-11-10");
+  });
+
+  it("depois de 10/11/2026 (ex: 20/11), from fica fixo em 2026-11-10, to continua rolando com hoje", () => {
+    const { from, to } = defaultFiltroBlackFridayStrPura(new Date("2026-11-20T12:00:00.000-03:00"));
+    expect(from).toBe("2026-11-10");
+    expect(to).toBe("2026-11-20");
+  });
+
+  it("bem depois (ex: 2027), from continua fixo em 2026-11-10 — não é um range rolante, é o início real da campanha", () => {
+    const { from, to } = defaultFiltroBlackFridayStrPura(new Date("2027-03-01T12:00:00.000-03:00"));
+    expect(from).toBe("2026-11-10");
+    expect(to).toBe("2027-03-01");
   });
 });
