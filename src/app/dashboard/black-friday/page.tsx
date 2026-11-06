@@ -12,6 +12,7 @@ import {
   getCacPorCampanha,
   getFiltrosSemAtacado,
   getVendasPorFaixaDesconto,
+  getComparativoMetaDiariaBlackFriday,
   type DashboardFilters,
 } from "@/lib/metrics";
 import {
@@ -139,13 +140,14 @@ export default async function BlackFridayPage({
       erroMetaAds = e instanceof Error ? e.message : "Erro desconhecido buscando investimento do Meta Ads.";
     });
 
-  const [resumo, resumoAnterior, vendasPorCanal, salesByDay, topProdutos, vendasPorFaixaDesconto, cac, syncStatus] = await Promise.all([
+  const [resumo, resumoAnterior, vendasPorCanal, salesByDay, topProdutos, vendasPorFaixaDesconto, comparativoMetaDiaria, cac, syncStatus] = await Promise.all([
     getResumoBlackFriday(filtrosSemAtacado),
     getResumoBlackFriday(filtrosAnteriorSemAtacado),
     getVendasPorCanal(filtrosSemAtacado),
     getSalesByDay(filtrosSemAtacado),
     getTopProdutosBlackFriday(filtrosSemAtacado, 20),
     getVendasPorFaixaDesconto(filtrosSemAtacado),
+    getComparativoMetaDiariaBlackFriday(filtrosSemAtacado),
     getCacEcommerce(filters.from, filters.to),
     getSyncStatusDetalhado(),
     metaAdsPromise,
@@ -164,6 +166,15 @@ export default async function BlackFridayPage({
       : null;
 
   const salesChartData = salesByDay.map((s) => ({ day: s.day, receita: s.revenue }));
+  // Gráfico "Meta vs. Real" — 3 séries por dia (meta 2026/real 2026/real 2025). real2025 pode ser
+  // null por dia (planilha sem dado) — IndicatorChart já trata null como "sem ponto" (corta a
+  // linha em vez de cair pra zero, ver comentário do componente), nunca fabricado aqui.
+  const metaDiariaChartData = comparativoMetaDiaria.dias.map((d) => ({
+    day: d.data,
+    meta2026: d.metaReceita2026,
+    real2026: d.receitaReal2026,
+    real2025: d.receitaReal2025,
+  }));
   const campanhasPorConjunto = mapInsights(insightsPorConjunto, 15);
   const campanhasPorAnuncio = mapInsights(insightsPorAnuncio, 15);
   // Aviso: status indisponível (não erro geral do Meta Ads, que já tem a própria mensagem acima)
@@ -246,6 +257,79 @@ export default async function BlackFridayPage({
           granularity="day"
           series={[{ key: "receita", name: "Receita líquida", color: "var(--series-1)" }]}
         />
+      </section>
+
+      {/* ── Meta diária (campanha) ── */}
+      <h2 className="mb-3 text-base font-semibold">Meta vs. real — campanha</h2>
+      <p className="mb-3 text-xs text-[var(--text-muted)]">
+        Meta de faturamento 2026 e real de 2025, dia a dia, da planilha da campanha — escopo
+        restrito ao período que ela cobre (não o filtro De/Até acima). Faturamento real 2026 já
+        sem Atacado, mesma regra do resto desta aba.
+      </p>
+      {showFinancials ? (
+        <>
+          <section className="mb-3 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+            <StatTile
+              label="Faturamento hoje"
+              value={comparativoMetaDiaria.hoje ? formatBRL(comparativoMetaDiaria.hoje.receitaReal2026) : "—"}
+              subValue={comparativoMetaDiaria.hoje ? undefined : "Hoje está fora do período da campanha cadastrado"}
+            />
+            <StatTile
+              label="Meta do dia"
+              value={comparativoMetaDiaria.hoje ? formatBRL(comparativoMetaDiaria.hoje.metaReceita2026) : "—"}
+            />
+            <StatTile
+              label="% atingimento (hoje)"
+              value={comparativoMetaDiaria.hoje?.atingimentoPct != null ? formatPercent(comparativoMetaDiaria.hoje.atingimentoPct) : "—"}
+              status={comparativoMetaDiaria.hoje?.atingimentoPct != null ? (comparativoMetaDiaria.hoje.atingimentoPct >= 100 ? "good" : "critical") : undefined}
+            />
+            <StatTile
+              label="Diferença (hoje)"
+              value={comparativoMetaDiaria.hoje ? formatBRL(comparativoMetaDiaria.hoje.diferencaReal) : "—"}
+            />
+            <StatTile
+              label="Real 2025 (mesmo dia)"
+              value={comparativoMetaDiaria.hoje?.receitaReal2025 != null ? formatBRL(comparativoMetaDiaria.hoje.receitaReal2025) : "—"}
+              subValue={comparativoMetaDiaria.hoje && comparativoMetaDiaria.hoje.receitaReal2025 == null ? "Sem dado de 2025 pra este dia" : undefined}
+            />
+            <StatTile
+              label="Crescimento anual (hoje)"
+              value={comparativoMetaDiaria.hoje?.crescimentoAnualPct != null ? formatPercent(comparativoMetaDiaria.hoje.crescimentoAnualPct) : "—"}
+              status={comparativoMetaDiaria.hoje?.crescimentoAnualPct != null ? (comparativoMetaDiaria.hoje.crescimentoAnualPct >= 0 ? "good" : "critical") : undefined}
+            />
+          </section>
+          <section className="mb-3 grid grid-cols-2 gap-4 sm:grid-cols-4">
+            <StatTile label="Acumulado real 2026" value={formatBRL(comparativoMetaDiaria.acumulado.receitaReal2026)} />
+            <StatTile label="Meta acumulada" value={formatBRL(comparativoMetaDiaria.acumulado.metaReceita2026)} />
+            <StatTile
+              label="% atingimento acumulado"
+              value={comparativoMetaDiaria.acumulado.atingimentoPct != null ? formatPercent(comparativoMetaDiaria.acumulado.atingimentoPct) : "—"}
+              status={comparativoMetaDiaria.acumulado.atingimentoPct != null ? (comparativoMetaDiaria.acumulado.atingimentoPct >= 100 ? "good" : "critical") : undefined}
+            />
+            <StatTile label="Diferença acumulada" value={formatBRL(comparativoMetaDiaria.acumulado.diferencaReal)} />
+          </section>
+        </>
+      ) : (
+        <p className="mb-3 text-sm text-[var(--text-muted)]">Sem permissão para ver dado financeiro (meta/real da campanha).</p>
+      )}
+      <section className="mb-10 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
+        <h3 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Meta 2026 vs. real 2026 vs. real 2025, por dia</h3>
+        {comparativoMetaDiaria.dias.length === 0 ? (
+          <p className="text-sm text-[var(--text-muted)]">
+            Nenhuma meta diária importada ainda — use o botão &quot;Importar meta diária Black Friday&quot; no Admin.
+          </p>
+        ) : (
+          <IndicatorChart
+            data={metaDiariaChartData}
+            format="currency"
+            granularity="day"
+            series={[
+              { key: "meta2026", name: "Meta 2026", color: "var(--cat-1)" },
+              { key: "real2026", name: "Real 2026", color: "var(--cat-2)" },
+              { key: "real2025", name: "Real 2025", color: "var(--cat-3)" },
+            ]}
+          />
+        )}
       </section>
 
       {/* ── Por canal ── */}

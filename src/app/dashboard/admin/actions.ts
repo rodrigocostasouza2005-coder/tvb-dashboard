@@ -11,6 +11,8 @@ import { runSync, recuperarVendasRecentes } from "@/lib/sync-runner";
 import { setBannerModoManual, getBannerStatus, type ModoManual } from "@/lib/black-friday-banner";
 import { upsertPrecosBlackFriday, type PrecoBlackFridayInput } from "@/lib/precos-black-friday";
 import precosBlackFridayData from "../../../../data/precos-black-friday.json";
+import { upsertMetaDiariaBlackFriday, type MetaDiariaBlackFridayInput } from "@/lib/meta-diaria-black-friday";
+import metaDiariaBlackFridayData from "../../../../data/meta-diaria-black-friday.json";
 import type { Role } from "@prisma/client";
 
 async function requireAdmin() {
@@ -316,6 +318,27 @@ export async function importarPrecosBlackFridayAction(): Promise<{ ok: boolean; 
   try {
     const { criadas, atualizadas } = await upsertPrecosBlackFriday(
       precosBlackFridayData as PrecoBlackFridayInput[]
+    );
+    return { ok: true, message: `Importado: ${criadas} criados, ${atualizadas} atualizados.` };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : "Erro desconhecido ao importar." };
+  }
+}
+
+// Importa/atualiza MetaDiariaBlackFriday a partir de data/meta-diaria-black-friday.json (commitado
+// no repo, gerado 1x da planilha real do Rodrigo "Plano BF 2026.xlsx" — ver
+// scripts/black-friday/importar-meta-diaria.ts, que gera esse mesmo JSON a partir do .xlsx
+// original). Mesmo motivo de rodar dentro do processo do servidor que importarPrecosBlackFridayAction
+// acima: DATABASE_URL de produção é "Sensitive" na Vercel, não dá pra rodar o script local
+// apontando pra produção. Quando o Rodrigo mandar uma planilha de meta atualizada, regenerar
+// data/meta-diaria-black-friday.json (reaproveitando o parser do script) e clicar de novo —
+// upsert por data, idempotente, seguro repetir.
+export async function importarMetaDiariaBlackFridayAction(): Promise<{ ok: boolean; message: string }> {
+  await requireAdmin();
+
+  try {
+    const { criadas, atualizadas } = await upsertMetaDiariaBlackFriday(
+      metaDiariaBlackFridayData as MetaDiariaBlackFridayInput[]
     );
     return { ok: true, message: `Importado: ${criadas} criados, ${atualizadas} atualizados.` };
   } catch (e) {

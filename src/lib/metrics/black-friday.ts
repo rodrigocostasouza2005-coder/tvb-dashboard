@@ -12,7 +12,7 @@
 // sempre separadas entre si, só o Atacado saiu de cena por completo.
 import { prisma } from "@/lib/prisma";
 import { saleWhere, returnWhere, netByReturns, type DashboardFilters } from "./core";
-import { getSalesByGrupoProduto, getReturnsByGrupoProduto } from "./vendas";
+import { getSalesByGrupoProduto, getReturnsByGrupoProduto, getSalesByDay } from "./vendas";
 import { getEcommerceStoreId } from "./cac";
 import { getInsightsPorConjunto } from "@/lib/connectors/meta-ads";
 import { todayBrasiliaStr } from "@/lib/filters";
@@ -446,4 +446,152 @@ export async function getVendasPorFaixaDesconto(filters: DashboardFilters): Prom
   const liquido = netByReturns(vendas, devolucoes);
 
   return montarVendasPorFaixaDesconto(liquido, precosPorProduto, faixasReais);
+}
+
+// ===== Meta diária (MetaDiariaBlackFriday) =====
+//
+// Pedido do Rodrigo (2026-11-06, "só o periodo da black"): comparar, dia a dia, a meta de
+// faturamento 2026 (planilha "Plano BF 2026.xlsx", importada por
+// scripts/black-friday/importar-meta-diaria.ts em MetaDiariaBlackFriday) com o faturamento REAL
+// do mesmo dia em 2026 e com o real de 2025 (mesma planilha). Escopo deliberadamente restrito ao
+// período que a planilha cobre (2026-11-01 a 2026-11-30 no import confirmado em 2026-11-06, ver
+// comentário do model no schema) — não é um sistema de meta anual.
+//
+// Esta função recebe `filters` já SEM Atacado quando é isso que a tela quer — mesmo padrão de
+// getResumoBlackFriday/getVendasPorFaixaDesconto: a exclusão de Atacado é decidida por quem chama
+// (página passa filtrosSemAtacado), não aqui. A meta é sobre desempenho de varejo/e-commerce da
+// campanha, não sobre o Atacado.
+//
+// A janela comparada é sempre a janela CADASTRADA em MetaDiariaBlackFriday (min/max de `data`),
+// nunca o período escolhido no seletor de data da página — este painel é sobre a campanha inteira,
+// independente do filtro De/Até aplicado no resto da Central Black Friday.
+
+export type ComparativoDiaBlackFriday = {
+  data: string; // "YYYY-MM-DD", dia de Brasília
+  metaReceita2026: number;
+  receitaReal2026: number;
+  // null só quando metaReceita2026 é 0 (nunca divide por zero) — não deveria acontecer na
+  // prática (toda linha da planilha tem meta > 0), mas a função não assume isso.
+  atingimentoPct: number | null;
+  diferencaReal: number; // receitaReal2026 - metaReceita2026 (positivo = bateu/passou a meta)
+  // null = a planilha não tem real 2025 pra este dia — nunca inventa 0 (apareceria como "caiu
+  // 100%" quando na verdade é "sem dado"). Ver comentário do campo no model.
+  receitaReal2025: number | null;
+  crescimentoAnualPct: number | null; // null quando não há receitaReal2025 ou ele é 0
+  acao: string | null;
+};
+
+export type ComparativoAcumuladoBlackFriday = {
+  metaReceita2026: number;
+  receitaReal2026: number;
+  atingimentoPct: number | null;
+  diferencaReal: number;
+};
+
+export type ResumoMetaDiariaBlackFriday = {
+  dias: ComparativoDiaBlackFriday[];
+  acumulado: ComparativoAcumuladoBlackFriday;
+  // Linha de `dias` cujo `data` é hoje (Brasília) — null quando hoje cai fora da janela
+  // cadastrada na planilha (campanha ainda não começou, ou já terminou). UI usa isso pro bloco
+  // "hoje" (faturamento realizado hoje/meta do dia/% atingimento/diferença/real 2025 do
+  // dia/crescimento anual), nunca mostrando esse bloco fabricado quando não existe hoje real.
+  hoje: ComparativoDiaBlackFriday | null;
+};
+
+// Função PURA — procura a linha de `dias` cujo `data` bate com `dataStr` exatamente. Separada de
+// montarComparativoMetaDiariaBlackFriday só pra poder testar "hoje" sem depender do relógio real
+// (ver __tests__/blackFriday.test.ts).
+export function encontrarDiaPorData(dias: ComparativoDiaBlackFriday[], dataStr: string): ComparativoDiaBlackFriday | null {
+  return dias.find((d) => d.data === dataStr) ?? null;
+}
+
+// Função PURA (sem Prisma, sem relógio real) — monta a comparação dia a dia a partir das metas
+// já lidas do banco e da receita líquida real já agregada por dia (mesmo formato devolvido por
+// getSalesByDay: um Map "YYYY-MM-DD" -> receita líquida). `hojeStr` é passado por quem chama (a
+// versão async resolve com todayBrasiliaStr(new Date())) — nunca lido daqui, pra manter esta
+// função testável sem depender do relógio real. Testável, ver __tests__/blackFriday.test.ts.
+export function montarComparativoMetaDiariaBlackFriday(
+  metas: { data: string; metaReceita2026: number; receitaReal2025: number | null; acao: string | null }[],
+  receitaRealPorDia: Map<string, number>,
+  hojeStr: string | null = null
+): ResumoMetaDiariaBlackFriday {
+  const dias: ComparativoDiaBlackFriday[] = metas
+    .slice()
+    .sort((a, b) => a.data.localeCompare(b.data))
+    .map((m) => {
+      // Dia sem nenhuma venda registrada ainda (campanha não chegou lá, ou sync atrasado) conta
+      // como 0 de receita real — diferente de receitaReal2025 (esse sim fica null quando falta),
+      // porque aqui "sem Sale no período" é um fato real sobre o Sale, não um dado ausente da
+      // planilha.
+      const receitaReal2026 = receitaRealPorDia.get(m.data) ?? 0;
+      const atingimentoPct = m.metaReceita2026 !== 0 ? (receitaReal2026 / m.metaReceita2026) * 100 : null;
+      const crescimentoAnualPct =
+        m.receitaReal2025 != null && m.receitaReal2025 !== 0
+          ? ((receitaReal2026 - m.receitaReal2025) / m.receitaReal2025) * 100
+          : null;
+      return {
+        data: m.data,
+        metaReceita2026: m.metaReceita2026,
+        receitaReal2026,
+        atingimentoPct,
+        diferencaReal: receitaReal2026 - m.metaReceita2026,
+        receitaReal2025: m.receitaReal2025,
+        crescimentoAnualPct,
+        acao: m.acao,
+      } satisfies ComparativoDiaBlackFriday;
+    });
+
+  // Acumulado no mês = soma de TODOS os dias cadastrados (a planilha só cadastra dia de
+  // campanha real, então "acumulado" aqui já é "acumulado da campanha até onde a planilha
+  // cobre" — não existe hoje um corte de "só até hoje", ver comentário da função async abaixo).
+  const metaAcumulada = dias.reduce((s, d) => s + d.metaReceita2026, 0);
+  const realAcumulado = dias.reduce((s, d) => s + d.receitaReal2026, 0);
+
+  return {
+    dias,
+    acumulado: {
+      metaReceita2026: metaAcumulada,
+      receitaReal2026: realAcumulado,
+      atingimentoPct: metaAcumulada !== 0 ? (realAcumulado / metaAcumulada) * 100 : null,
+      diferencaReal: realAcumulado - metaAcumulada,
+    },
+    hoje: hojeStr != null ? encontrarDiaPorData(dias, hojeStr) : null,
+  };
+}
+
+export async function getComparativoMetaDiariaBlackFriday(
+  filters: DashboardFilters
+): Promise<ResumoMetaDiariaBlackFriday> {
+  const metasRows = await prisma.metaDiariaBlackFriday.findMany({ orderBy: { data: "asc" } });
+  if (metasRows.length === 0) {
+    return {
+      dias: [],
+      acumulado: { metaReceita2026: 0, receitaReal2026: 0, atingimentoPct: null, diferencaReal: 0 },
+      hoje: null,
+    };
+  }
+
+  const primeiraData = metasRows[0].data;
+  const ultimaData = metasRows[metasRows.length - 1].data;
+  // getSalesByDay (vendas.ts) já devolve líquido (venda - devolução) por dia de Brasília — a
+  // mesma função usada no gráfico "Receita líquida por dia" da Visão Geral, reaproveitada aqui em
+  // vez de reimplementar a agregação. Sobrescreve from/to de `filters` pra cobrir a janela
+  // CADASTRADA na planilha de meta (ver comentário no topo da seção), não o período escolhido no
+  // seletor De/Até da página.
+  const filtrosJanelaCampanha: DashboardFilters = {
+    ...filters,
+    from: primeiraData,
+    to: new Date(ultimaData.getTime() + 86399999), // fim do último dia cadastrado (23:59:59.999)
+  };
+  const salesByDay = await getSalesByDay(filtrosJanelaCampanha);
+  const receitaRealPorDia = new Map(salesByDay.map((s) => [s.day, s.revenue]));
+
+  const metas = metasRows.map((m) => ({
+    data: m.data.toISOString().slice(0, 10),
+    metaReceita2026: m.metaReceita2026,
+    receitaReal2025: m.receitaReal2025,
+    acao: m.acao,
+  }));
+
+  return montarComparativoMetaDiariaBlackFriday(metas, receitaRealPorDia, todayBrasiliaStr(new Date()));
 }
