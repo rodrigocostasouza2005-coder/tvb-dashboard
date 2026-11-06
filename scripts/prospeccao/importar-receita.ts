@@ -118,6 +118,12 @@ async function main() {
   const unique = new Map<string, ProspectRow>();
   for (const row of rows) if (!unique.has(row.cnpj)) unique.set(row.cnpj, row);
   const deduped = [...unique.values()];
+  const foraDoFoco = deduped.filter((row) => row.cnae_principal !== "4781400");
+  if (foraDoFoco.length > 0) {
+    throw new Error(
+      `Importação bloqueada: ${foraDoFoco.length} registro(s) não têm CNAE principal 4781400 (varejo de vestuário). CNAE secundário não é aceito como critério de entrada.`
+    );
+  }
   console.log(`Arquivo: ${file}`);
   console.log(`Competência informada: ${competence}`);
   console.log(`Linhas válidas: ${rows.length} | CNPJs únicos: ${deduped.length} | duplicados no arquivo: ${rows.length - deduped.length}`);

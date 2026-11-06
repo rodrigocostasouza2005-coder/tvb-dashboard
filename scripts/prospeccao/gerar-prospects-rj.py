@@ -21,13 +21,8 @@ import sys
 from pathlib import Path
 
 # Layout oficial: estabelecimentos tem 30 colunas; empresas tem 7.
-# CNAEs iniciais para validação do piloto RJ: vestuário, calçados e acessórios.
-CNAES_ALVO = {
-    "4781400": "Comércio varejista de artigos do vestuário e acessórios",
-    "4782201": "Comércio varejista de calçados",
-    "4782202": "Comércio varejista de artigos de viagem",
-    "4789001": "Comércio varejista de suvenires, bijuterias e artesanatos",
-}
+# Foco TVB: somente comércio varejista de artigos do vestuário como CNAE principal.
+CNAES_ALVO = {"4781400": "Comércio varejista de artigos do vestuário e acessórios"}
 SITUACAO_ATIVA = "02"
 
 
@@ -107,8 +102,8 @@ def main() -> int:
             continue
         count_active += 1
         principal = digits(row[11])
-        secundarias = {digits(item) for item in row[12].split(",") if digits(item)}
-        if principal in CNAES_ALVO or any(code in CNAES_ALVO for code in secundarias):
+        # CNAE secundário não qualifica a empresa: evita incluir negócios de outro ramo.
+        if principal == "4781400":
             count_cnae += 1
             wanted_roots.add(row[0].strip())
 
@@ -142,9 +137,8 @@ def main() -> int:
             if uf not in ufs or row[5].strip() != SITUACAO_ATIVA:
                 continue
             principal = digits(row[11])
-            secundarias = {digits(item) for item in row[12].split(",") if digits(item)}
-            matched = [code for code in CNAES_ALVO if code == principal or code in secundarias]
-            if not matched:
+            # Só entra quando vestuário é a atividade principal do estabelecimento.
+            if principal != "4781400":
                 continue
 
             raiz, ordem, dv = row[0].strip(), row[1].strip(), row[2].strip()
@@ -159,9 +153,7 @@ def main() -> int:
             ddd1, tel1, ddd2, tel2 = (row[i].strip() for i in (21, 22, 23, 24))
             phone = "".join(digits(x) for x in (ddd1, tel1)) or "".join(digits(x) for x in (ddd2, tel2))
             email = row[27].strip().lower() or ""
-            cnae = principal if principal in CNAES_ALVO else next(
-                (code for code in matched if code in CNAES_ALVO), principal
-            )
+            cnae = principal
             writer.writerow({
                 "nome_fantasia": fantasy[:160],
                 "razao_social": company.get("razao_social", ""),

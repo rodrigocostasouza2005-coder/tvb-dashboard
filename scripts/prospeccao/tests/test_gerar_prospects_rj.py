@@ -96,6 +96,17 @@ class ReceitaProspectorTests(unittest.TestCase):
             self.assertIn("ativos examinados=2", result.stderr)
             self.assertIn("com CNAE-alvo=2", result.stderr)
 
+    def test_ignores_vestuario_only_as_secondary_cnae(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            row = establishment(cnae="5611201")  # restaurante como atividade principal
+            row[12] = "4781400"  # vestuário apenas como atividade secundária
+            result, output = self.run_script(root, [row])
+            self.assertEqual(result.returncode, 0, result.stderr)
+            with output.open(encoding="utf-8-sig", newline="") as f:
+                data = list(csv.DictReader(f, delimiter=";"))
+            self.assertEqual(data, [])
+
     def test_deduplicates_repeated_cnpj(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

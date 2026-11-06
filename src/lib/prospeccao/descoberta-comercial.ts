@@ -16,12 +16,12 @@ export function gerarConsultasDescoberta(perfis: PerfilAprendido[], uf: string, 
   if (!/^[A-Z]{2}$/.test(sigla)) throw new Error("UF inválida");
   const municipio = cidade?.trim().replace(/\s+/g, " ").slice(0, 100);
   const local = municipio ? `"${municipio}" ${sigla}` : sigla;
-  const base = `loja "moda masculina" multimarcas ${local}`;
+  const base = `"surf shop" OR surfwear OR skateshop "moda masculina" multimarcas revenda ${local}`;
   const consultas = perfis.slice(0, 5).map((perfil) => {
     const termos = termosPerfil(perfil);
-    return termos.length ? `loja "moda masculina" multimarcas ${termos.map((x) => `"${x}"`).join(" ")} ${local}` : base;
+    return termos.length ? `surfwear "moda masculina" multimarcas revenda ${termos.map((x) => `"${x}"`).join(" ")} ${local}` : base;
   });
-  consultas.push(base, `"roupas masculinas" "multimarcas" loja ${local}`);
+  consultas.push(base, `surfwear "roupas masculinas" "multimarcas" revenda ${local}`);
   return [...new Set(consultas)].slice(0, Math.max(1, Math.min(12, limite)));
 }
 
@@ -50,11 +50,19 @@ export function avaliarCandidatoDescoberto(
     if (!["http:", "https:"].includes(u.protocol)) return null;
   } catch { return null; }
   const masculino = evidencia.sinaisModaMasculina;
+  const nomeLoja = `${resultado.titulo} ${evidencia.titulo}`.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  const nomeSegmento = /\b(surf|surfwear|surf\s*shop|skate|skateshop|boardshop)\b/.test(nomeLoja);
   const multi = evidencia.sinaisMultimarcas;
   const marcas = evidencia.marcas;
-  // Não basta CNAE, título ou menção genérica a moda: exige evidência textual no site.
-  if (!masculino.length || (!multi.length && marcas.length < 2)) return null;
-  const score = Math.min(100, 30 + Math.min(35, multi.length * 20) + Math.min(30, marcas.length * 10) + (evidencia.titulo ? 5 : 0));
+  const exclusoes = evidencia.sinaisExclusao ?? [];
+  const marcaPropria = (evidencia.sinaisMarcaPropria?.length ?? 0) > 0;
+  // Exige moda masculina + prova explícita de revenda + pelo menos duas marcas identificadas.
+  if (exclusoes.length || (evidencia.sinaisModaFeminina?.length && !masculino.length)) return null;
+  // O nome público da loja também precisa apontar para surf/skate; segmento citado só no rodapé não basta.
+  if (!nomeSegmento) return null;
+  if (marcaPropria) return null;
+  if (!masculino.length || !multi.length || marcas.length < 2) return null;
+  const score = Math.min(100, 60 + Math.min(25, marcas.length * 8) + (nomeSegmento ? 10 : 0) + (evidencia.descricao ? 5 : 0));
   return {
     nomeResultado: resultado.titulo || dominio,
     url: evidencia.url,

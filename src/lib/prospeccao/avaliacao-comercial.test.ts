@@ -14,25 +14,19 @@ const evidence = {
 describe("avaliação de evidências comerciais", () => {
   it("encaminha para revisão humana apenas com identidade, moda masculina e multimarcas evidenciados", () => {
     const result = avaliarEvidenciasComerciais({
-      nomeLoja: "Loja Teste",
-      cidade: "Rio de Janeiro",
-      confiancaIdentidade: "ALTA",
-      evidencia: evidence,
-      situacaoCadastral: "ATIVA",
+      nomeLoja: "Loja Teste", cidade: "Rio de Janeiro", confiancaIdentidade: "ALTA",
+      evidencia: evidence, situacaoCadastral: "ATIVA",
     });
     expect(result.situacao).toBe("PRONTA_PARA_REVISAO_HUMANA");
     expect(result.scoreEvidencia).toBe(100);
-    expect(result.pendencias).toContain("confirmar se as marcas citadas são efetivamente comercializadas pela loja");
+    expect(result.pendencias).not.toContain("confirmar se as marcas citadas são efetivamente comercializadas pela loja");
     expect(result.explicacao).toContain("não aprova");
   });
 
   it("não confunde duas marcas citadas com prova de operação multimarcas", () => {
     const result = avaliarEvidenciasComerciais({
-      nomeLoja: "Loja Teste",
-      cidade: null,
-      confiancaIdentidade: "ALTA",
-      evidencia: { ...evidence, sinaisMultimarcas: [] },
-      situacaoCadastral: "ATIVA",
+      nomeLoja: "Loja Teste", cidade: null, confiancaIdentidade: "ALTA",
+      evidencia: { ...evidence, sinaisMultimarcas: [] }, situacaoCadastral: "ATIVA",
     });
     expect(result.multimarcas).toBe("INDICIO_POR_MARCAS");
     expect(result.situacao).toBe("EVIDENCIA_PARCIAL");
@@ -40,15 +34,21 @@ describe("avaliação de evidências comerciais", () => {
 
   it("não recomenda revisão comercial quando o site não corresponde à loja", () => {
     const result = avaliarEvidenciasComerciais({
-      nomeLoja: "Loja Teste",
-      cidade: "Rio de Janeiro",
-      confiancaIdentidade: "BAIXA",
-      evidencia: evidence,
-      situacaoCadastral: "ATIVA",
+      nomeLoja: "Loja Teste", cidade: "Rio de Janeiro", confiancaIdentidade: "BAIXA",
+      evidencia: evidence, situacaoCadastral: "ATIVA",
     });
     expect(result.situacao).toBe("EVIDENCIA_PARCIAL");
     expect(result.scoreEvidencia).toBe(0);
-    expect(result.pendencias[0]).toContain("confirmar se o site pertence");
+    expect(result.pendencias[0]).toContain("confirmar identidade do site e vínculo com a loja/cidade");
+  });
+
+  it("não encaminha identidade apenas média, mesmo com evidência comercial completa", () => {
+    const result = avaliarEvidenciasComerciais({
+      nomeLoja: "Loja Teste", cidade: null, confiancaIdentidade: "MEDIA",
+      evidencia: evidence, situacaoCadastral: "ATIVA",
+    });
+    expect(result.situacao).toBe("EVIDENCIA_PARCIAL");
+    expect(result.pendencias.join(" ")).toContain("somente confiança ALTA");
   });
 
   it("mantém cadastro inativo como pendência sem transformar isso em score comercial", () => {
@@ -60,6 +60,37 @@ describe("avaliação de evidências comerciais", () => {
     });
     expect(inactive.scoreEvidencia).toBe(active.scoreEvidencia);
     expect(inactive.pendencias).toContain("revisar situação cadastral: BAIXADA");
+  });
+
+  for (const categoria of ["lingerie", "bijuterias", "loja de móveis", "restaurante"]) {
+    it("descarta atividade incompatível: " + categoria, () => {
+      const result = avaliarEvidenciasComerciais({
+        nomeLoja: "Loja Teste", cidade: null, confiancaIdentidade: "ALTA",
+        evidencia: { ...evidence, sinaisExclusao: [categoria] }, situacaoCadastral: "ATIVA",
+      });
+      expect(result.situacao).toBe("NAO_ADERENTE");
+      expect(result.scoreEvidencia).toBe(0);
+      expect(result.motivosDesqualificacao.join(" ")).toContain(categoria);
+    });
+  }
+
+  it("descarta fabricante ou marca própria mesmo com sinais de multimarcas", () => {
+    const result = avaliarEvidenciasComerciais({
+      nomeLoja: "Marca Própria", cidade: null, confiancaIdentidade: "ALTA",
+      evidencia: { ...evidence, sinaisMarcaPropria: ["marca própria"] },
+      situacaoCadastral: "ATIVA",
+    });
+    expect(result.situacao).toBe("NAO_ADERENTE");
+    expect(result.motivosDesqualificacao.join(" ")).toContain("marca");
+  });
+
+  it("descarta loja exclusivamente feminina sem evidência masculina", () => {
+    const result = avaliarEvidenciasComerciais({
+      nomeLoja: "Loja Feminina", cidade: null, confiancaIdentidade: "ALTA",
+      evidencia: { ...evidence, sinaisModaMasculina: [], sinaisModaFeminina: ["moda feminina"] },
+      situacaoCadastral: "ATIVA",
+    });
+    expect(result.situacao).toBe("NAO_ADERENTE");
   });
 
   it("não atribui aderência sem conteúdo de site", () => {

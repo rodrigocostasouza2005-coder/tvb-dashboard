@@ -3,43 +3,51 @@ import { avaliarCandidatoDescoberto, gerarConsultasDescoberta, gerarCsvDescobert
 import type { PerfilAprendido } from "./aprendizado-comercial";
 
 const perfil: PerfilAprendido = {
-  chave: "x", perfil: "MODA MASCULINA · MULTIMARCAS · MEDIO · RJ",
+  chave: "x", perfil: "SURFWEAR · MODA MASCULINA · MULTIMARCAS · MEDIO · RJ",
   totalLojas: 8, interacoesComSinal: 6, sinaisPositivos: 5, sinaisNegativos: 1,
   emNegociacao: 2, convertidasDapic: 1, taxaSinalPositivo: 83, taxaConversaoDapic: 13,
   confianca: "BAIXA",
-  atributos: { segmentoComercial: "MODA MASCULINA", perfilLoja: "MULTIMARCAS", faixaPreco: "MEDIO", estado: "RJ" },
+  atributos: { segmentoComercial: "SURFWEAR", perfilLoja: "MULTIMARCAS", faixaPreco: "MEDIO", estado: "RJ" },
 };
-const resultado = { url: "https://exemplo.com.br", titulo: "Loja Exemplo - Moda masculina", trecho: "Multimarcas no Rio" };
+const resultado = { url: "https://exemplo.com.br", titulo: "Surf Shop Exemplo - Moda masculina", trecho: "Multimarcas no Rio" };
 const evidencia = {
-  url: "https://exemplo.com.br/", titulo: "Loja Exemplo", descricao: "Moda masculina multimarcas",
+  url: "https://exemplo.com.br/", titulo: "Surf Shop Exemplo", descricao: "Moda masculina multimarcas surfwear",
   texto: "Reserva Aramis Osklen",
   marcas: ["Reserva", "Aramis", "Osklen"], sinaisModaMasculina: ["moda masculina"],
-  sinaisMultimarcas: ["multimarcas"],
+  sinaisMultimarcas: ["loja multimarcas"], sinaisSurfSkate: ["surfwear"],
 };
 
-describe("descoberta comercial", () => {
-  it("gera buscas com atributos aprendidos e UF, sem duplicar consultas", () => {
-    const queries = gerarConsultasDescoberta([perfil], "rj", 8);
-    expect(queries[0]).toContain("RJ");
-    expect(queries[0]).toContain('"medio"');
-    expect(queries[0]).not.toContain("evidencia");
-    expect(queries[0]).not.toContain("publica");
+describe("descoberta comercial surfwear", () => {
+  it("gera buscas focadas em surfwear, revenda e município", () => {
+    const queries = gerarConsultasDescoberta([perfil], "RJ", 8, "Niterói");
+    expect(queries[0]).toContain("surfwear");
+    expect(queries[0]).toContain("revenda");
+    expect(queries[0]).toContain('"Niterói" RJ');
     expect(new Set(queries).size).toBe(queries.length);
   });
-  it("restringe consultas à cidade escolhida sem perder a UF", () => {
-    const queries = gerarConsultasDescoberta([perfil], "RJ", 8, "Niterói");
-    const normalized = gerarConsultasDescoberta([perfil], "RJ", 8, "  Niterói   Centro  ");
-    expect(normalized[0]).toContain('"Niterói Centro" RJ');
-    expect(queries[0]).toContain("Niterói");
-    expect(queries[0]).toContain("RJ");
+  it("rejeita loja cujo nome não indica surf ou skate", () => {
+    // Nenhum dos dois títulos (snippet de busca e título do site) pode mencionar surf/skate;
+    // caso contrário o "nome público" é considerado comprovado mesmo sem o segmento no snippet.
+    expect(avaliarCandidatoDescoberto({ ...resultado, titulo: "Loja Exemplo - Moda masculina" }, { ...evidencia, titulo: "Loja Exemplo" }, perfil.perfil)).toBeNull();
   });
   it("rejeita site sem evidência de moda masculina", () => {
     expect(avaliarCandidatoDescoberto(resultado, { ...evidencia, sinaisModaMasculina: [] }, perfil.perfil)).toBeNull();
   });
-  it("exige sinal multimarcas ou ao menos duas marcas", () => {
+  it("exige sinal explícito de revenda multimarcas e duas marcas", () => {
     expect(avaliarCandidatoDescoberto(resultado, { ...evidencia, sinaisMultimarcas: [], marcas: ["Reserva"] }, perfil.perfil)).toBeNull();
+    expect(avaliarCandidatoDescoberto(resultado, { ...evidencia, sinaisMultimarcas: [] }, perfil.perfil)).toBeNull();
   });
-  it("classifica achado como candidato para revisão, nunca como lead aprovado", () => {
+  it("rejeita categorias incompatíveis", () => {
+    expect(avaliarCandidatoDescoberto(resultado, { ...evidencia, sinaisExclusao: ["lingerie"] }, perfil.perfil)).toBeNull();
+    expect(avaliarCandidatoDescoberto(resultado, { ...evidencia, sinaisExclusao: ["restaurante"] }, perfil.perfil)).toBeNull();
+  });
+  it("rejeita qualquer fabricante ou marca própria, mesmo se declarar multimarcas", () => {
+    expect(avaliarCandidatoDescoberto(resultado, { ...evidencia, sinaisMarcaPropria: ["marca própria"] }, perfil.perfil)).toBeNull();
+  });
+  it("não aceita loja feminina sem sinal de linha masculina", () => {
+    expect(avaliarCandidatoDescoberto(resultado, { ...evidencia, sinaisModaMasculina: [], sinaisModaFeminina: ["moda feminina"] }, perfil.perfil)).toBeNull();
+  });
+  it("classifica achado como candidato para revisão, nunca lead aprovado", () => {
     const candidate = avaliarCandidatoDescoberto(resultado, evidencia, perfil.perfil);
     expect(candidate?.classificacao).toBe("CANDIDATO_PARA_REVISAO");
     expect(candidate?.pontuacaoEvidencia).toBeGreaterThanOrEqual(60);
@@ -47,7 +55,7 @@ describe("descoberta comercial", () => {
   it("escapa aspas e listas no CSV", () => {
     const candidate = avaliarCandidatoDescoberto(resultado, evidencia, perfil.perfil)!;
     const csv = gerarCsvDescoberta([candidate]);
-    expect(csv).toContain('"Loja Exemplo - Moda masculina"');
+    expect(csv).toContain('"Surf Shop Exemplo - Moda masculina"');
     expect(csv).toContain('"Reserva; Aramis; Osklen"');
   });
 });
