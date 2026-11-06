@@ -9,23 +9,18 @@ import { RevisaoCandidatosWeb } from "./revisao-candidatos-web";
 import { ProspectFilters } from "./prospect-filters";
 import { CoastalProspectingMap } from "./coastal-prospecting-map";
 import { ESTADOS_BRASIL } from "@/lib/prospeccao/estados-litoraneos";
-
-function classificarAderencia(observacoes: string | null) {
-  const texto = observacoes ?? "";
-  if (texto.includes("Correspondência CNAE: atividade secundária") || texto.includes("Atividade secundária de varejo de moda/acessórios")) {
-    return { label: "Revisar", detalhe: "Moda aparece como atividade secundária", nivel: "revisar" as const };
-  }
-  if (texto.includes("CNAE principal: 4781400")) {
-    return { label: "CNAE de vestuário", detalhe: "Atividade cadastral compatível; validar loja multimarcas e moda masculina", nivel: "medio" as const };
-  }
-  if (texto.includes("CNAE principal: 4782201") || texto.includes("CNAE principal: 4782202")) {
-    return { label: "Complementar", detalhe: "Calçados ou artigos de viagem como atividade principal", nivel: "medio" as const };
-  }
-  if (texto.includes("CNAE principal: 4789001")) {
-    return { label: "Baixa aderência", detalhe: "Bijuterias e suvenires como atividade principal", nivel: "baixo" as const };
-  }
-  return { label: "Não classificado", detalhe: "Cadastro manual ou sem CNAE disponível", nivel: "neutro" as const };
-}
+import {
+  contarPorStatusComercial,
+  listarAprovados,
+  listarPendentesRevisao,
+  listarReprovados,
+  listarMunicipiosDisponiveis,
+} from "@/lib/metrics/prospeccao-qualificacao";
+import { QualificacaoKpis } from "./qualificacao-kpis";
+import { QualificacaoFiltros } from "./qualificacao-filtros";
+import { ProspectosAprovadosTable } from "./prospectos-aprovados-table";
+import { ProspectosPendentesTable } from "./prospectos-pendentes-table";
+import { ProspectosReprovadosTable } from "./prospectos-reprovados-table";
 
 const STATUS: Record<string, string> = {
   NOVO: "Novo",
@@ -40,7 +35,7 @@ const STATUS: Record<string, string> = {
 export default async function AtacadoProspeccaoPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; grupo?: string; cidade?: string; uf?: string; erro?: string; criado?: string; importacao?: string; novos?: string; duplicados?: string; invalidos?: string; bruce?: string; revisao?: string; cadastro?: string; presenca?: string }>;
+  searchParams: Promise<{ status?: string; grupo?: string; cidade?: string; uf?: string; erro?: string; criado?: string; importacao?: string; novos?: string; duplicados?: string; invalidos?: string; bruce?: string; revisao?: string; cadastro?: string; presenca?: string; qEstado?: string; qMunicipio?: string; qCapital?: string; qClasse?: string }>;
 }) {
   const user = await getSessionUser();
   if (!user) return null;
@@ -67,6 +62,22 @@ export default async function AtacadoProspeccaoPage({
     take: 250,
     include: { activities: { orderBy: { createdAt: "desc" }, take: 3 } },
   });
+
+  // Filtros da seção "Qualificação B2B" — params próprios (qEstado/qMunicipio/qCapital/qClasse),
+  // nunca reaproveitando uf/cidade/grupo/status acima (aquilo filtra o pipeline manual legado).
+  const qEstado = params.qEstado && /^[A-Za-z]{2}$/.test(params.qEstado) ? params.qEstado.toUpperCase() : undefined;
+  const qMunicipio = params.qMunicipio?.trim().slice(0, 100) || undefined;
+  const qCapital: "capital" | "interior" | undefined = params.qCapital === "capital" || params.qCapital === "interior" ? params.qCapital : undefined;
+  const qClasse: "ALTA_PRIORIDADE" | "QUALIFICADO" | undefined = params.qClasse === "ALTA_PRIORIDADE" || params.qClasse === "QUALIFICADO" ? params.qClasse : undefined;
+  const filtroQualificacao = { estado: qEstado, municipio: qMunicipio, capital: qCapital, classificacao: qClasse };
+
+  const [contagemQualificacao, aprovados, pendentesRevisao, reprovados, municipiosQualificacao] = await Promise.all([
+    contarPorStatusComercial(),
+    listarAprovados(filtroQualificacao),
+    listarPendentesRevisao(filtroQualificacao),
+    listarReprovados(filtroQualificacao),
+    listarMunicipiosDisponiveis(qEstado),
+  ]);
 
   const [total, novos, emPesquisa, qualificados, contatados, grupoA, grupoB, grupoC, grupoD, cidades] = await Promise.all([
     prisma.atacadoProspect.count(),
@@ -101,6 +112,28 @@ export default async function AtacadoProspeccaoPage({
       {params.presenca === "salva" && <p role="status" className="rounded-md border border-green-600/40 px-3 py-2 text-sm text-green-700">Presença digital salva no cadastro da loja.</p>}
       {params.presenca === "erro" && <p role="alert" className="rounded-md border border-red-500/40 px-3 py-2 text-sm text-red-600">Não foi possível salvar. Use URLs completas iniciadas por http:// ou https://.</p>}
       <ProspeccaoRadarConsole total={total} novos={novos} emPesquisa={emPesquisa} qualificados={qualificados} contatados={contatados} />
+
+      <section className="space-y-4 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
+        <div>
+          <h2 className="text-sm font-semibold">Qualificação B2B (motor automático)</h2>
+          <p className="mt-1 text-xs text-[var(--text-muted)]">Resultado do gate de elegibilidade e pontuação — só quem passa aqui entra na base comercial definitiva. Hoje a maior parte da carteira ainda está EM_INVESTIGACAO: o motor acabou de ser religado e ainda não rodou sobre a base nacional.</p>
+        </div>
+        <QualificacaoKpis contagem={contagemQualificacao} />
+        <QualificacaoFiltros
+          estado={qEstado ?? ""}
+          municipio={qMunicipio ?? ""}
+          capital={qCapital ?? ""}
+          classificacao={qClasse ?? ""}
+          municipios={municipiosQualificacao}
+        />
+        <ProspectosAprovadosTable prospects={aprovados} />
+        <ProspectosPendentesTable prospects={pendentesRevisao} />
+        <details data-testid="qualificacao-reprovados" className="rounded-lg border border-[var(--border)]">
+          <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-[var(--text-secondary)]">Auditoria de reprovações ({reprovados.length})</summary>
+          <ProspectosReprovadosTable prospects={reprovados} />
+        </details>
+      </section>
+
       <CoastalProspectingMap selectedUf={uf ?? ""} selectedCity={cidade ?? ""} cities={cidades.map((item) => item.cidade).filter((value): value is string => Boolean(value))} stateCounts={stateCounts} />
       {params.revisao === "concluida" && <p role="status" className="border border-green-600/40 px-3 py-2 text-sm text-green-700">Revisão concluída: {params.novos ?? "0"} candidatos incluídos na fila de qualificação; {params.duplicados ?? "0"} duplicados ignorados.</p>}
       {params.revisao === "dados-invalidos" && <p role="alert" className="border border-red-500/40 px-3 py-2 text-sm text-red-600">Revise nome, CNPJ com dígitos verificadores, cidade e UF de cada candidato selecionado.</p>}
@@ -254,13 +287,13 @@ export default async function AtacadoProspeccaoPage({
                     {p.justificativaGrupo && <div className="mt-1 max-w-48 text-[11px] text-[var(--text-muted)]">{p.justificativaGrupo}</div>}
                     {p.responsavel && <div className="mt-1 text-[11px] font-medium text-[var(--series-1)]">Fila: {p.responsavel.replaceAll("_", " ")}</div>}
                     {p.confiancaPesquisa === "CADASTRAL_OFICIAL" && <div className="mt-0.5 text-[10px] font-semibold text-emerald-700">Receita Federal consultada via Serpro · perfil comercial ainda não verificado</div>}{p.confiancaPesquisa === "CADASTRAL" && <div className="mt-0.5 text-[10px] text-[var(--text-muted)]">Triagem cadastral; perfil comercial ainda não verificado</div>}
-                    {(() => {
-                      const fit = classificarAderencia(p.observacoes);
-                      return <div title={fit.detalhe} className="text-xs">
-                        <span className={fit.nivel === "revisar" ? "font-semibold text-amber-700" : "text-[var(--text-secondary)]"}>{fit.label}</span>
-                        <div className="mt-0.5 max-w-48 text-[11px] text-[var(--text-muted)]">{fit.detalhe}</div>
-                      </div>;
-                    })()}
+                    {p.statusComercial !== "EM_INVESTIGACAO" && (
+                      <div className="mt-1 text-[11px]">
+                        {p.statusComercial === "APROVADO" && <span className="font-semibold text-emerald-700">Aprovado pelo motor — ver seção Qualificação acima</span>}
+                        {p.statusComercial === "PENDENTE_REVISAO_HUMANA" && <span className="font-semibold text-amber-700">Pendente de revisão — ver seção Qualificação acima</span>}
+                        {p.statusComercial === "REPROVADO" && <span className="font-semibold text-red-600">Reprovado pelo motor — ver auditoria na seção Qualificação</span>}
+                      </div>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-xs text-[var(--text-secondary)]">
                     {p.telefone && <div>{p.telefone}</div>}
