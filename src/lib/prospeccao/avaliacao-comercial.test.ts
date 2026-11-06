@@ -39,7 +39,7 @@ describe("avaliação de evidências comerciais", () => {
     });
     expect(result.situacao).toBe("EVIDENCIA_PARCIAL");
     expect(result.scoreEvidencia).toBe(0);
-    expect(result.pendencias[0]).toContain("confirmar se o site pertence");
+    expect(result.pendencias[0]).toContain("confirmar identidade do site e vínculo com a loja/cidade");
   });
 
   it("não encaminha identidade apenas média, mesmo com evidência comercial completa", () => {

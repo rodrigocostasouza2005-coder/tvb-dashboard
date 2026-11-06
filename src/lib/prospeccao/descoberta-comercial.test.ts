@@ -26,7 +26,9 @@ describe("descoberta comercial surfwear", () => {
     expect(new Set(queries).size).toBe(queries.length);
   });
   it("rejeita loja cujo nome não indica surf ou skate", () => {
-    expect(avaliarCandidatoDescoberto({ ...resultado, titulo: "Loja Exemplo - Moda masculina" }, evidencia, perfil.perfil)).toBeNull();
+    // Nenhum dos dois títulos (snippet de busca e título do site) pode mencionar surf/skate;
+    // caso contrário o "nome público" é considerado comprovado mesmo sem o segmento no snippet.
+    expect(avaliarCandidatoDescoberto({ ...resultado, titulo: "Loja Exemplo - Moda masculina" }, { ...evidencia, titulo: "Loja Exemplo" }, perfil.perfil)).toBeNull();
   });
   it("rejeita site sem evidência de moda masculina", () => {
     expect(avaliarCandidatoDescoberto(resultado, { ...evidencia, sinaisModaMasculina: [] }, perfil.perfil)).toBeNull();
