@@ -338,12 +338,22 @@ export async function getTopProdutosBlackFriday(filters: DashboardFilters, limit
 // getTopProdutosBlackFriday: a página passa `filtrosSemAtacado`, resultado de
 // getFiltrosSemAtacado(filters), não `filters` original).
 //
-// Exibição honesta de dado faltante (mesma convenção de SEM_CLASSIFICACAO em
-// montarProdutosBlackFriday): produto vendido no período sem linha correspondente em
-// PrecoBlackFriday cai no bucket `desconto: null` ("Sem desconto cadastrado") — nunca é
-// descartado nem assumido como 0% de desconto.
+// Convenção corrigida a pedido do Rodrigo (2026-11-06): "se não tem desconto cadastrado = 0%".
+// Isso substitui o design anterior (PR #54) de um bucket `desconto: null` ("Sem desconto
+// cadastrado") separado — produto vendido no período sem linha correspondente em PrecoBlackFriday
+// agora é tratado como desconto=0 e cai DENTRO do mesmo bucket 0% real (junto com produtos que já
+// têm desconto=0 explícito na planilha), não numa linha própria. `desconto` nunca é null por essa
+// via; o bucket 0 é sempre semeado (mesmo que a planilha não tenha nenhuma linha com desconto=0
+// cadastrado), pra garantir que essas vendas sempre tenham onde cair.
+export type FaixaDescontoProduto = {
+  grupo: string;
+  produto: string;
+  unitsSold: number;
+  revenue: number;
+};
+
 export type FaixaDescontoRow = {
-  desconto: number | null; // null = "Sem desconto cadastrado"
+  desconto: number;
   label: string;
   unitsSold: number;
   revenue: number;
@@ -352,55 +362,58 @@ export type FaixaDescontoRow = {
   // por pedido" (esse exigiria agrupar por dapicVendaId, que não existe neste grain
   // grupo+produto; ver ticketMedio em ResumoBlackFriday/CanalVendasRow pra esse outro sentido).
   precoMedioLiquido: number | null;
+  // Produtos que compõem esta faixa, ordenados por receita líquida decrescente — alimenta o
+  // dropdown "melhores produtos de cada %" (pedido do Rodrigo, 2026-11-06) sem round-trip
+  // adicional ao banco: já é a mesma venda líquida usada pra montar a linha agregada acima.
+  produtos: FaixaDescontoProduto[];
 };
 
 // Função PURA (sem Prisma) — recebe a venda líquida já calculada (mesma netByReturns usada em
 // getTopProdutosBlackFriday) e o mapa grupo::produto -> desconto real, e monta uma linha por
-// faixa. `faixasReais` garante que toda faixa cadastrada na planilha apareça mesmo com zero venda
-// no período (nunca omitida por falta de venda) — testável sem banco, ver
-// __tests__/blackFriday.test.ts.
+// faixa (agregada) + a lista de produtos que a compõem. `faixasReais` garante que toda faixa
+// cadastrada na planilha apareça mesmo com zero venda no período (nunca omitida por falta de
+// venda); o bucket 0 é sempre garantido independentemente de `faixasReais` conter 0 ou não —
+// testável sem banco, ver __tests__/blackFriday.test.ts.
 export function montarVendasPorFaixaDesconto(
   liquido: { grupo: string; key: string; unitsSold: number; revenue: number }[],
   precosPorProduto: Map<string, number>,
   faixasReais: number[]
 ): FaixaDescontoRow[] {
-  type Acc = { unitsSold: number; revenue: number; produtos: Set<string> };
-  const buckets = new Map<number | null, Acc>();
+  type Acc = { unitsSold: number; revenue: number; produtos: FaixaDescontoProduto[] };
+  const buckets = new Map<number, Acc>();
 
-  function getBucket(chave: number | null): Acc {
+  function getBucket(chave: number): Acc {
     let b = buckets.get(chave);
     if (!b) {
-      b = { unitsSold: 0, revenue: 0, produtos: new Set() };
+      b = { unitsSold: 0, revenue: 0, produtos: [] };
       buckets.set(chave, b);
     }
     return b;
   }
 
   for (const f of faixasReais) getBucket(f);
+  getBucket(0); // garante o bucket 0% mesmo que a planilha não tenha nenhuma linha com desconto=0
 
   for (const v of liquido) {
     const chaveProduto = `${v.grupo}::${v.key}`;
-    const desconto = precosPorProduto.has(chaveProduto) ? precosPorProduto.get(chaveProduto)! : null;
+    const desconto = precosPorProduto.has(chaveProduto) ? precosPorProduto.get(chaveProduto)! : 0;
     const b = getBucket(desconto);
     b.unitsSold += v.unitsSold;
     b.revenue += v.revenue;
-    b.produtos.add(chaveProduto);
+    b.produtos.push({ grupo: v.grupo, produto: v.key, unitsSold: v.unitsSold, revenue: v.revenue });
   }
 
   const rows: FaixaDescontoRow[] = [...buckets.entries()].map(([desconto, b]) => ({
     desconto,
-    label: desconto == null ? "Sem desconto cadastrado" : `${Math.round(desconto * 100)}%`,
+    label: `${Math.round(desconto * 100)}%`,
     unitsSold: b.unitsSold,
     revenue: b.revenue,
-    produtosDistintos: b.produtos.size,
+    produtosDistintos: b.produtos.length,
     precoMedioLiquido: b.unitsSold > 0 ? b.revenue / b.unitsSold : null,
+    produtos: [...b.produtos].sort((a, c) => c.revenue - a.revenue),
   }));
 
-  return rows.sort((a, b) => {
-    if (a.desconto == null) return 1; // "Sem desconto cadastrado" sempre por último
-    if (b.desconto == null) return -1;
-    return a.desconto - b.desconto;
-  });
+  return rows.sort((a, b) => a.desconto - b.desconto);
 }
 
 // Faixas de desconto reais distintas, cadastradas na planilha (PrecoBlackFriday) — não um range

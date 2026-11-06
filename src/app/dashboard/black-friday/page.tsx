@@ -275,8 +275,9 @@ export default async function BlackFridayPage({
       <h2 className="mb-3 text-base font-semibold">Vendas por faixa de desconto</h2>
       <p className="mb-3 text-xs text-[var(--text-muted)]">
         Desconto REAL aplicado a cada produto (planilha de preços da Black Friday), cruzado com a
-        venda líquida do período. &quot;Sem desconto cadastrado&quot; é honesto: produto vendido
-        sem linha correspondente na planilha — nunca é assumido como 0%.
+        venda líquida do período. Produto vendido sem linha correspondente na planilha conta como
+        0% de desconto. Use o dropdown abaixo da tabela pra ver os melhores produtos de cada
+        faixa.
       </p>
       <section className="mb-10">
         <FaixaDescontoTable rows={vendasPorFaixaDesconto} showFinancials={showFinancials} />
