@@ -5,9 +5,15 @@ import { formatBRL, formatNumber } from "@/lib/format";
 // uma linha "Total" escondendo qual canal fez o quê. A linha de soma no fim é só um apoio visual
 // (mantém a origem de cada canal visível em cima dela, nunca no lugar dela).
 export function CanalTable({ rows, showFinancials }: { rows: CanalVendasRow[]; showFinancials: boolean }) {
-  const totalUnidades = rows.reduce((s, r) => s + r.unitsSold, 0);
-  const totalReceita = rows.reduce((s, r) => s + r.revenue, 0);
-  const totalPedidos = rows.reduce((s, r) => s + r.pedidos, 0);
+  // Soma do rodapé exclui Atacado (pedido do Rodrigo em 2026-11-06: a linha do Atacado continua
+  // visível acima, por transparência, mas o TOTAL precisa bater com o resto da Central Black
+  // Friday — resumo/ranking/gráfico/faixa de desconto já excluem Atacado via filtrosSemAtacado em
+  // page.tsx; uma soma que incluísse Atacado aqui contradiria esses números e enganaria quem olha
+  // só o rodapé).
+  const rowsVarejo = rows.filter((r) => r.code !== "ATACADO");
+  const totalUnidades = rowsVarejo.reduce((s, r) => s + r.unitsSold, 0);
+  const totalReceita = rowsVarejo.reduce((s, r) => s + r.revenue, 0);
+  const totalPedidos = rowsVarejo.reduce((s, r) => s + r.pedidos, 0);
 
   return (
     <div className="overflow-x-auto overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
@@ -46,7 +52,7 @@ export function CanalTable({ rows, showFinancials }: { rows: CanalVendasRow[]; s
         {rows.length > 0 && (
           <tfoot>
             <tr className="border-t-2 border-[var(--gridline)] font-medium">
-              <td className="px-4 py-2">Soma dos {rows.length} canais acima</td>
+              <td className="px-4 py-2">Soma dos {rowsVarejo.length} canais de varejo (sem Atacado)</td>
               <td className="px-4 py-2 text-right tabular-nums">{formatNumber(totalUnidades)}</td>
               <td className="px-4 py-2 text-right tabular-nums">{formatNumber(totalPedidos)}</td>
               {showFinancials && <td className="px-4 py-2 text-right tabular-nums">{formatBRL(totalReceita)}</td>}

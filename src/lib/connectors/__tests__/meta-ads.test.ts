@@ -739,3 +739,57 @@ describe("getAtivoPorNomeConjunto / getAtivoPorNomeAnuncio — usam effective_st
     expect(result.get("Não Existe")).toBe(false);
   });
 });
+
+// Correção 2026-11-06 (bug real "os criativos sumiram" em produção): getAtivoPorNomeConjunto/
+// Anuncio e getStatusPorNomeConjunto/Anuncio (badge cosmético) e getFotosPorNomeConjunto/Anuncio
+// (foto) reaproveitam o MESMO registro de cache (meta-ads-adsets-raw / meta-ads-anuncios-raw), mas
+// cada um agora tolera uma janela de frescor diferente — "ativo" (gateia se a linha aparece ou
+// não na tabela) não pode esperar as 12h que servem bem pra foto/badge, só cosméticos. Os dois
+// testes abaixo provam a independência das duas janelas sobre o MESMO registro de cache: 20min de
+// idade já é stale pro "ativo" (10min), mas ainda fresco pro "status"/foto (12h).
+describe("TTL do cache da lista crua é decoupled entre 'ativo' (gateia visibilidade) e 'status'/foto (cosmético)", () => {
+  beforeEach(() => {
+    findUnique.mockReset();
+    upsert.mockReset();
+    vi.stubGlobal("fetch", vi.fn());
+    process.env.META_AD_ACCOUNT_ID = "123";
+    process.env.META_ACCESS_TOKEN = "token-fake";
+  });
+
+  it("getAtivoPorNomeConjunto: cache de 20min (stale pro seu próprio TTL de 10min) é descartado — busca de novo na API, mesmo esse mesmo registro ainda valendo pra foto/badge (12h)", async () => {
+    const vinteMinAtras = new Date(Date.now() - 20 * 60 * 1000);
+    findUnique.mockResolvedValue({
+      data: [{ id: "adset-1", name: "Conjunto X", status: "ACTIVE", effective_status: "PAUSED" }],
+      updatedAt: vinteMinAtras,
+    });
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    // Resposta fresca da API: o conjunto foi reativado depois do cache de 20min atrás.
+    fetchMock.mockResolvedValue({
+      json: () =>
+        Promise.resolve({
+          data: [{ id: "adset-1", name: "Conjunto X", status: "ACTIVE", effective_status: "ACTIVE" }],
+        }),
+    });
+
+    const { getAtivoPorNomeConjunto } = await import("../meta-ads");
+    const result = await getAtivoPorNomeConjunto(mockPrisma(), ["Conjunto X"]);
+
+    expect(fetchMock).toHaveBeenCalled(); // refez a busca — não confiou no cache de 20min
+    expect(result.get("Conjunto X")).toBe(true); // refletiu o dado FRESCO (reativado), não o stale (PAUSED)
+  });
+
+  it("getStatusPorNomeConjunto: o MESMO cache de 20min ainda é tratado como fresco (dentro das 12h do uso cosmético) — não bate a API de novo", async () => {
+    const vinteMinAtras = new Date(Date.now() - 20 * 60 * 1000);
+    findUnique.mockResolvedValue({
+      data: [{ id: "adset-1", name: "Conjunto X", status: "ACTIVE", effective_status: "PAUSED" }],
+      updatedAt: vinteMinAtras,
+    });
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+
+    const { getStatusPorNomeConjunto } = await import("../meta-ads");
+    const result = await getStatusPorNomeConjunto(mockPrisma(), ["Conjunto X"]);
+
+    expect(fetchMock).not.toHaveBeenCalled(); // 20min < 12h -> usou o cache, não bateu na API
+    expect(result.get("Conjunto X")).toBe(true); // `status` (não effective_status) do cache: ACTIVE
+  });
+});

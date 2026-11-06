@@ -117,9 +117,23 @@ async function fetchAdSets(): Promise<MetaAdSet[]> {
 // uma vez só, as duas funções reaproveitam o mesmo dado.
 const ADSETS_CACHE_LABEL = "meta-ads-adsets-raw";
 
-async function fetchAdSetsCached(prisma: PrismaClient): Promise<MetaAdSet[]> {
+// Correção 2026-11-06 (bug real em produção, "os criativos sumiram" na Central Black Friday logo
+// depois do deploy que fez o status ATIVO/PAUSADO passar de selo cosmético pra FILTRO que decide
+// se a linha aparece ou não — ver campanhasAtivasPorGasto em black-friday/campanhas-ativas.ts).
+// `maxAgeMs` deixou de vir fixo em FOTOS_MAX_AGE_HORAS pra virar parâmetro: quem só quer status
+// pra MOSTRAR um selo (getStatusPorNomeConjunto/Anuncio, usado pela Analytics do Site) ou buscar
+// foto (getFotosPorNomeConjunto/Anuncio) tolera uma lista com até 12h — cosmético, campanha raras
+// vezes muda de status de um load pro outro. Mas quem usa o MESMO dado pra decidir se uma linha
+// inteira aparece ou desaparece (getAtivoPorNomeConjunto/Anuncio, ver ATIVO_MAX_AGE_MS abaixo) não
+// pode aceitar 12h de atraso durante a janela de preparação da Black Friday, quando o Rodrigo liga
+// e desliga conjunto/anúncio no próprio Meta Ads Manager várias vezes por dia — um cache de 12h
+// nessa hora faz a tabela mentir "sumiu" (ou "ainda ativo") por até 12h depois de uma mudança real.
+// O registro de cache continua ÚNICO e COMPARTILHADO (mesmo clientLabel) entre os dois usos —
+// quando a chamada mais exigente (ativo, 10min) força um refetch, o registro novo também deixa
+// foto/badge mais frescos de brinde, nunca gera uma 2ª chamada à API do Meta à toa.
+async function fetchAdSetsCached(prisma: PrismaClient, maxAgeMs: number): Promise<MetaAdSet[]> {
   const cached = await prisma.priceCatalogCache.findUnique({ where: { clientLabel: ADSETS_CACHE_LABEL } });
-  const isFresh = cached != null && Date.now() - cached.updatedAt.getTime() < FOTOS_MAX_AGE_HORAS * 60 * 60 * 1000;
+  const isFresh = cached != null && Date.now() - cached.updatedAt.getTime() < maxAgeMs;
   if (isFresh) return (cached!.data as unknown as MetaAdSet[]) ?? [];
 
   const fresh = await fetchAdSets();
@@ -135,7 +149,7 @@ async function fetchAdSetsCached(prisma: PrismaClient): Promise<MetaAdSet[]> {
 // 2026-09-28. "status" aqui é o do CONJUNTO em si (ACTIVE/PAUSED/...), independente de ter tido
 // gasto no período do insight (um conjunto pausado hoje pode ter gastado a semana toda).
 export async function getStatusPorNomeConjunto(prisma: PrismaClient, nomesConjuntos: string[]): Promise<Map<string, boolean>> {
-  const adsets = await fetchAdSetsCached(prisma);
+  const adsets = await fetchAdSetsCached(prisma, FOTOS_MAX_AGE_HORAS * 60 * 60 * 1000);
   // Correção 2026-11-05: antes era `new Map(adsets.map(a => [a.name, ...]))` — se dois conjuntos
   // (ids diferentes) tiverem o mesmo nome, o Map sobrescrevia o status do primeiro com o do
   // segundo. Agora: ativo se QUALQUER um dos conjuntos com esse nome estiver ACTIVE (reflete a
@@ -145,7 +159,7 @@ export async function getStatusPorNomeConjunto(prisma: PrismaClient, nomesConjun
 }
 
 export async function getStatusPorNomeAnuncio(prisma: PrismaClient, nomesAnuncios: string[]): Promise<Map<string, boolean>> {
-  const ads = await fetchTodosAnunciosCached(prisma);
+  const ads = await fetchTodosAnunciosCached(prisma, FOTOS_MAX_AGE_HORAS * 60 * 60 * 1000);
   // Mesma correção 2026-11-05 de getStatusPorNomeConjunto acima — antes pegava só o status do
   // PRIMEIRO anúncio daquele nome (`if (!porNome.has(...))`), podia reportar "pausado" com outro
   // anúncio do mesmo nome ativo de verdade. Agora: ativo se qualquer um dos ids com esse nome
@@ -170,8 +184,13 @@ export function efetivamenteAtivo(effectiveStatus: string | undefined): boolean 
 // MESMA lista crua já cacheada por fetchAdSetsCached (também usada por getStatusPorNomeConjunto/
 // getFotosPorNomeConjunto) — nenhuma chamada nova à API do Meta, só mais um campo no `fields` já
 // pedido em fetchAdSets.
+// TTL próprio (10min), bem mais curto que o FOTOS_MAX_AGE_HORAS (12h) da lista crua compartilhada
+// — ver comentário completo em fetchAdSetsCached acima sobre por que essas duas leituras não podem
+// usar a mesma janela de frescor.
+const ATIVO_MAX_AGE_MS = 10 * 60 * 1000;
+
 export async function getAtivoPorNomeConjunto(prisma: PrismaClient, nomesConjuntos: string[]): Promise<Map<string, boolean>> {
-  const adsets = await fetchAdSetsCached(prisma);
+  const adsets = await fetchAdSetsCached(prisma, ATIVO_MAX_AGE_MS);
   const porNome = agruparPorNome(adsets);
   return new Map(nomesConjuntos.map((n) => [n, (porNome.get(n) ?? []).some((a) => efetivamenteAtivo(a.effective_status))]));
 }
@@ -180,7 +199,7 @@ export async function getAtivoPorNomeConjunto(prisma: PrismaClient, nomesConjunt
 // chama indiretamente via getFotosPorNomeAnuncio (ver black-friday/page.tsx), e fetchTodosAnuncios
 // já busca `effective_status` como campo (ver comentário em fetchTodosAnuncios mais abaixo).
 export async function getAtivoPorNomeAnuncio(prisma: PrismaClient, nomesAnuncios: string[]): Promise<Map<string, boolean>> {
-  const ads = await fetchTodosAnunciosCached(prisma);
+  const ads = await fetchTodosAnunciosCached(prisma, ATIVO_MAX_AGE_MS);
   const porNome = agruparPorNome(ads);
   return new Map(nomesAnuncios.map((n) => [n, (porNome.get(n) ?? []).some((a) => efetivamenteAtivo(a.effective_status))]));
 }
@@ -224,7 +243,7 @@ export async function getFotosPorNomeConjunto(
     return new Map(nomesConjuntos.map((n) => [n, cachedData[n] ?? []]));
   }
 
-  const adsets = await fetchAdSetsCached(prisma);
+  const adsets = await fetchAdSetsCached(prisma, FOTOS_MAX_AGE_HORAS * 60 * 60 * 1000);
   // Correção 2026-11-05: `.find()` pegava só o PRIMEIRO conjunto com esse nome — se existisse um
   // segundo conjunto (id diferente) com o mesmo nome, as fotos dele nunca apareciam, mesmo tendo
   // criativo de verdade disponível. Agora busca fotos de TODOS os conjuntos com esse nome e junta
@@ -474,9 +493,9 @@ async function fetchCreativesPorIds(ids: string[]): Promise<Map<string, string>>
 // chamavam fetchTodosAnuncios() cada uma por conta própria.
 const ANUNCIOS_CACHE_LABEL = "meta-ads-anuncios-raw";
 
-async function fetchTodosAnunciosCached(prisma: PrismaClient): Promise<MetaAd[]> {
+async function fetchTodosAnunciosCached(prisma: PrismaClient, maxAgeMs: number): Promise<MetaAd[]> {
   const cached = await prisma.priceCatalogCache.findUnique({ where: { clientLabel: ANUNCIOS_CACHE_LABEL } });
-  const isFresh = cached != null && Date.now() - cached.updatedAt.getTime() < FOTOS_MAX_AGE_HORAS * 60 * 60 * 1000;
+  const isFresh = cached != null && Date.now() - cached.updatedAt.getTime() < maxAgeMs;
   if (isFresh) return (cached!.data as unknown as MetaAd[]) ?? [];
 
   const fresh = await fetchTodosAnuncios();
@@ -509,7 +528,7 @@ export async function getFotosPorNomeAnuncio(
   // (`if (!idPorNome.has(a.name))`) — se dois anúncios reais (ids diferentes) tivessem o mesmo
   // nome, a foto do segundo nunca era buscada nem mostrada. Agora `idsPorNome` guarda TODOS os
   // ids de cada nome, e a foto final é a união das fotos de todos eles.
-  const ads = await fetchTodosAnunciosCached(prisma);
+  const ads = await fetchTodosAnunciosCached(prisma, FOTOS_MAX_AGE_HORAS * 60 * 60 * 1000);
   const idsPorNome = agruparPorNome(ads);
   const nomesParaBuscar = isFresh ? faltando : nomesAnuncios;
   const idsParaBuscar = nomesParaBuscar.flatMap((n) => (idsPorNome.get(n) ?? []).map((a) => a.id));
