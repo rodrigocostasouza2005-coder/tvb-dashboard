@@ -14,6 +14,7 @@ import { prisma } from "@/lib/prisma";
 import { saleWhere, returnWhere, netByReturns, type DashboardFilters } from "./core";
 import { getSalesByGrupoProduto, getReturnsByGrupoProduto } from "./vendas";
 import { getEcommerceStoreId } from "./cac";
+import { getVarejoPriceMap } from "./estoque";
 import { getInsightsPorConjunto } from "@/lib/connectors/meta-ads";
 import { todayBrasiliaStr } from "@/lib/filters";
 
@@ -446,4 +447,154 @@ export async function getVendasPorFaixaDesconto(filters: DashboardFilters): Prom
   const liquido = netByReturns(vendas, devolucoes);
 
   return montarVendasPorFaixaDesconto(liquido, precosPorProduto, faixasReais);
+}
+
+// ===== Top 20 produtos por SKU, com desconto REAL (preço de referência vs. preço efetivo vendido) =====
+//
+// Painel complementar ao de "Por faixa de desconto real" acima — aquele agrega por grupo+produto
+// contra o desconto CADASTRADO manualmente na planilha de BF (PrecoBlackFriday.desconto, grain
+// grupo+produto). Este aqui é um ranking dos TOP 20 produtos individuais por SKU (Sale.cod =
+// IdGradeProduto, a mesma chave usada por StockSnapshot.cod — grão de grade/tamanho/cor real, não
+// "produto" genérico) com um desconto CALCULADO, não cadastrado:
+//   % desconto = (precoReferencia - precoEfetivoVendido) / precoReferencia × 100
+// onde precoEfetivoVendido = receita líquida do SKU no período / unidades líquidas vendidas.
+// Nunca lê PrecoBlackFriday aqui — é um número diferente (desconto de campanha cadastrado à mão),
+// pra um painel diferente (esse, FaixaDescontoRow, já existe e continua intocado).
+//
+// Fonte do preço de referência (2026-11-06, confirmado com o Rodrigo): hoje usa o catálogo de
+// preços do DAPIC em cache (PriceCatalogCache, mantido pelo sync — ver connectors/tabela-preco.ts)
+// via getVarejoPriceMap() (estoque.ts, já usado pelo valor de venda estimado da aba Estoque
+// Atual) — pega a "Tabela varejo" por cod, a mesma noção de "preço cheio" que a aba de estoque já
+// usa. Rodrigo avisou que pretende trocar essa fonte por uma tabela de preço dedicada no futuro
+// ("hoje em dia sim, já já vai ter outra tabela de preço") — por isso a troca fica isolada: só
+// getVarejoPriceMap (ou o que vier a substituí-la) precisa mudar; getTop20ProdutosComDesconto e
+// montarTop20ProdutosComDesconto abaixo não sabem nem precisam saber de onde o preço vem, só
+// recebem um Map<cod, precoReferencia> já pronto.
+export type Top20ProdutoDesconto = {
+  cod: string;
+  grupo: string;
+  produto: string;
+  tamanho: string | null;
+  cor: string | null;
+  unitsSold: number;
+  revenue: number;
+  // null = preço de referência não encontrado no catálogo (SKU novo, sem tabela varejo cadastrada
+  // etc) — nunca 0, nunca um preço inventado.
+  precoReferencia: number | null;
+  // null só quando unitsSold <= 0 (não deveria ocorrer pós-filtro de venda líquida positiva, mas
+  // nunca divide por zero).
+  precoEfetivo: number | null;
+  // null quando precoReferencia é null/<=0 ou precoEfetivo é null — nunca fabrica uma % com dado
+  // que falta, nunca mostra 0% como se fosse desconto zero real.
+  descontoPct: number | null;
+  // participação deste SKU na receita líquida TOTAL do período filtrado (não só na soma dos top
+  // 20) — reaproveita o mesmo total que a Visão Geral já mostra (getResumoBlackFriday.faturamento
+  // passado pelo chamador), pra nunca divergir do que o Rodrigo já vê no topo da página.
+  participacaoFaturamentoPct: number | null;
+};
+
+// Função PURA (sem Prisma) — recebe a venda líquida já agregada por SKU (netByReturns) e o mapa
+// de preço de referência por cod, e monta o ranking. Testável sem banco, ver
+// __tests__/blackFriday.test.ts.
+export function montarTop20ProdutosComDesconto(
+  liquido: {
+    cod: string;
+    grupo: string;
+    produto: string;
+    tamanho: string | null;
+    cor: string | null;
+    unitsSold: number;
+    revenue: number;
+  }[],
+  precoReferenciaPorCod: Map<string, number>,
+  faturamentoTotalPeriodo: number,
+  ordenarPor: "revenue" | "unidades" = "revenue",
+  limit = 20
+): Top20ProdutoDesconto[] {
+  return liquido
+    .map((v) => {
+      const precoReferencia = precoReferenciaPorCod.get(v.cod) ?? null;
+      const precoEfetivo = v.unitsSold > 0 ? v.revenue / v.unitsSold : null;
+      const descontoPct =
+        precoReferencia != null && precoReferencia > 0 && precoEfetivo != null
+          ? ((precoReferencia - precoEfetivo) / precoReferencia) * 100
+          : null;
+      const participacaoFaturamentoPct =
+        faturamentoTotalPeriodo > 0 ? (v.revenue / faturamentoTotalPeriodo) * 100 : null;
+      return {
+        cod: v.cod,
+        grupo: v.grupo,
+        produto: v.produto,
+        tamanho: v.tamanho,
+        cor: v.cor,
+        unitsSold: v.unitsSold,
+        revenue: v.revenue,
+        precoReferencia,
+        precoEfetivo,
+        descontoPct,
+        participacaoFaturamentoPct,
+      } satisfies Top20ProdutoDesconto;
+    })
+    .sort((a, b) => (ordenarPor === "unidades" ? b.unitsSold - a.unitsSold : b.revenue - a.revenue))
+    .slice(0, limit);
+}
+
+// Venda líquida por SKU (Sale.cod) — grão diferente de getSalesByGrupoProduto (grupo+produto):
+// aqui cada linha é um cod/grade real (inclui tamanho/cor), por isso entram também no groupBy
+// pra virem prontos sem precisar de um 2º round-trip pra "representante" de cada cod.
+async function getSalesBySku(filters: DashboardFilters) {
+  const rows = await prisma.sale.groupBy({
+    by: ["cod", "grupo", "produto", "tamanho", "cor"],
+    where: saleWhere(filters),
+    _sum: { quantidade: true, valorTotalLiquido: true },
+  });
+  return rows.map((r) => ({
+    key: r.cod,
+    cod: r.cod,
+    grupo: r.grupo,
+    produto: r.produto,
+    tamanho: r.tamanho,
+    cor: r.cor,
+    unitsSold: r._sum.quantidade ?? 0,
+    revenue: r._sum.valorTotalLiquido ?? 0,
+  }));
+}
+
+// Devolução por SKU — só por cod (não precisa de grupo/produto/tamanho/cor aqui, netByReturns só
+// usa `key` pra casar com a venda e descontar unidades/valor).
+async function getReturnsBySku(filters: DashboardFilters) {
+  const rows = await prisma.return.groupBy({
+    by: ["cod"],
+    where: returnWhere(filters),
+    _sum: { quantidade: true, valorTotal: true },
+  });
+  return rows.map((r) => ({
+    key: r.cod,
+    unitsReturned: r._sum.quantidade ?? 0,
+    value: r._sum.valorTotal ?? 0,
+  }));
+}
+
+// faturamentoTotalPeriodo: SEMPRE vem de fora (o chamador já tem getResumoBlackFriday(filtros)
+// calculado pra Visão Geral da página — ver page.tsx) — esta função nunca recalcula esse total
+// sozinha, pra nunca divergir do número que o Rodrigo já vê no topo da tela.
+export async function getTop20ProdutosComDesconto(
+  filters: DashboardFilters,
+  faturamentoTotalPeriodo: number,
+  options?: { ordenarPor?: "revenue" | "unidades"; limit?: number }
+): Promise<Top20ProdutoDesconto[]> {
+  const [vendas, devolucoes, precoReferenciaPorCod] = await Promise.all([
+    getSalesBySku(filters),
+    getReturnsBySku(filters),
+    getVarejoPriceMap(),
+  ]);
+  const liquido = netByReturns(vendas, devolucoes);
+
+  return montarTop20ProdutosComDesconto(
+    liquido,
+    precoReferenciaPorCod,
+    faturamentoTotalPeriodo,
+    options?.ordenarPor ?? "revenue",
+    options?.limit ?? 20
+  );
 }
