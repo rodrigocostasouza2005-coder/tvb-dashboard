@@ -4,6 +4,15 @@ import { AnuncioFotoCell } from "./anuncio-foto";
 
 export type CampanhaRow = { nome: string } & MetaInsight;
 
+// Decide cor do ponto + rótulo do selo a partir do Map de status. Extraída como função pura (em
+// vez de inline no JSX) pra dar pra testar sem renderizar o componente — este repo não tem
+// jsdom/testing-library configurado (ver vitest.config.ts, environment: "node"), então a
+// convenção aqui é sempre extrair a decisão em si, não o componente inteiro. Nome ausente do Map
+// (`undefined`) cai no mesmo visual de "Pausado" — mesma regra de antes do PR #58.
+export function badgeAtivoPausado(ativo: boolean | undefined): { cor: string; label: string } {
+  return ativo ? { cor: "var(--status-good)", label: "Ativo" } : { cor: "var(--text-muted)", label: "Pausado" };
+}
+
 // Item 3 da missão: investimento/impressões/cliques/CTR/CPC/CPM/conversões/ROAS — dois níveis
 // (conjunto e anúncio), NUNCA misturados na mesma tabela. Esse componente só sabe desenhar UMA
 // tabela; a página chama ele duas vezes com dados diferentes.
@@ -12,23 +21,29 @@ export type CampanhaRow = { nome: string } & MetaInsight;
 // "Por anúncio" — "Por conjunto" continua sem essa prop, então a coluna de imagem nem existe lá
 // (9 colunas de sempre). Com `fotos`, vira 10 colunas.
 //
-// Não existe mais prop de "ativo"/"pausado" aqui: até 2026-11-06 a tabela mostrava AMBOS e só
-// sinalizava com um selo (ponto + rótulo). Pedido do Rodrigo em 2026-11-06 ("eu quero que só
-// mostre os criativos ativos") trocou isso por um FILTRO — a página (ver campanhasAtivasPorGasto
-// em ./campanhas-ativas.ts) já remove pausado de `rows` antes de chegar aqui, então toda linha
-// renderizada É ativa por construção; um selo por linha ficaria redundante (sempre "Ativo"). Se o
-// status do Meta estiver indisponível (rate limit/token vencido), a página mostra um aviso ACIMA
-// das duas tabelas (não um selo por linha) e cai pra mostrar tudo sem filtrar nesse caso só.
+// `ativoPorNome` (pedido do Rodrigo em 2026-11-06 — "saber quais criativos estão rodando de
+// verdade", e de novo no mesmo dia depois de uma rodada curta filtrando pausado pra fora: "volta
+// o selo, mas mostrando todos") é OPCIONAL e, diferente de `fotos`, se aplica tanto a "Por
+// conjunto" quanto "Por anúncio": campanha/conjunto pausado existe tanto quanto anúncio pausado.
+// Vem do effective_status real do Meta (ver getAtivoPorNomeConjunto/getAtivoPorNomeAnuncio em
+// connectors/meta-ads.ts), não do `status` isolado — por isso é um Map calculado pela página, não
+// um campo de MetaInsight (que só sabe de gasto/métrica, nunca viu adset/campanha pai). `rows` NÃO
+// é filtrado por status — mostra ativo e pausado juntos, só sinalizados; o selo (ponto + rótulo)
+// usa o mesmo padrão visual já em analytics-site/investimento-meta-ads.tsx, embutido na coluna do
+// nome (não uma coluna nova), pra não desalinhar as duas tabelas quando só uma delas tiver o dado
+// disponível (`ativoPorNome` undefined — ver statusAtivoIndisponivel em ./campanhas-ativas.ts).
 export function CampanhaTable({
   titulo,
   nomeColuna,
   rows,
   fotos,
+  ativoPorNome,
 }: {
   titulo: string;
   nomeColuna: string;
   rows: CampanhaRow[];
   fotos?: Map<string, string[]>;
+  ativoPorNome?: Map<string, boolean>;
 }) {
   const colCount = fotos ? 10 : 9;
   return (
@@ -59,7 +74,20 @@ export function CampanhaTable({
                   </td>
                 )}
                 <td className="max-w-[220px] truncate px-4 py-2 font-medium" title={r.nome}>
-                  {r.nome}
+                  {ativoPorNome ? (
+                    (() => {
+                      const { cor, label } = badgeAtivoPausado(ativoPorNome.get(r.nome));
+                      return (
+                        <span className="inline-flex items-center gap-1.5">
+                          <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: cor }} />
+                          <span className="truncate">{r.nome}</span>
+                          <span className="shrink-0 text-xs font-normal text-[var(--text-muted)]">{label}</span>
+                        </span>
+                      );
+                    })()
+                  ) : (
+                    r.nome
+                  )}
                 </td>
                 <td className="px-4 py-2 text-right tabular-nums">{formatBRL(r.gasto)}</td>
                 <td className="px-4 py-2 text-right tabular-nums">{formatNumber(r.impressoes)}</td>
