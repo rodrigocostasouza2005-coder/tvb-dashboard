@@ -280,6 +280,25 @@ model ApiToken {
   updatedAt DateTime @updatedAt
 }
 
+// Confiança do vínculo Sale/Gift -> ClienteCadastro (ver clienteCadastroId). Dois valores de
+// propósito, nomeados pelo MECANISMO real usado em cada caso, não por "CPF" — investigação de
+// 2026-11-06 confirmou que a API do DAPIC nunca expõe CPF/CNPJ diretamente em /vendaspdv nem em
+// /faturas (lista ou detalhe), só em /clientes (DapicCliente.CpfCnpj, já capturado em
+// ClienteCadastro.cpfCnpj). O que /faturas EXPÕE (e não era capturado até aqui) é "IdCliente" —
+// o Id do cliente no MESMO espaço de /clientes, ou seja, já é o identificador que bate 1:1 com
+// ClienteCadastro.dapicId. É mais forte que casar por CPF (nenhuma ambiguidade de formatação,
+// nenhuma comparação de string) — por isso ID, não CPF, é o nível "confiável" aqui.
+//   ID   = resolvido por um identificador direto do DAPIC (fatura.IdCliente -> ClienteCadastro.dapicId)
+//          — sem comparação de texto, mesmo nível de confiança que uma foreign key de verdade.
+//   NOME = resolvido por nome normalizado (trim+upper) contra ClienteCadastro.nome — a MESMA
+//          limitação que já existia antes desta migration (homônimo, variação de digitação),
+//          mantida só pra não descartar histórico/linhas de /vendaspdv (loja física), que a API
+//          nunca expõe com nenhum identificador de cliente, só o nome em texto livre.
+enum ClienteCadastroMatchConfianca {
+  ID
+  NOME
+}
+
 // Registros ficam denormalizados (grupo/cor/tamanho/coleção direto na linha) porque é assim
 // que o DAPIC/Power BI já exportam — evita um modelo de produto separado que a fonte não tem.
 model Sale {
@@ -325,13 +344,26 @@ model Sale {
   status            String    @default("Fechada")
   canceladaEm       DateTime?
 
-  store Store @relation(fields: [storeId], references: [id])
+  // Vínculo real com ClienteCadastro — substitui o casamento só-por-nome na hora de identificar
+  // "é o mesmo cliente" (ver ClienteCadastroMatchConfianca acima pro porquê de ID vs NOME, e
+  // cac.ts/montarMotivoLimitacao pra limitação que isso resolve). Nullable e HONESTO: nem toda
+  // venda resolve (sem clienteNome, ou nome sem nenhum ClienteCadastro correspondente) — nunca
+  // inventamos um vínculo só pra preencher a coluna. Resolvido no sync pra venda NOVA (syncFaturas
+  // via IdCliente = ID; syncVendas via nome = NOME) e via scripts/clientes/backfill-clientecadastro-link.ts
+  // pra histórico anterior a esta migration (só NOME disponível, API não guarda IdCliente
+  // retroativamente sem reconsultar o DAPIC por venda, fora do escopo deste backfill).
+  clienteCadastroId           String?
+  clienteCadastroMatchConfianca ClienteCadastroMatchConfianca?
+
+  store           Store            @relation(fields: [storeId], references: [id])
+  clienteCadastro ClienteCadastro? @relation(fields: [clienteCadastroId], references: [id])
 
   @@unique([storeId, dapicVendaId, itemIndex])
   @@index([storeId, saleDate])
   @@index([grupo])
   @@index([marca])
   @@index([status])
+  @@index([clienteCadastroId])
   // saleDate isolado: saleWhere() sempre filtra por data, mas quando storeIds é undefined
   // (sell-through "empresa toda" em getStockVsSales/resolveSellThrough) o índice composto
   // [storeId, saleDate] acima não ajuda — vira scan sem índice. tabelaPreco e colecao: filtrados
@@ -367,6 +399,14 @@ model StockSnapshot {
   @@index([grupo])
 }
 
+// Avaliado (missão Sale<->ClienteCadastro, 2026-11-06) se Return merece o mesmo clienteCadastroId
+// de Sale, pra simetria. Decisão: NÃO agora, fica como follow-up. Return nem tem clienteNome hoje
+// (nunca teve) — dar a ela um vínculo de cliente direto seria inventar uma dimensão nova, não
+// "aplicar o mesmo padrão" a algo que já existe. Return já carrega (storeId, dapicVendaId) — a
+// MESMA chave de idempotência da Sale que originou a devolução — então quem for construir o
+// "líquido de devolução" do CAC/novo-vs-recorrente (a tarefa futura que isto desbloqueia) consegue
+// chegar no clienteCadastroId da venda original via JOIN por (storeId, dapicVendaId) em vez de
+// duplicar a coluna aqui. Revisitar só se essa futura tarefa achar que o JOIN não é suficiente.
 model Return {
   id           String   @id @default(cuid())
   storeId      String
@@ -544,6 +584,8 @@ model ClienteCadastro {
   // outra pessoa), a Sale antiga não é reescrita — comparar contra esse campo (sempre atualizado a
   // cada sync) é como a divergência é detectada em getVendedorDivergente().
   vendedorResponsavel String?
+
+  sales Sale[]
 
   @@index([nome])
 }
