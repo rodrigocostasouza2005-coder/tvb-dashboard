@@ -1,4 +1,26 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+const storeFindFirst = vi.fn();
+const saleAggregate = vi.fn();
+const saleGroupBy = vi.fn();
+const returnAggregate = vi.fn();
+const getInsightsPorConjunto = vi.fn();
+
+vi.mock("@/lib/prisma", () => ({
+  prisma: {
+    store: { findFirst: (...a: unknown[]) => storeFindFirst(...a) },
+    sale: {
+      aggregate: (...a: unknown[]) => saleAggregate(...a),
+      groupBy: (...a: unknown[]) => saleGroupBy(...a),
+    },
+    return: { aggregate: (...a: unknown[]) => returnAggregate(...a) },
+  },
+}));
+
+vi.mock("@/lib/connectors/meta-ads", () => ({
+  getInsightsPorConjunto: (...a: unknown[]) => getInsightsPorConjunto(...a),
+}));
+
 import {
   montarVendasPorCanal,
   montarProdutosBlackFriday,
@@ -6,6 +28,7 @@ import {
   periodoAnterior,
   ORDEM_CANAL,
   excluirAtacado,
+  getResumoBlackFriday,
 } from "../black-friday";
 import type { DashboardFilters } from "../core";
 
@@ -245,5 +268,83 @@ describe("periodoAnterior", () => {
     const duracaoAnterior = anterior.to.getTime() - anterior.from.getTime();
     expect(duracaoAnterior).toBe(duracaoAtual);
     expect(anterior.to.getTime()).toBeLessThan(from.getTime());
+  });
+});
+
+// Pedido do Rodrigo (2026-11-06): ROAS era "blended" — receita de TODAS as lojas (menos Atacado)
+// sobre o gasto total do Meta Ads, não um ROAS de canal de verdade. Corrigido pra usar só a
+// receita líquida do e-commerce (Store.code="CD") no numerador.
+describe("getResumoBlackFriday — roas usa só a receita do e-commerce (CD), não a receita blended de todas as lojas", () => {
+  const CD_STORE_ID = "store-cd-123";
+  const FROM = new Date("2026-11-01T00:00:00-03:00");
+  const TO = new Date("2026-11-30T23:59:59-03:00");
+
+  beforeEach(() => {
+    storeFindFirst.mockReset();
+    saleAggregate.mockReset();
+    saleGroupBy.mockReset();
+    returnAggregate.mockReset();
+    getInsightsPorConjunto.mockReset();
+    storeFindFirst.mockResolvedValue({ id: CD_STORE_ID });
+    saleGroupBy.mockResolvedValue([{ storeId: CD_STORE_ID, dapicVendaId: 1 }]);
+    returnAggregate.mockResolvedValue({ _sum: { valorTotal: 0, quantidade: 0 } });
+    getInsightsPorConjunto.mockResolvedValue(
+      new Map([
+        [
+          "Conjunto A",
+          { gasto: 1000, impressoes: 0, alcance: 0, cliques: 0, ctrPct: 0, cpc: 0, cpm: 0, compras: 0, roas: null, custoPorCompra: null },
+        ],
+      ])
+    );
+  });
+
+  it("empresa inteira (menos Atacado) fatura 10000, mas só o CD fatura 4000 -> roas = 4000/1000, nunca 10000/1000", async () => {
+    saleAggregate.mockImplementation(
+      async ({ where }: { where: { storeId?: { in: string[] } } }) => {
+        if (where.storeId?.in?.includes(CD_STORE_ID)) {
+          return { _sum: { valorTotalLiquido: 4000, quantidade: 40 } };
+        }
+        return { _sum: { valorTotalLiquido: 10000, quantidade: 100 } }; // blended: todas as lojas
+      }
+    );
+
+    const r = await getResumoBlackFriday({ from: FROM, to: TO });
+
+    // faturamento/pecas continuam company-wide (minus Atacado) — só roas mudou de definição.
+    expect(r.faturamento).toBe(10000);
+    expect(r.investimentoMidia).toBe(1000);
+    expect(r.roas).toBe(4); // 4000 (só CD) / 1000, nunca 10000/1000=10
+  });
+
+  it("permissão do usuário já exclui a loja CD inteiramente -> roas vira null, nunca calcula com dado que ele não pode ver", async () => {
+    saleAggregate.mockResolvedValue({ _sum: { valorTotalLiquido: 2000, quantidade: 20 } });
+
+    const r = await getResumoBlackFriday({ from: FROM, to: TO, storeIds: ["store-leblon"] });
+
+    expect(r.roas).toBeNull();
+    // Nunca chega a consultar Sale restrito ao storeId do CD (permissão não inclui essa loja).
+    for (const call of saleAggregate.mock.calls) {
+      const where = call[0].where as { storeId?: { in: string[] } };
+      expect(where.storeId?.in?.includes(CD_STORE_ID)).not.toBe(true);
+    }
+  });
+
+  it("loja CD não existe no ambiente (sync de lojas nunca rodou) -> roas vira null, nunca quebra nem mostra 0", async () => {
+    storeFindFirst.mockResolvedValue(null);
+    saleAggregate.mockResolvedValue({ _sum: { valorTotalLiquido: 5000, quantidade: 50 } });
+
+    const r = await getResumoBlackFriday({ from: FROM, to: TO });
+
+    expect(r.roas).toBeNull();
+  });
+
+  it("investimento indisponível (Meta Ads falhou) -> roas null mesmo com faturamento do CD disponível", async () => {
+    saleAggregate.mockResolvedValue({ _sum: { valorTotalLiquido: 5000, quantidade: 50 } });
+    getInsightsPorConjunto.mockRejectedValue(new Error("META_AD_ACCOUNT_ID / META_ACCESS_TOKEN não configurados"));
+
+    const r = await getResumoBlackFriday({ from: FROM, to: TO });
+
+    expect(r.investimentoIndisponivel).toBe(true);
+    expect(r.roas).toBeNull();
   });
 });

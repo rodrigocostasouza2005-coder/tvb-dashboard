@@ -11,16 +11,28 @@ export type CampanhaRow = { nome: string } & MetaInsight;
 // `fotos` (refinamento visual da missão 2026-11-05) é OPCIONAL e só a página passa pra chamada
 // "Por anúncio" — "Por conjunto" continua sem essa prop, então a coluna de imagem nem existe lá
 // (9 colunas de sempre). Com `fotos`, vira 10 colunas.
+//
+// `ativoPorNome` (pedido do Rodrigo em 2026-11-06 — "saber quais criativos estão rodando de
+// verdade") é OPCIONAL e, diferente de `fotos`, se aplica tanto a "Por conjunto" quanto "Por
+// anúncio": campanha/conjunto pausado existe tanto quanto anúncio pausado. Vem do
+// effective_status real do Meta (ver getAtivoPorNomeConjunto/getAtivoPorNomeAnuncio em
+// connectors/meta-ads.ts), não do `status` isolado — por isso é um Map calculado pela página, não
+// um campo de MetaInsight (que só sabe de gasto/métrica, nunca viu adset/campanha pai). Mesmo selo
+// visual (ponto + rótulo) já usado em analytics-site/investimento-meta-ads.tsx, pra manter a
+// mesma linguagem visual de "ativo/pausado" no Radar — embutido na coluna do nome, não uma coluna
+// nova, pra não desalinhar as duas tabelas quando só uma delas tiver o dado disponível.
 export function CampanhaTable({
   titulo,
   nomeColuna,
   rows,
   fotos,
+  ativoPorNome,
 }: {
   titulo: string;
   nomeColuna: string;
   rows: CampanhaRow[];
   fotos?: Map<string, string[]>;
+  ativoPorNome?: Map<string, boolean>;
 }) {
   const colCount = fotos ? 10 : 9;
   return (
@@ -50,7 +62,23 @@ export function CampanhaTable({
                     <AnuncioFotoCell fotos={fotos.get(r.nome) ?? []} nome={r.nome} />
                   </td>
                 )}
-                <td className="max-w-[220px] truncate px-4 py-2 font-medium" title={r.nome}>{r.nome}</td>
+                <td className="max-w-[220px] truncate px-4 py-2 font-medium" title={r.nome}>
+                  {ativoPorNome ? (
+                    <span className="inline-flex items-center gap-1.5">
+                      <span
+                        aria-hidden
+                        className="h-1.5 w-1.5 shrink-0 rounded-full"
+                        style={{ backgroundColor: ativoPorNome.get(r.nome) ? "var(--status-good)" : "var(--text-muted)" }}
+                      />
+                      <span className="truncate">{r.nome}</span>
+                      <span className="shrink-0 text-xs font-normal text-[var(--text-muted)]">
+                        {ativoPorNome.get(r.nome) ? "Ativo" : "Pausado"}
+                      </span>
+                    </span>
+                  ) : (
+                    r.nome
+                  )}
+                </td>
                 <td className="px-4 py-2 text-right tabular-nums">{formatBRL(r.gasto)}</td>
                 <td className="px-4 py-2 text-right tabular-nums">{formatNumber(r.impressoes)}</td>
                 <td className="px-4 py-2 text-right tabular-nums">{formatNumber(r.cliques)}</td>

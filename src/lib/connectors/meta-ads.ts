@@ -68,7 +68,15 @@ function agruparPorNome<T extends { name: string }>(itens: T[]): Map<string, T[]
   return grupos;
 }
 
-type MetaAdSet = { id: string; name: string; status: string };
+// effective_status (2026-11-06, pedido do Rodrigo — Central Black Friday): `status` é só o
+// toggle da PRÓPRIA entidade; `effective_status` já contabiliza esse toggle MAIS o estado do
+// adset/campanha pai (um anúncio pode ter status=ACTIVE mas effective_status=CAMPAIGN_PAUSED ou
+// ADSET_PAUSED quando o pai está pausado — nesse caso ele não está rodando de verdade, mesmo com
+// o toggle próprio "ligado"). getStatusPorNomeConjunto/getStatusPorNomeAnuncio abaixo (usadas pela
+// Analytics do Site) ainda decidem por `status` sozinho — não alterado aqui, fora do escopo desta
+// correção (que é só a Central Black Friday) — ver efetivamenteAtivo/getAtivoPorNomeConjunto/
+// getAtivoPorNomeAnuncio pra quem precisa do estado REAL.
+type MetaAdSet = { id: string; name: string; status: string; effective_status?: string };
 // thumbnail_url cobre a esmagadora maioria dos criativos (confirmado em 2026-10-13: amostra de 40
 // anúncios ativos/pausados da conta real, incluindo vídeo/Reels/carrossel dinâmico, 0 sem
 // thumbnail_url) — o Meta já renderiza essa miniatura server-side pra praticamente todo tipo de
@@ -83,7 +91,7 @@ type MetaCreative = {
   };
   asset_feed_spec?: { images?: { url?: string }[] };
 };
-type MetaAd = { id: string; name: string; status: string; creative?: MetaCreative };
+type MetaAd = { id: string; name: string; status: string; effective_status?: string; creative?: MetaCreative };
 
 export function extrairFoto(creative: MetaCreative | undefined): string | undefined {
   if (!creative) return undefined;
@@ -98,7 +106,7 @@ export function extrairFoto(creative: MetaCreative | undefined): string | undefi
 
 async function fetchAdSets(): Promise<MetaAdSet[]> {
   const { accountId, accessToken } = getCredentials();
-  const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/act_${accountId}/adsets?fields=id,name,status&limit=200&access_token=${accessToken}`;
+  const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/act_${accountId}/adsets?fields=id,name,status,effective_status&limit=200&access_token=${accessToken}`;
   return fetchAllPages<MetaAdSet>(url);
 }
 
@@ -144,6 +152,37 @@ export async function getStatusPorNomeAnuncio(prisma: PrismaClient, nomesAnuncio
   // estiver ACTIVE.
   const porNome = agruparPorNome(ads);
   return new Map(nomesAnuncios.map((n) => [n, (porNome.get(n) ?? []).some((a) => a.status === "ACTIVE")]));
+}
+
+// Pura — determina se uma entidade do Meta Ads está REALMENTE ativa agora. `effective_status` já
+// contabiliza o toggle próprio da entidade E o estado do adset/campanha pai: um anúncio pode ter
+// status=ACTIVE (toggle próprio "ligado") mas effective_status=CAMPAIGN_PAUSED ou ADSET_PAUSED
+// quando o pai está pausado — nesse caso ele não está rodando de verdade, e usar só `status`
+// mentiria "ativo". Só ACTIVE conta como rodando agora; qualquer outro valor (PAUSED,
+// CAMPAIGN_PAUSED, ADSET_PAUSED, WITH_ISSUES, DELETED, ARCHIVED, ...) é "não está no ar" — a UI
+// só precisa do booleano simples, não de cada estado possível do Graph API.
+export function efetivamenteAtivo(effectiveStatus: string | undefined): boolean {
+  return effectiveStatus === "ACTIVE";
+}
+
+// "Ativo" de verdade (effective_status) pra tabela de Campanhas da Central Black Friday — pedido
+// do Rodrigo em 2026-11-06 ("saber quais criativos estão rodando de verdade"). Reaproveita a
+// MESMA lista crua já cacheada por fetchAdSetsCached (também usada por getStatusPorNomeConjunto/
+// getFotosPorNomeConjunto) — nenhuma chamada nova à API do Meta, só mais um campo no `fields` já
+// pedido em fetchAdSets.
+export async function getAtivoPorNomeConjunto(prisma: PrismaClient, nomesConjuntos: string[]): Promise<Map<string, boolean>> {
+  const adsets = await fetchAdSetsCached(prisma);
+  const porNome = agruparPorNome(adsets);
+  return new Map(nomesConjuntos.map((n) => [n, (porNome.get(n) ?? []).some((a) => efetivamenteAtivo(a.effective_status))]));
+}
+
+// Mesma ideia, nível anúncio — reaproveita fetchTodosAnunciosCached, que a Central Black Friday já
+// chama indiretamente via getFotosPorNomeAnuncio (ver black-friday/page.tsx), e fetchTodosAnuncios
+// já busca `effective_status` como campo (ver comentário em fetchTodosAnuncios mais abaixo).
+export async function getAtivoPorNomeAnuncio(prisma: PrismaClient, nomesAnuncios: string[]): Promise<Map<string, boolean>> {
+  const ads = await fetchTodosAnunciosCached(prisma);
+  const porNome = agruparPorNome(ads);
+  return new Map(nomesAnuncios.map((n) => [n, (porNome.get(n) ?? []).some((a) => efetivamenteAtivo(a.effective_status))]));
 }
 
 // Prioriza anúncios ACTIVE do conjunto ("o que tá no ar agora") — só cai pra PAUSED (com foto)
@@ -396,7 +435,7 @@ async function fetchTodosAnuncios(): Promise<MetaAd[]> {
   // chamada (cache-miss). Nada do que já é ARCHIVED/DELETED interessa aqui (status/foto exibidos
   // na tela só fazem sentido pra anúncio que ainda existe de verdade).
   const status = encodeURIComponent(JSON.stringify(["ACTIVE", "PAUSED"]));
-  const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/act_${accountId}/ads?fields=id,name,status&effective_status=${status}&limit=100&access_token=${accessToken}`;
+  const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/act_${accountId}/ads?fields=id,name,status,effective_status&effective_status=${status}&limit=100&access_token=${accessToken}`;
   return fetchAllPages<MetaAd>(url);
 }
 

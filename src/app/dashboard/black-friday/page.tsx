@@ -14,7 +14,14 @@ import {
   getVendasPorFaixaDesconto,
   type DashboardFilters,
 } from "@/lib/metrics";
-import { getInsightsPorConjunto, getInsightsPorAnuncio, getFotosPorNomeAnuncio, type MetaInsight } from "@/lib/connectors/meta-ads";
+import {
+  getInsightsPorConjunto,
+  getInsightsPorAnuncio,
+  getFotosPorNomeAnuncio,
+  getAtivoPorNomeConjunto,
+  getAtivoPorNomeAnuncio,
+  type MetaInsight,
+} from "@/lib/connectors/meta-ads";
 import { prisma } from "@/lib/prisma";
 import { getSyncStatusDetalhado } from "@/lib/sync-runner";
 import { todayBrasiliaStr } from "@/lib/filters";
@@ -90,21 +97,38 @@ export default async function BlackFridayPage({
   // Map vazio por padrão: se a busca de foto falhar, a tabela continua de pé com o fallback
   // visual local (AnuncioFotoCell), nunca com imagem quebrada nem linha vazia.
   let fotosPorAnuncio = new Map<string, string[]>();
+  // "Ativo"/"Pausado" por effective_status real (pedido do Rodrigo em 2026-11-06) — undefined por
+  // padrão (não Map vazio): CampanhaTable só desenha o selo quando a prop existe; Map vazio faria
+  // TODO conjunto/anúncio aparecer como "Pausado" por engano caso essa busca falhe, o que seria
+  // pior do que simplesmente não mostrar o selo. Aplica-se às DUAS tabelas (conjunto e anúncio) —
+  // diferente de fotos, que é só da tabela "Por anúncio".
+  let ativoPorConjunto: Map<string, boolean> | undefined;
+  let ativoPorAnuncio: Map<string, boolean> | undefined;
   const metaAdsPromise = Promise.all([
     getInsightsPorConjunto({ since: todayBrasiliaStr(filters.from), until: todayBrasiliaStr(filters.to) }),
     getInsightsPorAnuncio({ since: todayBrasiliaStr(filters.from), until: todayBrasiliaStr(filters.to) }),
   ])
     .then(async (r) => {
       [insightsPorConjunto, insightsPorAnuncio] = r;
-      // Só busca foto pros nomes que de fato vão aparecer na tabela (top 15 por gasto, mesmo
-      // corte de mapInsights abaixo) — mesmo padrão de analytics-site/page.tsx. Isolado em try
-      // próprio: erro buscando foto (rate limit, token vencido) não pode derrubar o investimento/
-      // CTR/ROAS que já carregaram certinho — só fica sem foto.
+      // Só busca foto/status pros nomes que de fato vão aparecer na tabela (top 15 por gasto,
+      // mesmo corte de mapInsights abaixo) — mesmo padrão de analytics-site/page.tsx. Isolado em
+      // try próprio: erro buscando foto/status (rate limit, token vencido) não pode derrubar o
+      // investimento/CTR/ROAS que já carregaram certinho — só fica sem foto/selo.
+      const nomesTopConjuntos = mapInsights(insightsPorConjunto, 15).map((row) => row.nome);
       const nomesTopAnuncios = mapInsights(insightsPorAnuncio, 15).map((row) => row.nome);
       try {
         fotosPorAnuncio = await getFotosPorNomeAnuncio(prisma, nomesTopAnuncios);
       } catch {
         // Sem foto agora — AnuncioFotoCell já trata Map vazio/sem entrada com fallback visual.
+      }
+      try {
+        [ativoPorConjunto, ativoPorAnuncio] = await Promise.all([
+          getAtivoPorNomeConjunto(prisma, nomesTopConjuntos),
+          getAtivoPorNomeAnuncio(prisma, nomesTopAnuncios),
+        ]);
+      } catch {
+        // Sem status agora — permanece undefined, CampanhaTable não desenha o selo (nunca mostra
+        // "Pausado" errado pra quem está rodando de verdade).
       }
     })
     .catch((e) => {
@@ -193,9 +217,9 @@ export default async function BlackFridayPage({
               value={resumo.investimentoIndisponivel ? "indisponível" : formatBRL(resumo.investimentoMidia)}
             />
             <StatTile
-              label="ROAS (receita total / mídia)"
+              label="ROAS (e-commerce)"
               value={resumo.roas != null ? resumo.roas.toFixed(2) : "—"}
-              subValue="Receita de TODAS as lojas sobre o gasto total do Meta Ads — não é por canal/campanha"
+              subValue="Receita líquida só do site (CD) sobre o gasto total do Meta Ads — não lojas físicas/Atacado"
             />
           </>
         )}
@@ -233,8 +257,8 @@ export default async function BlackFridayPage({
         </p>
       )}
       <section className="mb-10 flex flex-col gap-6">
-        <CampanhaTable titulo="Por conjunto de anúncios" nomeColuna="Conjunto" rows={campanhasPorConjunto} />
-        <CampanhaTable titulo="Por anúncio" nomeColuna="Anúncio" rows={campanhasPorAnuncio} fotos={fotosPorAnuncio} />
+        <CampanhaTable titulo="Por conjunto de anúncios" nomeColuna="Conjunto" rows={campanhasPorConjunto} ativoPorNome={ativoPorConjunto} />
+        <CampanhaTable titulo="Por anúncio" nomeColuna="Anúncio" rows={campanhasPorAnuncio} fotos={fotosPorAnuncio} ativoPorNome={ativoPorAnuncio} />
       </section>
 
       {/* ── Produtos ── */}
