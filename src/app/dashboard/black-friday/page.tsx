@@ -32,7 +32,7 @@ import { GetForm } from "../get-form";
 import { IndicatorChart } from "../indicadores/indicator-chart";
 import { CanalTable } from "./canal-table";
 import { CampanhaTable } from "./campanha-table";
-import { campanhasAtivasPorGasto, statusAtivoIndisponivel } from "./campanhas-ativas";
+import { mapInsights, statusAtivoIndisponivel } from "./campanhas-ativas";
 import { ProdutosTable } from "./produtos-table";
 import { FaixaDescontoTable } from "./faixa-desconto-table";
 import { FonteStatus } from "./fonte-status";
@@ -96,12 +96,14 @@ export default async function BlackFridayPage({
   // Map vazio por padrão: se a busca de foto falhar, a tabela continua de pé com o fallback
   // visual local (AnuncioFotoCell), nunca com imagem quebrada nem linha vazia.
   let fotosPorAnuncio = new Map<string, string[]>();
-  // Filtro "só ativos" por effective_status real (pedido do Rodrigo em 2026-11-06: "eu quero que
-  // só mostre os criativos ativos") — undefined por padrão (não Map vazio): significa "não
-  // consegui confirmar status agora" (rate limit/token vencido), e campanhasAtivasPorGasto (ver
-  // ./campanhas-ativas.ts) trata isso como fail-OPEN (mostra tudo, sem filtrar), nunca como "trata
-  // tudo como pausado" — Map vazio faria o filtro remover TODO conjunto/anúncio por engano.
-  // Aplica-se às DUAS tabelas (conjunto e anúncio) — diferente de fotos, que é só da "Por anúncio".
+  // "Ativo"/"Pausado" por effective_status real (pedido original do Rodrigo em 2026-11-06, PR
+  // #56). PR #58 tinha trocado isso por um FILTRO (removia pausado da tabela) e tirado o selo —
+  // Rodrigo testou de novo e pediu pra voltar: "o selo Ativo/Pausado, mas mostrando todos" (não
+  // dava pra comparar ativo vs. pausado sem ver os dois lado a lado). undefined por padrão (não
+  // Map vazio): CampanhaTable só desenha o selo quando a prop existe de verdade; Map vazio faria
+  // TODO conjunto/anúncio aparecer como "Pausado" por engano caso essa busca falhe — pior do que
+  // simplesmente não mostrar o selo nesse caso (ver statusAtivoIndisponivel). Aplica-se às DUAS
+  // tabelas (conjunto e anúncio) — diferente de fotos, que é só da "Por anúncio".
   let ativoPorConjunto: Map<string, boolean> | undefined;
   let ativoPorAnuncio: Map<string, boolean> | undefined;
   const metaAdsPromise = Promise.all([
@@ -110,29 +112,27 @@ export default async function BlackFridayPage({
   ])
     .then(async (r) => {
       [insightsPorConjunto, insightsPorAnuncio] = r;
-      // Status ANTES do corte de top-15 por gasto — pra TODO nome com gasto no período, não só
-      // pro top-15 (ver campanhasAtivasPorGasto: filtrar status DEPOIS do corte deixaria passar
-      // menos de 15 linhas quando um top-15 estiver pausado, e nunca daria chance a um ativo de
-      // verdade que ficou no #16+). Sem custo extra de chamada à API do Meta: getAtivoPorNomeX só
-      // filtra em memória uma lista já cacheada da conta inteira (ver meta-ads.ts), então pedir
-      // status pra mais nomes não bate a API mais vezes.
-      try {
-        [ativoPorConjunto, ativoPorAnuncio] = await Promise.all([
-          getAtivoPorNomeConjunto(prisma, [...insightsPorConjunto.keys()]),
-          getAtivoPorNomeAnuncio(prisma, [...insightsPorAnuncio.keys()]),
-        ]);
-      } catch {
-        // Sem status agora — permanece undefined; campanhasAtivasPorGasto falha aberto (mostra
-        // tudo sem filtrar) e a página acima da tabela avisa o Rodrigo disso.
-      }
-      // Fotos só pros nomes que de fato vão aparecer na tabela — agora calculado DEPOIS do filtro
-      // de ativo (top-15 por gasto ENTRE os ativos, não top-15 por gasto bruto), senão a busca de
-      // foto gastaria tempo com um nome que nem vai aparecer (pausado, cortado da tabela).
-      const nomesTopAnuncios = campanhasAtivasPorGasto(insightsPorAnuncio, ativoPorAnuncio, 15).map((row) => row.nome);
+      // Só busca foto/status pros nomes que de fato vão aparecer na tabela (top-15 por gasto
+      // bruto, mesmo corte de mapInsights abaixo — status não participa dessa seleção, só vira
+      // selo depois) — mesmo padrão de analytics-site/page.tsx. Isolado em try próprio: erro
+      // buscando foto/status (rate limit, token vencido) não pode derrubar o investimento/CTR/ROAS
+      // que já carregaram certinho — só fica sem foto/selo.
+      const nomesTopConjuntos = mapInsights(insightsPorConjunto, 15).map((row) => row.nome);
+      const nomesTopAnuncios = mapInsights(insightsPorAnuncio, 15).map((row) => row.nome);
       try {
         fotosPorAnuncio = await getFotosPorNomeAnuncio(prisma, nomesTopAnuncios);
       } catch {
         // Sem foto agora — AnuncioFotoCell já trata Map vazio/sem entrada com fallback visual.
+      }
+      try {
+        [ativoPorConjunto, ativoPorAnuncio] = await Promise.all([
+          getAtivoPorNomeConjunto(prisma, nomesTopConjuntos),
+          getAtivoPorNomeAnuncio(prisma, nomesTopAnuncios),
+        ]);
+      } catch {
+        // Sem status agora — permanece undefined, CampanhaTable não desenha o selo (nunca mostra
+        // "Pausado" errado pra quem está rodando de verdade); statusAtivoIndisponivel avisa o
+        // Rodrigo que só o SELO ficou indisponível, a tabela em si está normal.
       }
     })
     .catch((e) => {
@@ -164,11 +164,11 @@ export default async function BlackFridayPage({
       : null;
 
   const salesChartData = salesByDay.map((s) => ({ day: s.day, receita: s.revenue }));
-  const campanhasPorConjunto = campanhasAtivasPorGasto(insightsPorConjunto, ativoPorConjunto, 15);
-  const campanhasPorAnuncio = campanhasAtivasPorGasto(insightsPorAnuncio, ativoPorAnuncio, 15);
-  // Aviso de fail-open: status indisponível (não erro geral do Meta Ads, que já tem a própria
-  // mensagem acima) significa que as tabelas abaixo não garantem "só ativos" — podem incluir
-  // pausado, sem como saber qual. Melhor avisar do que fingir que o filtro rodou.
+  const campanhasPorConjunto = mapInsights(insightsPorConjunto, 15);
+  const campanhasPorAnuncio = mapInsights(insightsPorAnuncio, 15);
+  // Aviso: status indisponível (não erro geral do Meta Ads, que já tem a própria mensagem acima)
+  // significa só que o SELO Ativo/Pausado por linha não pôde ser confirmado agora — a tabela em
+  // si (seleção por gasto, investimento, CTR, ROAS...) está normal e completa, nada foi escondido.
   const mostrarAvisoStatusIndisponivel = statusAtivoIndisponivel(erroMetaAds, ativoPorConjunto, ativoPorAnuncio);
 
   return (
@@ -260,8 +260,8 @@ export default async function BlackFridayPage({
       {/* ── Campanhas ── */}
       <h2 className="mb-3 text-base font-semibold">Campanhas (Meta Ads)</h2>
       <p className="mb-3 text-xs text-[var(--text-muted)]">
-        Mostra só os conjuntos/anúncios com status ativo de verdade agora (effective_status do
-        Meta) — pausados são removidos da lista, não só sinalizados.
+        Top 15 por investimento em cada nível, ativos e pausados juntos — o selo ao lado do nome
+        mostra o status real (effective_status do Meta) agora, pra comparar os dois.
       </p>
       {erroMetaAds && (
         <p className="mb-4 rounded-lg border border-[var(--status-critical)] bg-[var(--surface-1)] p-3 text-xs text-[var(--text-secondary)]">
@@ -270,12 +270,12 @@ export default async function BlackFridayPage({
       )}
       {mostrarAvisoStatusIndisponivel && (
         <p className="mb-4 rounded-lg border border-[var(--status-warning)] bg-[var(--surface-1)] p-3 text-xs text-[var(--text-secondary)]">
-          Não foi possível confirmar quais estão ativos agora — mostrando todos os conjuntos/anúncios com gasto no período, inclusive os pausados.
+          Não foi possível confirmar o status ativo/pausado agora — as tabelas abaixo estão completas normalmente, só sem o selo por linha até a próxima atualização.
         </p>
       )}
       <section className="mb-10 flex flex-col gap-6">
-        <CampanhaTable titulo="Por conjunto de anúncios" nomeColuna="Conjunto" rows={campanhasPorConjunto} />
-        <CampanhaTable titulo="Por anúncio" nomeColuna="Anúncio" rows={campanhasPorAnuncio} fotos={fotosPorAnuncio} />
+        <CampanhaTable titulo="Por conjunto de anúncios" nomeColuna="Conjunto" rows={campanhasPorConjunto} ativoPorNome={ativoPorConjunto} />
+        <CampanhaTable titulo="Por anúncio" nomeColuna="Anúncio" rows={campanhasPorAnuncio} fotos={fotosPorAnuncio} ativoPorNome={ativoPorAnuncio} />
       </section>
 
       {/* ── Produtos ── */}

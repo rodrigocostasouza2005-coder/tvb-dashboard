@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { campanhasAtivasPorGasto, statusAtivoIndisponivel } from "../campanhas-ativas";
+import { mapInsights, statusAtivoIndisponivel } from "../campanhas-ativas";
 import type { MetaInsight } from "@/lib/connectors/meta-ads";
 
 function insight(gasto: number): MetaInsight {
@@ -17,97 +17,63 @@ function insight(gasto: number): MetaInsight {
   };
 }
 
-describe("campanhasAtivasPorGasto — filtra por status ANTES de cortar pro top-N por gasto", () => {
-  it("exclui um pausado que estava no top-N por gasto e dá vaga pro ativo que ficou de fora do corte bruto", () => {
-    // 3 entradas, limit=2. Por gasto bruto o top-2 seria A (100) e B (90) — mas B está pausado.
-    // O correto é A (ativo) + C (ativo, 80) — nunca B, mesmo B tendo gasto maior que C.
+// 2026-11-06, segunda rodada: Rodrigo testou o filtro "só ativos" (PR #58) e voltou atrás —
+// "os criativos voltaram mas eu não consigo saber quais estão ativos ou não". Escolheu
+// explicitamente: selo Ativo/Pausado de volta, mostrando TODOS (PR #56). A seleção de linhas
+// (mapInsights) volta a ser pura por gasto, sem nenhuma participação de status ativo/pausado —
+// status nunca mais tira ninguém da tabela, só vira selo (ver campanha-table.tsx).
+describe("mapInsights — seleção de linhas é pura por gasto, status não participa do corte", () => {
+  it("ordena por gasto desc e corta no limit, incluindo pausado (sem conceito de status aqui)", () => {
     const map = new Map<string, MetaInsight>([
-      ["A - ativo top gasto", insight(100)],
-      ["B - pausado top gasto", insight(90)],
-      ["C - ativo gasto menor", insight(80)],
-    ]);
-    const ativoPorNome = new Map<string, boolean>([
-      ["A - ativo top gasto", true],
-      ["B - pausado top gasto", false],
-      ["C - ativo gasto menor", true],
+      ["A - maior gasto", insight(100)],
+      ["B - segundo gasto", insight(90)],
+      ["C - terceiro gasto", insight(80)],
     ]);
 
-    const resultado = campanhasAtivasPorGasto(map, ativoPorNome, 2);
+    const resultado = mapInsights(map, 2);
 
-    expect(resultado.map((r) => r.nome)).toEqual(["A - ativo top gasto", "C - ativo gasto menor"]);
+    expect(resultado.map((r) => r.nome)).toEqual(["A - maior gasto", "B - segundo gasto"]);
   });
 
-  it("um ativo fora do corte bruto top-N (ex.: #16 por gasto) aparece quando os de cima estão pausados", () => {
-    // limit=1: por gasto bruto só apareceria o #1 (pausado). Com o filtro correto, o #2 (ativo)
-    // é quem deve aparecer — nunca uma tabela vazia só porque o maior gasto está pausado.
+  it("um pausado que gastou mais continua no topo, igual um ativo — mapInsights não sabe de status", () => {
+    // Antes do PR #58, essa era a regra: puro gasto. Depois de reverter o PR #58, é a regra de
+    // novo. "Pausado"/"Ativo" não existe neste tipo (MetaInsight), só entra depois via
+    // ativoPorNome em CampanhaTable — por isso esse teste nem usa a palavra "status".
     const map = new Map<string, MetaInsight>([
-      ["Maior gasto, pausado", insight(500)],
-      ["Segundo gasto, ativo", insight(10)],
-    ]);
-    const ativoPorNome = new Map<string, boolean>([
-      ["Maior gasto, pausado", false],
-      ["Segundo gasto, ativo", true],
+      ["Maior gasto", insight(500)],
+      ["Segundo gasto", insight(10)],
     ]);
 
-    const resultado = campanhasAtivasPorGasto(map, ativoPorNome, 1);
+    const resultado = mapInsights(map, 1);
 
-    expect(resultado.map((r) => r.nome)).toEqual(["Segundo gasto, ativo"]);
+    expect(resultado.map((r) => r.nome)).toEqual(["Maior gasto"]);
   });
 
-  it("nome com gasto que não aparece no Map de status (ausência) é tratado como não-ativo, não incluído", () => {
-    const map = new Map<string, MetaInsight>([["Órfão, sem status", insight(100)]]);
-    const ativoPorNome = new Map<string, boolean>(); // nome nem presente
-
-    const resultado = campanhasAtivasPorGasto(map, ativoPorNome, 15);
-
-    expect(resultado).toEqual([]);
-  });
-
-  it("continua removendo gasto zero (regra antiga preservada)", () => {
+  it("remove gasto zero", () => {
     const map = new Map<string, MetaInsight>([
       ["Sem gasto", insight(0)],
       ["Com gasto", insight(10)],
     ]);
-    const ativoPorNome = new Map<string, boolean>([
-      ["Sem gasto", true],
-      ["Com gasto", true],
-    ]);
 
-    const resultado = campanhasAtivasPorGasto(map, ativoPorNome, 15);
+    const resultado = mapInsights(map, 15);
 
     expect(resultado.map((r) => r.nome)).toEqual(["Com gasto"]);
   });
 
-  it("fail-open: ativoPorNome undefined (status indisponível) não filtra nada, mantém o top-N por gasto normal, inclusive pausado", () => {
-    const map = new Map<string, MetaInsight>([
-      ["Ativo", insight(100)],
-      ["Pausado, mas status indisponível agora", insight(90)],
-    ]);
-
-    const resultado = campanhasAtivasPorGasto(map, undefined, 2);
-
-    expect(resultado.map((r) => r.nome)).toEqual(["Ativo", "Pausado, mas status indisponível agora"]);
-  });
-
-  it("respeita o limit sobre o conjunto já filtrado (ordenado por gasto desc)", () => {
+  it("respeita o limit sobre o conjunto ordenado por gasto desc", () => {
     const map = new Map<string, MetaInsight>([
       ["1", insight(10)],
       ["2", insight(30)],
       ["3", insight(20)],
     ]);
-    const ativoPorNome = new Map<string, boolean>([
-      ["1", true],
-      ["2", true],
-      ["3", true],
-    ]);
 
-    const resultado = campanhasAtivasPorGasto(map, ativoPorNome, 2);
+    const resultado = mapInsights(map, 2);
 
     expect(resultado.map((r) => r.nome)).toEqual(["2", "3"]);
   });
 });
 
-describe("statusAtivoIndisponivel — quando mostrar o aviso de fail-open acima das tabelas", () => {
+describe("statusAtivoIndisponivel — quando avisar que o SELO ativo/pausado está indisponível", () => {
   const mapVazio = new Map<string, boolean>();
 
   it("mostra aviso quando o Meta Ads respondeu (sem erro geral) mas a busca de status pro conjunto falhou", () => {
