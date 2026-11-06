@@ -25,6 +25,7 @@ import {
   montarVendasPorCanal,
   montarProdutosBlackFriday,
   montarVendasPorFaixaDesconto,
+  montarTop20ProdutosComDesconto,
   periodoAnterior,
   ORDEM_CANAL,
   excluirAtacado,
@@ -386,5 +387,112 @@ describe("getResumoBlackFriday — roas usa só a receita do e-commerce (CD), n�
 
     expect(r.investimentoIndisponivel).toBe(true);
     expect(r.roas).toBeNull();
+  });
+});
+
+// Painel "Top 20 produtos (SKU) com desconto real" (pedido do Rodrigo, 2026-11-06) — diferente do
+// painel de faixa de desconto (que usa PrecoBlackFriday, grain grupo+produto): aqui o desconto é
+// CALCULADO por SKU (precoReferencia vs. precoEfetivo = receita/unidades), nunca lido de
+// PrecoBlackFriday.
+describe("montarTop20ProdutosComDesconto", () => {
+  it("calcula % desconto a partir do preço de referência vs. preço efetivo vendido", () => {
+    const liquido = [
+      { cod: "100", grupo: "Camisa", produto: "Camisa Classic", tamanho: "M", cor: "Azul", unitsSold: 10, revenue: 2000 }, // efetivo 200
+    ];
+    const precos = new Map([["100", 250]]); // referência 250 -> desconto de (250-200)/250 = 20%
+    const rows = montarTop20ProdutosComDesconto(liquido, precos, 100000);
+    expect(rows[0].precoEfetivo).toBe(200);
+    expect(rows[0].precoReferencia).toBe(250);
+    expect(rows[0].descontoPct).toBeCloseTo(20);
+  });
+
+  it("SKU sem preço de referência no catálogo mostra desconto indisponível (null), nunca fabrica 0%", () => {
+    const liquido = [
+      { cod: "999", grupo: "Camisa", produto: "Camisa Nova", tamanho: null, cor: null, unitsSold: 5, revenue: 500 },
+    ];
+    const precos = new Map<string, number>(); // sem nenhum preço cadastrado
+    const rows = montarTop20ProdutosComDesconto(liquido, precos, 10000);
+    expect(rows[0].precoReferencia).toBeNull();
+    expect(rows[0].descontoPct).toBeNull();
+    // precoEfetivo continua calculável (não depende do catálogo) — só o desconto fica indisponível.
+    expect(rows[0].precoEfetivo).toBe(100);
+  });
+
+  it("nunca divide por zero: unitsSold 0 vira precoEfetivo e descontoPct null, não Infinity/NaN", () => {
+    const liquido = [
+      { cod: "100", grupo: "Camisa", produto: "Camisa Classic", tamanho: "M", cor: "Azul", unitsSold: 0, revenue: 0 },
+    ];
+    const precos = new Map([["100", 250]]);
+    const rows = montarTop20ProdutosComDesconto(liquido, precos, 10000);
+    expect(rows[0].precoEfetivo).toBeNull();
+    expect(rows[0].descontoPct).toBeNull();
+  });
+
+  it("preço de referência zero ou negativo (dado corrompido) também vira desconto indisponível, nunca divide por zero", () => {
+    const liquido = [
+      { cod: "100", grupo: "Camisa", produto: "Camisa Classic", tamanho: "M", cor: "Azul", unitsSold: 5, revenue: 500 },
+    ];
+    const precos = new Map([["100", 0]]);
+    const rows = montarTop20ProdutosComDesconto(liquido, precos, 10000);
+    expect(rows[0].precoReferencia).toBe(0);
+    expect(rows[0].descontoPct).toBeNull();
+  });
+
+  it("ordena por receita líquida decrescente por padrão", () => {
+    const liquido = [
+      { cod: "A", grupo: "G", produto: "Baixa receita", tamanho: null, cor: null, unitsSold: 100, revenue: 100 },
+      { cod: "B", grupo: "G", produto: "Alta receita", tamanho: null, cor: null, unitsSold: 1, revenue: 900 },
+      { cod: "C", grupo: "G", produto: "Média receita", tamanho: null, cor: null, unitsSold: 10, revenue: 500 },
+    ];
+    const rows = montarTop20ProdutosComDesconto(liquido, new Map(), 1500);
+    expect(rows.map((r) => r.produto)).toEqual(["Alta receita", "Média receita", "Baixa receita"]);
+  });
+
+  it("alterando ordenarPor pra 'unidades', ordena por unidades vendidas decrescente", () => {
+    const liquido = [
+      { cod: "A", grupo: "G", produto: "Poucas unidades", tamanho: null, cor: null, unitsSold: 1, revenue: 900 },
+      { cod: "B", grupo: "G", produto: "Muitas unidades", tamanho: null, cor: null, unitsSold: 100, revenue: 100 },
+    ];
+    const rows = montarTop20ProdutosComDesconto(liquido, new Map(), 1000, "unidades");
+    expect(rows.map((r) => r.produto)).toEqual(["Muitas unidades", "Poucas unidades"]);
+  });
+
+  it("corta no limite (padrão 20), mantendo só os top N por receita", () => {
+    const liquido = Array.from({ length: 25 }, (_, i) => ({
+      cod: `cod-${i}`,
+      grupo: "G",
+      produto: `Produto ${i}`,
+      tamanho: null,
+      cor: null,
+      unitsSold: 1,
+      revenue: 25 - i, // produto 0 tem a maior receita
+    }));
+    const rows = montarTop20ProdutosComDesconto(liquido, new Map(), 1000);
+    expect(rows).toHaveLength(20);
+    expect(rows[0].produto).toBe("Produto 0");
+  });
+
+  it("% de participação no faturamento usa o total do período passado pelo chamador, não recalcula sozinho", () => {
+    const liquido = [
+      { cod: "A", grupo: "G", produto: "P", tamanho: null, cor: null, unitsSold: 1, revenue: 250 },
+    ];
+    const rows = montarTop20ProdutosComDesconto(liquido, new Map(), 1000); // total do período = 1000
+    expect(rows[0].participacaoFaturamentoPct).toBeCloseTo(25); // 250/1000 = 25%
+  });
+
+  it("faturamento total do período zero/negativo -> participação null, nunca divide por zero", () => {
+    const liquido = [
+      { cod: "A", grupo: "G", produto: "P", tamanho: null, cor: null, unitsSold: 1, revenue: 250 },
+    ];
+    const rows = montarTop20ProdutosComDesconto(liquido, new Map(), 0);
+    expect(rows[0].participacaoFaturamentoPct).toBeNull();
+  });
+
+  it("preserva grupo/produto/tamanho/cor do SKU, pra tabela não precisar de outra consulta", () => {
+    const liquido = [
+      { cod: "100", grupo: "Camisa", produto: "Camisa Classic", tamanho: "M", cor: "Azul", unitsSold: 5, revenue: 500 },
+    ];
+    const rows = montarTop20ProdutosComDesconto(liquido, new Map(), 10000);
+    expect(rows[0]).toMatchObject({ cod: "100", grupo: "Camisa", produto: "Camisa Classic", tamanho: "M", cor: "Azul" });
   });
 });
