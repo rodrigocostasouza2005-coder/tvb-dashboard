@@ -828,3 +828,18 @@ model AtacadoProspectActivity {
 
   @@index([prospectId, createdAt])
 }
+
+// Override manual (temporário) do banner promocional de Black Friday — mesma convenção de
+// MapaComprasConfig/PromotionRulesConfig (linha única, id fixo "global"). As datas da janela
+// automática (2026-11-10 06:00 a 2026-12-01 06:00, horário de Brasília) são fixas no código
+// (black-friday-banner.ts), não ficam aqui: pedido do Rodrigo em 2026-11-05 foi explícito que
+// isso não é campo editável pelo admin. `modoManual` só serve pra FORÇAR o banner visível antes
+// da janela abrir ou escondido durante ela — null = respeita a janela automática. Sem linha
+// ainda = também respeita a automática (mesmo default de "nunca configurado" que os outros
+// singletons).
+model BlackFridayBannerConfig {
+  id              String   @id
+  modoManual      String?
+  updatedAt       DateTime @updatedAt
+  updatedByEmail  String?
+}
