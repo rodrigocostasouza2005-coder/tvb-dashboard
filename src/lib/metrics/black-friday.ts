@@ -762,16 +762,17 @@ export async function getVendasPorEstadoEcommerce(filters: DashboardFilters): Pr
 //     Friday.xlsx" importada pela PR #54/#55) — nunca mais calculado a partir de preço de
 //     referência vs. efetivo, nem lido do catálogo do DAPIC;
 // (3) nunca mostrar SKU/cod na saída.
-// Produto sem linha correspondente em PrecoBlackFriday mostra desconto/preços indisponíveis
-// (null) — mesma honestidade já estabelecida em getVendasPorFaixaDesconto, nunca inventa 0%.
+// Produto sem linha correspondente em PrecoBlackFriday mostra desconto indisponível (null) —
+// mesma honestidade já estabelecida em getVendasPorFaixaDesconto, nunca inventa 0%. Simplificado
+// em 2026-11-06 (2ª correção do mesmo dia): Rodrigo só quer unidades/faturamento/% desconto —
+// preço cheio/preço com desconto removidos (ninguém mais consome, não ficar carregando dado sem
+// uso).
 export type Top20ProdutoDesconto = {
   grupo: string;
   produto: string;
   unitsSold: number;
   revenue: number;
   // null = produto sem linha correspondente em PrecoBlackFriday — nunca 0, nunca inventado.
-  precoCheio: number | null;
-  precoComDesconto: number | null;
   descontoPct: number | null;
   // participação deste produto na receita líquida TOTAL do período filtrado (não só na soma dos
   // top 20) — reaproveita o mesmo total que a Visão Geral já mostra (getResumoBlackFriday.
@@ -780,18 +781,18 @@ export type Top20ProdutoDesconto = {
 };
 
 // Função PURA (sem Prisma) — recebe a venda líquida já agregada por grupo+produto (netByReturns)
-// e o mapa de preço/desconto cadastrado (PrecoBlackFriday) por grupo+produto, e monta o ranking.
-// Testável sem banco, ver __tests__/blackFriday.test.ts.
+// e o mapa de desconto cadastrado (PrecoBlackFriday, via getPrecosPorProduto) por grupo+produto,
+// e monta o ranking. Testável sem banco, ver __tests__/blackFriday.test.ts.
 export function montarTop20ProdutosComDesconto(
   liquido: { grupo: string; key: string; unitsSold: number; revenue: number }[],
-  precosCadastrados: Map<string, { precoCheio: number | null; desconto: number; precoComDesconto: number | null }>,
+  descontosCadastrados: Map<string, number>,
   faturamentoTotalPeriodo: number,
   ordenarPor: "revenue" | "unidades" = "revenue",
   limit = 20
 ): Top20ProdutoDesconto[] {
   return liquido
     .map((v) => {
-      const cadastro = precosCadastrados.get(`${v.grupo}::${v.key}`) ?? null;
+      const desconto = descontosCadastrados.get(`${v.grupo}::${v.key}`);
       const participacaoFaturamentoPct =
         faturamentoTotalPeriodo > 0 ? (v.revenue / faturamentoTotalPeriodo) * 100 : null;
       return {
@@ -799,34 +800,12 @@ export function montarTop20ProdutosComDesconto(
         produto: v.key,
         unitsSold: v.unitsSold,
         revenue: v.revenue,
-        precoCheio: cadastro?.precoCheio ?? null,
-        precoComDesconto: cadastro?.precoComDesconto ?? null,
-        descontoPct: cadastro ? cadastro.desconto * 100 : null,
+        descontoPct: desconto != null ? desconto * 100 : null,
         participacaoFaturamentoPct,
       } satisfies Top20ProdutoDesconto;
     })
     .sort((a, b) => (ordenarPor === "unidades" ? b.unitsSold - a.unitsSold : b.revenue - a.revenue))
     .slice(0, limit);
-}
-
-// Preço cheio/desconto/preço com desconto CADASTRADOS (PrecoBlackFriday), por grupo::produto —
-// mesma chave de getPrecosPorProduto (que só devolve o desconto; esta devolve a linha completa,
-// precisa pra mostrar precoCheio/precoComDesconto nesta tabela).
-async function getPrecosCadastradosPorProduto(): Promise<
-  Map<string, { precoCheio: number | null; desconto: number; precoComDesconto: number | null }>
-> {
-  const rows = await prisma.precoBlackFriday.findMany({
-    select: { grupo: true, produto: true, precoCheio: true, desconto: true, precoComDesconto: true },
-  });
-  const map = new Map<string, { precoCheio: number | null; desconto: number; precoComDesconto: number | null }>();
-  for (const r of rows) {
-    map.set(`${r.grupo}::${r.produto}`, {
-      precoCheio: r.precoCheio,
-      desconto: r.desconto,
-      precoComDesconto: r.precoComDesconto,
-    });
-  }
-  return map;
 }
 
 // faturamentoTotalPeriodo: SEMPRE vem de fora (o chamador já tem getResumoBlackFriday(filtros)
@@ -837,16 +816,16 @@ export async function getTop20ProdutosComDesconto(
   faturamentoTotalPeriodo: number,
   options?: { ordenarPor?: "revenue" | "unidades"; limit?: number }
 ): Promise<Top20ProdutoDesconto[]> {
-  const [vendas, devolucoes, precosCadastrados] = await Promise.all([
+  const [vendas, devolucoes, descontosCadastrados] = await Promise.all([
     getSalesByGrupoProduto(filters),
     getReturnsByGrupoProduto(filters),
-    getPrecosCadastradosPorProduto(),
+    getPrecosPorProduto(),
   ]);
   const liquido = netByReturns(vendas, devolucoes);
 
   return montarTop20ProdutosComDesconto(
     liquido,
-    precosCadastrados,
+    descontosCadastrados,
     faturamentoTotalPeriodo,
     options?.ordenarPor ?? "revenue",
     options?.limit ?? 20

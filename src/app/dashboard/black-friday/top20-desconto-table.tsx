@@ -4,10 +4,11 @@ import { useState } from "react";
 import type { Top20ProdutoDesconto } from "@/lib/metrics";
 import { formatBRL, formatNumber, formatPercent } from "@/lib/format";
 
-// Painel "Top 20 produtos com desconto real" (pedido do Rodrigo, 2026-11-06, corrigido no mesmo
-// dia depois de ver a 1ª versão em produção: "o top 20 produtos é produto, não tamanho" — era
-// agrupado por SKU, agora é por grupo+produto, sem mostrar código de SKU). Desconto/preço vêm do
-// que está CADASTRADO na planilha de BF (PrecoBlackFriday), nunca calculado.
+// Painel "Top 20 produtos com desconto real" (pedido do Rodrigo, 2026-11-06, corrigido 2x no
+// mesmo dia: 1ª vez "o top 20 produtos é produto, não tamanho" — era agrupado por SKU, virou
+// grupo+produto; 2ª vez simplificado pra só unidades/faturamento/% desconto — ele não quer ver
+// preço cheio/preço com desconto, só o essencial). Desconto vem do CADASTRADO na planilha de BF
+// (PrecoBlackFriday), nunca calculado.
 //
 // Toggle "ordenar por" é só client-side: reordena as mesmas 20 linhas já trazidas do servidor
 // (ordenadas por receita por padrão) — não busca um novo top-20-por-unidades no banco.
@@ -58,10 +59,7 @@ export function Top20DescontoTable({ rows, showFinancials }: { rows: Top20Produt
               <th className="px-4 py-2 font-medium">Produto</th>
               <th className="px-4 py-2 font-medium text-right">Unidades</th>
               {showFinancials && <th className="px-4 py-2 font-medium text-right">Faturamento</th>}
-              {showFinancials && <th className="px-4 py-2 font-medium text-right">Preço cheio</th>}
-              {showFinancials && <th className="px-4 py-2 font-medium text-right">Preço c/ desconto</th>}
               {showFinancials && <th className="px-4 py-2 font-medium text-right">% desconto</th>}
-              {showFinancials && <th className="px-4 py-2 font-medium text-right">% do faturamento</th>}
             </tr>
           </thead>
           <tbody>
@@ -75,38 +73,23 @@ export function Top20DescontoTable({ rows, showFinancials }: { rows: Top20Produt
                 <td className="px-4 py-2 text-right tabular-nums">{formatNumber(r.unitsSold)}</td>
                 {showFinancials && <td className="px-4 py-2 text-right tabular-nums">{formatBRL(r.revenue)}</td>}
                 {showFinancials && (
-                  <td className="px-4 py-2 text-right tabular-nums text-[var(--text-secondary)]">
-                    {r.precoCheio != null ? formatBRL(r.precoCheio) : "—"}
-                  </td>
-                )}
-                {showFinancials && (
-                  <td className="px-4 py-2 text-right tabular-nums text-[var(--text-secondary)]">
-                    {r.precoComDesconto != null ? formatBRL(r.precoComDesconto) : "—"}
-                  </td>
-                )}
-                {showFinancials && (
                   <td className="px-4 py-2 text-right tabular-nums">
                     {r.descontoPct != null ? (
                       <span className={r.descontoPct > 0 ? "text-[var(--status-warning)]" : "text-[var(--text-secondary)]"}>
                         {formatPercent(r.descontoPct)}
                       </span>
                     ) : (
-                      <span className="text-[var(--text-muted)]" title="Produto sem preço/desconto cadastrado na planilha de Black Friday">
+                      <span className="text-[var(--text-muted)]" title="Produto sem desconto cadastrado na planilha de Black Friday">
                         indisponível
                       </span>
                     )}
-                  </td>
-                )}
-                {showFinancials && (
-                  <td className="px-4 py-2 text-right tabular-nums text-[var(--text-secondary)]">
-                    {r.participacaoFaturamentoPct != null ? formatPercent(r.participacaoFaturamentoPct) : "—"}
                   </td>
                 )}
               </tr>
             ))}
             {ordenadas.length === 0 && (
               <tr>
-                <td colSpan={showFinancials ? 8 : 3} className="px-4 py-6 text-center text-[var(--text-muted)]">
+                <td colSpan={showFinancials ? 5 : 3} className="px-4 py-6 text-center text-[var(--text-muted)]">
                   Sem venda no período.
                 </td>
               </tr>
