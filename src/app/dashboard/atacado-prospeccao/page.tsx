@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { requireTabAccess } from "@/lib/tabs";
@@ -35,7 +34,7 @@ const STATUS: Record<string, string> = {
 export default async function AtacadoProspeccaoPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; grupo?: string; cidade?: string; uf?: string; erro?: string; criado?: string; importacao?: string; novos?: string; duplicados?: string; invalidos?: string; bruce?: string; revisao?: string; cadastro?: string; presenca?: string; qEstado?: string; qMunicipio?: string; qCapital?: string; qClasse?: string }>;
+  searchParams: Promise<{ status?: string; cidade?: string; uf?: string; erro?: string; criado?: string; importacao?: string; novos?: string; duplicados?: string; invalidos?: string; bruce?: string; revisao?: string; cadastro?: string; presenca?: string; qEstado?: string; qMunicipio?: string; qCapital?: string; qClasse?: string }>;
 }) {
   const user = await getSessionUser();
   if (!user) return null;
@@ -43,15 +42,12 @@ export default async function AtacadoProspeccaoPage({
 
   const params = await searchParams;
   const status = params.status && Object.hasOwn(STATUS, params.status) ? params.status : undefined;
-  const grupos = ["A", "B", "C", "D", "PENDENTE"];
-  const grupo = params.grupo && grupos.includes(params.grupo) ? params.grupo : undefined;
   const uf = params.uf && /^[A-Z]{2}$/.test(params.uf.toUpperCase()) ? params.uf.toUpperCase() : undefined;
   const cidade = params.cidade?.trim().slice(0, 100) || undefined;
   const cadastroValores = ["ATIVA", "SUSPENSA", "INAPTA", "BAIXADA", "NULA", "NAO_INFORMADA"];
   const cadastro = params.cadastro && cadastroValores.includes(params.cadastro) ? params.cadastro : undefined;
   const where = {
     ...(status ? { status } : {}),
-    ...(grupo ? { grupoComercial: grupo } : {}),
     ...(uf ? { estado: uf } : {}),
     ...(cidade ? { cidade: { contains: cidade, mode: "insensitive" as const } } : {}),
     ...(cadastro ? { situacaoCadastral: cadastro } : {}),
@@ -64,7 +60,7 @@ export default async function AtacadoProspeccaoPage({
   });
 
   // Filtros da seção "Qualificação B2B" — params próprios (qEstado/qMunicipio/qCapital/qClasse),
-  // nunca reaproveitando uf/cidade/grupo/status acima (aquilo filtra o pipeline manual legado).
+  // nunca reaproveitando uf/cidade/status acima (aquilo filtra o pipeline manual legado).
   const qEstado = params.qEstado && /^[A-Za-z]{2}$/.test(params.qEstado) ? params.qEstado.toUpperCase() : undefined;
   const qMunicipio = params.qMunicipio?.trim().slice(0, 100) || undefined;
   const qCapital: "capital" | "interior" | undefined = params.qCapital === "capital" || params.qCapital === "interior" ? params.qCapital : undefined;
@@ -79,16 +75,12 @@ export default async function AtacadoProspeccaoPage({
     listarMunicipiosDisponiveis(qEstado),
   ]);
 
-  const [total, novos, emPesquisa, qualificados, contatados, grupoA, grupoB, grupoC, grupoD, cidades] = await Promise.all([
+  const [total, novos, emPesquisa, qualificados, contatados, cidades] = await Promise.all([
     prisma.atacadoProspect.count(),
     prisma.atacadoProspect.count({ where: { status: "NOVO" } }),
     prisma.atacadoProspect.count({ where: { status: "EM_QUALIFICACAO" } }),
     prisma.atacadoProspect.count({ where: { status: "QUALIFICADO" } }),
     prisma.atacadoProspect.count({ where: { status: "CONTATADO" } }),
-    prisma.atacadoProspect.count({ where: { grupoComercial: "A" } }),
-    prisma.atacadoProspect.count({ where: { grupoComercial: "B" } }),
-    prisma.atacadoProspect.count({ where: { grupoComercial: "C" } }),
-    prisma.atacadoProspect.count({ where: { grupoComercial: "D" } }),
     prisma.atacadoProspect.findMany({ where: { estado: uf ?? "RJ" }, distinct: ["cidade"], select: { cidade: true }, orderBy: { cidade: "asc" }, take: 300 }),
   ]);
 
@@ -138,16 +130,9 @@ export default async function AtacadoProspeccaoPage({
       {params.revisao === "concluida" && <p role="status" className="border border-green-600/40 px-3 py-2 text-sm text-green-700">Revisão concluída: {params.novos ?? "0"} candidatos incluídos na fila de qualificação; {params.duplicados ?? "0"} duplicados ignorados.</p>}
       {params.revisao === "dados-invalidos" && <p role="alert" className="border border-red-500/40 px-3 py-2 text-sm text-red-600">Revise nome, CNPJ com dígitos verificadores, cidade e UF de cada candidato selecionado.</p>}
       {params.revisao === "evidencia-invalida" && <p role="alert" className="border border-red-500/40 px-3 py-2 text-sm text-red-600">Um ou mais candidatos não possuem URL ou evidências comerciais mínimas válidas.</p>}
+      {params.revisao === "uf-fora-cobertura" && <p role="alert" className="border border-red-500/40 px-3 py-2 text-sm text-red-600">Um ou mais candidatos têm UF fora dos 17 estados litorâneos autorizados para prospecção. Remova-os do arquivo de revisão e envie novamente.</p>}
       {params.revisao === "arquivo-invalido" && <p role="alert" className="border border-red-500/40 px-3 py-2 text-sm text-red-600">Arquivo de revisão inválido. Exporte novamente o CSV do agente de descoberta.</p>}
       <RevisaoCandidatosWeb defaultUf={uf ?? "RJ"} />
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-        {([["A", grupoA], ["B", grupoB], ["C", grupoC], ["D", grupoD], ["Pendentes", total - grupoA - grupoB - grupoC - grupoD]] as const).map(([label, count]) => (
-          <Link key={label} href={label === "Pendentes" ? "?grupo=PENDENTE" : `?grupo=${label}`} className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3 hover:border-[var(--series-1)]">
-            <div className="text-xs text-[var(--text-muted)]">Grupo {label}</div>
-            <div className="mt-1 text-xl font-semibold tabular-nums">{count.toLocaleString("pt-BR")}</div>
-          </Link>
-        ))}
-      </div>
 
       <section className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
         <h2 className="mb-3 text-sm font-semibold">Cadastrar prospecto</h2>
@@ -220,10 +205,8 @@ export default async function AtacadoProspeccaoPage({
           <ProspectFilters
             uf={uf ?? ""}
             cidade={cidade ?? ""}
-            grupo={grupo ?? ""}
             status={status ?? ""}
             cadastro={cadastro ?? ""}
-            grupos={grupos}
             statusOptions={Object.entries(STATUS)}
             cadastroOptions={cadastroValores}
             cidades={cidades.map((item) => item.cidade).filter((value): value is string => Boolean(value))}
@@ -282,7 +265,17 @@ export default async function AtacadoProspeccaoPage({
                     <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${p.nomeFantasia} ${p.cidade ?? ""} ${p.estado ?? ""}`)}`} target="_blank" rel="noopener noreferrer" className="mt-1 inline-block text-[10px] text-[var(--series-1)] underline underline-offset-2">Buscar endereço no mapa ↗</a>
                   </td>
                   <td className="px-4 py-3">
-                    <div className="mb-1 font-semibold">{p.grupoComercial === "PENDENTE" ? "Pendente" : `Grupo ${p.grupoComercial}`}</div>
+                    {/* Estado real do motor (statusComercial), nunca mais grupoComercial A/B/C/D —
+                        esse campo não é gravado com A/B/C/D em nenhum fluxo de produção, só
+                        "PENDENTE" (ver auditoria). EM_INVESTIGACAO cobre dois momentos distintos;
+                        resultadoEliminacao (já existente no schema) é o que diferencia os dois sem
+                        precisar de um status novo — ver comentário em prospeccao-qualificacao.ts. */}
+                    <div className="mb-1 font-semibold">
+                      {p.statusComercial === "APROVADO" && "Aprovado manualmente"}
+                      {p.statusComercial === "PENDENTE_REVISAO_HUMANA" && "Pendente de revisão humana"}
+                      {p.statusComercial === "REPROVADO" && "Reprovado"}
+                      {p.statusComercial === "EM_INVESTIGACAO" && (p.resultadoEliminacao === "INCONCLUSIVO" ? "Em investigação (evidência insuficiente)" : "Aguardando investigação")}
+                    </div>
                     {p.scoreComercial !== null && <div className="text-[11px] text-[var(--text-muted)]">{p.justificativaGrupo?.startsWith("EVIDÊNCIA COMERCIAL") ? "Evidência comercial" : "Score cadastral"} {p.scoreComercial}/100{p.justificativaGrupo?.startsWith("EVIDÊNCIA COMERCIAL") ? " · não é aprovação" : ""}</div>}
                     {p.justificativaGrupo && <div className="mt-1 max-w-48 text-[11px] text-[var(--text-muted)]">{p.justificativaGrupo}</div>}
                     {p.responsavel && <div className="mt-1 text-[11px] font-medium text-[var(--series-1)]">Fila: {p.responsavel.replaceAll("_", " ")}</div>}

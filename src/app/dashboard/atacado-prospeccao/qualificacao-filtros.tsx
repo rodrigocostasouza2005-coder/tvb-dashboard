@@ -4,7 +4,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useTransition, type FormEvent } from "react";
 
 // Filtros da seção "Qualificação B2B" — params próprios (qEstado/qMunicipio/qCapital/qClasse)
-// pra não colidir com uf/cidade/grupo/status já usados pelo pipeline manual mais abaixo na
+// pra não colidir com uf/cidade/status já usados pelo pipeline manual mais abaixo na
 // mesma página. Mesmo padrão de controle inline de ProspectFilters (replace de URL, sem reload).
 type Props = {
   estado: string;

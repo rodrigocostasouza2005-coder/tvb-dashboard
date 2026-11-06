@@ -37,9 +37,13 @@ jobs:
         env:
           COMPETENCIA: ${{ steps.params.outputs.competencia }}
         run: |
+          # UFs lidas do mesmo JSON que o script Python e o lado TS (src/lib/prospeccao/
+          # estados-litoraneos.ts) usam como fonte única — nunca mais uma lista hardcoded aqui
+          # (ver auditoria pós-PR#51-53, achado B.3/E.7/D6: a lista vivia duplicada em 3 lugares).
+          UFS=$(python -c "import json; print(' '.join(json.load(open('scripts/prospeccao/estados-litoraneos.json'))))")
           python scripts/prospeccao/extrair-parquet-receita.py \
             --competencia "$COMPETENCIA" \
-            --ufs AL AP BA CE ES MA PA PB PE PI PR RJ RN RS SC SE SP \
+            --ufs $UFS \
             --saida dados/candidatos-litoral.parquet
       - name: Disponibilizar base e manifesto para revisão
         uses: actions/upload-artifact@v4

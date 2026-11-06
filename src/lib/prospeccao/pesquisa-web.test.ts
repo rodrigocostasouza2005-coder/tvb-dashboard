@@ -23,4 +23,28 @@ it("detecta operação exclusivamente feminina mesmo com menção negativa ao ma
  expect(r.sinaisExclusao).toContain("não trabalhamos com moda masculina");
 });
 it("exige nome e cidade para confiança alta",()=>{expect(calcularConfiancaPesquisa({nomeLoja:"Loja Costa Moda",cidade:"Niterói",titulo:"Loja Costa Moda Niterói",descricao:"",texto:""})).toBe("ALTA");expect(calcularConfiancaPesquisa({nomeLoja:"Loja Costa Moda",cidade:"Niterói",titulo:"Moda masculina",descricao:"",texto:""})).toBe("BAIXA");});
+
+describe("marcasCandidatas — curadoria dinâmica de marcas fora das 24 referências (Fase 3)",()=>{
+  it("reconhece marca legítima fora da lista fixa quando aparece logo depois de um sinal explícito de multimarcas",()=>{
+    const r=extrairEvidenciasSite("https://loja.com",'<title>Loja Surf</title><main>Somos loja multimarcas. Marcas disponíveis: Billabong, Quiksilver e Rip Curl.</main>');
+    expect(r.marcasCandidatas).toEqual(expect.arrayContaining(["Billabong","Quiksilver","Rip Curl"]));
+  });
+
+  it("não extrai nada quando não há nenhum sinal de multimarcas na página, mesmo com nomes em Title Case em outro lugar",()=>{
+    const r=extrairEvidenciasSite("https://loja.com",'<title>Loja Billabong Store</title><main>Rua das Flores, 123, Niterói. Atendimento de segunda a sábado.</main>');
+    expect(r.marcasCandidatas).toEqual([]);
+  });
+
+  it("não duplica como candidata uma marca que já está na lista fixa (Nike já conta via `marcas`)",()=>{
+    const r=extrairEvidenciasSite("https://loja.com",'<title>Loja</title><main>Loja multimarcas. Marcas disponíveis: Nike e Adidas.</main>');
+    expect(r.marcas).toEqual(expect.arrayContaining(["Nike","Adidas"]));
+    expect(r.marcasCandidatas).toEqual([]);
+  });
+
+  it("ignora palavras gramaticais comuns que aparecem na própria frase do sinal (ex.: 'Trabalhamos')",()=>{
+    const r=extrairEvidenciasSite("https://loja.com",'<title>Loja</title><main>Trabalhamos com marcas: Volcom e Element.</main>');
+    expect(r.marcasCandidatas).not.toContain("Trabalhamos");
+    expect(r.marcasCandidatas).toEqual(expect.arrayContaining(["Volcom","Element"]));
+  });
+});
 });
