@@ -170,6 +170,27 @@ export function montarCandidatoPesquisaComercial(input: EntradaPesquisaComercial
       }))
     : [];
 
+  // Curadoria dinâmica de marcas (Fase 3, faxina pós-auditoria 2026-11): marcas candidatas fora
+  // das 24 referências fixas (ver pesquisa-web.ts MARCAS/extrairMarcasCandidatas) passam pelo
+  // MESMO gate de evidência que as 24 (siteConfiavel + sinal explícito de multimarcas + fonteUrl)
+  // — nunca uma régua mais permissiva. A única diferença deliberada: confiança sempre rebaixada
+  // pra MEDIA no máximo, mesmo quando a identidade do site é ALTA. Detectar um padrão de texto não
+  // é o mesmo que confirmar uma marca já catalogada; isso nunca vira aprovação automática (o
+  // próprio motor já nunca grava APROVADO sozinho — ver motor-qualificacao.ts), mas garante que
+  // uma marca nova nunca pesa tanto na pontuação quanto uma das 24 já confirmadas (ver
+  // pontuarMultimarcas em motor-pontuacao.ts, bônus de confiança por marca ALTA).
+  const confiancaMarcaCandidata: NivelConfianca = input.confianca === "ALTA" ? "MEDIA" : input.confianca;
+  const marcasCandidatas: EvidenciaMarca[] = siteConfiavel && ev && ev.sinaisMultimarcas.length > 0 && fonteUrl && (ev.marcasCandidatas?.length ?? 0) > 0
+    ? [...new Set(ev.marcasCandidatas)].map((marcaNome) => ({
+        marca: marcaNome,
+        evidencia: `Marca candidata fora da lista de 24 referências fixas, identificada em texto imediatamente após sinal explícito de revenda multimarcas (${ev.sinaisMultimarcas.join(", ")}); confiança limitada a MEDIA por ser detecção por padrão de texto, não confirmação humana nem fonte estruturada prévia.`,
+        fonteUrl,
+        dataVerificacao: input.dataVerificacao,
+        tipoEvidencia: "SITE_OFICIAL" as const,
+        confianca: confiancaMarcaCandidata,
+      }))
+    : [];
+
   return {
     nomeFantasia: input.nomeFantasia,
     cnpj: input.cnpj,
@@ -182,7 +203,7 @@ export function montarCandidatoPesquisaComercial(input: EntradaPesquisaComercial
     evidenciaAtividadeComercial,
     evidenciaVarejoVestuario,
     evidenciaModaMasculina,
-    marcas,
+    marcas: [...marcas, ...marcasCandidatas],
     evidenciaPosicionamentoTvb,
     fontesOficiaisConsultadas: input.fontesOficiaisConsultadas,
     fontesMultiplas: Boolean(input.siteConfirmado) && input.instagramEncontrado,

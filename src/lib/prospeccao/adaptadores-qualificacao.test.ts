@@ -260,6 +260,96 @@ describe("construirOperacoesMarcas", () => {
   });
 });
 
+describe("curadoria dinâmica de marcas fora das 24 referências fixas (Fase 3)", () => {
+  const baseCandidata = {
+    nomeFantasia: "Surf Shop Teste", cnpj: CNPJ_VALIDO, cnpjValido: true, hasContato: true,
+    situacaoCadastral: "ATIVA" as const, dataVerificacao: AGORA, fontesOficiaisConsultadas: true,
+    instagramEncontrado: false, potencialComercialSinais: [],
+    confianca: "ALTA" as const, siteConfirmado: "https://loja.com.br", urlReferencia: "https://loja.com.br",
+  };
+
+  it("marca legítima fora das 24 referências, com evidência completa (sinal de multimarcas + URL + data), é reconhecida e conta pro critério", () => {
+    const candidato = montarCandidatoPesquisaComercial({
+      ...baseCandidata,
+      evidencia: siteVazio({
+        marcasCandidatas: ["Billabong", "Rip Curl"],
+        sinaisModaMasculina: ["moda masculina"],
+        sinaisMultimarcas: ["loja multimarcas"],
+      }),
+    });
+    expect(candidato.marcas.map((m) => m.marca).sort()).toEqual(["Billabong", "Rip Curl"]);
+    expect(candidato.marcas.every((m) => m.fonteUrl && m.dataVerificacao)).toBe(true);
+    const resultado = qualificarProspect(candidato);
+    const multimarcas = resultado.eliminacao.criterios.find((c) => c.id === "MULTIMARCAS");
+    expect(multimarcas?.resultado).toBe("ATENDE");
+  });
+
+  it("marca candidata nunca recebe confiança ALTA automaticamente, mesmo com identidade do site ALTA", () => {
+    const candidato = montarCandidatoPesquisaComercial({
+      ...baseCandidata,
+      evidencia: siteVazio({ marcasCandidatas: ["Billabong", "Rip Curl"], sinaisMultimarcas: ["loja multimarcas"] }),
+    });
+    expect(candidato.marcas.every((m) => m.confianca === "MEDIA")).toBe(true);
+  });
+
+  it("marca candidata sem site confirmado (fonte não verificável) não é contabilizada", () => {
+    const candidato = montarCandidatoPesquisaComercial({
+      ...baseCandidata,
+      siteConfirmado: null,
+      evidencia: siteVazio({ marcasCandidatas: ["Billabong", "Rip Curl"], sinaisMultimarcas: ["loja multimarcas"] }),
+    });
+    expect(candidato.marcas).toEqual([]);
+    expect(qualificarProspect(candidato).eliminacao.resultado).toBe("REPROVADO");
+  });
+
+  it("marca própria citada junto de sinal de multimarcas bloqueia mesmo quando as marcas vêm da curadoria dinâmica (não só das 24 fixas)", () => {
+    const candidato = montarCandidatoPesquisaComercial({
+      ...baseCandidata,
+      evidencia: siteVazio({
+        marcasCandidatas: ["Billabong", "Rip Curl"],
+        sinaisMultimarcas: ["loja multimarcas"],
+        sinaisMarcaPropria: ["marca própria"],
+      }),
+    });
+    expect(candidato.categoriasBloqueio).toContain("SOMENTE_MARCA_PROPRIA");
+    const resultado = qualificarProspect(candidato);
+    expect(resultado.eliminacao.resultado).toBe("REPROVADO");
+    expect(resultado.eliminacao.criterios.find((c) => c.id === "MULTIMARCAS")?.resultado).toBe("NAO_ATENDE");
+  });
+
+  it("mesma marca candidata mencionada duas vezes (dedupe de pesquisa-web.ts + avaliarMultimarcas) conta como 1, não 2", () => {
+    const candidato = montarCandidatoPesquisaComercial({
+      ...baseCandidata,
+      evidencia: siteVazio({ marcasCandidatas: ["Billabong", "billabong", " Billabong "], sinaisMultimarcas: ["loja multimarcas"] }),
+    });
+    const operacoes = construirOperacoesMarcas(candidato.marcas);
+    expect(operacoes).toHaveLength(1);
+  });
+
+  it("evidência ambígua (só marcas candidatas, confiança MEDIA, mínimo de 2 atendido) nunca é aprovada nem rejeitada automaticamente — cai em PENDENTE_REVISAO_HUMANA", () => {
+    const candidato = montarCandidatoPesquisaComercial({
+      ...baseCandidata,
+      confianca: "MEDIA",
+      instagramEncontrado: true,
+      potencialComercialSinais: [{ descricao: "porte grande" }, { descricao: "ponto comercial de destaque" }],
+      evidencia: siteVazio({
+        marcasCandidatas: ["Billabong", "Rip Curl", "Volcom"],
+        sinaisModaMasculina: ["moda masculina", "roupa masculina"],
+        sinaisMultimarcas: ["loja multimarcas"],
+        sinaisSurfSkate: ["surf shop"],
+      }),
+    });
+    const resultado = qualificarProspect(candidato);
+    expect(resultado.eliminacao.resultado).toBe("APROVADO_GATE");
+    // Gate passou e pontuação bate o corte mínimo (sem nenhuma marca ALTA — só candidatas MEDIA,
+    // que nunca dão o bônus de confiança de pontuarMultimarcas em motor-pontuacao.ts), mas o motor
+    // NUNCA grava APROVADO sozinho: fica pendente de decisão humana, nem aprovado nem reprovado.
+    expect(resultado.statusComercial).not.toBe("APROVADO");
+    expect(resultado.statusComercial).not.toBe("REPROVADO");
+    expect(resultado.statusComercial).toBe("PENDENTE_REVISAO_HUMANA");
+  });
+});
+
 describe("prepararCandidatosParaQuota", () => {
   it("ignora prospect sem score (gate não aprovou) e sem estado", () => {
     const candidatos = prepararCandidatosParaQuota([
