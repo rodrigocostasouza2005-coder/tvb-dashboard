@@ -9,6 +9,7 @@
 import { prisma } from "@/lib/prisma";
 import { saleWhere, returnWhere, netByReturns, type DashboardFilters } from "./core";
 import { getSalesByGrupoProduto, getReturnsByGrupoProduto } from "./vendas";
+import { getEcommerceStoreId } from "./cac";
 import { getInsightsPorConjunto } from "@/lib/connectors/meta-ads";
 import { todayBrasiliaStr } from "@/lib/filters";
 
@@ -58,16 +59,45 @@ export type ResumoBlackFriday = {
   ticketMedio: number | null;
   investimentoMidia: number;
   investimentoIndisponivel: boolean;
-  // Receita total da empresa / investimento total em mídia — métrica "blended" (não é ROAS por
-  // canal: o Meta Ads hoje roda majoritariamente pro site, mas essa função soma TODA a receita,
-  // de qualquer loja, no denominador contra TODO o gasto). Exibir sempre junto da ressalva de
-  // que não é um ROAS por canal/campanha (esse existe só por conjunto/anúncio, ver connectors).
+  // Receita líquida SÓ do e-commerce (Store.code="CD", mesmo Store resolvido por
+  // getEcommerceStoreId em cac.ts) sobre o investimento total em mídia do Meta Ads. Corrigido em
+  // 2026-11-06 (pedido do Rodrigo): antes somava a receita de TODAS as lojas (menos Atacado) no
+  // numerador — "blended", não um ROAS de canal de verdade, já que o Meta Ads hoje roda
+  // majoritariamente pro site. Ressalva que ainda vale: o denominador (investimentoMidia) é a
+  // soma de TODOS os anúncios da conta — não existe hoje nenhuma forma de isolar só o gasto que
+  // de fato aponta pro site (assume-se que é praticamente todo ele). Vira null quando: faltar
+  // investimento (ver investimentoIndisponivel), a loja CD não existir no ambiente, ou a permissão
+  // do usuário (allowedStoreIds) já excluir CD inteiramente — nunca mostra um número calculado com
+  // dado que o usuário não tem acesso.
   roas: number | null;
 };
 
+// Receita líquida (venda - devolução, mesma convenção do resto deste arquivo) restrita SÓ à loja
+// de e-commerce (Store.code="CD") — numerador do ROAS corrigido. Reaproveita getEcommerceStoreId
+// (cac.ts) em vez de resolver o Store de novo aqui.
+//
+// Respeita a restrição de loja já embutida em `filters.storeIds` (vem de getStoreRestriction,
+// ver permissions.ts, já aplicada antes de chegar aqui): se o usuário não pode ver a loja CD,
+// devolve null — nunca ignora a permissão pra calcular um número que ele não deveria ver, nem
+// finge "0" (que pareceria "sem venda" em vez de "indisponível pra você").
+async function getFaturamentoEcommerce(
+  filters: DashboardFilters,
+  cdStoreId: string | null
+): Promise<number | null> {
+  if (!cdStoreId) return null;
+  if (filters.storeIds !== undefined && !filters.storeIds.includes(cdStoreId)) return null;
+
+  const filtrosCd: DashboardFilters = { ...filters, storeIds: [cdStoreId] };
+  const [salesAgg, returnsAgg] = await Promise.all([
+    prisma.sale.aggregate({ where: saleWhere(filtrosCd), _sum: { valorTotalLiquido: true } }),
+    prisma.return.aggregate({ where: returnWhere(filtrosCd), _sum: { valorTotal: true } }),
+  ]);
+  return (salesAgg._sum.valorTotalLiquido ?? 0) - (returnsAgg._sum.valorTotal ?? 0);
+}
+
 export async function getResumoBlackFriday(filters: DashboardFilters): Promise<ResumoBlackFriday> {
   const where = saleWhere(filters);
-  const [salesAgg, pedidosRows, returnsAgg, investimentoResult] = await Promise.all([
+  const [salesAgg, pedidosRows, returnsAgg, investimentoResult, cdStoreId] = await Promise.all([
     prisma.sale.aggregate({ where, _sum: { quantidade: true, valorTotalLiquido: true } }),
     prisma.sale.groupBy({ by: ["storeId", "dapicVendaId"], where }),
     prisma.return.aggregate({ where: returnWhere(filters), _sum: { quantidade: true, valorTotal: true } }),
@@ -79,7 +109,9 @@ export async function getResumoBlackFriday(filters: DashboardFilters): Promise<R
       },
       () => ({ valor: 0, indisponivel: true })
     ),
+    getEcommerceStoreId(),
   ]);
+  const faturamentoEcommerce = await getFaturamentoEcommerce(filters, cdStoreId);
 
   const faturamento = (salesAgg._sum.valorTotalLiquido ?? 0) - (returnsAgg._sum.valorTotal ?? 0);
   const pecas = (salesAgg._sum.quantidade ?? 0) - (returnsAgg._sum.quantidade ?? 0);
@@ -94,7 +126,10 @@ export async function getResumoBlackFriday(filters: DashboardFilters): Promise<R
     ticketMedio: pedidos > 0 ? faturamento / pedidos : null,
     investimentoMidia: investimentoResult.valor,
     investimentoIndisponivel: investimentoResult.indisponivel,
-    roas: !investimentoResult.indisponivel && investimentoResult.valor > 0 ? faturamento / investimentoResult.valor : null,
+    roas:
+      !investimentoResult.indisponivel && investimentoResult.valor > 0 && faturamentoEcommerce != null
+        ? faturamentoEcommerce / investimentoResult.valor
+        : null,
   };
 }
 

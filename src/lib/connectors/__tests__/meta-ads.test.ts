@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { extrairFoto } from "../meta-ads";
+import { extrairFoto, efetivamenteAtivo } from "../meta-ads";
 
 describe("extrairFoto — prioridade e fallback de imagem do criativo", () => {
   it("usa thumbnail_url quando presente (caso comum: imagem, vídeo, Reels, carrossel dinâmico)", () => {
@@ -647,5 +647,95 @@ describe("getFotosPorNomeAnuncio — erro de API buscando creative não pode vir
     // legítimo vazio) — deveria pelo menos propagar, pra quem chama poder diferenciar os dois
     // casos (hoje resolve [] normalmente, sem exceção nenhuma).
     await expect(getFotosPorNomeAnuncio(mockPrisma(), ["Anuncio Com Erro"])).rejects.toThrow();
+  });
+});
+
+// Pedido do Rodrigo em 2026-11-06 (Central Black Friday): distinguir anúncio/conjunto realmente
+// no ar agora de pausado — usando effective_status (que já contabiliza o pai pausado), nunca o
+// `status` isolado da própria entidade (ver comentário em efetivamenteAtivo, meta-ads.ts).
+describe("efetivamenteAtivo — só effective_status=ACTIVE conta como rodando agora", () => {
+  it("ACTIVE -> true", () => {
+    expect(efetivamenteAtivo("ACTIVE")).toBe(true);
+  });
+
+  it.each(["PAUSED", "CAMPAIGN_PAUSED", "ADSET_PAUSED", "WITH_ISSUES", "DELETED", "ARCHIVED"])(
+    "%s -> false",
+    (status) => {
+      expect(efetivamenteAtivo(status)).toBe(false);
+    }
+  );
+
+  it("undefined (campo ausente na resposta) -> false, nunca assume ativo por omissão", () => {
+    expect(efetivamenteAtivo(undefined)).toBe(false);
+  });
+});
+
+describe("getAtivoPorNomeConjunto / getAtivoPorNomeAnuncio — usam effective_status, não status", () => {
+  beforeEach(() => {
+    findUnique.mockReset();
+    upsert.mockReset();
+    vi.stubGlobal("fetch", vi.fn());
+    process.env.META_AD_ACCOUNT_ID = "123";
+    process.env.META_ACCESS_TOKEN = "token-fake";
+  });
+
+  it("conjunto com status=ACTIVE (toggle próprio) mas effective_status=CAMPAIGN_PAUSED (campanha pai pausada) é reportado como NÃO ativo", async () => {
+    findUnique.mockResolvedValue({
+      data: [{ id: "adset-1", name: "Conjunto Órfão", status: "ACTIVE", effective_status: "CAMPAIGN_PAUSED" }],
+      updatedAt: new Date(),
+    });
+
+    const { getAtivoPorNomeConjunto } = await import("../meta-ads");
+    const result = await getAtivoPorNomeConjunto(mockPrisma(), ["Conjunto Órfão"]);
+
+    expect(result.get("Conjunto Órfão")).toBe(false);
+  });
+
+  it("anúncio com status=ACTIVE mas effective_status=ADSET_PAUSED (conjunto pai pausado) é reportado como NÃO ativo", async () => {
+    findUnique.mockResolvedValue({
+      data: [{ id: "ad-1", name: "Anúncio Órfão", status: "ACTIVE", effective_status: "ADSET_PAUSED" }],
+      updatedAt: new Date(),
+    });
+
+    const { getAtivoPorNomeAnuncio } = await import("../meta-ads");
+    const result = await getAtivoPorNomeAnuncio(mockPrisma(), ["Anúncio Órfão"]);
+
+    expect(result.get("Anúncio Órfão")).toBe(false);
+  });
+
+  it("effective_status=ACTIVE de verdade (próprio e pai rodando) é reportado como ativo", async () => {
+    findUnique.mockResolvedValue({
+      data: [{ id: "ad-1", name: "Anúncio Rodando", status: "ACTIVE", effective_status: "ACTIVE" }],
+      updatedAt: new Date(),
+    });
+
+    const { getAtivoPorNomeAnuncio } = await import("../meta-ads");
+    const result = await getAtivoPorNomeAnuncio(mockPrisma(), ["Anúncio Rodando"]);
+
+    expect(result.get("Anúncio Rodando")).toBe(true);
+  });
+
+  it("dois conjuntos com o mesmo nome, um ACTIVE e outro CAMPAIGN_PAUSED — ativo se QUALQUER um dos dois estiver efetivamente ativo", async () => {
+    findUnique.mockResolvedValue({
+      data: [
+        { id: "adset-1", name: "Conjunto X", status: "ACTIVE", effective_status: "CAMPAIGN_PAUSED" },
+        { id: "adset-2", name: "Conjunto X", status: "ACTIVE", effective_status: "ACTIVE" },
+      ],
+      updatedAt: new Date(),
+    });
+
+    const { getAtivoPorNomeConjunto } = await import("../meta-ads");
+    const result = await getAtivoPorNomeConjunto(mockPrisma(), ["Conjunto X"]);
+
+    expect(result.get("Conjunto X")).toBe(true);
+  });
+
+  it("nome não encontrado na lista crua (ex: filtrado pelo effective_status da query) devolve false, nunca true por omissão", async () => {
+    findUnique.mockResolvedValue({ data: [], updatedAt: new Date() });
+
+    const { getAtivoPorNomeAnuncio } = await import("../meta-ads");
+    const result = await getAtivoPorNomeAnuncio(mockPrisma(), ["Não Existe"]);
+
+    expect(result.get("Não Existe")).toBe(false);
   });
 });
