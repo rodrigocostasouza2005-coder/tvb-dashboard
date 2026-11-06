@@ -435,13 +435,12 @@ export default async function BlackFridayPage({
         <ProdutosTable rows={topProdutos} showFinancials={showFinancials} />
       </section>
 
-      {/* ── Top 20 produtos (SKU) com desconto real ── */}
-      <h2 className="mb-3 text-base font-semibold">Top 20 produtos (SKU) com desconto real</h2>
+      {/* ── Top 20 produtos com desconto real ── */}
+      <h2 className="mb-3 text-base font-semibold">Top 20 produtos com desconto real</h2>
       <p className="mb-3 text-xs text-[var(--text-muted)]">
-        Ranking por SKU (grade real, inclui tamanho/cor) — desconto CALCULADO comparando o preço de
-        referência do catálogo (Tabela varejo) com o preço efetivo realmente vendido no período, não o
-        desconto cadastrado na planilha de BF (esse já aparece em &quot;Vendas por faixa de desconto&quot;,
-        abaixo). SKU sem preço de referência no catálogo mostra &quot;indisponível&quot;, nunca 0%.
+        Ranking por produto (grupo+produto, nunca por tamanho/cor) — unidades, faturamento e o %
+        de desconto cadastrado na planilha de Black Friday. Produto sem linha correspondente na
+        planilha mostra desconto indisponível, nunca 0%.
       </p>
       <section className="mb-10">
         <Top20DescontoTable rows={top20ProdutosDesconto} showFinancials={showFinancials} />

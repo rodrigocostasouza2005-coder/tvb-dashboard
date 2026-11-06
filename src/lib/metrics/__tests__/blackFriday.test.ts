@@ -666,20 +666,16 @@ describe("montarVendasPorEstadoEcommerce", () => {
 // dia: "o top 20 produtos é produto, não tamanho" — era por SKU, virou grupo+produto; desconto
 // agora vem do CADASTRADO em PrecoBlackFriday, nunca calculado por preço de referência).
 describe("montarTop20ProdutosComDesconto", () => {
-  it("lê preço cheio/desconto/preço com desconto direto do cadastro (PrecoBlackFriday)", () => {
+  it("lê % desconto direto do cadastro (PrecoBlackFriday)", () => {
     const liquido = [{ grupo: "Camisa", key: "Camisa Classic", unitsSold: 10, revenue: 2000 }];
-    const cadastro = new Map([["Camisa::Camisa Classic", { precoCheio: 250, desconto: 0.2, precoComDesconto: 200 }]]);
-    const rows = montarTop20ProdutosComDesconto(liquido, cadastro, 100000);
-    expect(rows[0].precoCheio).toBe(250);
-    expect(rows[0].precoComDesconto).toBe(200);
+    const descontos = new Map([["Camisa::Camisa Classic", 0.2]]);
+    const rows = montarTop20ProdutosComDesconto(liquido, descontos, 100000);
     expect(rows[0].descontoPct).toBeCloseTo(20);
   });
 
-  it("produto sem linha correspondente em PrecoBlackFriday mostra tudo indisponível (null), nunca fabrica 0%", () => {
+  it("produto sem linha correspondente em PrecoBlackFriday mostra desconto indisponível (null), nunca fabrica 0%", () => {
     const liquido = [{ grupo: "Camisa", key: "Camisa Nova", unitsSold: 5, revenue: 500 }];
     const rows = montarTop20ProdutosComDesconto(liquido, new Map(), 10000);
-    expect(rows[0].precoCheio).toBeNull();
-    expect(rows[0].precoComDesconto).toBeNull();
     expect(rows[0].descontoPct).toBeNull();
   });
 
