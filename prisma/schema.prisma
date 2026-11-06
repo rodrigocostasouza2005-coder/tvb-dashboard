@@ -758,6 +758,59 @@ model ArmazemConhecido {
 }
 
 
+// Rebuild do núcleo de qualificação B2B (Fase 1, 2026-11) — pedido do Rodrigo de trocar
+// "qualquer loja com CNAE de vestuário" por "revendedor multimarcas de moda masculina verificado,
+// com potencial comercial real pra TVB" (qualidade, não quantidade: 300 prospects excelentes >
+// 5000 CNPJs inúteis). Ver src/lib/prospeccao/motor-qualificacao.ts pra lógica completa — os
+// campos abaixo só guardam o RESULTADO do motor, nunca recalculado aqui no schema.
+enum ClassificacaoProspectComercial {
+  ALTA_PRIORIDADE
+  QUALIFICADO
+  REPROVADO
+}
+
+// Status de workflow, DIFERENTE da classificação de qualidade acima: o motor de qualificação
+// NUNCA grava APROVADO sozinho (ver motor-qualificacao.ts) — isso é sempre uma promoção manual
+// feita por uma pessoa depois de revisar um PENDENTE_REVISAO_HUMANA. Só APROVADO entra na base
+// comercial definitiva; PENDENTE_REVISAO_HUMANA fica numa fila separada, nunca auto-promovido.
+enum StatusComercialProspect {
+  APROVADO
+  EM_INVESTIGACAO
+  REPROVADO
+  PENDENTE_REVISAO_HUMANA
+}
+
+enum ResultadoGateEliminacao {
+  APROVADO_GATE
+  REPROVADO
+  INCONCLUSIVO
+}
+
+// Matriz x filial pelo mesmo cnpjRaiz (8 primeiros dígitos do CNPJ) — filiais NÃO são
+// descartadas automaticamente (podem ser oportunidades comerciais independentes), mas devem
+// respeitar a cota geográfica por município como qualquer outro prospect (ver quota-geografica.ts),
+// nunca contar em dobro só porque são "a mesma empresa".
+enum TipoEstabelecimentoProspect {
+  MATRIZ
+  FILIAL
+}
+
+enum TipoEvidenciaMarca {
+  SITE_OFICIAL
+  CATALOGO_PRODUTO
+  INSTAGRAM_COMERCIAL
+  POST_PRODUTO
+  FOTO_VITRINE
+  MARKETPLACE
+  OUTRA_FONTE_VERIFICAVEL
+}
+
+enum NivelConfiancaProspect {
+  ALTA
+  MEDIA
+  BAIXA
+}
+
 // Prospectos comerciais B2B ainda não convertidos em clientes do DAPIC.
 // Mantido separado de ClienteCadastro, que representa exclusivamente clientes sincronizados.
 model AtacadoProspect {
@@ -805,11 +858,55 @@ model AtacadoProspect {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
+  // --- Núcleo do motor de qualificação (rebuild Fase 1, 2026-11) ---
+  // Resultado estruturado do gate de elegibilidade e da pontuação (ver motor-qualificacao.ts).
+  // scoreComercial acima continua sendo o total 0-100 (reaproveitado); scoreDetalhe guarda o
+  // detalhamento por sub-critério + rationale (nunca só o número final, pra ficar auditável).
+  classificacaoProspect  ClassificacaoProspectComercial?
+  statusComercial        StatusComercialProspect @default(EM_INVESTIGACAO)
+  resultadoEliminacao    ResultadoGateEliminacao?
+  motivosEliminacao      String[] @default([])
+  scoreDetalhe           Json?
+  // Evidências estruturadas por critério (existência, atividade, varejo, moda masculina,
+  // posicionamento TVB, sinais de potencial comercial) — ver tipo Evidencia em
+  // motor-elegibilidade.ts. Marcas de terceiros NÃO ficam aqui: têm tabela própria
+  // (AtacadoProspectBrand) porque são o requisito central e precisam ser auditáveis 1 a 1.
+  evidenciasQualificacao Json?
+  tipoEstabelecimento    TipoEstabelecimentoProspect?
+  // 8 primeiros dígitos do CNPJ — agrupa matriz/filiais da mesma empresa sem duplicar cadastro;
+  // ver enum TipoEstabelecimentoProspect acima.
+  cnpjRaiz               String?
+  capitalEstadual        Boolean @default(false)
+  // Campos normalizados (trim/lowercase/sem acento) só pra VARREDURA de possível duplicata —
+  // nunca uma constraint UNIQUE: filiais de uma mesma rede legitimamente repetem nome fantasia
+  // em municípios diferentes, e endereço sozinho não é identidade de empresa. Dedup de verdade
+  // (bloqueante) continua sendo só o cnpj @unique abaixo; isto aqui alimenta
+  // detectarPossivelDuplicata() pra fila de revisão humana, nunca bloqueia um insert.
+  nomeFantasiaNormalizado String?
+  enderecoNormalizado     String?
+  // Data da última validação/reconfirmação de evidência (distinto de pesquisadoEm, que é a
+  // pesquisa mais recente feita — ultimaValidacaoEm é especificamente "confirmamos que isso
+  // ainda é verdade", usado por uma futura auditoria adversarial pra achar informação velha).
+  ultimaValidacaoEm       DateTime?
+  // --- Ponto de extensão pra auditoria adversarial (fase futura, NÃO implementada aqui) ---
+  // Um agente independente pode reabrir qualquer prospect (mesmo já APROVADO) pra caçar marca
+  // inventada, loja inativa, informação desatualizada, fabricante sem revenda disfarçado etc.
+  // Texto livre de propósito (não enum): o processo adversarial ainda não existe, então o
+  // conjunto de resultados possíveis pode mudar sem precisar de migration nova.
+  revisaoAdversarialStatus String?
+  revisaoAdversarialEm     DateTime?
+  revisaoAdversarialPor    String?
+
   activities AtacadoProspectActivity[]
+  brands     AtacadoProspectBrand[]
 
   @@index([estado, cidade])
   @@index([status, updatedAt])
   @@index([nomeFantasia])
+  @@index([cnpjRaiz])
+  @@index([statusComercial])
+  @@index([classificacaoProspect])
+  @@index([nomeFantasiaNormalizado])
 }
 
 model AtacadoProspectActivity {
@@ -827,4 +924,28 @@ model AtacadoProspectActivity {
   prospect AtacadoProspect @relation(fields: [prospectId], references: [id], onDelete: Cascade)
 
   @@index([prospectId, createdAt])
+}
+
+// Evidência de UMA marca de terceiro revendida por um prospect — requisito central do rebuild
+// (ver motor-elegibilidade.ts avaliarMultimarcas): autodescrição "somos multimarcas" nunca basta,
+// precisa de marca + evidência específica + fonte + data + tipo + confiança, registrados 1 a 1.
+// marcaNormalizada é a chave de dedupe (trim/lowercase/sem acento) — duas linhas do mesmo produto
+// da MESMA marca nunca devem virar duas marcas distintas; @@unique garante isso no banco também,
+// não só na validação em memória do motor.
+model AtacadoProspectBrand {
+  id               String                 @id @default(cuid())
+  prospectId       String
+  marca            String
+  marcaNormalizada String
+  evidencia        String
+  fonteUrl         String
+  dataVerificacao  DateTime
+  tipoEvidencia    TipoEvidenciaMarca
+  confianca        NivelConfiancaProspect
+  createdAt        DateTime               @default(now())
+
+  prospect AtacadoProspect @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+
+  @@unique([prospectId, marcaNormalizada])
+  @@index([prospectId])
 }
