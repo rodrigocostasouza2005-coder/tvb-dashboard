@@ -4,16 +4,13 @@ import { useState } from "react";
 import type { Top20ProdutoDesconto } from "@/lib/metrics";
 import { formatBRL, formatNumber, formatPercent } from "@/lib/format";
 
-// Painel "Top 20 produtos (SKU) com desconto real" (pedido do Rodrigo, 2026-11-06) — ranking por
-// SKU (Sale.cod), não por grupo+produto. Desconto é CALCULADO (preço de referência do catálogo
-// DAPIC em cache vs. preço efetivo realmente vendido no período), não o desconto cadastrado na
-// planilha de BF (esse já aparece no painel "Vendas por faixa de desconto", acima).
+// Painel "Top 20 produtos com desconto real" (pedido do Rodrigo, 2026-11-06, corrigido no mesmo
+// dia depois de ver a 1ª versão em produção: "o top 20 produtos é produto, não tamanho" — era
+// agrupado por SKU, agora é por grupo+produto, sem mostrar código de SKU). Desconto/preço vêm do
+// que está CADASTRADO na planilha de BF (PrecoBlackFriday), nunca calculado.
 //
 // Toggle "ordenar por" é só client-side: reordena as mesmas 20 linhas já trazidas do servidor
-// (ordenadas por receita por padrão) — não busca um novo top-20-por-unidades no banco. Suficiente
-// pro pedido original ("permitir alternar pra quantidade vendida" dentro do ranking já visto);
-// uma troca real de universo (top 20 POR unidades, que pode incluir SKUs fora do top 20 por
-// receita) exigiria um 2º fetch — fora de escopo por ora, ver nota no relatório da PR.
+// (ordenadas por receita por padrão) — não busca um novo top-20-por-unidades no banco.
 export function Top20DescontoTable({ rows, showFinancials }: { rows: Top20ProdutoDesconto[]; showFinancials: boolean }) {
   const [ordenarPor, setOrdenarPor] = useState<"revenue" | "unidades">("revenue");
 
@@ -59,38 +56,32 @@ export function Top20DescontoTable({ rows, showFinancials }: { rows: Top20Produt
             <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
               <th className="px-4 py-2 font-medium">#</th>
               <th className="px-4 py-2 font-medium">Produto</th>
-              <th className="px-4 py-2 font-medium">SKU</th>
               <th className="px-4 py-2 font-medium text-right">Unidades</th>
               {showFinancials && <th className="px-4 py-2 font-medium text-right">Faturamento</th>}
-              {showFinancials && <th className="px-4 py-2 font-medium text-right">Preço referência</th>}
-              {showFinancials && <th className="px-4 py-2 font-medium text-right">Preço efetivo</th>}
+              {showFinancials && <th className="px-4 py-2 font-medium text-right">Preço cheio</th>}
+              {showFinancials && <th className="px-4 py-2 font-medium text-right">Preço c/ desconto</th>}
               {showFinancials && <th className="px-4 py-2 font-medium text-right">% desconto</th>}
               {showFinancials && <th className="px-4 py-2 font-medium text-right">% do faturamento</th>}
             </tr>
           </thead>
           <tbody>
             {ordenadas.map((r, i) => (
-              <tr key={r.cod} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
+              <tr key={`${r.grupo}::${r.produto}`} className="border-b border-[var(--gridline)] last:border-0 hover:bg-[var(--page-plane)]">
                 <td className="px-4 py-2 text-[var(--text-muted)]">{i + 1}</td>
                 <td className="px-4 py-2">
                   <div className="font-medium text-[var(--text-primary)]">{r.produto}</div>
-                  <div className="text-xs text-[var(--text-muted)]">
-                    {r.grupo}
-                    {r.tamanho ? ` · ${r.tamanho}` : ""}
-                    {r.cor ? ` · ${r.cor}` : ""}
-                  </div>
+                  <div className="text-xs text-[var(--text-muted)]">{r.grupo}</div>
                 </td>
-                <td className="px-4 py-2 text-xs text-[var(--text-muted)]">{r.cod}</td>
                 <td className="px-4 py-2 text-right tabular-nums">{formatNumber(r.unitsSold)}</td>
                 {showFinancials && <td className="px-4 py-2 text-right tabular-nums">{formatBRL(r.revenue)}</td>}
                 {showFinancials && (
                   <td className="px-4 py-2 text-right tabular-nums text-[var(--text-secondary)]">
-                    {r.precoReferencia != null ? formatBRL(r.precoReferencia) : "indisponível"}
+                    {r.precoCheio != null ? formatBRL(r.precoCheio) : "—"}
                   </td>
                 )}
                 {showFinancials && (
                   <td className="px-4 py-2 text-right tabular-nums text-[var(--text-secondary)]">
-                    {r.precoEfetivo != null ? formatBRL(r.precoEfetivo) : "—"}
+                    {r.precoComDesconto != null ? formatBRL(r.precoComDesconto) : "—"}
                   </td>
                 )}
                 {showFinancials && (
@@ -100,7 +91,7 @@ export function Top20DescontoTable({ rows, showFinancials }: { rows: Top20Produt
                         {formatPercent(r.descontoPct)}
                       </span>
                     ) : (
-                      <span className="text-[var(--text-muted)]" title="Sem preço de referência cadastrado para este SKU no catálogo">
+                      <span className="text-[var(--text-muted)]" title="Produto sem preço/desconto cadastrado na planilha de Black Friday">
                         indisponível
                       </span>
                     )}
@@ -115,7 +106,7 @@ export function Top20DescontoTable({ rows, showFinancials }: { rows: Top20Produt
             ))}
             {ordenadas.length === 0 && (
               <tr>
-                <td colSpan={showFinancials ? 9 : 4} className="px-4 py-6 text-center text-[var(--text-muted)]">
+                <td colSpan={showFinancials ? 8 : 3} className="px-4 py-6 text-center text-[var(--text-muted)]">
                   Sem venda no período.
                 </td>
               </tr>
