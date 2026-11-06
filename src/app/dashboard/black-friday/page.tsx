@@ -12,6 +12,7 @@ import {
   getCacPorCampanha,
   getFiltrosSemAtacado,
   getVendasPorFaixaDesconto,
+  getVendasPorEstadoEcommerce,
   getTop20ProdutosComDesconto,
   type DashboardFilters,
 } from "@/lib/metrics";
@@ -31,6 +32,7 @@ import { formatBRL, formatNumber, formatPercent } from "@/lib/format";
 import { StatTile } from "../stat-tile";
 import { GetForm } from "../get-form";
 import { IndicatorChart } from "../indicadores/indicator-chart";
+import { BrazilMap } from "../brazil-map";
 import { CanalTable } from "./canal-table";
 import { CampanhaTable } from "./campanha-table";
 import { mapInsights, statusAtivoIndisponivel } from "./campanhas-ativas";
@@ -141,18 +143,27 @@ export default async function BlackFridayPage({
       erroMetaAds = e instanceof Error ? e.message : "Erro desconhecido buscando investimento do Meta Ads.";
     });
 
-  const [resumo, resumoAnterior, vendasPorCanal, salesByDay, topProdutos, vendasPorFaixaDesconto, cac, syncStatus] = await Promise.all([
+  const [resumo, resumoAnterior, vendasPorCanal, salesByDay, topProdutos, vendasPorFaixaDesconto, vendasPorEstadoEcommerce, cac, syncStatus] = await Promise.all([
     getResumoBlackFriday(filtrosSemAtacado),
     getResumoBlackFriday(filtrosAnteriorSemAtacado),
     getVendasPorCanal(filtrosSemAtacado),
     getSalesByDay(filtrosSemAtacado),
     getTopProdutosBlackFriday(filtrosSemAtacado, 20),
     getVendasPorFaixaDesconto(filtrosSemAtacado),
+    // Escopo MAIS ESTREITO que o resto da tela: só a loja CD (e-commerce), não "todas menos
+    // Atacado" — por isso recebe `filters` (o range da campanha), não `filtrosSemAtacado`. Ver
+    // comentário completo em getVendasPorEstadoEcommerce (black-friday.ts).
+    getVendasPorEstadoEcommerce(filters),
     getCacEcommerce(filters.from, filters.to),
     getSyncStatusDetalhado(),
     metaAdsPromise,
   ]);
   const cacPorCampanha = getCacPorCampanha();
+  const participacaoSemEstadoPct =
+    vendasPorEstadoEcommerce.receitaBrutaTotal > 0
+      ? (vendasPorEstadoEcommerce.semEstado.receita / vendasPorEstadoEcommerce.receitaBrutaTotal) * 100
+      : null;
+  const estadoMaisFaturamento = [...vendasPorEstadoEcommerce.rows].sort((a, b) => b.receita - a.receita)[0];
   // Reaproveita resumo.faturamento (já calculado acima pra Visão Geral) como total do período
   // pra "% do faturamento" de cada SKU — nunca recalcula um total diferente aqui (ver
   // getTop20ProdutosComDesconto em black-friday.ts).
@@ -262,6 +273,52 @@ export default async function BlackFridayPage({
       <section className="mb-10">
         <CanalTable rows={vendasPorCanal} showFinancials={showFinancials} />
       </section>
+
+      {/* ── Mapa de estados — e-commerce ── */}
+      {showFinancials && (
+        <>
+          <h2 className="mb-3 text-base font-semibold">Mapa de estados — e-commerce (CD)</h2>
+          <p className="mb-3 text-xs text-[var(--text-muted)]">
+            Só a loja CD (site), período da campanha — mais estreito que o resto desta tela
+            (que é CD+Leblon+Rio Sul+Barra). Linhas por estado/cidade são brutas (sem desconto de
+            devolução: a devolução não tem como ser rateada por estado, só entra como total abaixo).
+          </p>
+          {vendasPorEstadoEcommerce.disponivel ? (
+            vendasPorEstadoEcommerce.rows.length > 0 ? (
+              <section className="mb-10 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
+                <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  <StatTile label="Receita bruta (CD)" value={formatBRL(vendasPorEstadoEcommerce.receitaBrutaTotal)} />
+                  <StatTile label="Devolução (CD, total período)" value={formatBRL(vendasPorEstadoEcommerce.devolucaoTotal)} />
+                  <StatTile
+                    label="Maior faturamento"
+                    value={estadoMaisFaturamento ? estadoMaisFaturamento.estado : "—"}
+                    subValue={estadoMaisFaturamento ? formatBRL(estadoMaisFaturamento.receita) : undefined}
+                  />
+                  <StatTile
+                    label="Sem UF identificada"
+                    value={formatBRL(vendasPorEstadoEcommerce.semEstado.receita)}
+                    subValue={participacaoSemEstadoPct != null ? `${formatPercent(participacaoSemEstadoPct)} do bruto — não distribuído entre estados` : undefined}
+                  />
+                </div>
+                <BrazilMap
+                  rows={vendasPorEstadoEcommerce.rows.map((r) => ({ estado: r.estado, receita: r.receita, unidades: r.unidades }))}
+                  citiesByState={vendasPorEstadoEcommerce.citiesByState}
+                />
+                <p className="mt-4 text-xs text-[var(--text-muted)]">
+                  Crescimento vs. 2025 e clientes novos por estado ainda não entram aqui: o
+                  primeiro exigiria uma base comparável do ano passado (não disponível nesta
+                  tela hoje) e o segundo depende do vínculo Sale↔ClienteCadastro, que está sendo
+                  construído em paralelo — ver follow-up no PR.
+                </p>
+              </section>
+            ) : (
+              <p className="mb-10 text-sm text-[var(--text-muted)]">Sem venda de e-commerce (CD) no período/filtro selecionado.</p>
+            )
+          ) : (
+            <p className="mb-10 text-sm text-[var(--text-muted)]">Mapa de estados indisponível: loja CD não encontrada ou sem permissão para vê-la.</p>
+          )}
+        </>
+      )}
 
       {/* ── Campanhas ── */}
       <h2 className="mb-3 text-base font-semibold">Campanhas (Meta Ads)</h2>

@@ -25,6 +25,7 @@ import {
   montarVendasPorCanal,
   montarProdutosBlackFriday,
   montarVendasPorFaixaDesconto,
+  montarVendasPorEstadoEcommerce,
   montarTop20ProdutosComDesconto,
   periodoAnterior,
   ORDEM_CANAL,
@@ -387,6 +388,102 @@ describe("getResumoBlackFriday — roas usa só a receita do e-commerce (CD), n�
 
     expect(r.investimentoIndisponivel).toBe(true);
     expect(r.roas).toBeNull();
+  });
+});
+
+// Mapa de estados — e-commerce (CD). Pedido do Rodrigo (2026-11-06): reaproveitar o BrazilMap já
+// usado na aba Vendas, escopado SÓ à loja CD (mais estreito que o resto da tela), com pedido sem
+// UF identificada isolado numa categoria própria — nunca distribuído entre os estados conhecidos.
+describe("montarVendasPorEstadoEcommerce", () => {
+  it("agrupa receita/unidades por estado e por cidade dentro do estado", () => {
+    const r = montarVendasPorEstadoEcommerce(
+      [
+        { estado: "RJ", cidade: "Rio de Janeiro", unidades: 10, receita: 1000 },
+        { estado: "RJ", cidade: "Niterói", unidades: 2, receita: 200 },
+        { estado: "SP", cidade: "São Paulo", unidades: 5, receita: 500 },
+      ],
+      [],
+      0
+    );
+    const rj = r.rows.find((x) => x.estado === "RJ");
+    const sp = r.rows.find((x) => x.estado === "SP");
+    expect(rj?.receita).toBe(1200);
+    expect(rj?.unidades).toBe(12);
+    expect(sp?.receita).toBe(500);
+    expect(r.citiesByState.get("RJ")).toEqual([
+      { cidade: "Rio de Janeiro", receita: 1000, unidades: 10 },
+      { cidade: "Niterói", receita: 200, unidades: 2 },
+    ]);
+  });
+
+  it("pedido sem UF identificada (estado null) nunca é distribuído entre os estados conhecidos — fica isolado em semEstado", () => {
+    const r = montarVendasPorEstadoEcommerce(
+      [
+        { estado: "RJ", cidade: "Rio de Janeiro", unidades: 10, receita: 1000 },
+        { estado: null, cidade: null, unidades: 3, receita: 300 },
+        { estado: null, cidade: "Alguma Cidade", unidades: 1, receita: 100 },
+      ],
+      [],
+      0
+    );
+    expect(r.rows).toHaveLength(1);
+    expect(r.rows[0].estado).toBe("RJ");
+    expect(r.semEstado).toEqual({ receita: 400, unidades: 4, pedidos: 0 });
+    // receitaBrutaTotal soma estados conhecidos + semEstado, nunca esconde o sem-UF do total.
+    expect(r.receitaBrutaTotal).toBe(1400);
+  });
+
+  it("estado conhecido mas cidade null entra no total do estado sem aparecer como entrada de cidade", () => {
+    const r = montarVendasPorEstadoEcommerce(
+      [{ estado: "MG", cidade: null, unidades: 4, receita: 400 }],
+      [],
+      0
+    );
+    const mg = r.rows.find((x) => x.estado === "MG");
+    expect(mg?.receita).toBe(400);
+    expect(r.citiesByState.get("MG")).toBeUndefined();
+  });
+
+  it("conta pedidos distintos por estado (uma linha por (estado, dapicVendaId)) e calcula ticket médio", () => {
+    const r = montarVendasPorEstadoEcommerce(
+      [{ estado: "RJ", cidade: "Rio de Janeiro", unidades: 10, receita: 1000 }],
+      [{ estado: "RJ" }, { estado: "RJ" }, { estado: null }],
+      0
+    );
+    const rj = r.rows.find((x) => x.estado === "RJ");
+    expect(rj?.pedidos).toBe(2);
+    expect(rj?.ticketMedio).toBe(500);
+    expect(r.semEstado.pedidos).toBe(1);
+  });
+
+  it("estado sem nenhum pedido contado (groupBy de pedidos não trouxe linha) tem ticketMedio null, não divide por zero", () => {
+    const r = montarVendasPorEstadoEcommerce(
+      [{ estado: "BA", cidade: "Salvador", unidades: 1, receita: 100 }],
+      [],
+      0
+    );
+    const ba = r.rows.find((x) => x.estado === "BA");
+    expect(ba?.pedidos).toBe(0);
+    expect(ba?.ticketMedio).toBeNull();
+  });
+
+  it("devolução do período entra só como total agregado (devolucaoTotal), nunca rateada por estado", () => {
+    const r = montarVendasPorEstadoEcommerce(
+      [{ estado: "RJ", cidade: "Rio de Janeiro", unidades: 10, receita: 1000 }],
+      [],
+      250
+    );
+    expect(r.devolucaoTotal).toBe(250);
+    // Linha por estado continua bruta — devolução não aparece descontada aqui.
+    expect(r.rows[0].receita).toBe(1000);
+  });
+
+  it("sem nenhuma venda no período devolve tudo zerado/vazio, sem quebrar", () => {
+    const r = montarVendasPorEstadoEcommerce([], [], 0);
+    expect(r.rows).toEqual([]);
+    expect(r.citiesByState.size).toBe(0);
+    expect(r.semEstado).toEqual({ receita: 0, unidades: 0, pedidos: 0 });
+    expect(r.receitaBrutaTotal).toBe(0);
   });
 });
 
