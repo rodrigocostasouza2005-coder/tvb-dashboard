@@ -1,7 +1,7 @@
 import { getSessionUser } from "@/lib/auth";
 import { requireTabAccess } from "@/lib/tabs";
 import { canSeeFinancials, getStoreRestriction } from "@/lib/permissions";
-import { parseFilters, defaultRecentRangeStr, type RawSearchParams } from "@/lib/filters";
+import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import {
   getResumoBlackFriday,
   periodoAnterior,
@@ -25,6 +25,7 @@ import {
 import { prisma } from "@/lib/prisma";
 import { getSyncStatusDetalhado } from "@/lib/sync-runner";
 import { todayBrasiliaStr } from "@/lib/filters";
+import { defaultFiltroBlackFridayStr } from "@/lib/black-friday-banner";
 import { formatBRL, formatNumber, formatPercent } from "@/lib/format";
 import { StatTile } from "../stat-tile";
 import { GetForm } from "../get-form";
@@ -66,17 +67,22 @@ export default async function BlackFridayPage({
 
   const showFinancials = canSeeFinancials(user);
   const rawParams = await searchParams;
-  const defaults = defaultRecentRangeStr(30);
+  // Pedido do Rodrigo (2026-11-06): a partir do início real da campanha, o filtro PADRÃO desta
+  // aba passa a sempre começar no dia da campanha (ver defaultFiltroBlackFridayStr,
+  // black-friday-banner.ts) — Rodrigo pode mudar manualmente a qualquer momento (rawParams.from/
+  // to abaixo sempre tem prioridade sobre o padrão).
+  const defaults = defaultFiltroBlackFridayStr();
   const fromStr = typeof rawParams.from === "string" && rawParams.from ? rawParams.from : defaults.from;
   const toStr = typeof rawParams.to === "string" && rawParams.to ? rawParams.to : defaults.to;
   const allowedStoreIds = getStoreRestriction(user);
   const filters: DashboardFilters = parseFilters(rawParams, { allowedStoreIds });
   const anterior = periodoAnterior(filters.from, filters.to);
 
-  // Pedido do Rodrigo (2026-11-05): "não contabilizar atacado na aba de central black friday".
-  // Afeta visão geral/ranking de produto/gráfico de receita por dia — NUNCA a tabela "Por canal"
-  // (getVendasPorCanal continua recebendo `filters` original, Atacado aparece lá como canal
-  // próprio, transparente; ver comentário em black-friday.ts).
+  // Pedido do Rodrigo (2026-11-05, reforçado em 2026-11-06: "eu quero que tire qualquer venda do
+  // atacado dessa aba"). Afeta TODA a Central Black Friday agora, inclusive a tabela "Por canal"
+  // — a versão anterior mantinha a linha do Atacado ali de propósito (transparência de origem),
+  // mas Rodrigo deixou claro que não quer NENHUMA venda de Atacado nesta aba, nem como linha
+  // informativa. getVendasPorCanal agora recebe filtrosSemAtacado como todo o resto.
   const filtrosSemAtacado = await getFiltrosSemAtacado(filters);
   const filtrosAnteriorSemAtacado: DashboardFilters = { ...filtrosSemAtacado, from: anterior.from, to: anterior.to };
 
@@ -136,7 +142,7 @@ export default async function BlackFridayPage({
   const [resumo, resumoAnterior, vendasPorCanal, salesByDay, topProdutos, vendasPorFaixaDesconto, cac, syncStatus] = await Promise.all([
     getResumoBlackFriday(filtrosSemAtacado),
     getResumoBlackFriday(filtrosAnteriorSemAtacado),
-    getVendasPorCanal(filters),
+    getVendasPorCanal(filtrosSemAtacado),
     getSalesByDay(filtrosSemAtacado),
     getTopProdutosBlackFriday(filtrosSemAtacado, 20),
     getVendasPorFaixaDesconto(filtrosSemAtacado),

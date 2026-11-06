@@ -1,15 +1,16 @@
 import type { CanalVendasRow } from "@/lib/metrics";
 import { formatBRL, formatNumber } from "@/lib/format";
 
-// Item 2 da missão: Site(CD)/Leblon/Rio Sul/Barra/Atacado SEMPRE em linhas separadas — nunca
-// uma linha "Total" escondendo qual canal fez o quê. A linha de soma no fim é só um apoio visual
-// (mantém a origem de cada canal visível em cima dela, nunca no lugar dela).
+// Item 2 da missão: CD/Leblon/Rio Sul/Barra SEMPRE em linhas separadas — nunca uma linha "Total"
+// escondendo qual canal fez o quê. A linha de soma no fim é só um apoio visual (mantém a origem
+// de cada canal visível em cima dela, nunca no lugar dela).
+//
+// Atacado não entra mais nesta tabela (pedido do Rodrigo em 2026-11-06: "tire qualquer venda do
+// atacado dessa aba" — page.tsx agora passa filtrosSemAtacado pra getVendasPorCanal, então `rows`
+// nunca deveria conter uma linha ATACADO). O filtro abaixo é defensivo (não deveria ter efeito
+// algum em uso normal) — mantido pra nunca somar Atacado no rodapé mesmo que `rows` receba algo
+// inesperado no futuro.
 export function CanalTable({ rows, showFinancials }: { rows: CanalVendasRow[]; showFinancials: boolean }) {
-  // Soma do rodapé exclui Atacado (pedido do Rodrigo em 2026-11-06: a linha do Atacado continua
-  // visível acima, por transparência, mas o TOTAL precisa bater com o resto da Central Black
-  // Friday — resumo/ranking/gráfico/faixa de desconto já excluem Atacado via filtrosSemAtacado em
-  // page.tsx; uma soma que incluísse Atacado aqui contradiria esses números e enganaria quem olha
-  // só o rodapé).
   const rowsVarejo = rows.filter((r) => r.code !== "ATACADO");
   const totalUnidades = rowsVarejo.reduce((s, r) => s + r.unitsSold, 0);
   const totalReceita = rowsVarejo.reduce((s, r) => s + r.revenue, 0);
