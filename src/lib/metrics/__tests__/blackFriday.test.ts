@@ -201,21 +201,40 @@ describe("excluirAtacado", () => {
 });
 
 // Painel "vendas por faixa de desconto" (pedido do Rodrigo, 2026-11-06) — cruza venda líquida
-// com o desconto real cadastrado em PrecoBlackFriday (planilha importada).
+// com o desconto real cadastrado em PrecoBlackFriday (planilha importada). Desde 2026-11-06,
+// produto sem linha cadastrada conta como 0% e se junta ao bucket 0% real (não vira mais uma
+// linha própria de "sem cadastro").
 describe("montarVendasPorFaixaDesconto", () => {
-  it("produto vendido sem linha correspondente em PrecoBlackFriday cai em 'Sem desconto cadastrado', nunca é descartado nem vira 0%", () => {
+  it("produto sem linha correspondente em PrecoBlackFriday cai no bucket 0%, junto com produtos que têm desconto=0 explícito", () => {
+    const liquido = [
+      { grupo: "Camisa", key: "Camisa Sem Preço", unitsSold: 10, revenue: 1000 }, // sem linha na planilha
+      { grupo: "Camisa", key: "Camisa Desconto Zero", unitsSold: 4, revenue: 400 }, // desconto=0 explícito
+    ];
+    const precos = new Map<string, number>([["Camisa::Camisa Desconto Zero", 0]]);
+    const rows = montarVendasPorFaixaDesconto(liquido, precos, [0, 0.1, 0.2]);
+
+    // Nunca mais existe um bucket null/"sem cadastro" — tudo que não bate vira 0%.
+    expect(rows.find((r) => r.desconto === null)).toBeUndefined();
+
+    const faixaZero = rows.find((r) => r.desconto === 0);
+    expect(faixaZero).toBeDefined();
+    expect(faixaZero?.label).toBe("0%");
+    // Uma ÚNICA linha, com os dois produtos somados — não duas linhas separadas.
+    expect(faixaZero?.unitsSold).toBe(14);
+    expect(faixaZero?.revenue).toBe(1400);
+    expect(faixaZero?.produtosDistintos).toBe(2);
+    expect(faixaZero?.produtos).toHaveLength(2);
+  });
+
+  it("garante o bucket 0% mesmo que a planilha não tenha nenhuma linha com desconto=0 cadastrado", () => {
     const liquido = [{ grupo: "Camisa", key: "Camisa Sem Preço", unitsSold: 10, revenue: 1000 }];
     const precos = new Map<string, number>(); // nenhum preço cadastrado pra esse produto
-    const rows = montarVendasPorFaixaDesconto(liquido, precos, [0.1, 0.2]);
+    const rows = montarVendasPorFaixaDesconto(liquido, precos, [0.1, 0.2]); // faixasReais sem 0
 
-    const semCadastro = rows.find((r) => r.desconto === null);
-    expect(semCadastro).toBeDefined();
-    expect(semCadastro?.label).toBe("Sem desconto cadastrado");
-    expect(semCadastro?.unitsSold).toBe(10);
-    expect(semCadastro?.revenue).toBe(1000);
-    // Nunca aparece dentro da faixa 0% real (que é uma faixa cadastrada e diferente de "sem dado").
     const faixaZero = rows.find((r) => r.desconto === 0);
-    expect(faixaZero).toBeUndefined();
+    expect(faixaZero).toBeDefined();
+    expect(faixaZero?.unitsSold).toBe(10);
+    expect(faixaZero?.revenue).toBe(1000);
   });
 
   it("agrega venda líquida (já descontada devolução, via netByReturns) corretamente por faixa", () => {
@@ -243,19 +262,40 @@ describe("montarVendasPorFaixaDesconto", () => {
       expect(r.revenue).toBe(0);
       expect(r.produtosDistintos).toBe(0);
       expect(r.precoMedioLiquido).toBeNull();
+      expect(r.produtos).toEqual([]);
     }
   });
 
-  it("ordena por desconto ascendente, com 'Sem desconto cadastrado' sempre por último", () => {
+  it("ordena por desconto ascendente", () => {
     const liquido = [{ grupo: "G", key: "P", unitsSold: 1, revenue: 1 }];
-    const precos = new Map<string, number>(); // cai em sem-cadastro
+    const precos = new Map<string, number>(); // cai em 0%
     const rows = montarVendasPorFaixaDesconto(liquido, precos, [0.3, 0.1, 0.45, 0]);
-    expect(rows.map((r) => r.desconto)).toEqual([0, 0.1, 0.3, 0.45, null]);
+    expect(rows.map((r) => r.desconto)).toEqual([0, 0.1, 0.3, 0.45]);
   });
 
   it("rótulo de porcentagem bate com o valor decimal cadastrado (0.15 -> '15%')", () => {
     const rows = montarVendasPorFaixaDesconto([], new Map(), [0.15]);
-    expect(rows[0].label).toBe("15%");
+    expect(rows.find((r) => r.desconto === 0.15)?.label).toBe("15%");
+  });
+
+  it("produtos dentro de cada faixa vêm ordenados por receita líquida decrescente", () => {
+    const liquido = [
+      { grupo: "Camisa", key: "Camisa Baixa Receita", unitsSold: 1, revenue: 100 },
+      { grupo: "Camisa", key: "Camisa Alta Receita", unitsSold: 1, revenue: 900 },
+      { grupo: "Camisa", key: "Camisa Media Receita", unitsSold: 1, revenue: 500 },
+    ];
+    const precos = new Map<string, number>([
+      ["Camisa::Camisa Baixa Receita", 0.1],
+      ["Camisa::Camisa Alta Receita", 0.1],
+      ["Camisa::Camisa Media Receita", 0.1],
+    ]);
+    const rows = montarVendasPorFaixaDesconto(liquido, precos, [0.1]);
+    const faixa10 = rows.find((r) => r.desconto === 0.1);
+    expect(faixa10?.produtos.map((p) => p.produto)).toEqual([
+      "Camisa Alta Receita",
+      "Camisa Media Receita",
+      "Camisa Baixa Receita",
+    ]);
   });
 });
 
