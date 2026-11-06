@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { requireTabAccess } from "@/lib/tabs";
 import { validarCnpj } from "@/lib/prospeccao/cnpj";
+import { isUfLitoranea } from "@/lib/prospeccao/estados-litoraneos";
 
 function value(formData: FormData, key: string): string {
   return String(formData.get(key) ?? "").trim();
@@ -412,6 +413,15 @@ export async function aprovarCandidatosDescobertosAction(formData: FormData) {
   for (const candidato of candidatos) {
     if (!candidato.nomeFantasia || !validarCnpj(candidato.cnpj) || !/^[A-Z]{2}$/.test(candidato.estado) || !candidato.cidade) {
       redirect("/dashboard/atacado-prospeccao?revisao=dados-invalidos");
+    }
+    // Unificação da ingestão (faxina pós-auditoria 2026-11, achados B.3/E.7/D6): este é um dos
+    // caminhos que de fato grava AtacadoProspect novo no Neon — o agente de descoberta
+    // (scripts/prospeccao/agente-descoberta-comercial.ts) aceita qualquer UF de 2 letras no
+    // `--uf`, sem restrição litorânea própria, então a validação tem que acontecer aqui, no
+    // portão de escrita, usando a mesma fonte única de verdade do importador da Receita Federal
+    // (src/lib/prospeccao/estados-litoraneos.ts) — nunca uma segunda lista paralela.
+    if (!isUfLitoranea(candidato.estado)) {
+      redirect("/dashboard/atacado-prospeccao?revisao=uf-fora-cobertura");
     }
     const site = normalizeHttpUrl(candidato.site);
     if (!site || !candidato.sinaisMasculino.length || (!candidato.sinaisMultimarcas.length && candidato.marcasEncontradas.length < 2)) {

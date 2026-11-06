@@ -27,7 +27,16 @@ CNAES = {
     "4782202": "Comércio varejista de artigos de viagem",
 }
 BASE = "hf://datasets/cnpjaberto/cnpj-dados-receita-brasil-{competencia}"
-ESTADOS_LITORANEOS = {"AL", "AP", "BA", "CE", "ES", "MA", "PA", "PB", "PE", "PI", "PR", "RJ", "RN", "RS", "SC", "SE", "SP"}
+
+# Fonte única de verdade dos 17 estados litorâneos — lida do mesmo JSON que
+# src/lib/prospeccao/estados-litoraneos.ts usa como base pra derivar UFS_LITORANEAS/
+# isUfLitoranea(), e que .github/workflows/agentes-prospeccao.yml também lê pro --ufs do
+# workflow de exportação. Nunca redefinir esta lista aqui: um teste de paridade em
+# estados-litoraneos.test.ts (lado TS) garante que o JSON bate com a lista derivada de
+# ESTADOS_BRASIL; manter os três lados lendo o mesmo arquivo é o que impede divergência silenciosa
+# (ver auditoria pós-PR#51-53, achado B.3/E.7/D6).
+_ESTADOS_LITORANEOS_JSON = Path(__file__).resolve().parent / "estados-litoraneos.json"
+ESTADOS_LITORANEOS = frozenset(json.loads(_ESTADOS_LITORANEOS_JSON.read_text(encoding="utf-8")))
 
 
 def main() -> int:

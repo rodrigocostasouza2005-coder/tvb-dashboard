@@ -11,6 +11,7 @@
  */
 import { readFile } from "node:fs/promises";
 import { PrismaClient } from "@prisma/client";
+import { importarComValidacaoUf } from "../../src/lib/prospeccao/importador-receita";
 
 type ProspectRow = {
   nome_fantasia: string;
@@ -127,72 +128,85 @@ async function main() {
   console.log(`Arquivo: ${file}`);
   console.log(`Competência informada: ${competence}`);
   console.log(`Linhas válidas: ${rows.length} | CNPJs únicos: ${deduped.length} | duplicados no arquivo: ${rows.length - deduped.length}`);
-  if (!apply) {
-    console.log("PRÉVIA: nenhum dado foi gravado. Revise o arquivo e execute novamente com --apply.");
-    return;
-  }
 
-  const prisma = new PrismaClient();
+  // Única validação de UF litorânea antes de qualquer persistência em AtacadoProspect — fonte
+  // única de verdade em src/lib/prospeccao/estados-litoraneos.ts (unificação da ingestão, Fase 2
+  // da faxina pós-auditoria 2026-11; achados B.3/E.7/D6). UF fora das 17 litorâneas nunca é
+  // persistida, mesmo com --apply; isto roda também no modo prévia (sem --apply) só para reportar.
+  const prisma = apply ? new PrismaClient() : null;
   try {
-    let inserted = 0;
-    let citiesNormalized = 0;
-    // Importação somente aditiva: registros existentes nunca são alterados.
-    for (let offset = 0; offset < deduped.length; offset += 400) {
-      const batch = deduped.slice(offset, offset + 400);
-      const existing = await prisma.atacadoProspect.findMany({
-        where: { cnpj: { in: batch.map((row) => row.cnpj) } },
-        select: { cnpj: true },
-      });
-      const existingCnpjs = new Set(existing.map((row) => row.cnpj));
-      const novos = batch.filter((row) => !existingCnpjs.has(row.cnpj));
-      if (novos.length === 0) continue;
-      const result = await prisma.atacadoProspect.createMany({
-        data: novos.map((row) => ({
-          nomeFantasia: row.nome_fantasia.slice(0, 160),
-          razaoSocial: row.razao_social.slice(0, 180) || null,
-          cnpj: row.cnpj,
-          cidade: row.cidade.slice(0, 100) || null,
-          codigoMunicipio: row.codigo_municipio.slice(0, 10) || null,
-          estado: row.uf,
-          telefone: row.telefone.slice(0, 40) || null,
-          email: row.email.slice(0, 180) || null,
-          site: safeUrl(row.site),
-          origem: "receita_federal_dados_abertos",
-          origemAgente: "AGENTE_CAPTACAO_RECEITA_V1",
-          evidenciaUrl: safeUrl(row.evidencia_url),
-          observacoes: [
-            `Coleta cadastral Receita Federal — competência ${competence}`,
-            row.cnae_principal ? `CNAE principal: ${row.cnae_principal}` : "",
-            row.cnae_correspondente ? `CNAE de moda identificado: ${row.cnae_correspondente}` : "",
-            row.tipo_correspondencia === "PRINCIPAL" ? "Correspondência CNAE: atividade principal" : "Correspondência CNAE: atividade secundária — validar aderência comercial",
-            row.cnae_descricao,
-            row.porte ? `Porte cadastral: ${row.porte}` : "",
-            row.nome_fantasia === "NOME COMERCIAL NÃO IDENTIFICADO" ? "Nome fantasia ausente na Receita; razão social mantida separadamente e nome comercial pendente de pesquisa." : "",
-            "Grupo comercial pendente de pesquisa; CNAE não é suficiente para classificar A/B/C/D.",
-            "Lead cadastral não verificado comercialmente.",
-          ].filter(Boolean).join(" | "),
-        })),
-        skipDuplicates: true,
-      });
-      inserted += result.count;
-      const insertedRows = await prisma.atacadoProspect.findMany({
-        where: { cnpj: { in: novos.map((row) => row.cnpj) } },
-        select: { id: true, cnpj: true },
-      });
-      await prisma.atacadoProspectActivity.createMany({
-        data: insertedRows.map((row) => ({
-          prospectId: row.id,
-          tipo: "AGENTE_CAPTACAO",
-          etapa: "CAPTACAO_RECEITA",
-          descricao: "Candidato captado da base pública da Receita Federal. Aguardando triagem cadastral e validação comercial.",
-          criadoPor: "AGENTE_CAPTACAO_RECEITA_V1",
-        })),
-      });
-      console.log(`Lote ${Math.floor(offset / 400) + 1}: ${result.count} novos registros`);
+    const resumo = await importarComValidacaoUf({
+      registros: deduped,
+      apply,
+      persistencia: {
+        buscarCnpjsExistentes: async (cnpjs) => {
+          const existing = await prisma!.atacadoProspect.findMany({
+            where: { cnpj: { in: cnpjs } },
+            select: { cnpj: true },
+          });
+          return new Set(existing.flatMap((row) => (row.cnpj ? [row.cnpj] : [])));
+        },
+        inserirLote: async (novos) => {
+          const result = await prisma!.atacadoProspect.createMany({
+            data: novos.map((row) => ({
+              nomeFantasia: row.nome_fantasia.slice(0, 160),
+              razaoSocial: row.razao_social.slice(0, 180) || null,
+              cnpj: row.cnpj,
+              cidade: row.cidade.slice(0, 100) || null,
+              codigoMunicipio: row.codigo_municipio.slice(0, 10) || null,
+              estado: row.uf,
+              telefone: row.telefone.slice(0, 40) || null,
+              email: row.email.slice(0, 180) || null,
+              site: safeUrl(row.site),
+              origem: "receita_federal_dados_abertos",
+              origemAgente: "AGENTE_CAPTACAO_RECEITA_V1",
+              evidenciaUrl: safeUrl(row.evidencia_url),
+              observacoes: [
+                `Coleta cadastral Receita Federal — competência ${competence}`,
+                row.cnae_principal ? `CNAE principal: ${row.cnae_principal}` : "",
+                row.cnae_correspondente ? `CNAE de moda identificado: ${row.cnae_correspondente}` : "",
+                row.tipo_correspondencia === "PRINCIPAL" ? "Correspondência CNAE: atividade principal" : "Correspondência CNAE: atividade secundária — validar aderência comercial",
+                row.cnae_descricao,
+                row.porte ? `Porte cadastral: ${row.porte}` : "",
+                row.nome_fantasia === "NOME COMERCIAL NÃO IDENTIFICADO" ? "Nome fantasia ausente na Receita; razão social mantida separadamente e nome comercial pendente de pesquisa." : "",
+                "Grupo comercial pendente de pesquisa; CNAE não é suficiente para classificar A/B/C/D.",
+                "Lead cadastral não verificado comercialmente.",
+              ].filter(Boolean).join(" | "),
+            })),
+            skipDuplicates: true,
+          });
+          const insertedRows = await prisma!.atacadoProspect.findMany({
+            where: { cnpj: { in: novos.map((row) => row.cnpj) } },
+            select: { id: true, cnpj: true },
+          });
+          await prisma!.atacadoProspectActivity.createMany({
+            data: insertedRows.map((row) => ({
+              prospectId: row.id,
+              tipo: "AGENTE_CAPTACAO",
+              etapa: "CAPTACAO_RECEITA",
+              descricao: "Candidato captado da base pública da Receita Federal. Aguardando triagem cadastral e validação comercial.",
+              criadoPor: "AGENTE_CAPTACAO_RECEITA_V1",
+            })),
+          });
+          return result.count;
+        },
+      },
+    });
+
+    if (resumo.rejeitadosPorUf.length > 0) {
+      console.log(`UF fora da cobertura litorânea: ${resumo.rejeitadosPorUf.length} registro(s) rejeitado(s) (nunca persistidos).`);
+      for (const r of resumo.rejeitadosPorUf) console.log(` - ${r.cnpj} (UF ${r.uf || "?"}): ${r.motivo}`);
     }
-    console.log(`Concluído: ${inserted} inseridos; ${deduped.length - inserted} já existiam e foram preservados.`);
+
+    if (!apply) {
+      console.log(`Elegíveis por UF litorânea: ${resumo.aceitosPorUf} de ${deduped.length}.`);
+      console.log("PRÉVIA: nenhum dado foi gravado. Revise o arquivo e execute novamente com --apply.");
+      return;
+    }
+
+    console.log(`Concluído: ${resumo.inseridos} inseridos; ${resumo.jaExistiam} já existiam e foram preservados.`);
   } finally {
-    await prisma.$disconnect();
+    await prisma?.$disconnect();
   }
 }
 

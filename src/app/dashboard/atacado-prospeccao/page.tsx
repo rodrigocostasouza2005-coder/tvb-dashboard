@@ -130,6 +130,7 @@ export default async function AtacadoProspeccaoPage({
       {params.revisao === "concluida" && <p role="status" className="border border-green-600/40 px-3 py-2 text-sm text-green-700">Revisão concluída: {params.novos ?? "0"} candidatos incluídos na fila de qualificação; {params.duplicados ?? "0"} duplicados ignorados.</p>}
       {params.revisao === "dados-invalidos" && <p role="alert" className="border border-red-500/40 px-3 py-2 text-sm text-red-600">Revise nome, CNPJ com dígitos verificadores, cidade e UF de cada candidato selecionado.</p>}
       {params.revisao === "evidencia-invalida" && <p role="alert" className="border border-red-500/40 px-3 py-2 text-sm text-red-600">Um ou mais candidatos não possuem URL ou evidências comerciais mínimas válidas.</p>}
+      {params.revisao === "uf-fora-cobertura" && <p role="alert" className="border border-red-500/40 px-3 py-2 text-sm text-red-600">Um ou mais candidatos têm UF fora dos 17 estados litorâneos autorizados para prospecção. Remova-os do arquivo de revisão e envie novamente.</p>}
       {params.revisao === "arquivo-invalido" && <p role="alert" className="border border-red-500/40 px-3 py-2 text-sm text-red-600">Arquivo de revisão inválido. Exporte novamente o CSV do agente de descoberta.</p>}
       <RevisaoCandidatosWeb defaultUf={uf ?? "RJ"} />
 
