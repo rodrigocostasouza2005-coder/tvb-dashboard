@@ -13,6 +13,7 @@ import {
   getFiltrosSemAtacado,
   getVendasPorFaixaDesconto,
   getVendasPorEstadoEcommerce,
+  getTop20ProdutosComDesconto,
   type DashboardFilters,
 } from "@/lib/metrics";
 import {
@@ -37,6 +38,7 @@ import { CampanhaTable } from "./campanha-table";
 import { mapInsights, statusAtivoIndisponivel } from "./campanhas-ativas";
 import { ProdutosTable } from "./produtos-table";
 import { FaixaDescontoTable } from "./faixa-desconto-table";
+import { Top20DescontoTable } from "./top20-desconto-table";
 import { FonteStatus } from "./fonte-status";
 
 // Investimento em mídia (getInsightsPorConjunto/Anuncio) é lento o suficiente (ver mesmo
@@ -162,6 +164,10 @@ export default async function BlackFridayPage({
       ? (vendasPorEstadoEcommerce.semEstado.receita / vendasPorEstadoEcommerce.receitaBrutaTotal) * 100
       : null;
   const estadoMaisFaturamento = [...vendasPorEstadoEcommerce.rows].sort((a, b) => b.receita - a.receita)[0];
+  // Reaproveita resumo.faturamento (já calculado acima pra Visão Geral) como total do período
+  // pra "% do faturamento" de cada SKU — nunca recalcula um total diferente aqui (ver
+  // getTop20ProdutosComDesconto em black-friday.ts).
+  const top20ProdutosDesconto = await getTop20ProdutosComDesconto(filtrosSemAtacado, resumo.faturamento);
 
   // Comparativo só aparece quando os DOIS períodos têm pedido real — nunca força uma comparação
   // contra um período vazio (pedido explícito da missão, item 1).
@@ -343,6 +349,18 @@ export default async function BlackFridayPage({
       </p>
       <section className="mb-10">
         <ProdutosTable rows={topProdutos} showFinancials={showFinancials} />
+      </section>
+
+      {/* ── Top 20 produtos (SKU) com desconto real ── */}
+      <h2 className="mb-3 text-base font-semibold">Top 20 produtos (SKU) com desconto real</h2>
+      <p className="mb-3 text-xs text-[var(--text-muted)]">
+        Ranking por SKU (grade real, inclui tamanho/cor) — desconto CALCULADO comparando o preço de
+        referência do catálogo (Tabela varejo) com o preço efetivo realmente vendido no período, não o
+        desconto cadastrado na planilha de BF (esse já aparece em &quot;Vendas por faixa de desconto&quot;,
+        abaixo). SKU sem preço de referência no catálogo mostra &quot;indisponível&quot;, nunca 0%.
+      </p>
+      <section className="mb-10">
+        <Top20DescontoTable rows={top20ProdutosDesconto} showFinancials={showFinancials} />
       </section>
 
       {/* ── Por faixa de desconto ── */}
