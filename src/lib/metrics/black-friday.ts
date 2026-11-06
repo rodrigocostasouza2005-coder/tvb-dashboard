@@ -3,9 +3,13 @@
 // nenhuma regra de negócio que já existe em outro lugar (ver saleWhere/returnWhere em core.ts,
 // getCacEcommerce em cac.ts, getClassificacaoPorProduto em compras-inteligencia.ts).
 //
-// Regra inegociável desta tela (ver prompt da missão): canal nunca é somado escondendo a
-// origem — Site(CD)/Leblon/Rio Sul/Barra/Atacado aparecem SEMPRE separados, por Store.code real,
-// nunca por displayGroup (que hoje agrupa CD+ATACADO só pra exibição no FilterBar).
+// Regra original da missão (canal nunca somado escondendo a origem: Site(CD)/Leblon/Rio
+// Sul/Barra/Atacado SEMPRE separados, por Store.code real, nunca por displayGroup) foi
+// REVOGADA em 2026-11-06 especificamente pro Atacado: Rodrigo pediu "tire qualquer venda do
+// atacado dessa aba" — não só dos totais, também da tabela "Por canal". Atacado não aparece mais
+// em NENHUM lugar da Central Black Friday (ver getFiltrosSemAtacado abaixo, aplicado a todas as
+// funções desta tela sem exceção agora). As outras lojas (CD/Leblon/Rio Sul/Barra) continuam
+// sempre separadas entre si, só o Atacado saiu de cena por completo.
 import { prisma } from "@/lib/prisma";
 import { saleWhere, returnWhere, netByReturns, type DashboardFilters } from "./core";
 import { getSalesByGrupoProduto, getReturnsByGrupoProduto } from "./vendas";
@@ -13,15 +17,12 @@ import { getEcommerceStoreId } from "./cac";
 import { getInsightsPorConjunto } from "@/lib/connectors/meta-ads";
 import { todayBrasiliaStr } from "@/lib/filters";
 
-// ===== Exclusão de Atacado (pedido do Rodrigo, 2026-11-05: "não contabilizar atacado na aba de
-// central black friday") =====
+// ===== Exclusão de Atacado (pedido do Rodrigo, 2026-11-05, ampliado em 2026-11-06 pra cobrir
+// TUDO nesta tela, inclusive a tabela "Por canal" — ver comentário no topo do arquivo) =====
 //
-// Afeta só os números "visão geral/ranking/gráfico" desta tela (getResumoBlackFriday,
-// getTopProdutosBlackFriday, getSalesByDay via DashboardFilters) — NUNCA getVendasPorCanal: a
-// tabela "Por canal" existe justamente pra mostrar Atacado como linha própria, transparente (ver
-// comentário no topo do arquivo, "canal nunca é somado escondendo a origem"). Omitir Atacado ali
-// seria escondida a origem, não "não contar"; só quem chama (a página) decide qual filtro passar
-// pra qual função — este módulo não muda o comportamento de saleWhere/returnWhere/getVendasPorCanal.
+// A página (black-friday/page.tsx) passa filtrosSemAtacado pra TODAS as funções desta tela sem
+// exceção, incluindo getVendasPorCanal — este módulo não muda o comportamento de
+// saleWhere/returnWhere/getVendasPorCanal em si, só quem chama decide qual filtro passar.
 
 // Função PURA (sem Prisma) — recebe o id já resolvido da loja ATACADO e, só quando necessário
 // (filters.storeIds indefinido = "sem restrição, todas as lojas"), a lista de ids de todas as
