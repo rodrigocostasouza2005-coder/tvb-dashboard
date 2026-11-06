@@ -70,20 +70,32 @@ export type ContagemStatusComercial = {
   altaPrioridade: number;
   qualificado: number;
   pendente: number;
-  emInvestigacao: number;
+  // EM_INVESTIGACAO cobre dois momentos reais bem diferentes, e o schema (StatusComercialProspect)
+  // só tem UM valor pra ambos — sem migration (proibida nesta faxina), a única forma honesta de
+  // separar é usar o campo resultadoEliminacao, que já existe e já é preenchido pelo motor:
+  //   - aguardandoInvestigacao: resultadoEliminacao ainda NULL => motor nunca rodou sobre este
+  //     prospect (estado inicial puro, "aguardando").
+  //   - emInvestigacaoComEvidenciaInsuficiente: resultadoEliminacao = INCONCLUSIVO => o motor já
+  //     rodou e não bloqueou nada, mas falta evidência em pelo menos um critério obrigatório
+  //     (ver avaliarEliminacao em motor-elegibilidade.ts) — isto é ao mesmo tempo "em investigação"
+  //     e "evidência insuficiente"; não existem como dois estados distintos no schema atual, então
+  //     esta única contagem alimenta os dois rótulos na UI (ver qualificacao-kpis.tsx).
+  aguardandoInvestigacao: number;
+  emInvestigacaoComEvidenciaInsuficiente: number;
   reprovado: number;
 };
 
 export async function contarPorStatusComercial(): Promise<ContagemStatusComercial> {
-  const [aprovado, altaPrioridade, qualificado, pendente, emInvestigacao, reprovado] = await Promise.all([
+  const [aprovado, altaPrioridade, qualificado, pendente, aguardandoInvestigacao, emInvestigacaoComEvidenciaInsuficiente, reprovado] = await Promise.all([
     prisma.atacadoProspect.count({ where: { statusComercial: "APROVADO" } }),
     prisma.atacadoProspect.count({ where: { statusComercial: "APROVADO", classificacaoProspect: "ALTA_PRIORIDADE" } }),
     prisma.atacadoProspect.count({ where: { statusComercial: "APROVADO", classificacaoProspect: "QUALIFICADO" } }),
     prisma.atacadoProspect.count({ where: { statusComercial: "PENDENTE_REVISAO_HUMANA" } }),
-    prisma.atacadoProspect.count({ where: { statusComercial: "EM_INVESTIGACAO" } }),
+    prisma.atacadoProspect.count({ where: { statusComercial: "EM_INVESTIGACAO", resultadoEliminacao: null } }),
+    prisma.atacadoProspect.count({ where: { statusComercial: "EM_INVESTIGACAO", resultadoEliminacao: "INCONCLUSIVO" } }),
     prisma.atacadoProspect.count({ where: { statusComercial: "REPROVADO" } }),
   ]);
-  return { aprovado, altaPrioridade, qualificado, pendente, emInvestigacao, reprovado };
+  return { aprovado, altaPrioridade, qualificado, pendente, aguardandoInvestigacao, emInvestigacaoComEvidenciaInsuficiente, reprovado };
 }
 
 // Só estado/município de quem já passou pelo motor (aprovado ou pendente) — não faz sentido

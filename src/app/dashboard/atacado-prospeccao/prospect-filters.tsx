@@ -6,10 +6,8 @@ import { useTransition, type FormEvent } from "react";
 type Props = {
   uf: string;
   cidade: string;
-  grupo: string;
   status: string;
   cadastro: string;
-  grupos: string[];
   statusOptions: Array<[string, string]>;
   cadastroOptions: string[];
   cidades: string[];
@@ -24,7 +22,7 @@ export function ProspectFilters(props: Props) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const params = new URLSearchParams(window.location.search);
-    for (const key of ["uf", "cidade", "grupo", "status", "cadastro"]) {
+    for (const key of ["uf", "cidade", "status", "cadastro"]) {
       const value = String(form.get(key) ?? "").trim();
       if (value) params.set(key, value);
       else params.delete(key);
@@ -41,11 +39,6 @@ export function ProspectFilters(props: Props) {
       <label htmlFor="cidade" className="text-xs text-[var(--text-muted)]">Cidade</label>
       <input id="cidade" name="cidade" list="cidades-prospects" defaultValue={props.cidade} placeholder="Rio de Janeiro" className={`${inputClass} w-40`} />
       <datalist id="cidades-prospects">{props.cidades.map((city) => <option key={city} value={city} />)}</datalist>
-      <label htmlFor="grupo" className="text-xs text-[var(--text-muted)]">Grupo</label>
-      <select id="grupo" name="grupo" defaultValue={props.grupo} className={inputClass}>
-        <option value="">Todos</option>
-        {props.grupos.map((item) => <option key={item} value={item}>{item === "PENDENTE" ? "Pendente" : `Grupo ${item}`}</option>)}
-      </select>
       <label htmlFor="status" className="text-xs text-[var(--text-muted)]">Status</label>
       <select id="status" name="status" defaultValue={props.status} className={inputClass}>
         <option value="">Todos</option>

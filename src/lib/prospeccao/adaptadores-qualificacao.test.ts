@@ -115,6 +115,26 @@ describe("montarCandidatoPesquisaComercial", () => {
     expect(candidato.categoriasBloqueio).toContain("ALIMENTACAO");
   });
 
+  // Regressão trazida de avaliacao-comercial.test.ts (removido na faxina pós-auditoria, PR #51+):
+  // aquele teste cobria "bijuterias"/"loja de móveis" como texto de exclusão ponta a ponta. Esta
+  // camada (EXCLUSAO_PARA_CATEGORIA) já tinha os termos mapeados, mas não tinha teste próprio —
+  // adicionado aqui para não perder cobertura líquida do critério ao remover o arquivo antigo.
+  it("sinal de exclusão 'bijuterias' mapeia para categoria JOALHERIA_BIJUTERIA tipada", () => {
+    const candidato = montarCandidatoPesquisaComercial({
+      ...base, confianca: "ALTA", siteConfirmado: "https://loja.com.br", urlReferencia: "https://loja.com.br",
+      evidencia: siteVazio({ sinaisExclusao: ["bijuterias"] }),
+    });
+    expect(candidato.categoriasBloqueio).toContain("JOALHERIA_BIJUTERIA");
+  });
+
+  it("sinal de exclusão 'loja de móveis' mapeia para categoria MOVEIS tipada", () => {
+    const candidato = montarCandidatoPesquisaComercial({
+      ...base, confianca: "ALTA", siteConfirmado: "https://loja.com.br", urlReferencia: "https://loja.com.br",
+      evidencia: siteVazio({ sinaisExclusao: ["loja de móveis"] }),
+    });
+    expect(candidato.categoriasBloqueio).toContain("MOVEIS");
+  });
+
   it("marca própria bloqueia por SOMENTE_MARCA_PROPRIA", () => {
     const candidato = montarCandidatoPesquisaComercial({
       ...base, confianca: "ALTA", siteConfirmado: "https://loja.com.br", urlReferencia: "https://loja.com.br",

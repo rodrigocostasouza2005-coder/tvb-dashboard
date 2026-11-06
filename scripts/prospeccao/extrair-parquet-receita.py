@@ -14,11 +14,17 @@ from pathlib import Path
 
 import duckdb
 
+# Dicionário DOCUMENTAL apenas — a query SQL abaixo (ver `filtrados`) filtra por um único CNAE
+# hardcoded ('4781400'), nunca por este dicionário. NÃO adicionar de volta o CNAE de suvenires/
+# bijuterias/semijoias/artesanato: é uma categoria de exclusão aprovada pelo motor de qualificação
+# (CategoriaBloqueio "JOALHERIA_BIJUTERIA" em src/lib/prospeccao/motor-elegibilidade.ts) e incluí-la
+# aqui já causou confusão numa auditoria anterior — se algum dia este dicionário passar a ser
+# usado de fato no SQL (hoje não é), bijuterias precisam continuar fora dele (ver teste de
+# regressão em scripts/prospeccao/tests/test_extrair_parquet_receita.py).
 CNAES = {
     "4781400": "Comércio varejista de artigos do vestuário e acessórios",
     "4782201": "Comércio varejista de calçados",
     "4782202": "Comércio varejista de artigos de viagem",
-    "4789001": "Comércio varejista de suvenires, bijuterias e artesanatos",
 }
 BASE = "hf://datasets/cnpjaberto/cnpj-dados-receita-brasil-{competencia}"
 ESTADOS_LITORANEOS = {"AL", "AP", "BA", "CE", "ES", "MA", "PA", "PB", "PE", "PI", "PR", "RJ", "RN", "RS", "SC", "SE", "SP"}

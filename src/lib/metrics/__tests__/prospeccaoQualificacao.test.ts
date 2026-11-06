@@ -88,14 +88,15 @@ describe("listarAprovados / listarPendentesRevisao / listarReprovados", () => {
 });
 
 describe("contarPorStatusComercial", () => {
-  it("conta cada status comercial e a alta-prioridade dentro dos aprovados separadamente", async () => {
+  it("conta cada status comercial, a alta-prioridade dentro dos aprovados e separa EM_INVESTIGACAO por resultadoEliminacao (null = aguardando; INCONCLUSIVO = evidência insuficiente)", async () => {
     count.mockReset();
     count
       .mockResolvedValueOnce(10) // aprovado
       .mockResolvedValueOnce(4) // altaPrioridade
       .mockResolvedValueOnce(6) // qualificado
       .mockResolvedValueOnce(3) // pendente
-      .mockResolvedValueOnce(50) // emInvestigacao
+      .mockResolvedValueOnce(50) // aguardandoInvestigacao (resultadoEliminacao: null)
+      .mockResolvedValueOnce(7) // emInvestigacaoComEvidenciaInsuficiente (resultadoEliminacao: INCONCLUSIVO)
       .mockResolvedValueOnce(2); // reprovado
     const { contarPorStatusComercial } = await import("../prospeccao-qualificacao");
     const resultado = await contarPorStatusComercial();
@@ -104,9 +105,13 @@ describe("contarPorStatusComercial", () => {
       altaPrioridade: 4,
       qualificado: 6,
       pendente: 3,
-      emInvestigacao: 50,
+      aguardandoInvestigacao: 50,
+      emInvestigacaoComEvidenciaInsuficiente: 7,
       reprovado: 2,
     });
+    // Garante que a separação usa resultadoEliminacao (não inventa um status novo no schema).
+    expect(count.mock.calls[4][0]).toEqual({ where: { statusComercial: "EM_INVESTIGACAO", resultadoEliminacao: null } });
+    expect(count.mock.calls[5][0]).toEqual({ where: { statusComercial: "EM_INVESTIGACAO", resultadoEliminacao: "INCONCLUSIVO" } });
   });
 });
 
