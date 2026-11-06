@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { montarVendasPorCanal, montarProdutosBlackFriday, periodoAnterior, ORDEM_CANAL, excluirAtacado } from "../black-friday";
+import {
+  montarVendasPorCanal,
+  montarProdutosBlackFriday,
+  montarVendasPorFaixaDesconto,
+  periodoAnterior,
+  ORDEM_CANAL,
+  excluirAtacado,
+} from "../black-friday";
 import type { DashboardFilters } from "../core";
 
 // Regressão real (missão de refinamento, 2026-11-05): getVendasPorCanal usava
@@ -167,6 +174,65 @@ describe("excluirAtacado", () => {
     const filtros: DashboardFilters = { ...base, storeIds: ["s-atacado"] };
     const result = excluirAtacado(filtros, "s-atacado", todasLojas);
     expect(result.storeIds).toEqual([]);
+  });
+});
+
+// Painel "vendas por faixa de desconto" (pedido do Rodrigo, 2026-11-06) — cruza venda líquida
+// com o desconto real cadastrado em PrecoBlackFriday (planilha importada).
+describe("montarVendasPorFaixaDesconto", () => {
+  it("produto vendido sem linha correspondente em PrecoBlackFriday cai em 'Sem desconto cadastrado', nunca é descartado nem vira 0%", () => {
+    const liquido = [{ grupo: "Camisa", key: "Camisa Sem Preço", unitsSold: 10, revenue: 1000 }];
+    const precos = new Map<string, number>(); // nenhum preço cadastrado pra esse produto
+    const rows = montarVendasPorFaixaDesconto(liquido, precos, [0.1, 0.2]);
+
+    const semCadastro = rows.find((r) => r.desconto === null);
+    expect(semCadastro).toBeDefined();
+    expect(semCadastro?.label).toBe("Sem desconto cadastrado");
+    expect(semCadastro?.unitsSold).toBe(10);
+    expect(semCadastro?.revenue).toBe(1000);
+    // Nunca aparece dentro da faixa 0% real (que é uma faixa cadastrada e diferente de "sem dado").
+    const faixaZero = rows.find((r) => r.desconto === 0);
+    expect(faixaZero).toBeUndefined();
+  });
+
+  it("agrega venda líquida (já descontada devolução, via netByReturns) corretamente por faixa", () => {
+    const liquido = [
+      { grupo: "Camisa", key: "Camisa A", unitsSold: 8, revenue: 800 }, // já líquido: 10 vendidas - 2 devolvidas
+      { grupo: "Camisa", key: "Camisa B", unitsSold: 5, revenue: 500 },
+    ];
+    const precos = new Map<string, number>([
+      ["Camisa::Camisa A", 0.2],
+      ["Camisa::Camisa B", 0.2],
+    ]);
+    const rows = montarVendasPorFaixaDesconto(liquido, precos, [0.2]);
+    const faixa20 = rows.find((r) => r.desconto === 0.2);
+    expect(faixa20?.unitsSold).toBe(13);
+    expect(faixa20?.revenue).toBe(1300);
+    expect(faixa20?.produtosDistintos).toBe(2);
+    expect(faixa20?.precoMedioLiquido).toBeCloseTo(100);
+  });
+
+  it("faixa real cadastrada sem nenhuma venda no período aparece com zero, não fica omitida", () => {
+    const rows = montarVendasPorFaixaDesconto([], new Map(), [0, 0.1, 0.45]);
+    expect(rows).toHaveLength(3);
+    for (const r of rows) {
+      expect(r.unitsSold).toBe(0);
+      expect(r.revenue).toBe(0);
+      expect(r.produtosDistintos).toBe(0);
+      expect(r.precoMedioLiquido).toBeNull();
+    }
+  });
+
+  it("ordena por desconto ascendente, com 'Sem desconto cadastrado' sempre por último", () => {
+    const liquido = [{ grupo: "G", key: "P", unitsSold: 1, revenue: 1 }];
+    const precos = new Map<string, number>(); // cai em sem-cadastro
+    const rows = montarVendasPorFaixaDesconto(liquido, precos, [0.3, 0.1, 0.45, 0]);
+    expect(rows.map((r) => r.desconto)).toEqual([0, 0.1, 0.3, 0.45, null]);
+  });
+
+  it("rótulo de porcentagem bate com o valor decimal cadastrado (0.15 -> '15%')", () => {
+    const rows = montarVendasPorFaixaDesconto([], new Map(), [0.15]);
+    expect(rows[0].label).toBe("15%");
   });
 });
 

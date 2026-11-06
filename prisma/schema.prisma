@@ -964,3 +964,30 @@ model BlackFridayBannerConfig {
   updatedAt       DateTime @updatedAt
   updatedByEmail  String?
 }
+
+// Tabela de preço/desconto REAL da Black Friday (planilha "Preços Black Friday.xlsx" do Rodrigo,
+// 218 produtos, pedido em 2026-11-06) — cadastral, preenchida por importação (ver
+// scripts/black-friday/importar-precos.ts), nunca editada pela UI. Grain é grupo+produto, o mesmo
+// grain já usado em getSalesByGrupoProduto/getTopProdutosBlackFriday (ver black-friday.ts) — NÃO
+// existe tabela master de Produto neste projeto (mesmo motivo de ClassificacaoProduto acima), por
+// isso o cadastro aqui também é keyado por grupo+produto, não por um id de produto.
+//
+// `colecao` é só descritiva (vem da planilha, não usada pra chave nem pra bucket de desconto —
+// quem decide a faixa de desconto é `desconto`, direto). `precoCheio`/`precoComDesconto` são
+// nullable: a planilha real tem linha(s) com "Preço" vazio (2 casos confirmados, grupo "Code") —
+// importar como null em vez de inventar 0 ou descartar a linha (mesma convenção de "exibição
+// honesta de dado faltante" já usada pra classificação Best Seller/Drop nesta tela).
+model PrecoBlackFriday {
+  id               String   @id @default(cuid())
+  grupo            String
+  produto          String
+  colecao          String?
+  precoCheio       Float?
+  desconto         Float
+  precoComDesconto Float?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([grupo, produto])
+  @@index([desconto])
+}

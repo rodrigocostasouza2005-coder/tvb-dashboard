@@ -11,6 +11,7 @@ import {
   getCacEcommerce,
   getCacPorCampanha,
   getFiltrosSemAtacado,
+  getVendasPorFaixaDesconto,
   type DashboardFilters,
 } from "@/lib/metrics";
 import { getInsightsPorConjunto, getInsightsPorAnuncio, getFotosPorNomeAnuncio, type MetaInsight } from "@/lib/connectors/meta-ads";
@@ -24,6 +25,7 @@ import { IndicatorChart } from "../indicadores/indicator-chart";
 import { CanalTable } from "./canal-table";
 import { CampanhaTable, type CampanhaRow } from "./campanha-table";
 import { ProdutosTable } from "./produtos-table";
+import { FaixaDescontoTable } from "./faixa-desconto-table";
 import { FonteStatus } from "./fonte-status";
 
 // Investimento em mídia (getInsightsPorConjunto/Anuncio) é lento o suficiente (ver mesmo
@@ -109,12 +111,13 @@ export default async function BlackFridayPage({
       erroMetaAds = e instanceof Error ? e.message : "Erro desconhecido buscando investimento do Meta Ads.";
     });
 
-  const [resumo, resumoAnterior, vendasPorCanal, salesByDay, topProdutos, cac, syncStatus] = await Promise.all([
+  const [resumo, resumoAnterior, vendasPorCanal, salesByDay, topProdutos, vendasPorFaixaDesconto, cac, syncStatus] = await Promise.all([
     getResumoBlackFriday(filtrosSemAtacado),
     getResumoBlackFriday(filtrosAnteriorSemAtacado),
     getVendasPorCanal(filters),
     getSalesByDay(filtrosSemAtacado),
     getTopProdutosBlackFriday(filtrosSemAtacado, 20),
+    getVendasPorFaixaDesconto(filtrosSemAtacado),
     getCacEcommerce(filters.from, filters.to),
     getSyncStatusDetalhado(),
     metaAdsPromise,
@@ -242,6 +245,17 @@ export default async function BlackFridayPage({
       </p>
       <section className="mb-10">
         <ProdutosTable rows={topProdutos} showFinancials={showFinancials} />
+      </section>
+
+      {/* ── Por faixa de desconto ── */}
+      <h2 className="mb-3 text-base font-semibold">Vendas por faixa de desconto</h2>
+      <p className="mb-3 text-xs text-[var(--text-muted)]">
+        Desconto REAL aplicado a cada produto (planilha de preços da Black Friday), cruzado com a
+        venda líquida do período. &quot;Sem desconto cadastrado&quot; é honesto: produto vendido
+        sem linha correspondente na planilha — nunca é assumido como 0%.
+      </p>
+      <section className="mb-10">
+        <FaixaDescontoTable rows={vendasPorFaixaDesconto} showFinancials={showFinancials} />
       </section>
 
       {/* ── CAC ── */}

@@ -15,7 +15,8 @@
     "prospeccao:qualificar": "tsx scripts/prospeccao/agente-qualificacao.ts",
     "prospeccao:pesquisa-web": "tsx scripts/prospeccao/agente-pesquisa-comercial.ts",
     "prospeccao:descobrir": "tsx scripts/prospeccao/agente-descoberta-comercial.ts",
-    "prospeccao:consultar-cnpj": "tsx scripts/prospeccao/consultar-cnpj-serpro.ts"
+    "prospeccao:consultar-cnpj": "tsx scripts/prospeccao/consultar-cnpj-serpro.ts",
+    "black-friday:importar-precos": "tsx scripts/black-friday/importar-precos.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

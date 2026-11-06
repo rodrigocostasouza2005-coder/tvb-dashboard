@@ -288,3 +288,113 @@ export async function getTopProdutosBlackFriday(filters: DashboardFilters, limit
 
   return montarProdutosBlackFriday(liquido, colecoesPorProduto, limit);
 }
+
+// ===== Por faixa de desconto real (PrecoBlackFriday) =====
+//
+// Pedido do Rodrigo (2026-11-06): "como estão as vendas dos produtos com tal % de desconto" —
+// cruza a venda líquida do período com o desconto REAL aplicado a cada produto na Black Friday
+// (planilha "Preços Black Friday.xlsx", importada em PrecoBlackFriday por
+// scripts/black-friday/importar-precos.ts). Chave de junção é grupo+produto — o mesmo grain já
+// usado em getSalesByGrupoProduto/getTopProdutosBlackFriday, não a Coleção (que é descritiva na
+// planilha, não uma chave).
+//
+// Esta função recebe `filters` já SEM Atacado quando é isso que a tela quer — a exclusão de
+// Atacado não é decidida aqui, é decidida por quem chama (mesmo padrão de getResumoBlackFriday/
+// getTopProdutosBlackFriday: a página passa `filtrosSemAtacado`, resultado de
+// getFiltrosSemAtacado(filters), não `filters` original).
+//
+// Exibição honesta de dado faltante (mesma convenção de SEM_CLASSIFICACAO em
+// montarProdutosBlackFriday): produto vendido no período sem linha correspondente em
+// PrecoBlackFriday cai no bucket `desconto: null` ("Sem desconto cadastrado") — nunca é
+// descartado nem assumido como 0% de desconto.
+export type FaixaDescontoRow = {
+  desconto: number | null; // null = "Sem desconto cadastrado"
+  label: string;
+  unitsSold: number;
+  revenue: number;
+  produtosDistintos: number;
+  // Preço médio líquido por peça vendida nessa faixa (revenue/unitsSold) — NÃO é "ticket médio
+  // por pedido" (esse exigiria agrupar por dapicVendaId, que não existe neste grain
+  // grupo+produto; ver ticketMedio em ResumoBlackFriday/CanalVendasRow pra esse outro sentido).
+  precoMedioLiquido: number | null;
+};
+
+// Função PURA (sem Prisma) — recebe a venda líquida já calculada (mesma netByReturns usada em
+// getTopProdutosBlackFriday) e o mapa grupo::produto -> desconto real, e monta uma linha por
+// faixa. `faixasReais` garante que toda faixa cadastrada na planilha apareça mesmo com zero venda
+// no período (nunca omitida por falta de venda) — testável sem banco, ver
+// __tests__/blackFriday.test.ts.
+export function montarVendasPorFaixaDesconto(
+  liquido: { grupo: string; key: string; unitsSold: number; revenue: number }[],
+  precosPorProduto: Map<string, number>,
+  faixasReais: number[]
+): FaixaDescontoRow[] {
+  type Acc = { unitsSold: number; revenue: number; produtos: Set<string> };
+  const buckets = new Map<number | null, Acc>();
+
+  function getBucket(chave: number | null): Acc {
+    let b = buckets.get(chave);
+    if (!b) {
+      b = { unitsSold: 0, revenue: 0, produtos: new Set() };
+      buckets.set(chave, b);
+    }
+    return b;
+  }
+
+  for (const f of faixasReais) getBucket(f);
+
+  for (const v of liquido) {
+    const chaveProduto = `${v.grupo}::${v.key}`;
+    const desconto = precosPorProduto.has(chaveProduto) ? precosPorProduto.get(chaveProduto)! : null;
+    const b = getBucket(desconto);
+    b.unitsSold += v.unitsSold;
+    b.revenue += v.revenue;
+    b.produtos.add(chaveProduto);
+  }
+
+  const rows: FaixaDescontoRow[] = [...buckets.entries()].map(([desconto, b]) => ({
+    desconto,
+    label: desconto == null ? "Sem desconto cadastrado" : `${Math.round(desconto * 100)}%`,
+    unitsSold: b.unitsSold,
+    revenue: b.revenue,
+    produtosDistintos: b.produtos.size,
+    precoMedioLiquido: b.unitsSold > 0 ? b.revenue / b.unitsSold : null,
+  }));
+
+  return rows.sort((a, b) => {
+    if (a.desconto == null) return 1; // "Sem desconto cadastrado" sempre por último
+    if (b.desconto == null) return -1;
+    return a.desconto - b.desconto;
+  });
+}
+
+// Faixas de desconto reais distintas, cadastradas na planilha (PrecoBlackFriday) — não um range
+// fixo no código, pra acompanhar automaticamente se o Rodrigo adicionar/remover faixas numa
+// atualização futura da planilha.
+async function getFaixasDescontoReais(): Promise<number[]> {
+  const rows = await prisma.precoBlackFriday.findMany({
+    select: { desconto: true },
+    distinct: ["desconto"],
+    orderBy: { desconto: "asc" },
+  });
+  return rows.map((r) => r.desconto);
+}
+
+async function getPrecosPorProduto(): Promise<Map<string, number>> {
+  const rows = await prisma.precoBlackFriday.findMany({ select: { grupo: true, produto: true, desconto: true } });
+  const map = new Map<string, number>();
+  for (const r of rows) map.set(`${r.grupo}::${r.produto}`, r.desconto);
+  return map;
+}
+
+export async function getVendasPorFaixaDesconto(filters: DashboardFilters): Promise<FaixaDescontoRow[]> {
+  const [vendas, devolucoes, faixasReais, precosPorProduto] = await Promise.all([
+    getSalesByGrupoProduto(filters),
+    getReturnsByGrupoProduto(filters),
+    getFaixasDescontoReais(),
+    getPrecosPorProduto(),
+  ]);
+  const liquido = netByReturns(vendas, devolucoes);
+
+  return montarVendasPorFaixaDesconto(liquido, precosPorProduto, faixasReais);
+}
