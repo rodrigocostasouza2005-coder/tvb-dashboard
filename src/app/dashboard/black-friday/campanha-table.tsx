@@ -12,27 +12,23 @@ export type CampanhaRow = { nome: string } & MetaInsight;
 // "Por anúncio" — "Por conjunto" continua sem essa prop, então a coluna de imagem nem existe lá
 // (9 colunas de sempre). Com `fotos`, vira 10 colunas.
 //
-// `ativoPorNome` (pedido do Rodrigo em 2026-11-06 — "saber quais criativos estão rodando de
-// verdade") é OPCIONAL e, diferente de `fotos`, se aplica tanto a "Por conjunto" quanto "Por
-// anúncio": campanha/conjunto pausado existe tanto quanto anúncio pausado. Vem do
-// effective_status real do Meta (ver getAtivoPorNomeConjunto/getAtivoPorNomeAnuncio em
-// connectors/meta-ads.ts), não do `status` isolado — por isso é um Map calculado pela página, não
-// um campo de MetaInsight (que só sabe de gasto/métrica, nunca viu adset/campanha pai). Mesmo selo
-// visual (ponto + rótulo) já usado em analytics-site/investimento-meta-ads.tsx, pra manter a
-// mesma linguagem visual de "ativo/pausado" no Radar — embutido na coluna do nome, não uma coluna
-// nova, pra não desalinhar as duas tabelas quando só uma delas tiver o dado disponível.
+// Não existe mais prop de "ativo"/"pausado" aqui: até 2026-11-06 a tabela mostrava AMBOS e só
+// sinalizava com um selo (ponto + rótulo). Pedido do Rodrigo em 2026-11-06 ("eu quero que só
+// mostre os criativos ativos") trocou isso por um FILTRO — a página (ver campanhasAtivasPorGasto
+// em ./campanhas-ativas.ts) já remove pausado de `rows` antes de chegar aqui, então toda linha
+// renderizada É ativa por construção; um selo por linha ficaria redundante (sempre "Ativo"). Se o
+// status do Meta estiver indisponível (rate limit/token vencido), a página mostra um aviso ACIMA
+// das duas tabelas (não um selo por linha) e cai pra mostrar tudo sem filtrar nesse caso só.
 export function CampanhaTable({
   titulo,
   nomeColuna,
   rows,
   fotos,
-  ativoPorNome,
 }: {
   titulo: string;
   nomeColuna: string;
   rows: CampanhaRow[];
   fotos?: Map<string, string[]>;
-  ativoPorNome?: Map<string, boolean>;
 }) {
   const colCount = fotos ? 10 : 9;
   return (
@@ -63,21 +59,7 @@ export function CampanhaTable({
                   </td>
                 )}
                 <td className="max-w-[220px] truncate px-4 py-2 font-medium" title={r.nome}>
-                  {ativoPorNome ? (
-                    <span className="inline-flex items-center gap-1.5">
-                      <span
-                        aria-hidden
-                        className="h-1.5 w-1.5 shrink-0 rounded-full"
-                        style={{ backgroundColor: ativoPorNome.get(r.nome) ? "var(--status-good)" : "var(--text-muted)" }}
-                      />
-                      <span className="truncate">{r.nome}</span>
-                      <span className="shrink-0 text-xs font-normal text-[var(--text-muted)]">
-                        {ativoPorNome.get(r.nome) ? "Ativo" : "Pausado"}
-                      </span>
-                    </span>
-                  ) : (
-                    r.nome
-                  )}
+                  {r.nome}
                 </td>
                 <td className="px-4 py-2 text-right tabular-nums">{formatBRL(r.gasto)}</td>
                 <td className="px-4 py-2 text-right tabular-nums">{formatNumber(r.impressoes)}</td>
