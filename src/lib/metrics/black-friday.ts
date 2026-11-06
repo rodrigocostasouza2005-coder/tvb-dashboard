@@ -447,3 +447,156 @@ export async function getVendasPorFaixaDesconto(filters: DashboardFilters): Prom
 
   return montarVendasPorFaixaDesconto(liquido, precosPorProduto, faixasReais);
 }
+
+// ===== Mapa de estados — e-commerce (Store "CD" apenas) =====
+//
+// Pedido do Rodrigo (2026-11-06): o mesmo mapa de estados já usado na aba Vendas (BrazilMap, ver
+// brazil-map.tsx + getSiteVarejoCidades em vendas.ts, que alimenta o uso atual), só que escopado
+// ao e-commerce dentro do período da campanha (filters já vem com o range da Black Friday, igual
+// ao resto desta tela — ver black-friday-banner.ts/defaultFiltroBlackFridayStr, aplicado na
+// página, não aqui). Esse recorte é MAIS ESTREITO que o resto da Central Black Friday (que é
+// "todas as lojas menos Atacado": CD+Leblon+Rio Sul+Barra, ver getFiltrosSemAtacado) — aqui é só
+// a loja CD, mesmo Store resolvido por getEcommerceStoreId (cac.ts), igual ao numerador do ROAS em
+// getFaturamentoEcommerce acima. Por isso esta função recebe `filters` (não
+// `filtrosSemAtacado`) e força storeIds=[cdStoreId] por conta própria — excluir Atacado da lista
+// de lojas não faz diferença nenhuma aqui, já que só CD entra de qualquer forma.
+//
+// Mesma regra de permissão de getFaturamentoEcommerce: se a loja CD não existe no ambiente, ou o
+// usuário não tem permissão pra vê-la (filters.storeIds já veio restrito sem incluir CD), devolve
+// `disponivel: false` — nunca calcula um número com loja que o usuário não pode ver, nem finge
+// "zero vendas" (que pareceria "e-commerce não vendeu nada" em vez de "você não tem acesso").
+//
+// Return não tem campo estado/cidade (ver prisma/schema.prisma) — mesma limitação já documentada
+// em getSiteVarejoCidades (vendas.ts): não dá pra ratear devolução por estado/cidade. As linhas
+// por estado/cidade aqui são BRUTAS (venda, sem descontar devolução); a devolução do período entra
+// só como `devolucaoTotal`, agregada pra loja CD inteira — quem consome decide se mostra ao lado
+// do mapa (nunca dentro dele, BrazilMap não tem noção de devolução).
+//
+// Pedidos sem UF identificada (Sale.estado null) NUNCA são distribuídos entre os estados
+// conhecidos (pedido explícito do Rodrigo) — ficam isolados em `semEstado`, uma categoria própria
+// que fica de fora das linhas passadas pro BrazilMap (que só entende UF real).
+export type VendaPorEstadoEcommerce = {
+  estado: string;
+  receita: number;
+  unidades: number;
+  pedidos: number;
+  ticketMedio: number | null;
+};
+
+export type CidadePorEstadoEcommerce = { cidade: string; receita: number; unidades: number };
+
+export type VendasPorEstadoEcommerceResult = {
+  // false quando a loja CD não existe no ambiente ou o usuário não tem permissão de vê-la — ver
+  // comentário acima. Quando false, todo o resto do objeto vem zerado/vazio (nunca um número
+  // calculado sem acesso).
+  disponivel: boolean;
+  rows: VendaPorEstadoEcommerce[];
+  citiesByState: Map<string, CidadePorEstadoEcommerce[]>;
+  semEstado: { receita: number; unidades: number; pedidos: number };
+  receitaBrutaTotal: number; // soma de rows + semEstado — denominador de participação % por estado
+  devolucaoTotal: number; // total do período (loja CD), não rateável por estado — ver comentário acima
+};
+
+function resultVazio(disponivel: boolean): VendasPorEstadoEcommerceResult {
+  return {
+    disponivel,
+    rows: [],
+    citiesByState: new Map(),
+    semEstado: { receita: 0, unidades: 0, pedidos: 0 },
+    receitaBrutaTotal: 0,
+    devolucaoTotal: 0,
+  };
+}
+
+// Função PURA (sem Prisma) — monta estado/cidade/sem-estado a partir das linhas já agregadas do
+// banco. `porCidadeEstado` é o groupBy por (estado, cidade); `pedidosPorEstadoRaw` é uma linha por
+// (estado, dapicVendaId) distinto, só pra contar pedido (igual ao padrão de
+// getResumoBlackFriday/getVendasPorCanal — groupBy por id de pedido + contar linhas, não dá pra
+// contar distinct direto no Prisma). Testável sem banco, ver __tests__/blackFriday.test.ts.
+export function montarVendasPorEstadoEcommerce(
+  porCidadeEstado: { estado: string | null; cidade: string | null; unidades: number; receita: number }[],
+  pedidosPorEstadoRaw: { estado: string | null }[],
+  devolucaoTotal: number
+): Omit<VendasPorEstadoEcommerceResult, "disponivel"> {
+  const estadoMap = new Map<string, { receita: number; unidades: number }>();
+  const citiesByState = new Map<string, CidadePorEstadoEcommerce[]>();
+  let semEstadoReceita = 0;
+  let semEstadoUnidades = 0;
+
+  for (const r of porCidadeEstado) {
+    if (!r.estado) {
+      semEstadoReceita += r.receita;
+      semEstadoUnidades += r.unidades;
+      continue;
+    }
+    const prev = estadoMap.get(r.estado) ?? { receita: 0, unidades: 0 };
+    estadoMap.set(r.estado, { receita: prev.receita + r.receita, unidades: prev.unidades + r.unidades });
+    if (r.cidade) {
+      const cidades = citiesByState.get(r.estado) ?? [];
+      cidades.push({ cidade: r.cidade, receita: r.receita, unidades: r.unidades });
+      citiesByState.set(r.estado, cidades);
+    }
+  }
+
+  const pedidosPorEstado = new Map<string, number>();
+  let semEstadoPedidos = 0;
+  for (const r of pedidosPorEstadoRaw) {
+    if (!r.estado) {
+      semEstadoPedidos++;
+      continue;
+    }
+    pedidosPorEstado.set(r.estado, (pedidosPorEstado.get(r.estado) ?? 0) + 1);
+  }
+
+  const rows: VendaPorEstadoEcommerce[] = [...estadoMap.entries()].map(([estado, v]) => {
+    const pedidos = pedidosPorEstado.get(estado) ?? 0;
+    return {
+      estado,
+      receita: v.receita,
+      unidades: v.unidades,
+      pedidos,
+      ticketMedio: pedidos > 0 ? v.receita / pedidos : null,
+    };
+  });
+
+  const receitaBrutaTotal = rows.reduce((sum, r) => sum + r.receita, 0) + semEstadoReceita;
+
+  return {
+    rows,
+    citiesByState,
+    semEstado: { receita: semEstadoReceita, unidades: semEstadoUnidades, pedidos: semEstadoPedidos },
+    receitaBrutaTotal,
+    devolucaoTotal,
+  };
+}
+
+export async function getVendasPorEstadoEcommerce(filters: DashboardFilters): Promise<VendasPorEstadoEcommerceResult> {
+  const cdStoreId = await getEcommerceStoreId();
+  if (!cdStoreId) return resultVazio(false);
+  if (filters.storeIds !== undefined && !filters.storeIds.includes(cdStoreId)) return resultVazio(false);
+
+  const filtrosCd: DashboardFilters = { ...filters, storeIds: [cdStoreId] };
+  const where = saleWhere(filtrosCd);
+
+  const [porCidadeEstadoRaw, pedidosPorEstadoRaw, devolucaoAgg] = await Promise.all([
+    prisma.sale.groupBy({
+      by: ["estado", "cidade"],
+      where,
+      _sum: { quantidade: true, valorTotalLiquido: true },
+    }),
+    prisma.sale.groupBy({ by: ["estado", "dapicVendaId"], where }),
+    prisma.return.aggregate({ where: returnWhere(filtrosCd), _sum: { valorTotal: true } }),
+  ]);
+
+  const porCidadeEstado = porCidadeEstadoRaw.map((r) => ({
+    estado: r.estado,
+    cidade: r.cidade,
+    unidades: r._sum.quantidade ?? 0,
+    receita: r._sum.valorTotalLiquido ?? 0,
+  }));
+
+  return {
+    disponivel: true,
+    ...montarVendasPorEstadoEcommerce(porCidadeEstado, pedidosPorEstadoRaw, devolucaoAgg._sum.valorTotal ?? 0),
+  };
+}
