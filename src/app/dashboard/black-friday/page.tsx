@@ -10,6 +10,7 @@ import {
   getSalesByDay,
   getCacEcommerce,
   getCacPorCampanha,
+  getFiltrosSemAtacado,
   type DashboardFilters,
 } from "@/lib/metrics";
 import { getInsightsPorConjunto, getInsightsPorAnuncio, getFotosPorNomeAnuncio, type MetaInsight } from "@/lib/connectors/meta-ads";
@@ -69,7 +70,13 @@ export default async function BlackFridayPage({
   const allowedStoreIds = getStoreRestriction(user);
   const filters: DashboardFilters = parseFilters(rawParams, { allowedStoreIds });
   const anterior = periodoAnterior(filters.from, filters.to);
-  const filtrosAnterior: DashboardFilters = { ...filters, from: anterior.from, to: anterior.to };
+
+  // Pedido do Rodrigo (2026-11-05): "não contabilizar atacado na aba de central black friday".
+  // Afeta visão geral/ranking de produto/gráfico de receita por dia — NUNCA a tabela "Por canal"
+  // (getVendasPorCanal continua recebendo `filters` original, Atacado aparece lá como canal
+  // próprio, transparente; ver comentário em black-friday.ts).
+  const filtrosSemAtacado = await getFiltrosSemAtacado(filters);
+  const filtrosAnteriorSemAtacado: DashboardFilters = { ...filtrosSemAtacado, from: anterior.from, to: anterior.to };
 
   // Meta Ads (investimento/campanhas) é a parte que pode falhar (token vencido, credencial
   // ausente, rate limit) — isolado num try/catch próprio, igual analytics-site/page.tsx, pra
@@ -103,11 +110,11 @@ export default async function BlackFridayPage({
     });
 
   const [resumo, resumoAnterior, vendasPorCanal, salesByDay, topProdutos, cac, syncStatus] = await Promise.all([
-    getResumoBlackFriday(filters),
-    getResumoBlackFriday(filtrosAnterior),
+    getResumoBlackFriday(filtrosSemAtacado),
+    getResumoBlackFriday(filtrosAnteriorSemAtacado),
     getVendasPorCanal(filters),
-    getSalesByDay(filters),
-    getTopProdutosBlackFriday(filters, 20),
+    getSalesByDay(filtrosSemAtacado),
+    getTopProdutosBlackFriday(filtrosSemAtacado, 20),
     getCacEcommerce(filters.from, filters.to),
     getSyncStatusDetalhado(),
     metaAdsPromise,

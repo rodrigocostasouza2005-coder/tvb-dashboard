@@ -12,6 +12,41 @@ import { getSalesByGrupoProduto, getReturnsByGrupoProduto } from "./vendas";
 import { getInsightsPorConjunto } from "@/lib/connectors/meta-ads";
 import { todayBrasiliaStr } from "@/lib/filters";
 
+// ===== Exclusão de Atacado (pedido do Rodrigo, 2026-11-05: "não contabilizar atacado na aba de
+// central black friday") =====
+//
+// Afeta só os números "visão geral/ranking/gráfico" desta tela (getResumoBlackFriday,
+// getTopProdutosBlackFriday, getSalesByDay via DashboardFilters) — NUNCA getVendasPorCanal: a
+// tabela "Por canal" existe justamente pra mostrar Atacado como linha própria, transparente (ver
+// comentário no topo do arquivo, "canal nunca é somado escondendo a origem"). Omitir Atacado ali
+// seria escondida a origem, não "não contar"; só quem chama (a página) decide qual filtro passar
+// pra qual função — este módulo não muda o comportamento de saleWhere/returnWhere/getVendasPorCanal.
+
+// Função PURA (sem Prisma) — recebe o id já resolvido da loja ATACADO e, só quando necessário
+// (filters.storeIds indefinido = "sem restrição, todas as lojas"), a lista de ids de todas as
+// lojas pra poder expandir "todas menos Atacado". Testável sem banco.
+export function excluirAtacado(
+  filters: DashboardFilters,
+  atacadoStoreId: string | null,
+  todosStoreIds: string[]
+): DashboardFilters {
+  if (!atacadoStoreId) return filters;
+  const storeIdsEfetivos = filters.storeIds ?? todosStoreIds;
+  if (!storeIdsEfetivos.includes(atacadoStoreId)) return filters;
+  return { ...filters, storeIds: storeIdsEfetivos.filter((id) => id !== atacadoStoreId) };
+}
+
+// Resolve o id da loja ATACADO e, se preciso, a lista de todas as lojas — e aplica excluirAtacado.
+// Se a loja ATACADO não existir (ambiente sem essa loja cadastrada), devolve filters sem alteração.
+export async function getFiltrosSemAtacado(filters: DashboardFilters): Promise<DashboardFilters> {
+  const precisaTodasLojas = filters.storeIds === undefined;
+  const [atacado, todasLojas] = await Promise.all([
+    prisma.store.findFirst({ where: { code: "ATACADO" }, select: { id: true } }),
+    precisaTodasLojas ? prisma.store.findMany({ select: { id: true } }) : Promise.resolve([]),
+  ]);
+  return excluirAtacado(filters, atacado?.id ?? null, todasLojas.map((s) => s.id));
+}
+
 // ===== Visão geral =====
 
 export type ResumoBlackFriday = {

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { montarVendasPorCanal, montarProdutosBlackFriday, periodoAnterior, ORDEM_CANAL } from "../black-friday";
+import { montarVendasPorCanal, montarProdutosBlackFriday, periodoAnterior, ORDEM_CANAL, excluirAtacado } from "../black-friday";
+import type { DashboardFilters } from "../core";
 
 // Regressão real (missão de refinamento, 2026-11-05): getVendasPorCanal usava
 // `where: { sellsProducts: true }` — "Uniformes"/"Produtos acabados"/"Matérias-primas" são
@@ -129,6 +130,43 @@ describe("montarProdutosBlackFriday — classificação por Coleção (Sale.cole
     const colecoes = new Map<string, string[]>([["Camisa::Camisa Classic", ["Verão 27", "BESTSELLER"]]]);
     const rows = montarProdutosBlackFriday(liquido, colecoes);
     expect(rows[0].classificacao).toBe("BEST_SELLER");
+  });
+});
+
+// Pedido do Rodrigo (2026-11-05): "não contabilizar atacado na aba de central black friday" —
+// excluirAtacado é a função pura usada pra montar o filtro passado a getResumoBlackFriday/
+// getTopProdutosBlackFriday/getSalesByDay (NUNCA a getVendasPorCanal, que precisa continuar
+// mostrando Atacado como canal próprio).
+describe("excluirAtacado", () => {
+  const base: DashboardFilters = { from: new Date("2026-11-01"), to: new Date("2026-11-30") };
+  const todasLojas = ["s-cd", "s-leblon", "s-riosul", "s-barra", "s-atacado"];
+
+  it("sem restrição de loja (storeIds undefined), expande pra todas as lojas menos Atacado", () => {
+    const result = excluirAtacado(base, "s-atacado", todasLojas);
+    expect(result.storeIds).toEqual(["s-cd", "s-leblon", "s-riosul", "s-barra"]);
+  });
+
+  it("com lojas específicas já selecionadas e sem Atacado entre elas, não altera nada", () => {
+    const filtros: DashboardFilters = { ...base, storeIds: ["s-leblon", "s-barra"] };
+    const result = excluirAtacado(filtros, "s-atacado", todasLojas);
+    expect(result.storeIds).toEqual(["s-leblon", "s-barra"]);
+  });
+
+  it("com Atacado explicitamente entre as lojas selecionadas, remove só ele", () => {
+    const filtros: DashboardFilters = { ...base, storeIds: ["s-leblon", "s-atacado", "s-barra"] };
+    const result = excluirAtacado(filtros, "s-atacado", todasLojas);
+    expect(result.storeIds).toEqual(["s-leblon", "s-barra"]);
+  });
+
+  it("se a loja ATACADO não existir no ambiente (id null), devolve o filtro sem alteração", () => {
+    const result = excluirAtacado(base, null, todasLojas);
+    expect(result).toBe(base);
+  });
+
+  it("filtro já restrito a só Atacado vira lista vazia (nada a mostrar), não volta a 'sem restrição'", () => {
+    const filtros: DashboardFilters = { ...base, storeIds: ["s-atacado"] };
+    const result = excluirAtacado(filtros, "s-atacado", todasLojas);
+    expect(result.storeIds).toEqual([]);
   });
 });
 
