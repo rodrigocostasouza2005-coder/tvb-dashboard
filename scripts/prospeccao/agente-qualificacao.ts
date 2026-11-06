@@ -9,9 +9,22 @@
  * Não declara que a loja é multimarcas ou de moda masculina: isso exige pesquisa
  * comercial adicional. Por isso grupoComercial permanece PENDENTE.
  * Seguro por padrão: só grava com --apply.
+ *
+ * NÃO chama o motor de qualificação completo (motor-qualificacao.ts) — decisão deliberada,
+ * documentada em src/lib/prospeccao/adaptadores-qualificacao.ts: o critério MULTIMARCAS do gate
+ * não tem estado intermediário (zero marca comprovada já é reprovação definitiva), e nesta etapa
+ * nenhum candidato ainda tem evidência de marca. Rodar o gate completo aqui reprovaria 100% dos
+ * candidatos antes mesmo da pesquisa comercial acontecer. O motor completo só é chamado em
+ * agente-pesquisa-comercial.ts, a única etapa com chance real de evidência de marca. Esta etapa
+ * (triagem cadastral) continua decidindo "apto para fila" com avaliarProspectoCadastral, como
+ * antes; o que muda no rebuild é que ela agora também grava os dois campos puramente derivados
+ * do schema novo (cnpjRaiz, capitalEstadual) que a cota geográfica futura (quota-geografica.ts)
+ * vai precisar — ver docs/PROSPECCAO_EXTERNA.md, checklist de preparação da descoberta nacional.
  */
 import { PrismaClient } from "@prisma/client";
 import { avaliarProspectoCadastral } from "../../src/lib/prospeccao/avaliacao-cadastral";
+import { calcularCnpjRaiz } from "../../src/lib/prospeccao/adaptadores-qualificacao";
+import { ehCapitalEstadual } from "../../src/lib/prospeccao/capitais-estaduais";
 
 const prisma = new PrismaClient();
 
@@ -74,6 +87,12 @@ async function main() {
         segmentoComercial: "VESTUARIO_E_ACESSORIOS_A_VALIDAR",
         origemAgente: "AGENTE_QUALIFICACAO_RECEITA_V1",
         pesquisadoEm: now,
+        // Plumbing do rebuild do motor (Fase 1, PR #51): puramente derivados de CNPJ/UF/
+        // município, sem depender de nenhuma evidência comercial ainda — ver
+        // adaptadores-qualificacao.ts. cnpjRaiz agrupa matriz/filial; capitalEstadual alimenta
+        // aplicarQuotaGeografica() numa fase futura (descoberta nacional real, não executada aqui).
+        cnpjRaiz: calcularCnpjRaiz(prospect.cnpj),
+        capitalEstadual: ehCapitalEstadual(prospect.estado ?? "", prospect.cidade),
       },
     }),
   );
