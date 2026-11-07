@@ -151,7 +151,11 @@ export default async function BlackFridayPage({
     getSalesByDay(filtrosSemAtacado),
     getTopProdutosBlackFriday(filtrosSemAtacado, 20),
     getVendasPorFaixaDesconto(filtrosSemAtacado),
-    getComparativoMetaDiariaBlackFriday(filtrosSemAtacado),
+    // Escopo MAIS ESTREITO que o resto da tela: só a loja CD (e-commerce) — "a meta é só
+    // ecommerce" (Rodrigo, 2026-11-06). Por isso recebe `filters` (o range escolhido na página),
+    // não `filtrosSemAtacado` — a exclusão de Atacado é resolvida por dentro da própria função
+    // (força storeIds=[cdStoreId]), igual getVendasPorEstadoEcommerce.
+    getComparativoMetaDiariaBlackFriday(filters),
     // Escopo MAIS ESTREITO que o resto da tela: só a loja CD (e-commerce), não "todas menos
     // Atacado" — por isso recebe `filters` (o range da campanha), não `filtrosSemAtacado`. Ver
     // comentário completo em getVendasPorEstadoEcommerce (black-friday.ts).

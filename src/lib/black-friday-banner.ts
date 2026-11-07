@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { todayBrasiliaStr, defaultRecentRangeStr } from "@/lib/filters";
+import { todayBrasiliaStr } from "@/lib/filters";
 
 // Janela automática do banner "É BLACK FRIDAYYYYYYY!!!!!!!" — pedido do Rodrigo em 2026-11-05.
 // Fixa no código (não editável pelo admin, de propósito). Mesma convenção de brasiliaDayStart em
@@ -62,11 +62,18 @@ export async function getBannerStatus(): Promise<BannerStatus> {
 // escolheu um período manualmente (query string), isso sempre tem prioridade (ver black-
 // friday/page.tsx). Específico desta página — nenhuma outra aba do Radar muda de regra.
 //
-// Pura (testável sem Date.now() implícito) — mesmo padrão de isWithinAutomaticWindow acima.
+// Pura (testável sem Date.now() implícito) — mesmo padrão de isWithinAutomaticWindow acima. Bug
+// real corrigido em 2026-11-07: a versão original delegava pro ramo "antes da campanha" pra
+// defaultRecentRangeStr(30) (filters.ts), que por dentro chama `new Date()` de verdade — quebrava
+// a promessa de função pura (testável com `now` fixo) sem nenhum teste pegar isso na hora, só
+// apareceu quando a data real do sistema mudou de dia no meio da sessão. Corrigido pra calcular
+// "últimos 30 dias" usando SÓ o `now` recebido, nunca o relógio real.
 export function defaultFiltroBlackFridayStrPura(now: Date): { from: string; to: string } {
   const hojeStr = todayBrasiliaStr(now);
   const inicioStr = todayBrasiliaStr(BANNER_INICIO_BRT);
-  return hojeStr >= inicioStr ? { from: inicioStr, to: hojeStr } : defaultRecentRangeStr(30);
+  if (hojeStr >= inicioStr) return { from: inicioStr, to: hojeStr };
+  const trintaDiasAtras = new Date(now.getTime() - 30 * 86400000);
+  return { from: todayBrasiliaStr(trintaDiasAtras), to: hojeStr };
 }
 
 // Resolve o `now` real — chamada direto da página (Server Component, que não pode chamar

@@ -519,13 +519,19 @@ describe("encontrarDiaPorData", () => {
 // mesmo contrato de getResumoBlackFriday/getVendasPorFaixaDesconto nesta mesma tela (ver
 // comentário da função). A matemática em si já está cobrida por montarComparativoMetaDiariaBlackFriday
 // acima.
-describe("getComparativoMetaDiariaBlackFriday — encanamento (janela da planilha, Atacado passa intacto)", () => {
+// Pedido do Rodrigo (2026-11-06): "a meta é só ecommerce" — corrigido pra escopar SÓ a loja CD,
+// nunca "todas menos Atacado" como o resto da tela (mesmo padrão de getResumoBlackFriday.roas).
+describe("getComparativoMetaDiariaBlackFriday — escopado só ao e-commerce (CD), janela da planilha", () => {
+  const CD_STORE_ID = "s-cd";
+
   beforeEach(() => {
+    storeFindFirst.mockReset();
     metaDiariaBlackFridayFindMany.mockReset();
     getSalesByDay.mockReset();
+    storeFindFirst.mockResolvedValue({ id: CD_STORE_ID });
   });
 
-  it("usa a janela min/max de MetaDiariaBlackFriday pra chamar getSalesByDay, não o from/to do filtro recebido", async () => {
+  it("usa a janela min/max de MetaDiariaBlackFriday pra chamar getSalesByDay, não o from/to do filtro recebido, e força storeIds=[CD]", async () => {
     metaDiariaBlackFridayFindMany.mockResolvedValue([
       { data: new Date("2026-11-01T03:00:00.000Z"), metaReceita2026: 5000, receitaReal2025: 2927.08, acao: null },
       { data: new Date("2026-11-02T03:00:00.000Z"), metaReceita2026: 5000, receitaReal2025: 1800.72, acao: null },
@@ -533,21 +539,23 @@ describe("getComparativoMetaDiariaBlackFriday — encanamento (janela da planilh
     getSalesByDay.mockResolvedValue([{ day: "2026-11-01", unitsSold: 1, revenue: 6000 }]);
 
     // filters.from/to é um período qualquer do seletor da página, bem diferente da janela da
-    // planilha — a função deve ignorar esse from/to e usar a janela cadastrada.
+    // planilha — a função deve ignorar esse from/to e usar a janela cadastrada. storeIds recebido
+    // (todas as lojas menos Atacado, convenção do resto da tela) é IGNORADO aqui — só CD importa.
     const filtrosSemAtacado: DashboardFilters = {
       from: new Date("2025-01-01T00:00:00-03:00"),
       to: new Date("2025-01-31T23:59:59-03:00"),
-      storeIds: ["s-cd", "s-leblon", "s-riosul", "s-barra"], // já sem ATACADO
+      storeIds: ["s-cd", "s-leblon", "s-riosul", "s-barra"],
     };
 
     const resumo = await getComparativoMetaDiariaBlackFriday(filtrosSemAtacado);
 
+    expect(resumo.disponivel).toBe(true);
     expect(getSalesByDay).toHaveBeenCalledTimes(1);
     const filtrosRecebidos = getSalesByDay.mock.calls[0][0] as DashboardFilters;
     expect(filtrosRecebidos.from.toISOString()).toBe("2026-11-01T03:00:00.000Z");
     expect(filtrosRecebidos.to.getTime()).toBeGreaterThan(new Date("2026-11-02T03:00:00.000Z").getTime());
-    // Atacado continua excluído — storeIds repassado INTACTO, não resolvido/expandido de novo aqui.
-    expect(filtrosRecebidos.storeIds).toEqual(["s-cd", "s-leblon", "s-riosul", "s-barra"]);
+    // Só a loja CD — nunca as 4 lojas de filtrosSemAtacado.
+    expect(filtrosRecebidos.storeIds).toEqual([CD_STORE_ID]);
 
     expect(resumo.dias).toHaveLength(2);
     expect(resumo.dias[0].receitaReal2026).toBe(6000);
@@ -559,10 +567,32 @@ describe("getComparativoMetaDiariaBlackFriday — encanamento (janela da planilh
 
     const resumo = await getComparativoMetaDiariaBlackFriday({ from: new Date(), to: new Date() });
 
+    expect(resumo.disponivel).toBe(true);
     expect(resumo.dias).toEqual([]);
     expect(resumo.hoje).toBeNull();
     expect(resumo.acumulado).toEqual({ metaReceita2026: 0, receitaReal2026: 0, atingimentoPct: null, diferencaReal: 0 });
     expect(getSalesByDay).not.toHaveBeenCalled();
+  });
+
+  it("loja CD não existe no ambiente -> disponivel false, nunca calcula nem consulta meta", async () => {
+    storeFindFirst.mockResolvedValue(null);
+
+    const resumo = await getComparativoMetaDiariaBlackFriday({ from: new Date(), to: new Date() });
+
+    expect(resumo.disponivel).toBe(false);
+    expect(resumo.dias).toEqual([]);
+    expect(metaDiariaBlackFridayFindMany).not.toHaveBeenCalled();
+  });
+
+  it("permissão do usuário já exclui a loja CD -> disponivel false, nunca calcula com dado que ele não pode ver", async () => {
+    const resumo = await getComparativoMetaDiariaBlackFriday({
+      from: new Date(),
+      to: new Date(),
+      storeIds: ["s-leblon", "s-riosul"],
+    });
+
+    expect(resumo.disponivel).toBe(false);
+    expect(metaDiariaBlackFridayFindMany).not.toHaveBeenCalled();
   });
 });
 
