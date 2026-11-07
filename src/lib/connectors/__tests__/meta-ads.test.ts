@@ -793,3 +793,61 @@ describe("TTL do cache da lista crua é decoupled entre 'ativo' (gateia visibili
     expect(result.get("Conjunto X")).toBe(true); // `status` (não effective_status) do cache: ACTIVE
   });
 });
+
+// getGastoDiarioConta — gráfico "CAC diário" da Central Black Friday (2026-11-07).
+describe("getGastoDiarioConta — gasto diário (time_increment=1), nível conta", () => {
+  beforeEach(() => {
+    vi.stubGlobal("fetch", vi.fn());
+    process.env.META_AD_ACCOUNT_ID = "123";
+    process.env.META_ACCESS_TOKEN = "token-fake";
+  });
+
+  it("pede time_increment=1 e level=account, devolvendo um Map 'YYYY-MM-DD' -> gasto por dia", async () => {
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    fetchMock.mockResolvedValue({
+      json: () =>
+        Promise.resolve({
+          data: [
+            { date_start: "2026-11-01", date_stop: "2026-11-01", spend: "100" },
+            { date_start: "2026-11-02", date_stop: "2026-11-02", spend: "250.5" },
+          ],
+        }),
+    });
+
+    const { getGastoDiarioConta } = await import("../meta-ads");
+    const result = await getGastoDiarioConta("2026-11-01", "2026-11-02");
+
+    expect(result.get("2026-11-01")).toBe(100);
+    expect(result.get("2026-11-02")).toBe(250.5);
+    const urlChamada = fetchMock.mock.calls[0][0] as string;
+    expect(urlChamada).toContain("time_increment=1");
+    expect(urlChamada).toContain("level=account");
+  });
+
+  it("dia sem nenhum insight na resposta simplesmente não aparece no Map (quem chama decide o fallback, nunca 0 fabricado aqui)", async () => {
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    fetchMock.mockResolvedValue({ json: () => Promise.resolve({ data: [] }) });
+
+    const { getGastoDiarioConta } = await import("../meta-ads");
+    const result = await getGastoDiarioConta("2026-11-01", "2026-11-02");
+
+    expect(result.size).toBe(0);
+  });
+
+  it("erro da Graph API propaga como exceção — mesma regra de getInsightsPorConjunto, nunca some pra Map vazio em silêncio", async () => {
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    fetchMock.mockResolvedValue({ json: () => Promise.resolve({ error: { message: "Error validating access token" } }) });
+
+    const { getGastoDiarioConta } = await import("../meta-ads");
+    await expect(getGastoDiarioConta("2026-11-01", "2026-11-02")).rejects.toThrow(/Error validating access token/);
+  });
+
+  it("sem credenciais configuradas, lança antes de chamar fetch", async () => {
+    delete process.env.META_AD_ACCOUNT_ID;
+    delete process.env.META_ACCESS_TOKEN;
+    const { getGastoDiarioConta } = await import("../meta-ads");
+    await expect(getGastoDiarioConta("2026-11-01", "2026-11-02")).rejects.toThrow(
+      /META_AD_ACCOUNT_ID/
+    );
+  });
+});

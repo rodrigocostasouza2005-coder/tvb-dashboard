@@ -13,6 +13,7 @@ import {
   getFiltrosSemAtacado,
   getVendasPorFaixaDesconto,
   getComparativoMetaDiariaBlackFriday,
+  getCacDiarioBlackFriday,
   getVendasPorEstadoEcommerce,
   getTop20ProdutosComDesconto,
   type DashboardFilters,
@@ -144,7 +145,7 @@ export default async function BlackFridayPage({
       erroMetaAds = e instanceof Error ? e.message : "Erro desconhecido buscando investimento do Meta Ads.";
     });
 
-  const [resumo, resumoAnterior, vendasPorCanal, salesByDay, topProdutos, vendasPorFaixaDesconto, comparativoMetaDiaria, vendasPorEstadoEcommerce, cac, syncStatus] = await Promise.all([
+  const [resumo, resumoAnterior, vendasPorCanal, salesByDay, topProdutos, vendasPorFaixaDesconto, comparativoMetaDiaria, cacDiario, vendasPorEstadoEcommerce, cac, syncStatus] = await Promise.all([
     getResumoBlackFriday(filtrosSemAtacado),
     getResumoBlackFriday(filtrosAnteriorSemAtacado),
     getVendasPorCanal(filtrosSemAtacado),
@@ -156,6 +157,9 @@ export default async function BlackFridayPage({
     // não `filtrosSemAtacado` — a exclusão de Atacado é resolvida por dentro da própria função
     // (força storeIds=[cdStoreId]), igual getVendasPorEstadoEcommerce.
     getComparativoMetaDiariaBlackFriday(filters),
+    // Drill-down diário do CAC — mesma janela cadastrada em MetaDiariaBlackFriday que o
+    // comparativo acima (ver getCacDiarioBlackFriday), mesmo motivo de receber `filters`.
+    getCacDiarioBlackFriday(filters),
     // Escopo MAIS ESTREITO que o resto da tela: só a loja CD (e-commerce), não "todas menos
     // Atacado" — por isso recebe `filters` (o range da campanha), não `filtrosSemAtacado`. Ver
     // comentário completo em getVendasPorEstadoEcommerce (black-friday.ts).
@@ -196,6 +200,20 @@ export default async function BlackFridayPage({
     real2026: d.receitaReal2026,
     real2025: d.receitaReal2025,
   }));
+  // Gráficos "CAC diário" — 3 cartões (investimento/novos/CAC) em vez de 1 gráfico de 3 séries:
+  // as escalas são incompatíveis demais pra compartilhar 1 eixo Y (investimento em milhares de
+  // reais vs. novos clientes em unidades vs. CAC também em reais mas numa ordem de grandeza bem
+  // menor) — mesmo padrão já usado nesta base pra métricas relacionadas com unidades diferentes
+  // (ver "Conteúdos/% de qualificação/Engajamento médio" em analise-performance/page.tsx). investimento
+  // e cac podem vir null por dia (Meta Ads indisponível, ou 0 novos no dia) — IndicatorChart já
+  // corta a linha em null em vez de cair pra zero, nunca fabricado aqui.
+  const cacDiarioInvestimentoChartData = cacDiario.dias.map((d) => ({ day: d.data, investimento: d.investimento }));
+  const cacDiarioNovosChartData = cacDiario.dias.map((d) => ({ day: d.data, novos: d.novos, recorrentes: d.recorrentes }));
+  const cacDiarioCacChartData = cacDiario.dias.map((d) => ({ day: d.data, cac: d.cac }));
+  const cacDiarioNaoIdentificadosTotal = cacDiario.dias.reduce((s, d) => s + d.naoIdentificados, 0);
+  const cacDiarioNovosTotal = cacDiario.dias.reduce((s, d) => s + d.novos, 0);
+  const cacDiarioRecorrentesTotal = cacDiario.dias.reduce((s, d) => s + d.recorrentes, 0);
+
   const campanhasPorConjunto = mapInsights(insightsPorConjunto, 15);
   const campanhasPorAnuncio = mapInsights(insightsPorAnuncio, 15);
   // Aviso: status indisponível (não erro geral do Meta Ads, que já tem a própria mensagem acima)
@@ -477,13 +495,76 @@ export default async function BlackFridayPage({
           </p>
 
           <h3 className="mb-2 text-sm font-medium text-[var(--text-secondary)]">CAC por campanha</h3>
-          <p className="mb-10 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3 text-xs text-[var(--text-secondary)]">
+          <p className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3 text-xs text-[var(--text-secondary)]">
             {cacPorCampanha.disponivel === false ? (
               <>
                 <strong>Não disponível.</strong> {cacPorCampanha.motivo}
               </>
             ) : null}
           </p>
+
+          {/* ── CAC diário (drill-down diário) ── */}
+          <h3 className="mb-2 text-sm font-medium text-[var(--text-secondary)]">CAC diário</h3>
+          <p className="mb-3 text-xs text-[var(--text-muted)]">
+            Mesma janela da campanha cadastrada em &quot;Meta vs. real&quot; acima (não o filtro
+            De/Até no topo da página), dia a dia: investimento em mídia, novos clientes e CAC
+            resultante. <strong>Limitação (leia antes de usar o CAC diário pra decisão):</strong> {cacDiario.motivoLimitacao}
+          </p>
+          {cacDiario.dias.length === 0 ? (
+            <p className="mb-10 text-sm text-[var(--text-muted)]">
+              Nenhuma meta diária importada ainda — use o botão &quot;Importar meta diária Black Friday&quot; no Admin.
+            </p>
+          ) : (
+            <>
+              <section className="mb-3 grid grid-cols-2 gap-4 sm:grid-cols-3">
+                <StatTile label="Novos (período do gráfico)" value={formatNumber(cacDiarioNovosTotal)} />
+                <StatTile label="Recorrentes (período do gráfico)" value={formatNumber(cacDiarioRecorrentesTotal)} />
+                <StatTile
+                  label="Não identificados"
+                  value={formatNumber(cacDiarioNaoIdentificadosTotal)}
+                  subValue="Venda sem vínculo de cadastro resolvido — nunca contada como novo ou recorrente"
+                />
+              </section>
+              <section className="mb-10 grid grid-cols-1 gap-4 lg:grid-cols-3">
+                <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
+                  <h4 className="mb-2 text-xs font-medium text-[var(--text-muted)]">Investimento diário (Meta Ads)</h4>
+                  {cacDiario.investimentoIndisponivel ? (
+                    <p className="flex h-56 items-center justify-center text-center text-sm text-[var(--text-muted)]">
+                      Investimento indisponível (Meta Ads sem credenciais ou erro de API nesta chamada).
+                    </p>
+                  ) : (
+                    <IndicatorChart
+                      data={cacDiarioInvestimentoChartData}
+                      format="currency"
+                      granularity="day"
+                      series={[{ key: "investimento", name: "Investimento", color: "var(--cat-1)" }]}
+                    />
+                  )}
+                </div>
+                <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
+                  <h4 className="mb-2 text-xs font-medium text-[var(--text-muted)]">Novos clientes por dia (e-commerce)</h4>
+                  <IndicatorChart
+                    data={cacDiarioNovosChartData}
+                    format="number"
+                    granularity="day"
+                    series={[
+                      { key: "novos", name: "Novos", color: "var(--cat-2)" },
+                      { key: "recorrentes", name: "Recorrentes", color: "var(--cat-3)" },
+                    ]}
+                  />
+                </div>
+                <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
+                  <h4 className="mb-2 text-xs font-medium text-[var(--text-muted)]">CAC diário</h4>
+                  <IndicatorChart
+                    data={cacDiarioCacChartData}
+                    format="currency"
+                    granularity="day"
+                    series={[{ key: "cac", name: "CAC", color: "var(--cat-4)" }]}
+                  />
+                </div>
+              </section>
+            </>
+          )}
         </>
       ) : (
         <p className="mb-10 text-sm text-[var(--text-muted)]">Sem permissão para ver dado financeiro (CAC/investimento).</p>

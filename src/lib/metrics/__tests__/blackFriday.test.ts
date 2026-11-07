@@ -34,6 +34,22 @@ vi.mock("../vendas", () => ({
   getSalesByDay: (...a: unknown[]) => getSalesByDay(...a),
 }));
 
+// "./cac" PARCIALMENTE mockado só pra getCacDiarioBlackFriday (abaixo) — getEcommerceStoreId
+// continua a implementação REAL (bate em prisma.store.findFirst, já mockado via storeFindFirst
+// acima, mesmo boundary usado por getResumoBlackFriday/getComparativoMetaDiariaBlackFriday neste
+// mesmo arquivo). Só as duas funções novas (consulta pesada por dia / conector Meta Ads) são
+// substituídas, mesmo racional de mockar getSalesByDay acima em vez de reimplementar o SQL aqui.
+const getNovosClientesDiarioEcommerce = vi.fn();
+const getInvestimentoDiarioAquisicao = vi.fn();
+vi.mock("../cac", async () => {
+  const actual = await vi.importActual<typeof import("../cac")>("../cac");
+  return {
+    ...actual,
+    getNovosClientesDiarioEcommerce: (...a: unknown[]) => getNovosClientesDiarioEcommerce(...a),
+    getInvestimentoDiarioAquisicao: (...a: unknown[]) => getInvestimentoDiarioAquisicao(...a),
+  };
+});
+
 import {
   montarVendasPorCanal,
   montarProdutosBlackFriday,
@@ -41,6 +57,7 @@ import {
   montarComparativoMetaDiariaBlackFriday,
   encontrarDiaPorData,
   getComparativoMetaDiariaBlackFriday,
+  getCacDiarioBlackFriday,
   montarVendasPorEstadoEcommerce,
   montarTop20ProdutosComDesconto,
   periodoAnterior,
@@ -590,6 +607,98 @@ describe("getComparativoMetaDiariaBlackFriday — escopado só ao e-commerce (CD
       to: new Date(),
       storeIds: ["s-leblon", "s-riosul"],
     });
+
+    expect(resumo.disponivel).toBe(false);
+    expect(metaDiariaBlackFridayFindMany).not.toHaveBeenCalled();
+  });
+});
+
+// CAC diário — drill-down diário do CAC pra Central Black Friday (missão 2026-11-07, "o cac
+// diario eu quero em grafico"). Mesmo encanamento de getComparativoMetaDiariaBlackFriday acima
+// (janela min/max de MetaDiariaBlackFriday, storeId forçado CD) — aqui testado contra os mocks de
+// getNovosClientesDiarioEcommerce/getInvestimentoDiarioAquisicao (ver vi.mock("../cac") no topo).
+describe("getCacDiarioBlackFriday — janela da planilha, novos/recorrentes via clienteCadastroId, CAC nunca fabricado", () => {
+  const CD_STORE_ID = "s-cd";
+
+  beforeEach(() => {
+    storeFindFirst.mockReset();
+    metaDiariaBlackFridayFindMany.mockReset();
+    getNovosClientesDiarioEcommerce.mockReset();
+    getInvestimentoDiarioAquisicao.mockReset();
+    storeFindFirst.mockResolvedValue({ id: CD_STORE_ID });
+  });
+
+  it("usa a mesma janela min/max de MetaDiariaBlackFriday (não o from/to do filtro recebido), calcula CAC = investimento/novos por dia", async () => {
+    metaDiariaBlackFridayFindMany.mockResolvedValue([
+      { data: new Date("2026-11-01T03:00:00.000Z"), metaReceita2026: 5000, receitaReal2025: null, acao: null },
+      { data: new Date("2026-11-02T03:00:00.000Z"), metaReceita2026: 5000, receitaReal2025: null, acao: null },
+    ]);
+    getNovosClientesDiarioEcommerce.mockResolvedValue(
+      new Map([
+        ["2026-11-01", { novos: 2, recorrentes: 1, naoIdentificados: 0 }],
+        ["2026-11-02", { novos: 0, recorrentes: 3, naoIdentificados: 1 }],
+      ])
+    );
+    getInvestimentoDiarioAquisicao.mockResolvedValue(new Map([["2026-11-01", 1000], ["2026-11-02", 500]]));
+
+    const filtros: DashboardFilters = {
+      from: new Date("2025-01-01T00:00:00-03:00"),
+      to: new Date("2025-01-31T23:59:59-03:00"),
+      storeIds: ["s-cd", "s-leblon"],
+    };
+    const resumo = await getCacDiarioBlackFriday(filtros);
+
+    expect(resumo.disponivel).toBe(true);
+    expect(resumo.investimentoIndisponivel).toBe(false);
+    expect(resumo.dias).toHaveLength(2);
+    expect(resumo.dias[0]).toEqual({ data: "2026-11-01", investimento: 1000, novos: 2, recorrentes: 1, naoIdentificados: 0, cac: 500 });
+    // dia 2: 0 novos -> CAC null, nunca Infinity/0, mesmo com investimento disponível.
+    expect(resumo.dias[1]).toEqual({ data: "2026-11-02", investimento: 500, novos: 0, recorrentes: 3, naoIdentificados: 1, cac: null });
+
+    // Janela passada pras duas funções é a da planilha (2026-11-01..02), não o from/to do filtro.
+    expect(getNovosClientesDiarioEcommerce).toHaveBeenCalledWith(CD_STORE_ID, new Date("2026-11-01T03:00:00.000Z"), expect.any(Date));
+    expect(getInvestimentoDiarioAquisicao).toHaveBeenCalledWith(new Date("2026-11-01T03:00:00.000Z"), expect.any(Date));
+  });
+
+  it("investimento diário indisponível (Meta Ads falhou) -> todo dia vem com investimento/cac null, nunca 0 fabricado", async () => {
+    metaDiariaBlackFridayFindMany.mockResolvedValue([
+      { data: new Date("2026-11-01T03:00:00.000Z"), metaReceita2026: 5000, receitaReal2025: null, acao: null },
+    ]);
+    getNovosClientesDiarioEcommerce.mockResolvedValue(new Map([["2026-11-01", { novos: 2, recorrentes: 0, naoIdentificados: 0 }]]));
+    getInvestimentoDiarioAquisicao.mockRejectedValue(new Error("META_AD_ACCOUNT_ID não configurado"));
+
+    const resumo = await getCacDiarioBlackFriday({ from: new Date(), to: new Date() });
+
+    expect(resumo.investimentoIndisponivel).toBe(true);
+    expect(resumo.dias[0].investimento).toBeNull();
+    expect(resumo.dias[0].cac).toBeNull();
+    expect(resumo.motivoLimitacao).toContain("Meta Ads");
+  });
+
+  it("nenhuma meta cadastrada ainda -> dias vazio, sem chamar as funções de novos/investimento diário", async () => {
+    metaDiariaBlackFridayFindMany.mockResolvedValue([]);
+
+    const resumo = await getCacDiarioBlackFriday({ from: new Date(), to: new Date() });
+
+    expect(resumo.disponivel).toBe(true);
+    expect(resumo.dias).toEqual([]);
+    expect(getNovosClientesDiarioEcommerce).not.toHaveBeenCalled();
+    expect(getInvestimentoDiarioAquisicao).not.toHaveBeenCalled();
+  });
+
+  it("loja CD não existe no ambiente -> disponivel false, nunca consulta meta nem novos/investimento", async () => {
+    storeFindFirst.mockResolvedValue(null);
+
+    const resumo = await getCacDiarioBlackFriday({ from: new Date(), to: new Date() });
+
+    expect(resumo.disponivel).toBe(false);
+    expect(resumo.dias).toEqual([]);
+    expect(metaDiariaBlackFridayFindMany).not.toHaveBeenCalled();
+    expect(getNovosClientesDiarioEcommerce).not.toHaveBeenCalled();
+  });
+
+  it("permissão do usuário já exclui a loja CD -> disponivel false", async () => {
+    const resumo = await getCacDiarioBlackFriday({ from: new Date(), to: new Date(), storeIds: ["s-leblon"] });
 
     expect(resumo.disponivel).toBe(false);
     expect(metaDiariaBlackFridayFindMany).not.toHaveBeenCalled();

@@ -395,6 +395,31 @@ export async function getInsightsPorConjunto(range: { since: string; until: stri
   return new Map([...porNome].map(([nome, raw]) => [nome, finalizarInsight(raw)]));
 }
 
+// Gasto diário (nível conta, soma de todos os conjuntos) — pedido do Rodrigo em 2026-11-07 ("o
+// cac diario eu quero em grafico"). `time_increment=1` é parâmetro padrão documentado da Insights
+// API do Graph (não é algo inventado aqui) — devolve 1 linha por dia dentro do time_range, cada
+// uma já com date_start/date_stop (sempre presentes na resposta quando time_increment é usado,
+// independente do que vai em `fields`). level=account em vez de adset: getInvestimentoAquisicao
+// (cac.ts) já soma TODOS os conjuntos pra virar "investimento total em mídia" sem recorte por
+// canal (mesma limitação documentada lá — Meta Ads da TVB roda só pro site, mas a função não
+// confirma isso por conta própria) — pedir direto no nível conta é a MESMA soma, só evita somar
+// manualmente N conjuntos x M dias.
+// Minuto de atenção: date_start que o Meta devolve é no fuso da CONTA de anúncios configurado no
+// Gerenciador (normalmente já America/Sao_Paulo pra conta BR) — não há parâmetro nesta chamada
+// pra forçar um fuso diferente. Se um dia a conta mudar de fuso, o "dia" aqui pode discordar por
+// algumas horas do dia de Brasília usado no resto do dashboard (mesma classe de risco que já
+// existe em qualquer chamada deste conector, não introduzida agora).
+export async function getGastoDiarioConta(since: string, until: string): Promise<Map<string, number>> {
+  const { accountId, accessToken } = getCredentials();
+  const timeRange = encodeURIComponent(JSON.stringify({ since, until }));
+  const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/act_${accountId}/insights?level=account&fields=spend&time_range=${timeRange}&time_increment=1&limit=200&access_token=${accessToken}`;
+  type MetaDailySpendRow = { spend?: string; date_start: string };
+  const rows = await fetchAllPages<MetaDailySpendRow>(url);
+  const map = new Map<string, number>();
+  for (const r of rows) map.set(r.date_start, Number(r.spend ?? 0));
+  return map;
+}
+
 // Mesma coisa, mas level=ad — pedido do Rodrigo em 2026-09-28 pra poder ver investimento por
 // CRIATIVO individual, não só o conjunto somado (essa parte vem direto do Meta, não depende do
 // GA4/utm_content — diferente da tabela "Anúncios" acima, que é limitada ao nível de conjunto
