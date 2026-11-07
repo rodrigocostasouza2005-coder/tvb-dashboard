@@ -15,8 +15,8 @@
 import { prisma } from "@/lib/prisma";
 import { saleWhere, type DashboardFilters } from "./core";
 import { getPrimeiraCompraGlobalPorCliente } from "./clientes";
-import { getInsightsPorConjunto } from "@/lib/connectors/meta-ads";
-import { todayBrasiliaStr } from "@/lib/filters";
+import { getInsightsPorConjunto, getGastoDiarioConta } from "@/lib/connectors/meta-ads";
+import { todayBrasiliaStr, brasiliaDayStart, brasiliaDayEnd } from "@/lib/filters";
 
 // ===== Identificação do Store "CD" (e-commerce) =====
 
@@ -40,6 +40,18 @@ export async function getInvestimentoAquisicao(from: Date, to: Date): Promise<nu
   let total = 0;
   for (const insight of insights.values()) total += insight.gasto;
   return total;
+}
+
+// Mesma ideia, mas por dia — pedido do Rodrigo em 2026-11-07 ("o cac diario eu quero em
+// grafico"), consumido por getCacDiarioBlackFriday (black-friday.ts). Mapa "YYYY-MM-DD" -> gasto
+// daquele dia (fuso da conta de anúncios no Meta, ver comentário de getGastoDiarioConta). Lança a
+// mesma exceção de getGastoDiarioConta quando faltam as credenciais — quem chama decide o
+// fallback (getCacDiarioBlackFriday trata como "investimento indisponível pra toda a janela",
+// nunca fabrica um número).
+export async function getInvestimentoDiarioAquisicao(from: Date, to: Date): Promise<Map<string, number>> {
+  const since = todayBrasiliaStr(from);
+  const until = todayBrasiliaStr(to);
+  return getGastoDiarioConta(since, until);
 }
 
 // ===== Novos compradores do e-commerce (denominador do CAC) =====
@@ -127,6 +139,128 @@ async function getNovosCompradoresEcommerce(
   }
 
   return { novos, recorrentes, semCadastroVinculado, homonimosDetectados };
+}
+
+// ===== Novos compradores do e-commerce, por DIA (gráfico "CAC diário") =====
+//
+// Pedido do Rodrigo em 2026-11-07: "o cac diario eu quero em grafico" — versão diária de
+// getNovosCompradoresEcommerce acima, consumida por getCacDiarioBlackFriday (black-friday.ts).
+// Diferença deliberada em relação à versão de período: usa o vínculo REAL Sale.clienteCadastroId
+// (PR #65, cliente-cadastro-link.ts) em vez de casar só por clienteNome normalizado — tanto
+// confiança ID (fatura.IdCliente, e-commerce) quanto NOME (nome normalizado batendo com
+// EXATAMENTE 1 ClienteCadastro, já sem ambiguidade de homônimo porque resolverClienteCadastro
+// nunca resolve um nome com mais de 1 candidato) são mais seguras que repetir o casamento por
+// string cru feito pela versão de período. Venda com clienteCadastroId null (nunca resolvido —
+// nem por ID nem por NOME) NUNCA é classificada como novo/recorrente aqui: entra em
+// "naoIdentificados" (contado por nome normalizado, só pra não desaparecer do total do dia, nunca
+// usado pra decidir novo/recorrente) — mesma convenção de honestidade de getVendasPorFaixaDesconto
+// ("sem desconto cadastrado")/getVendasPorEstadoEcommerce ("semEstado") em black-friday.ts: nunca
+// esconde, nunca chuta.
+export type NovosClientesDiarioDia = {
+  novos: number;
+  recorrentes: number;
+  naoIdentificados: number;
+};
+
+export async function getNovosClientesDiarioEcommerce(
+  cdStoreId: string,
+  from: Date,
+  to: Date
+): Promise<Map<string, NovosClientesDiarioDia>> {
+  // Mesmo truncamento de dia (fuso Brasília) já usado em getSalesByDay (vendas.ts) — GROUP BY já
+  // devolve 1 linha por combinação (dia, clienteCadastroId, clienteNome) distinta, então o loop em
+  // JS abaixo só precisa deduplicar por dia (um cliente com 2 vendas no mesmo dia conta 1 vez).
+  const rows = await prisma.$queryRaw<{ day: Date; clienteCadastroId: string | null; clienteNome: string | null }[]>`
+    SELECT
+      (("saleDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo')::date AS day,
+      "clienteCadastroId",
+      "clienteNome"
+    FROM "Sale"
+    WHERE "status" != 'Cancelada'
+      AND "storeId" = ${cdStoreId}
+      AND "saleDate" >= ${from}
+      AND "saleDate" <= ${to}
+    GROUP BY day, "clienteCadastroId", "clienteNome"
+  `;
+  if (rows.length === 0) return new Map();
+
+  const idsPorDia = new Map<string, Set<string>>();
+  const naoIdentificadosPorDia = new Map<string, Set<string>>();
+  const todosIds = new Set<string>();
+
+  for (const r of rows) {
+    const day = new Date(r.day).toISOString().slice(0, 10);
+    if (r.clienteCadastroId) {
+      todosIds.add(r.clienteCadastroId);
+      const set = idsPorDia.get(day) ?? new Set<string>();
+      set.add(r.clienteCadastroId);
+      idsPorDia.set(day, set);
+    } else if (r.clienteNome) {
+      // Sem clienteCadastroId resolvido — não dá pra classificar novo/recorrente com segurança
+      // (é exatamente a fragilidade que a PR #65 resolveu pra quem TEM o vínculo). Deduplicado só
+      // por nome normalizado, melhor esforço, só pra contagem de "naoIdentificados" do dia.
+      const norm = r.clienteNome.trim().toUpperCase();
+      const set = naoIdentificadosPorDia.get(day) ?? new Set<string>();
+      set.add(norm);
+      naoIdentificadosPorDia.set(day, set);
+    }
+    // Sem clienteCadastroId E sem clienteNome: não há nenhuma identidade (nem fraca) pra contar
+    // como "um comprador" — fica de fora de todos os três buckets, de propósito.
+  }
+
+  const result = new Map<string, NovosClientesDiarioDia>();
+  if (todosIds.size === 0) {
+    for (const [day, nomes] of naoIdentificadosPorDia) {
+      result.set(day, { novos: 0, recorrentes: 0, naoIdentificados: nomes.size });
+    }
+    return result;
+  }
+
+  // 1ª compra GLOBAL por clienteCadastroId — qualquer loja/canal da empresa, SEM restrição de
+  // storeId (mesmo racional de getPrimeiraCompraGlobalPorCliente/getNovosCompradoresEcommerce:
+  // comprador que já comprava na Leblon antes não é "novo" só porque essa foi a 1ª compra dele NO
+  // SITE). Inclui ClienteCadastro.primeiraCompraExterna (site antigo pré-DAPIC) pelo mesmo motivo
+  // que getPrimeiraCompraGlobalPorCliente inclui.
+  const idsArray = [...todosIds];
+  const [primeiraPorSale, externaRows] = await Promise.all([
+    prisma.$queryRaw<{ clienteCadastroId: string; first: Date }[]>`
+      SELECT "clienteCadastroId", MIN("saleDate") AS first
+      FROM "Sale"
+      WHERE "status" != 'Cancelada' AND "clienteCadastroId" = ANY(${idsArray})
+      GROUP BY "clienteCadastroId"
+    `,
+    prisma.$queryRaw<{ id: string; first: Date }[]>`
+      SELECT "id", "primeiraCompraExterna" AS first
+      FROM "ClienteCadastro"
+      WHERE "id" = ANY(${idsArray}) AND "primeiraCompraExterna" IS NOT NULL
+    `,
+  ]);
+
+  const primeiraGlobalPorId = new Map<string, Date>();
+  for (const r of primeiraPorSale) primeiraGlobalPorId.set(r.clienteCadastroId, new Date(r.first));
+  for (const r of externaRows) {
+    const d = new Date(r.first);
+    const cur = primeiraGlobalPorId.get(r.id);
+    if (!cur || d < cur) primeiraGlobalPorId.set(r.id, d);
+  }
+
+  const todosDias = new Set([...idsPorDia.keys(), ...naoIdentificadosPorDia.keys()]);
+  for (const day of todosDias) {
+    const dayStart = brasiliaDayStart(day);
+    const dayEnd = brasiliaDayEnd(day);
+    let novos = 0;
+    let recorrentes = 0;
+    for (const id of idsPorDia.get(day) ?? []) {
+      const first = primeiraGlobalPorId.get(id);
+      // Defensivo: todo id em idsPorDia comprou nesse dia (status != Cancelada), logo tem pelo
+      // menos essa venda em primeiraPorSale — "first" faltando não deveria acontecer na prática.
+      if (!first) continue;
+      if (first >= dayStart && first <= dayEnd) novos++;
+      else recorrentes++;
+    }
+    result.set(day, { novos, recorrentes, naoIdentificados: naoIdentificadosPorDia.get(day)?.size ?? 0 });
+  }
+  return result;
 }
 
 // ===== CAC consolidado do período =====

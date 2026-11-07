@@ -13,7 +13,7 @@
 import { prisma } from "@/lib/prisma";
 import { saleWhere, returnWhere, netByReturns, type DashboardFilters } from "./core";
 import { getSalesByGrupoProduto, getReturnsByGrupoProduto, getSalesByDay } from "./vendas";
-import { getEcommerceStoreId } from "./cac";
+import { getEcommerceStoreId, getNovosClientesDiarioEcommerce, getInvestimentoDiarioAquisicao } from "./cac";
 import { getInsightsPorConjunto } from "@/lib/connectors/meta-ads";
 import { todayBrasiliaStr } from "@/lib/filters";
 
@@ -625,6 +625,100 @@ export async function getComparativoMetaDiariaBlackFriday(
   }));
 
   return montarComparativoMetaDiariaBlackFriday(metas, receitaRealPorDia, todayBrasiliaStr(new Date()));
+}
+
+// ===== CAC diário (drill-down diário do CAC — Custo de Aquisição de Cliente) =====
+//
+// Pedido do Rodrigo (2026-11-07): "o cac diario eu quero em grafico" — 3 séries por dia
+// (investimento em mídia, novos clientes, CAC = investimento/novos), mesmo padrão de wiring do
+// gráfico "Meta vs. real" acima: usa a MESMA janela CADASTRADA em MetaDiariaBlackFriday (não o
+// período De/Até do seletor da página), pra os dois gráficos diários desta aba cobrirem
+// exatamente o mesmo intervalo de datas. Escopo e-commerce (loja CD) — mesma restrição de
+// getCacEcommerce (cac.ts), nunca loja física/Atacado.
+
+export type CacDiarioDia = {
+  data: string; // "YYYY-MM-DD", dia cadastrado na planilha da campanha (mesmos dias de ComparativoDiaBlackFriday.data)
+  // null só quando o investimento diário do Meta Ads não pôde ser obtido NESTA chamada
+  // (credenciais ausentes ou erro de API) — nunca 0 fabricado.
+  investimento: number | null;
+  novos: number;
+  recorrentes: number;
+  // Compradores do dia sem Sale.clienteCadastroId resolvido (nem por ID nem por NOME) — nunca
+  // contados como novo ou recorrente, ver getNovosClientesDiarioEcommerce (cac.ts).
+  naoIdentificados: number;
+  // null quando novos=0 (nunca Infinity/0 fabricado) ou quando investimento é null.
+  cac: number | null;
+};
+
+export type ResumoCacDiarioBlackFriday = {
+  // false quando a loja CD não existe no ambiente ou a permissão do usuário já exclui CD — mesmo
+  // padrão de ResumoMetaDiariaBlackFriday.disponivel.
+  disponivel: boolean;
+  dias: CacDiarioDia[];
+  // true quando o Meta Ads não pôde ser consultado nesta chamada — todo `investimento`/`cac` de
+  // `dias` vem null quando isso acontece (nunca um gráfico com números inventados).
+  investimentoIndisponivel: boolean;
+  motivoLimitacao: string;
+};
+
+function motivoLimitacaoCacDiario(investimentoIndisponivel: boolean): string {
+  const partes: string[] = [
+    "\"Novo\"/\"recorrente\" usa o vínculo real Sale.clienteCadastroId (confiança ID quando " +
+      "resolvido por fatura.IdCliente, NOME quando resolvido por nome normalizado batendo com " +
+      "exatamente 1 cadastro — ver cliente-cadastro-link.ts) — mais confiável que casar só por " +
+      "nome cru, mas venda ainda sem esse vínculo (nunca resolvido) entra em \"não identificado\", " +
+      "nunca é classificada como novo ou recorrente por adivinhação.",
+  ];
+  if (investimentoIndisponivel) {
+    partes.push(
+      "Investimento diário do Meta Ads não pôde ser obtido nesta chamada (credenciais ausentes ou " +
+        "erro na API) — CAC diário não pode ser calculado pra nenhum dia desta janela."
+    );
+  }
+  return partes.join(" ");
+}
+
+function resumoCacDiarioVazio(disponivel: boolean, investimentoIndisponivel = false): ResumoCacDiarioBlackFriday {
+  return { disponivel, dias: [], investimentoIndisponivel, motivoLimitacao: motivoLimitacaoCacDiario(investimentoIndisponivel) };
+}
+
+export async function getCacDiarioBlackFriday(filters: DashboardFilters): Promise<ResumoCacDiarioBlackFriday> {
+  const cdStoreId = await getEcommerceStoreId();
+  if (!cdStoreId) return resumoCacDiarioVazio(false);
+  if (filters.storeIds !== undefined && !filters.storeIds.includes(cdStoreId)) return resumoCacDiarioVazio(false);
+
+  // Mesma janela CADASTRADA em MetaDiariaBlackFriday do gráfico "Meta vs. real" acima — não o
+  // período De/Até escolhido na página. Reaproveita os dias já cadastrados na planilha em vez de
+  // reconstruir o intervalo dia a dia aqui.
+  const metasRows = await prisma.metaDiariaBlackFriday.findMany({ orderBy: { data: "asc" } });
+  if (metasRows.length === 0) return resumoCacDiarioVazio(true, false);
+
+  const primeiraData = metasRows[0].data;
+  const ultimaData = metasRows[metasRows.length - 1].data;
+  const fimUltimoDia = new Date(ultimaData.getTime() + 86399999); // 23:59:59.999 do último dia cadastrado
+  const diasCadastrados = metasRows.map((m) => m.data.toISOString().slice(0, 10)).sort();
+
+  const [novosPorDia, investimentoResult] = await Promise.all([
+    getNovosClientesDiarioEcommerce(cdStoreId, primeiraData, fimUltimoDia),
+    getInvestimentoDiarioAquisicao(primeiraData, fimUltimoDia).then(
+      (valor) => ({ valor, indisponivel: false }),
+      () => ({ valor: new Map<string, number>(), indisponivel: true })
+    ),
+  ]);
+
+  const dias: CacDiarioDia[] = diasCadastrados.map((data) => {
+    const d = novosPorDia.get(data) ?? { novos: 0, recorrentes: 0, naoIdentificados: 0 };
+    const investimento = investimentoResult.indisponivel ? null : investimentoResult.valor.get(data) ?? 0;
+    const cac = investimento != null && d.novos > 0 ? investimento / d.novos : null;
+    return { data, investimento, novos: d.novos, recorrentes: d.recorrentes, naoIdentificados: d.naoIdentificados, cac };
+  });
+
+  return {
+    disponivel: true,
+    dias,
+    investimentoIndisponivel: investimentoResult.indisponivel,
+    motivoLimitacao: motivoLimitacaoCacDiario(investimentoResult.indisponivel),
+  };
 }
 
 // ===== Mapa de estados — e-commerce (Store "CD" apenas) =====

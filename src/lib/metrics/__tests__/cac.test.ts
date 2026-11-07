@@ -4,6 +4,7 @@ const storeFindFirst = vi.fn();
 const saleGroupBy = vi.fn();
 const queryRaw = vi.fn();
 const getInsightsPorConjunto = vi.fn();
+const getGastoDiarioConta = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -15,6 +16,7 @@ vi.mock("@/lib/prisma", () => ({
 
 vi.mock("@/lib/connectors/meta-ads", () => ({
   getInsightsPorConjunto: (...a: unknown[]) => getInsightsPorConjunto(...a),
+  getGastoDiarioConta: (...a: unknown[]) => getGastoDiarioConta(...a),
 }));
 
 const CD_STORE_ID = "store-cd-123";
@@ -35,6 +37,7 @@ beforeEach(() => {
   saleGroupBy.mockReset();
   queryRaw.mockReset();
   getInsightsPorConjunto.mockReset();
+  getGastoDiarioConta.mockReset();
   storeFindFirst.mockResolvedValue({ id: CD_STORE_ID, code: "CD" });
 });
 
@@ -208,5 +211,114 @@ describe("getCacPorCampanha — limitação documentada, não calcula número in
     const r = getCacPorCampanha();
     expect(r.disponivel).toBe(false);
     expect(r.motivo.length).toBeGreaterThan(0);
+  });
+});
+
+// getNovosClientesDiarioEcommerce — versão diária de getNovosCompradoresEcommerce (gráfico "CAC
+// diário", missão 2026-11-07), usando Sale.clienteCadastroId (PR #65) em vez de nome cru.
+describe("getNovosClientesDiarioEcommerce — novo/recorrente por dia via clienteCadastroId", () => {
+  const FROM_DIA = new Date("2026-11-01T00:00:00-03:00");
+  const TO_DIA = new Date("2026-11-02T23:59:59-03:00");
+
+  it("comprador com clienteCadastroId cuja 1ª compra GLOBAL cai no mesmo dia conta como novo nesse dia", async () => {
+    queryRaw
+      .mockResolvedValueOnce([{ day: new Date("2026-11-01T00:00:00.000Z"), clienteCadastroId: "cc-1", clienteNome: "Ana Paula" }])
+      .mockResolvedValueOnce([{ clienteCadastroId: "cc-1", first: new Date("2026-11-01T12:00:00-03:00") }])
+      .mockResolvedValueOnce([]); // ClienteCadastro.primeiraCompraExterna
+
+    const { getNovosClientesDiarioEcommerce } = await import("../cac");
+    const result = await getNovosClientesDiarioEcommerce(CD_STORE_ID, FROM_DIA, TO_DIA);
+
+    expect(result.get("2026-11-01")).toEqual({ novos: 1, recorrentes: 0, naoIdentificados: 0 });
+  });
+
+  it("1ª compra global ANTERIOR ao dia (ex: comprou antes em outra loja) conta como recorrente, nunca novo", async () => {
+    queryRaw
+      .mockResolvedValueOnce([{ day: new Date("2026-11-01T00:00:00.000Z"), clienteCadastroId: "cc-2", clienteNome: "Bruno Costa" }])
+      .mockResolvedValueOnce([{ clienteCadastroId: "cc-2", first: new Date("2026-01-10T00:00:00-03:00") }])
+      .mockResolvedValueOnce([]);
+
+    const { getNovosClientesDiarioEcommerce } = await import("../cac");
+    const result = await getNovosClientesDiarioEcommerce(CD_STORE_ID, FROM_DIA, TO_DIA);
+
+    expect(result.get("2026-11-01")).toEqual({ novos: 0, recorrentes: 1, naoIdentificados: 0 });
+  });
+
+  it("venda sem clienteCadastroId resolvido (nem ID nem NOME) nunca é classificada novo/recorrente — vai pra naoIdentificados", async () => {
+    queryRaw
+      .mockResolvedValueOnce([{ day: new Date("2026-11-01T00:00:00.000Z"), clienteCadastroId: null, clienteNome: "Sem Vinculo" }]);
+    // Sem nenhum id resolvido -> função nem chama as outras 2 queries de 1ª compra.
+
+    const { getNovosClientesDiarioEcommerce } = await import("../cac");
+    const result = await getNovosClientesDiarioEcommerce(CD_STORE_ID, FROM_DIA, TO_DIA);
+
+    expect(result.get("2026-11-01")).toEqual({ novos: 0, recorrentes: 0, naoIdentificados: 1 });
+    expect(queryRaw).toHaveBeenCalledTimes(1);
+  });
+
+  it("dois clientes diferentes (ids distintos) no mesmo dia são contados separadamente, mesmo nome igual por coincidência", async () => {
+    queryRaw
+      .mockResolvedValueOnce([
+        { day: new Date("2026-11-01T00:00:00.000Z"), clienteCadastroId: "cc-a", clienteNome: "Joao Silva" },
+        { day: new Date("2026-11-01T00:00:00.000Z"), clienteCadastroId: "cc-b", clienteNome: "Joao Silva" },
+      ])
+      .mockResolvedValueOnce([
+        { clienteCadastroId: "cc-a", first: new Date("2026-11-01T09:00:00-03:00") }, // novo
+        { clienteCadastroId: "cc-b", first: new Date("2025-01-01T09:00:00-03:00") }, // recorrente
+      ])
+      .mockResolvedValueOnce([]);
+
+    const { getNovosClientesDiarioEcommerce } = await import("../cac");
+    const result = await getNovosClientesDiarioEcommerce(CD_STORE_ID, FROM_DIA, TO_DIA);
+
+    expect(result.get("2026-11-01")).toEqual({ novos: 1, recorrentes: 1, naoIdentificados: 0 });
+  });
+
+  it("ClienteCadastro.primeiraCompraExterna mais antiga que a 1ª venda em Sale vence (histórico pré-DAPIC)", async () => {
+    queryRaw
+      .mockResolvedValueOnce([{ day: new Date("2026-11-01T00:00:00.000Z"), clienteCadastroId: "cc-3", clienteNome: "Cliente Antigo" }])
+      .mockResolvedValueOnce([{ clienteCadastroId: "cc-3", first: new Date("2026-11-01T09:00:00-03:00") }])
+      .mockResolvedValueOnce([{ id: "cc-3", first: new Date("2022-05-01T00:00:00-03:00") }]);
+
+    const { getNovosClientesDiarioEcommerce } = await import("../cac");
+    const result = await getNovosClientesDiarioEcommerce(CD_STORE_ID, FROM_DIA, TO_DIA);
+
+    // primeiraCompraExterna (2022) é mais antiga que a venda do dia -> recorrente, não novo.
+    expect(result.get("2026-11-01")).toEqual({ novos: 0, recorrentes: 1, naoIdentificados: 0 });
+  });
+
+  it("nenhuma venda no período devolve Map vazio, sem chamar as queries de 1ª compra", async () => {
+    queryRaw.mockResolvedValueOnce([]);
+
+    const { getNovosClientesDiarioEcommerce } = await import("../cac");
+    const result = await getNovosClientesDiarioEcommerce(CD_STORE_ID, FROM_DIA, TO_DIA);
+
+    expect(result.size).toBe(0);
+    expect(queryRaw).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("getInvestimentoDiarioAquisicao — encanamento pro conector (time_increment diário)", () => {
+  it("repassa since/until (fuso Brasília) pro conector e devolve o Map tal como veio", async () => {
+    getGastoDiarioConta.mockResolvedValue(new Map([["2026-11-01", 100], ["2026-11-02", 200]]));
+
+    const { getInvestimentoDiarioAquisicao } = await import("../cac");
+    const result = await getInvestimentoDiarioAquisicao(
+      new Date("2026-11-01T00:00:00-03:00"),
+      new Date("2026-11-02T23:59:59-03:00")
+    );
+
+    expect(result.get("2026-11-01")).toBe(100);
+    expect(result.get("2026-11-02")).toBe(200);
+    expect(getGastoDiarioConta).toHaveBeenCalledWith("2026-11-01", "2026-11-02");
+  });
+
+  it("erro do conector (credenciais ausentes) propaga — quem chama decide o fallback, nunca resolve pra Map vazio aqui", async () => {
+    getGastoDiarioConta.mockRejectedValue(new Error("META_AD_ACCOUNT_ID / META_ACCESS_TOKEN não configurados"));
+
+    const { getInvestimentoDiarioAquisicao } = await import("../cac");
+    await expect(
+      getInvestimentoDiarioAquisicao(new Date("2026-11-01T00:00:00-03:00"), new Date("2026-11-02T23:59:59-03:00"))
+    ).rejects.toThrow(/META_AD_ACCOUNT_ID/);
   });
 });
