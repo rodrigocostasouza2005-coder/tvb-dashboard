@@ -225,8 +225,20 @@ export function montarVendasPorCanal(
 
 export async function getVendasPorCanal(filters: DashboardFilters): Promise<CanalVendasRow[]> {
   const where = saleWhere(filters);
+  // Achado real (2026-11-06): a lista de lojas vinha SEMPRE com os 5 canais de ORDEM_CANAL,
+  // mesmo quando `filters.storeIds` já excluía algum deles (ex: Atacado, via
+  // filtrosSemAtacado/getFiltrosSemAtacado) — a query de Sale/Return já respeitava o filtro
+  // (where: saleWhere(filters)), mas a lista de STORES não, então a linha excluída aparecia
+  // zerada em vez de sumir (Rodrigo: "a linha que tem atacado pode apagar"). Corrigido: a lista
+  // de lojas agora também respeita filters.storeIds quando definido.
   const [stores, salesRows, returnRows, pedidosRows] = await Promise.all([
-    prisma.store.findMany({ where: { code: { in: ORDEM_CANAL } }, select: { id: true, code: true, name: true } }),
+    prisma.store.findMany({
+      where: {
+        code: { in: ORDEM_CANAL },
+        ...(filters.storeIds !== undefined ? { id: { in: filters.storeIds } } : {}),
+      },
+      select: { id: true, code: true, name: true },
+    }),
     prisma.sale.groupBy({ by: ["storeId"], where, _sum: { quantidade: true, valorTotalLiquido: true } }),
     prisma.return.groupBy({ by: ["storeId"], where: returnWhere(filters), _sum: { quantidade: true, valorTotal: true } }),
     prisma.sale.groupBy({ by: ["storeId", "dapicVendaId"], where }),
