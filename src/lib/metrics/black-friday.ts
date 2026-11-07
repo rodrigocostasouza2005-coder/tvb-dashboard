@@ -489,6 +489,10 @@ export type ComparativoAcumuladoBlackFriday = {
 };
 
 export type ResumoMetaDiariaBlackFriday = {
+  // false quando a loja CD não existe no ambiente ou o usuário não tem permissão de vê-la — ver
+  // mesmo padrão de getFaturamentoEcommerce/getVendasPorEstadoEcommerce. Quando false, todo o
+  // resto do objeto vem vazio/zerado (nunca um número calculado sem acesso).
+  disponivel: boolean;
   dias: ComparativoDiaBlackFriday[];
   acumulado: ComparativoAcumuladoBlackFriday;
   // Linha de `dias` cujo `data` é hoje (Brasília) — null quando hoje cai fora da janela
@@ -548,6 +552,7 @@ export function montarComparativoMetaDiariaBlackFriday(
   const realAcumulado = dias.reduce((s, d) => s + d.receitaReal2026, 0);
 
   return {
+    disponivel: true,
     dias,
     acumulado: {
       metaReceita2026: metaAcumulada,
@@ -559,29 +564,43 @@ export function montarComparativoMetaDiariaBlackFriday(
   };
 }
 
+function resumoMetaDiariaVazio(disponivel: boolean): ResumoMetaDiariaBlackFriday {
+  return {
+    disponivel,
+    dias: [],
+    acumulado: { metaReceita2026: 0, receitaReal2026: 0, atingimentoPct: null, diferencaReal: 0 },
+    hoje: null,
+  };
+}
+
+// Pedido do Rodrigo (2026-11-06): "a meta é só ecommerce" — esta comparação (meta 2026 vs. real
+// 2026 vs. real 2025) é escopada SÓ à loja de e-commerce (CD), não "todas menos Atacado" como o
+// resto da tela (ver getFiltrosSemAtacado) — a planilha de metas em si é do e-commerce (site), não
+// da operação de loja física. Mesmo padrão de permissão de getFaturamentoEcommerce/
+// getVendasPorEstadoEcommerce: se a loja CD não existe no ambiente, ou a permissão do usuário já
+// exclui CD, devolve indisponível — nunca calcula com loja que o usuário não pode ver.
 export async function getComparativoMetaDiariaBlackFriday(
   filters: DashboardFilters
 ): Promise<ResumoMetaDiariaBlackFriday> {
+  const cdStoreId = await getEcommerceStoreId();
+  if (!cdStoreId) return resumoMetaDiariaVazio(false);
+  if (filters.storeIds !== undefined && !filters.storeIds.includes(cdStoreId)) return resumoMetaDiariaVazio(false);
+
   const metasRows = await prisma.metaDiariaBlackFriday.findMany({ orderBy: { data: "asc" } });
-  if (metasRows.length === 0) {
-    return {
-      dias: [],
-      acumulado: { metaReceita2026: 0, receitaReal2026: 0, atingimentoPct: null, diferencaReal: 0 },
-      hoje: null,
-    };
-  }
+  if (metasRows.length === 0) return resumoMetaDiariaVazio(true);
 
   const primeiraData = metasRows[0].data;
   const ultimaData = metasRows[metasRows.length - 1].data;
   // getSalesByDay (vendas.ts) já devolve líquido (venda - devolução) por dia de Brasília — a
   // mesma função usada no gráfico "Receita líquida por dia" da Visão Geral, reaproveitada aqui em
-  // vez de reimplementar a agregação. Sobrescreve from/to de `filters` pra cobrir a janela
-  // CADASTRADA na planilha de meta (ver comentário no topo da seção), não o período escolhido no
-  // seletor De/Até da página.
+  // vez de reimplementar a agregação. Sobrescreve from/to/storeIds de `filters` pra cobrir a
+  // janela CADASTRADA na planilha de meta (não o período escolhido no seletor De/Até da página) e
+  // SÓ a loja CD.
   const filtrosJanelaCampanha: DashboardFilters = {
     ...filters,
     from: primeiraData,
     to: new Date(ultimaData.getTime() + 86399999), // fim do último dia cadastrado (23:59:59.999)
+    storeIds: [cdStoreId],
   };
   const salesByDay = await getSalesByDay(filtrosJanelaCampanha);
   const receitaRealPorDia = new Map(salesByDay.map((s) => [s.day, s.revenue]));
