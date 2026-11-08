@@ -99,7 +99,7 @@ export default async function AdminPage({
   if (user.role !== "ADMIN") redirect("/dashboard");
   const { ok } = await searchParams;
 
-  const [users, stores, marcas, tabelasPreco, apiTokenStatus, vendedores, bannerStatus] = await Promise.all([
+  const [users, stores, marcas, tabelasPreco, apiTokenStatus, vendedores, bannerStatus, precosBfCount, metaDiariaBfCount] = await Promise.all([
     prisma.user.findMany({ orderBy: { createdAt: "asc" } }),
     getRawStores(),
     getMarcas(),
@@ -107,6 +107,13 @@ export default async function AdminPage({
     getApiTokenStatus(),
     prisma.vendedor.findMany({ include: { store: true }, orderBy: [{ store: { name: "asc" } }, { nome: "asc" }] }),
     getBannerStatus(),
+    // Achado real em 2026-11-07: as 2 importações de planilha abaixo (PrecoBlackFriday,
+    // MetaDiariaBlackFriday) foram testadas no dev e esquecidas em produção — o painel
+    // correspondente fica silenciosamente vazio (por design, nunca inventa número), sem nenhum
+    // aviso visível de que faltava clicar no botão aqui. Contagem direta mostra isso na hora, sem
+    // precisar abrir a Central Black Friday pra notar que "não tem números".
+    prisma.precoBlackFriday.count(),
+    prisma.metaDiariaBlackFriday.count(),
   ]);
   const vendedoresPorLoja = new Map<string, typeof vendedores>();
   for (const v of vendedores) {
@@ -152,6 +159,14 @@ export default async function AdminPage({
           desconto&quot; da Central Black Friday) a partir da planilha mais recente. Seguro clicar mais de
           uma vez — atualiza quem já existe, não duplica.
         </p>
+        {precosBfCount === 0 ? (
+          <p className="mb-3 rounded-md border border-[var(--status-critical)] bg-[var(--surface-1)] px-3 py-2 text-xs font-medium text-[var(--status-critical)]">
+            ⚠️ Nunca importado nesse ambiente — os painéis de desconto na Central Black Friday vão
+            aparecer vazios até clicar no botão abaixo.
+          </p>
+        ) : (
+          <p className="mb-3 text-xs text-[var(--text-muted)]">{precosBfCount} produtos cadastrados.</p>
+        )}
         <ImportarPrecosBfButton />
       </section>
 
@@ -162,6 +177,14 @@ export default async function AdminPage({
           painel &quot;Meta vs. Real&quot; da Central Black Friday a partir da planilha mais recente.
           Seguro clicar mais de uma vez — atualiza quem já existe, não duplica.
         </p>
+        {metaDiariaBfCount === 0 ? (
+          <p className="mb-3 rounded-md border border-[var(--status-critical)] bg-[var(--surface-1)] px-3 py-2 text-xs font-medium text-[var(--status-critical)]">
+            ⚠️ Nunca importado nesse ambiente — os painéis &quot;Meta vs. Real&quot; e &quot;CAC diário&quot; na
+            Central Black Friday vão aparecer vazios até clicar no botão abaixo.
+          </p>
+        ) : (
+          <p className="mb-3 text-xs text-[var(--text-muted)]">{metaDiariaBfCount} dias cadastrados.</p>
+        )}
         <ImportarMetaDiariaBfButton />
       </section>
 
