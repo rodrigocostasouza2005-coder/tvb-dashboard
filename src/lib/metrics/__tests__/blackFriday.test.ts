@@ -60,6 +60,7 @@ import {
   getCacDiarioBlackFriday,
   montarVendasPorEstadoEcommerce,
   montarTop20ProdutosComDesconto,
+  montarTop20GruposComDesconto,
   periodoAnterior,
   ORDEM_CANAL,
   excluirAtacado,
@@ -487,6 +488,36 @@ describe("montarComparativoMetaDiariaBlackFriday", () => {
     expect(resumo.acumulado.atingimentoPct).toBeCloseTo(80, 5);
   });
 
+  // Card "Crescimento anual (acumulado)" — pedido do Rodrigo em 2026-11-08.
+  it("crescimento anual acumulado soma só os dias COM dado de 2025 (comparação justa)", () => {
+    const metas = [
+      { data: "2026-11-01", metaReceita2026: 5000, receitaReal2025: 2000, acao: null },
+      { data: "2026-11-02", metaReceita2026: 5000, receitaReal2025: 3000, acao: null },
+      { data: "2026-11-03", metaReceita2026: 5000, receitaReal2025: null, acao: null }, // sem dado 2025
+    ];
+    const receitaRealPorDia = new Map([
+      ["2026-11-01", 4000],
+      ["2026-11-02", 6000],
+      ["2026-11-03", 9000], // fica de fora da comparação (dia sem 2025)
+    ]);
+
+    const resumo = montarComparativoMetaDiariaBlackFriday(metas, receitaRealPorDia);
+
+    // 2026: 4000+6000=10000 (NUNCA inclui os 9000 do dia sem 2025) | 2025: 2000+3000=5000
+    expect(resumo.acumulado.receitaReal2026ComparavelA2025).toBe(10000);
+    expect(resumo.acumulado.receitaReal2025Acumulada).toBe(5000);
+    expect(resumo.acumulado.crescimentoAnualAcumuladoPct).toBeCloseTo(100, 5); // dobrou
+  });
+
+  it("crescimento anual acumulado fica indisponível (null) quando NENHUM dia da janela tem dado de 2025", () => {
+    const metas = [{ data: "2026-11-01", metaReceita2026: 5000, receitaReal2025: null, acao: null }];
+    const resumo = montarComparativoMetaDiariaBlackFriday(metas, new Map([["2026-11-01", 4000]]));
+
+    expect(resumo.acumulado.receitaReal2026ComparavelA2025).toBeNull();
+    expect(resumo.acumulado.receitaReal2025Acumulada).toBeNull();
+    expect(resumo.acumulado.crescimentoAnualAcumuladoPct).toBeNull();
+  });
+
   it("ordena os dias por data mesmo que as metas cheguem fora de ordem", () => {
     const metas = [
       { data: "2026-11-02", metaReceita2026: 5000, receitaReal2025: null, acao: null },
@@ -587,7 +618,15 @@ describe("getComparativoMetaDiariaBlackFriday — escopado só ao e-commerce (CD
     expect(resumo.disponivel).toBe(true);
     expect(resumo.dias).toEqual([]);
     expect(resumo.hoje).toBeNull();
-    expect(resumo.acumulado).toEqual({ metaReceita2026: 0, receitaReal2026: 0, atingimentoPct: null, diferencaReal: 0 });
+    expect(resumo.acumulado).toEqual({
+      metaReceita2026: 0,
+      receitaReal2026: 0,
+      atingimentoPct: null,
+      diferencaReal: 0,
+      receitaReal2026ComparavelA2025: null,
+      receitaReal2025Acumulada: null,
+      crescimentoAnualAcumuladoPct: null,
+    });
     expect(getSalesByDay).not.toHaveBeenCalled();
   });
 
@@ -865,5 +904,67 @@ describe("montarTop20ProdutosComDesconto", () => {
     const liquido = [{ grupo: "Camisa", key: "Camisa Classic", unitsSold: 5, revenue: 500 }];
     const rows = montarTop20ProdutosComDesconto(liquido, new Map(), 10000);
     expect(rows[0]).toMatchObject({ grupo: "Camisa", produto: "Camisa Classic", unitsSold: 5, revenue: 500 });
+  });
+});
+
+// Visão alternativa "por grupo de produto" (pedido do Rodrigo, 2026-11-08: botão pra escolher
+// produto ou grupo). Desconto do grupo é média PONDERADA por receita, só entre produtos com
+// desconto cadastrado — nunca inventa um número pra grupo sem nenhum cadastro.
+describe("montarTop20GruposComDesconto", () => {
+  it("agrega unidades/receita de todos os produtos do mesmo grupo", () => {
+    const liquido = [
+      { grupo: "Camisa", key: "Classic", unitsSold: 10, revenue: 1000 },
+      { grupo: "Camisa", key: "Slim", unitsSold: 5, revenue: 500 },
+      { grupo: "Shorts", key: "Liso", unitsSold: 3, revenue: 300 },
+    ];
+    const rows = montarTop20GruposComDesconto(liquido, new Map(), 1800);
+    const camisa = rows.find((r) => r.grupo === "Camisa");
+    expect(camisa?.unitsSold).toBe(15);
+    expect(camisa?.revenue).toBe(1500);
+  });
+
+  it("desconto do grupo é média ponderada por receita, só entre produtos com desconto cadastrado", () => {
+    const liquido = [
+      { grupo: "Camisa", key: "Classic", unitsSold: 10, revenue: 800 }, // 20% desconto
+      { grupo: "Camisa", key: "Slim", unitsSold: 5, revenue: 200 }, // 40% desconto
+    ];
+    const descontos = new Map([
+      ["Camisa::Classic", 0.2],
+      ["Camisa::Slim", 0.4],
+    ]);
+    const rows = montarTop20GruposComDesconto(liquido, descontos, 1000);
+    // ponderado: (800*0.2 + 200*0.4) / (800+200) = (160+80)/1000 = 24%
+    expect(rows[0].descontoMedioPct).toBeCloseTo(24, 5);
+  });
+
+  it("produto do grupo sem desconto cadastrado NÃO entra no peso nem no numerador da média", () => {
+    const liquido = [
+      { grupo: "Camisa", key: "Classic", unitsSold: 10, revenue: 800 }, // 20% desconto, cadastrado
+      { grupo: "Camisa", key: "Sem Cadastro", unitsSold: 5, revenue: 2000 }, // sem desconto cadastrado
+    ];
+    const descontos = new Map([["Camisa::Classic", 0.2]]);
+    const rows = montarTop20GruposComDesconto(liquido, descontos, 3000);
+    // média é só sobre os 800 com cadastro -> 20%, não dilui pelos 2000 sem cadastro
+    expect(rows[0].descontoMedioPct).toBeCloseTo(20, 5);
+    // mas a receita TOTAL do grupo continua somando tudo (800+2000)
+    expect(rows[0].revenue).toBe(2800);
+  });
+
+  it("grupo sem NENHUM produto cadastrado mostra desconto indisponível (null), nunca 0%/média fabricada", () => {
+    const liquido = [{ grupo: "Camisa", key: "Novo Produto", unitsSold: 5, revenue: 500 }];
+    const rows = montarTop20GruposComDesconto(liquido, new Map(), 10000);
+    expect(rows[0].descontoMedioPct).toBeNull();
+  });
+
+  it("ordena por receita decrescente por padrão e corta no limite", () => {
+    const liquido = Array.from({ length: 25 }, (_, i) => ({
+      grupo: `Grupo ${i}`,
+      key: "P",
+      unitsSold: 1,
+      revenue: 25 - i,
+    }));
+    const rows = montarTop20GruposComDesconto(liquido, new Map(), 1000);
+    expect(rows).toHaveLength(20);
+    expect(rows[0].grupo).toBe("Grupo 0");
   });
 });

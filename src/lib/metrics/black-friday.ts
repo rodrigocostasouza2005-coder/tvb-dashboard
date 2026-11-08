@@ -498,6 +498,13 @@ export type ComparativoAcumuladoBlackFriday = {
   receitaReal2026: number;
   atingimentoPct: number | null;
   diferencaReal: number;
+  // Soma de receitaReal2026 SÓ dos dias que têm receitaReal2025 (comparação justa, mesmos dias
+  // dos dois anos) — pedido do Rodrigo em 2026-11-08 ("card de % de crescimento ano contra
+  // ano"). Null quando nenhum dia da janela tem dado de 2025 (nunca inventa 0, que pareceria
+  // "caiu 100%").
+  receitaReal2026ComparavelA2025: number | null;
+  receitaReal2025Acumulada: number | null;
+  crescimentoAnualAcumuladoPct: number | null;
 };
 
 export type ResumoMetaDiariaBlackFriday = {
@@ -563,6 +570,17 @@ export function montarComparativoMetaDiariaBlackFriday(
   const metaAcumulada = dias.reduce((s, d) => s + d.metaReceita2026, 0);
   const realAcumulado = dias.reduce((s, d) => s + d.receitaReal2026, 0);
 
+  // Só os dias com receitaReal2025 real (não todos) — comparação justa ano-contra-ano, mesma
+  // janela de dias dos dois anos. Dia sem dado de 2025 fica de fora da soma dos dois lados, não
+  // conta como 0 de nenhum dos dois anos.
+  const diasComparaveis = dias.filter((d) => d.receitaReal2025 != null);
+  const real2026Comparavel = diasComparaveis.length > 0 ? diasComparaveis.reduce((s, d) => s + d.receitaReal2026, 0) : null;
+  const real2025Acumulada = diasComparaveis.length > 0 ? diasComparaveis.reduce((s, d) => s + (d.receitaReal2025 ?? 0), 0) : null;
+  const crescimentoAnualAcumuladoPct =
+    real2026Comparavel != null && real2025Acumulada != null && real2025Acumulada !== 0
+      ? ((real2026Comparavel - real2025Acumulada) / real2025Acumulada) * 100
+      : null;
+
   return {
     disponivel: true,
     dias,
@@ -571,6 +589,9 @@ export function montarComparativoMetaDiariaBlackFriday(
       receitaReal2026: realAcumulado,
       atingimentoPct: metaAcumulada !== 0 ? (realAcumulado / metaAcumulada) * 100 : null,
       diferencaReal: realAcumulado - metaAcumulada,
+      receitaReal2026ComparavelA2025: real2026Comparavel,
+      receitaReal2025Acumulada: real2025Acumulada,
+      crescimentoAnualAcumuladoPct,
     },
     hoje: hojeStr != null ? encontrarDiaPorData(dias, hojeStr) : null,
   };
@@ -580,7 +601,15 @@ function resumoMetaDiariaVazio(disponivel: boolean): ResumoMetaDiariaBlackFriday
   return {
     disponivel,
     dias: [],
-    acumulado: { metaReceita2026: 0, receitaReal2026: 0, atingimentoPct: null, diferencaReal: 0 },
+    acumulado: {
+      metaReceita2026: 0,
+      receitaReal2026: 0,
+      atingimentoPct: null,
+      diferencaReal: 0,
+      receitaReal2026ComparavelA2025: null,
+      receitaReal2025Acumulada: null,
+      crescimentoAnualAcumuladoPct: null,
+    },
     hoje: null,
   };
 }
@@ -931,6 +960,83 @@ export function montarTop20ProdutosComDesconto(
     })
     .sort((a, b) => (ordenarPor === "unidades" ? b.unitsSold - a.unitsSold : b.revenue - a.revenue))
     .slice(0, limit);
+}
+
+// ===== Top 20 GRUPOS de produto (mesma ideia, agregado 1 nível acima) =====
+//
+// Pedido do Rodrigo em 2026-11-08: "um botão pra escolher ver por produto... e outro pra ver por
+// grupo de produto" — mesmo painel, visão alternativa. Como PrecoBlackFriday é cadastrado por
+// grupo+produto (não por grupo só), um grupo real tem VÁRIOS produtos, cada um com seu próprio %
+// de desconto — não existe "o desconto do grupo" de verdade. Em vez de inventar um número só
+// (ex: média simples, que distorceria se um produto do grupo vender muito mais que outro),
+// mostra a MÉDIA PONDERADA POR RECEITA, e só entre os produtos do grupo que têm desconto
+// cadastrado de verdade (produto sem cadastro não entra no peso nem no numerador). Grupo sem
+// NENHUM produto cadastrado mostra desconto indisponível (null), nunca 0%/média fabricada.
+export type Top20GrupoDesconto = {
+  grupo: string;
+  unitsSold: number;
+  revenue: number;
+  descontoMedioPct: number | null;
+  participacaoFaturamentoPct: number | null;
+};
+
+// Função PURA — mesma entrada de montarTop20ProdutosComDesconto (venda líquida por grupo+produto
+// + mapa de desconto cadastrado), agregada por grupo. Testável sem banco.
+export function montarTop20GruposComDesconto(
+  liquido: { grupo: string; key: string; unitsSold: number; revenue: number }[],
+  descontosCadastrados: Map<string, number>,
+  faturamentoTotalPeriodo: number,
+  ordenarPor: "revenue" | "unidades" = "revenue",
+  limit = 20
+): Top20GrupoDesconto[] {
+  const porGrupo = new Map<string, { unitsSold: number; revenue: number; revenueComDesconto: number; descontoPonderadoSoma: number }>();
+  for (const v of liquido) {
+    const desconto = descontosCadastrados.get(`${v.grupo}::${v.key}`);
+    const acc = porGrupo.get(v.grupo) ?? { unitsSold: 0, revenue: 0, revenueComDesconto: 0, descontoPonderadoSoma: 0 };
+    acc.unitsSold += v.unitsSold;
+    acc.revenue += v.revenue;
+    if (desconto != null) {
+      acc.revenueComDesconto += v.revenue;
+      acc.descontoPonderadoSoma += desconto * v.revenue;
+    }
+    porGrupo.set(v.grupo, acc);
+  }
+
+  return [...porGrupo.entries()]
+    .map(([grupo, acc]) => {
+      const participacaoFaturamentoPct =
+        faturamentoTotalPeriodo > 0 ? (acc.revenue / faturamentoTotalPeriodo) * 100 : null;
+      return {
+        grupo,
+        unitsSold: acc.unitsSold,
+        revenue: acc.revenue,
+        descontoMedioPct: acc.revenueComDesconto > 0 ? (acc.descontoPonderadoSoma / acc.revenueComDesconto) * 100 : null,
+        participacaoFaturamentoPct,
+      } satisfies Top20GrupoDesconto;
+    })
+    .sort((a, b) => (ordenarPor === "unidades" ? b.unitsSold - a.unitsSold : b.revenue - a.revenue))
+    .slice(0, limit);
+}
+
+export async function getTop20GruposComDesconto(
+  filters: DashboardFilters,
+  faturamentoTotalPeriodo: number,
+  options?: { ordenarPor?: "revenue" | "unidades"; limit?: number }
+): Promise<Top20GrupoDesconto[]> {
+  const [vendas, devolucoes, descontosCadastrados] = await Promise.all([
+    getSalesByGrupoProduto(filters),
+    getReturnsByGrupoProduto(filters),
+    getPrecosPorProduto(),
+  ]);
+  const liquido = netByReturns(vendas, devolucoes);
+
+  return montarTop20GruposComDesconto(
+    liquido,
+    descontosCadastrados,
+    faturamentoTotalPeriodo,
+    options?.ordenarPor ?? "revenue",
+    options?.limit ?? 20
+  );
 }
 
 // faturamentoTotalPeriodo: SEMPRE vem de fora (o chamador já tem getResumoBlackFriday(filtros)
