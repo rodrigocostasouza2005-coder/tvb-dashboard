@@ -14,6 +14,7 @@ import {
   getCacDiarioBlackFriday,
   getVendasPorEstadoEcommerce,
   getTop20ProdutosComDesconto,
+  getTop20GruposComDesconto,
   type DashboardFilters,
 } from "@/lib/metrics";
 import {
@@ -170,9 +171,14 @@ export default async function BlackFridayPage({
       : null;
   const estadoMaisFaturamento = [...vendasPorEstadoEcommerce.rows].sort((a, b) => b.receita - a.receita)[0];
   // Reaproveita resumo.faturamento (já calculado acima pra Visão Geral) como total do período
-  // pra "% do faturamento" de cada SKU — nunca recalcula um total diferente aqui (ver
-  // getTop20ProdutosComDesconto em black-friday.ts).
-  const top20ProdutosDesconto = await getTop20ProdutosComDesconto(filtrosSemAtacado, resumo.faturamento);
+  // pra "% do faturamento" de cada linha — nunca recalcula um total diferente aqui (ver
+  // getTop20ProdutosComDesconto/getTop20GruposComDesconto em black-friday.ts). Busca as DUAS
+  // visões (produto e grupo) de uma vez — o toggle na tabela é só client-side, sem round-trip
+  // novo ao trocar (pedido do Rodrigo em 2026-11-08).
+  const [top20ProdutosDesconto, top20GruposDesconto] = await Promise.all([
+    getTop20ProdutosComDesconto(filtrosSemAtacado, resumo.faturamento),
+    getTop20GruposComDesconto(filtrosSemAtacado, resumo.faturamento),
+  ]);
 
   // Comparativo só aparece quando os DOIS períodos têm pedido real — nunca força uma comparação
   // contra um período vazio (pedido explícito da missão, item 1).
@@ -341,6 +347,12 @@ export default async function BlackFridayPage({
               status={comparativoMetaDiaria.acumulado.atingimentoPct != null ? (comparativoMetaDiaria.acumulado.atingimentoPct >= 100 ? "good" : "critical") : undefined}
             />
             <StatTile label="Diferença acumulada" value={formatBRL(comparativoMetaDiaria.acumulado.diferencaReal)} />
+            <StatTile
+              label="Crescimento anual (acumulado)"
+              value={comparativoMetaDiaria.acumulado.crescimentoAnualAcumuladoPct != null ? formatPercent(comparativoMetaDiaria.acumulado.crescimentoAnualAcumuladoPct) : "—"}
+              subValue={comparativoMetaDiaria.acumulado.crescimentoAnualAcumuladoPct == null ? "Nenhum dia da janela tem dado de 2025 ainda" : "Só dias com dado de 2025 (comparação justa)"}
+              status={comparativoMetaDiaria.acumulado.crescimentoAnualAcumuladoPct != null ? (comparativoMetaDiaria.acumulado.crescimentoAnualAcumuladoPct >= 0 ? "good" : "critical") : undefined}
+            />
           </section>
         </>
       ) : (
@@ -450,7 +462,7 @@ export default async function BlackFridayPage({
         planilha mostra desconto indisponível, nunca 0%.
       </p>
       <section className="mb-10">
-        <Top20DescontoTable rows={top20ProdutosDesconto} showFinancials={showFinancials} />
+        <Top20DescontoTable rowsPorProduto={top20ProdutosDesconto} rowsPorGrupo={top20GruposDesconto} showFinancials={showFinancials} />
       </section>
 
       {/* ── Por faixa de desconto ── */}
