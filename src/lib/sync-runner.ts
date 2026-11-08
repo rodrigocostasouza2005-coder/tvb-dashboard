@@ -503,12 +503,19 @@ export async function upsertSalesComVendedorAtualizavel(saleData: Prisma.SaleCre
   });
   const vendedorAntigoPorChave = new Map(existentes.map((e) => [`${e.dapicVendaId}::${e.itemIndex}`, e.vendedor]));
 
+  // Achado em produção (2026-11-08): o Postgres não infere sozinho que o parâmetro bound deste
+  // placeholder é do tipo enum "ClienteCadastroMatchConfianca" — sem o cast explícito, toda
+  // sincronização de venda NOVA (todas as lojas via syncVendas + cd-atacado via syncFaturas, já
+  // que as duas passam por este INSERT) falhava com "column ... is of type
+  // ClienteCadastroMatchConfianca but expression is of type text" (código 42804), reportado pelo
+  // Rodrigo como "sync de todas as lojas dando errado". Cast explícito resolve pra qualquer valor
+  // (incluindo NULL, que o Postgres aceita castado sem problema).
   const values = saleData.map(
     (s) => Prisma.sql`(
       ${randomUUID()}, ${s.storeId}, ${s.cod}, ${s.produto}, ${s.grupo}, ${s.cor ?? null}, ${s.tamanho ?? null},
       ${s.colecao ?? null}, ${s.marca ?? null}, ${s.clienteNome ?? null}, ${s.vendedor ?? null}, ${s.tabelaPreco ?? null},
       ${s.cidade ?? null}, ${s.estado ?? null}, ${s.quantidade}, ${s.valorTotalLiquido}, ${s.saleDate},
-      ${s.dapicVendaId}, ${s.itemIndex}, ${s.clienteCadastroId ?? null}, ${s.clienteCadastroMatchConfianca ?? null}
+      ${s.dapicVendaId}, ${s.itemIndex}, ${s.clienteCadastroId ?? null}, (${s.clienteCadastroMatchConfianca ?? null})::"ClienteCadastroMatchConfianca"
     )`
   );
 
