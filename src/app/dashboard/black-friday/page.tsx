@@ -6,10 +6,8 @@ import {
   getResumoBlackFriday,
   periodoAnterior,
   getVendasPorCanal,
-  getTopProdutosBlackFriday,
   getSalesByDay,
   getCacEcommerce,
-  getCacPorCampanha,
   getFiltrosSemAtacado,
   getVendasPorFaixaDesconto,
   getComparativoMetaDiariaBlackFriday,
@@ -38,7 +36,6 @@ import { BrazilMap } from "../brazil-map";
 import { CanalTable } from "./canal-table";
 import { CampanhaTable } from "./campanha-table";
 import { mapInsights, statusAtivoIndisponivel } from "./campanhas-ativas";
-import { ProdutosTable } from "./produtos-table";
 import { FaixaDescontoTable } from "./faixa-desconto-table";
 import { Top20DescontoTable } from "./top20-desconto-table";
 import { FonteStatus } from "./fonte-status";
@@ -145,12 +142,11 @@ export default async function BlackFridayPage({
       erroMetaAds = e instanceof Error ? e.message : "Erro desconhecido buscando investimento do Meta Ads.";
     });
 
-  const [resumo, resumoAnterior, vendasPorCanal, salesByDay, topProdutos, vendasPorFaixaDesconto, comparativoMetaDiaria, cacDiario, vendasPorEstadoEcommerce, cac, syncStatus] = await Promise.all([
+  const [resumo, resumoAnterior, vendasPorCanal, salesByDay, vendasPorFaixaDesconto, comparativoMetaDiaria, cacDiario, vendasPorEstadoEcommerce, cac, syncStatus] = await Promise.all([
     getResumoBlackFriday(filtrosSemAtacado),
     getResumoBlackFriday(filtrosAnteriorSemAtacado),
     getVendasPorCanal(filtrosSemAtacado),
     getSalesByDay(filtrosSemAtacado),
-    getTopProdutosBlackFriday(filtrosSemAtacado, 20),
     getVendasPorFaixaDesconto(filtrosSemAtacado),
     // Escopo MAIS ESTREITO que o resto da tela: só a loja CD (e-commerce) — "a meta é só
     // ecommerce" (Rodrigo, 2026-11-06). Por isso recebe `filters` (o range escolhido na página),
@@ -168,7 +164,6 @@ export default async function BlackFridayPage({
     getSyncStatusDetalhado(),
     metaAdsPromise,
   ]);
-  const cacPorCampanha = getCacPorCampanha();
   const participacaoSemEstadoPct =
     vendasPorEstadoEcommerce.receitaBrutaTotal > 0
       ? (vendasPorEstadoEcommerce.semEstado.receita / vendasPorEstadoEcommerce.receitaBrutaTotal) * 100
@@ -447,16 +442,6 @@ export default async function BlackFridayPage({
         <CampanhaTable titulo="Por anúncio" nomeColuna="Anúncio" rows={campanhasPorAnuncio} fotos={fotosPorAnuncio} ativoPorNome={ativoPorAnuncio} />
       </section>
 
-      {/* ── Produtos ── */}
-      <h2 className="mb-3 text-base font-semibold">Produtos</h2>
-      <p className="mb-3 text-xs text-[var(--text-muted)]">
-        Ranking de venda líquida no período, com a classificação Best Seller/Drop já cadastrada
-        em Inteligência de Compras (não recalculada aqui).
-      </p>
-      <section className="mb-10">
-        <ProdutosTable rows={topProdutos} showFinancials={showFinancials} />
-      </section>
-
       {/* ── Top 20 produtos com desconto real ── */}
       <h2 className="mb-3 text-base font-semibold">Top 20 produtos com desconto real</h2>
       <p className="mb-3 text-xs text-[var(--text-muted)]">
@@ -492,15 +477,6 @@ export default async function BlackFridayPage({
           </section>
           <p className="mb-6 rounded-lg border border-[var(--status-warning)] bg-[var(--surface-1)] p-3 text-xs text-[var(--text-secondary)]">
             <strong>Limitação deste número (leia antes de usar o CAC pra decisão):</strong> {cac.motivoLimitacao}
-          </p>
-
-          <h3 className="mb-2 text-sm font-medium text-[var(--text-secondary)]">CAC por campanha</h3>
-          <p className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3 text-xs text-[var(--text-secondary)]">
-            {cacPorCampanha.disponivel === false ? (
-              <>
-                <strong>Não disponível.</strong> {cacPorCampanha.motivo}
-              </>
-            ) : null}
           </p>
 
           {/* ── CAC diário (drill-down diário) ── */}
