@@ -570,10 +570,15 @@ export function montarComparativoMetaDiariaBlackFriday(
   const metaAcumulada = dias.reduce((s, d) => s + d.metaReceita2026, 0);
   const realAcumulado = dias.reduce((s, d) => s + d.receitaReal2026, 0);
 
-  // Só os dias com receitaReal2025 real (não todos) — comparação justa ano-contra-ano, mesma
-  // janela de dias dos dois anos. Dia sem dado de 2025 fica de fora da soma dos dois lados, não
-  // conta como 0 de nenhum dos dois anos.
-  const diasComparaveis = dias.filter((d) => d.receitaReal2025 != null);
+  // Só os dias com receitaReal2025 real E já ocorridos em 2026 (<= hoje) — comparação justa
+  // ano-contra-ano. Bug real corrigido em 2026-11-09: a planilha de 2025 é histórico completo
+  // (as 30 linhas da campanha SEMPRE têm receitaReal2025, mesmo pros dias que ainda não chegaram
+  // em 2026) — sem o corte por "hoje", a 1ª versão somava o MÊS INTEIRO de 2025 (já realizado)
+  // contra só os dias que já aconteceram em 2026 (muito menos, campanha em andamento), fazendo o
+  // crescimento parecer uma queda gigante e falsa só porque novembro/2026 ainda não terminou.
+  // Quando hojeStr é null (fora da janela cadastrada), não há "até hoje" sensato — cai pra
+  // nenhum dia comparável (null), nunca usa a janela inteira como fallback silencioso.
+  const diasComparaveis = dias.filter((d) => d.receitaReal2025 != null && hojeStr != null && d.data <= hojeStr);
   const real2026Comparavel = diasComparaveis.length > 0 ? diasComparaveis.reduce((s, d) => s + d.receitaReal2026, 0) : null;
   const real2025Acumulada = diasComparaveis.length > 0 ? diasComparaveis.reduce((s, d) => s + (d.receitaReal2025 ?? 0), 0) : null;
   const crescimentoAnualAcumuladoPct =
