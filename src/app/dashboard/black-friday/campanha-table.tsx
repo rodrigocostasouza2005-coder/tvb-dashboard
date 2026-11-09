@@ -80,7 +80,7 @@ export function CampanhaTable({
                     <AnuncioFotoCell fotos={fotos.get(r.nome) ?? []} nome={r.nome} />
                   </td>
                 )}
-                <td className="max-w-[420px] truncate px-4 py-2 font-medium" title={r.nome}>
+                <td className="max-w-[640px] truncate px-4 py-2 font-medium" title={r.nome}>
                   {ativoPorNome ? (
                     (() => {
                       const { cor, label } = badgeAtivoPausado(ativoPorNome.get(r.nome));
