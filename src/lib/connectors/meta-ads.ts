@@ -189,19 +189,37 @@ export function efetivamenteAtivo(effectiveStatus: string | undefined): boolean 
 // usar a mesma janela de frescor.
 const ATIVO_MAX_AGE_MS = 10 * 60 * 1000;
 
-export async function getAtivoPorNomeConjunto(prisma: PrismaClient, nomesConjuntos: string[]): Promise<Map<string, boolean>> {
+// Contagem, não só booleano — pedido do Rodrigo em 2026-11-09: "tem anúncios que estão em várias
+// campanhas, não sei se eles estão ativos ou não". Conjunto/anúncio é agrupado por NOME (ver
+// getInsightsPorConjunto/Anuncio — o mesmo nome pode ter vários ids em campanhas diferentes), e o
+// booleano antigo ("ativo se QUALQUER um estiver ACTIVE") escondia o caso de 1 ativo + 2 pausados
+// atrás do mesmo selo verde de sempre. `total` é quantos ids distintos têm esse nome; `ativos`
+// quantos desses estão com effective_status ACTIVE agora.
+export type AtivoStatus = { ativos: number; total: number };
+
+export async function getAtivoPorNomeConjunto(prisma: PrismaClient, nomesConjuntos: string[]): Promise<Map<string, AtivoStatus>> {
   const adsets = await fetchAdSetsCached(prisma, ATIVO_MAX_AGE_MS);
   const porNome = agruparPorNome(adsets);
-  return new Map(nomesConjuntos.map((n) => [n, (porNome.get(n) ?? []).some((a) => efetivamenteAtivo(a.effective_status))]));
+  return new Map(
+    nomesConjuntos.map((n) => {
+      const itens = porNome.get(n) ?? [];
+      return [n, { ativos: itens.filter((a) => efetivamenteAtivo(a.effective_status)).length, total: itens.length }];
+    })
+  );
 }
 
 // Mesma ideia, nível anúncio — reaproveita fetchTodosAnunciosCached, que a Central Black Friday já
 // chama indiretamente via getFotosPorNomeAnuncio (ver black-friday/page.tsx), e fetchTodosAnuncios
 // já busca `effective_status` como campo (ver comentário em fetchTodosAnuncios mais abaixo).
-export async function getAtivoPorNomeAnuncio(prisma: PrismaClient, nomesAnuncios: string[]): Promise<Map<string, boolean>> {
+export async function getAtivoPorNomeAnuncio(prisma: PrismaClient, nomesAnuncios: string[]): Promise<Map<string, AtivoStatus>> {
   const ads = await fetchTodosAnunciosCached(prisma, ATIVO_MAX_AGE_MS);
   const porNome = agruparPorNome(ads);
-  return new Map(nomesAnuncios.map((n) => [n, (porNome.get(n) ?? []).some((a) => efetivamenteAtivo(a.effective_status))]));
+  return new Map(
+    nomesAnuncios.map((n) => {
+      const itens = porNome.get(n) ?? [];
+      return [n, { ativos: itens.filter((a) => efetivamenteAtivo(a.effective_status)).length, total: itens.length }];
+    })
+  );
 }
 
 // Prioriza anúncios ACTIVE do conjunto ("o que tá no ar agora") — só cai pra PAUSED (com foto)

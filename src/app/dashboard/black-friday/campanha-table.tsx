@@ -1,4 +1,4 @@
-import type { MetaInsight } from "@/lib/connectors/meta-ads";
+import type { AtivoStatus, MetaInsight } from "@/lib/connectors/meta-ads";
 import { formatBRL, formatNumber, formatPercent } from "@/lib/format";
 import { AnuncioFotoCell } from "./anuncio-foto";
 
@@ -9,8 +9,15 @@ export type CampanhaRow = { nome: string } & MetaInsight;
 // jsdom/testing-library configurado (ver vitest.config.ts, environment: "node"), então a
 // convenção aqui é sempre extrair a decisão em si, não o componente inteiro. Nome ausente do Map
 // (`undefined`) cai no mesmo visual de "Pausado" — mesma regra de antes do PR #58.
-export function badgeAtivoPausado(ativo: boolean | undefined): { cor: string; label: string } {
-  return ativo ? { cor: "var(--status-good)", label: "Ativo" } : { cor: "var(--text-muted)", label: "Pausado" };
+//
+// Pedido do Rodrigo em 2026-11-09: nome com várias cópias (ids) em campanhas diferentes e status
+// misto (1 ativa + 2 pausadas, por exemplo) não pode virar um "Ativo" liso igual a uma cópia só —
+// isso escondia a mistura. `status.total > 1` e nem tudo ativo nem tudo pausado -> selo de alerta
+// com a contagem ("Ativo em 1/3"), pra ficar visível que não é unânime.
+export function badgeAtivoPausado(status: AtivoStatus | undefined): { cor: string; label: string } {
+  if (!status || status.ativos === 0) return { cor: "var(--text-muted)", label: "Pausado" };
+  if (status.ativos === status.total) return { cor: "var(--status-good)", label: "Ativo" };
+  return { cor: "var(--status-warning)", label: `Ativo em ${status.ativos}/${status.total}` };
 }
 
 // Item 3 da missão: investimento/impressões/cliques/CTR/CPC/CPM/conversões/ROAS — dois níveis
@@ -43,7 +50,7 @@ export function CampanhaTable({
   nomeColuna: string;
   rows: CampanhaRow[];
   fotos?: Map<string, string[]>;
-  ativoPorNome?: Map<string, boolean>;
+  ativoPorNome?: Map<string, AtivoStatus>;
 }) {
   const colCount = fotos ? 10 : 9;
   return (

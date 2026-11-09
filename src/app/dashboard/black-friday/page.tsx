@@ -24,6 +24,7 @@ import {
   getAtivoPorNomeConjunto,
   getAtivoPorNomeAnuncio,
   type MetaInsight,
+  type AtivoStatus,
 } from "@/lib/connectors/meta-ads";
 import { prisma } from "@/lib/prisma";
 import { getSyncStatusDetalhado } from "@/lib/sync-runner";
@@ -108,8 +109,8 @@ export default async function BlackFridayPage({
   // TODO conjunto/anúncio aparecer como "Pausado" por engano caso essa busca falhe — pior do que
   // simplesmente não mostrar o selo nesse caso (ver statusAtivoIndisponivel). Aplica-se às DUAS
   // tabelas (conjunto e anúncio) — diferente de fotos, que é só da "Por anúncio".
-  let ativoPorConjunto: Map<string, boolean> | undefined;
-  let ativoPorAnuncio: Map<string, boolean> | undefined;
+  let ativoPorConjunto: Map<string, AtivoStatus> | undefined;
+  let ativoPorAnuncio: Map<string, AtivoStatus> | undefined;
   const metaAdsPromise = Promise.all([
     getInsightsPorConjunto({ since: todayBrasiliaStr(filters.from), until: todayBrasiliaStr(filters.to) }),
     getInsightsPorAnuncio({ since: todayBrasiliaStr(filters.from), until: todayBrasiliaStr(filters.to) }),

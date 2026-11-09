@@ -74,7 +74,7 @@ describe("mapInsights — seleção de linhas é pura por gasto, status não par
 });
 
 describe("statusAtivoIndisponivel — quando avisar que o SELO ativo/pausado está indisponível", () => {
-  const mapVazio = new Map<string, boolean>();
+  const mapVazio = new Map<string, { ativos: number; total: number }>();
 
   it("mostra aviso quando o Meta Ads respondeu (sem erro geral) mas a busca de status pro conjunto falhou", () => {
     expect(statusAtivoIndisponivel(null, undefined, mapVazio)).toBe(true);

@@ -1,4 +1,4 @@
-import type { MetaInsight } from "@/lib/connectors/meta-ads";
+import type { AtivoStatus, MetaInsight } from "@/lib/connectors/meta-ads";
 
 export type CampanhaRow = { nome: string } & MetaInsight;
 
@@ -37,8 +37,8 @@ export function mapInsights(map: Map<string, MetaInsight>, limit: number): Campa
 // como função pura pra não depender de renderizar o Server Component em teste.
 export function statusAtivoIndisponivel(
   erroMetaAds: string | null,
-  ativoPorConjunto: Map<string, boolean> | undefined,
-  ativoPorAnuncio: Map<string, boolean> | undefined
+  ativoPorConjunto: Map<string, AtivoStatus> | undefined,
+  ativoPorAnuncio: Map<string, AtivoStatus> | undefined
 ): boolean {
   return erroMetaAds == null && (ativoPorConjunto === undefined || ativoPorAnuncio === undefined);
 }

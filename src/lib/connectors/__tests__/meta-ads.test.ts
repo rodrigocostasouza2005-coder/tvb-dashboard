@@ -688,7 +688,7 @@ describe("getAtivoPorNomeConjunto / getAtivoPorNomeAnuncio — usam effective_st
     const { getAtivoPorNomeConjunto } = await import("../meta-ads");
     const result = await getAtivoPorNomeConjunto(mockPrisma(), ["Conjunto Órfão"]);
 
-    expect(result.get("Conjunto Órfão")).toBe(false);
+    expect(result.get("Conjunto Órfão")).toEqual({ ativos: 0, total: 1 });
   });
 
   it("anúncio com status=ACTIVE mas effective_status=ADSET_PAUSED (conjunto pai pausado) é reportado como NÃO ativo", async () => {
@@ -700,7 +700,7 @@ describe("getAtivoPorNomeConjunto / getAtivoPorNomeAnuncio — usam effective_st
     const { getAtivoPorNomeAnuncio } = await import("../meta-ads");
     const result = await getAtivoPorNomeAnuncio(mockPrisma(), ["Anúncio Órfão"]);
 
-    expect(result.get("Anúncio Órfão")).toBe(false);
+    expect(result.get("Anúncio Órfão")).toEqual({ ativos: 0, total: 1 });
   });
 
   it("effective_status=ACTIVE de verdade (próprio e pai rodando) é reportado como ativo", async () => {
@@ -712,10 +712,10 @@ describe("getAtivoPorNomeConjunto / getAtivoPorNomeAnuncio — usam effective_st
     const { getAtivoPorNomeAnuncio } = await import("../meta-ads");
     const result = await getAtivoPorNomeAnuncio(mockPrisma(), ["Anúncio Rodando"]);
 
-    expect(result.get("Anúncio Rodando")).toBe(true);
+    expect(result.get("Anúncio Rodando")).toEqual({ ativos: 1, total: 1 });
   });
 
-  it("dois conjuntos com o mesmo nome, um ACTIVE e outro CAMPAIGN_PAUSED — ativo se QUALQUER um dos dois estiver efetivamente ativo", async () => {
+  it("dois conjuntos com o mesmo nome, um ACTIVE e outro CAMPAIGN_PAUSED — contagem reflete o misto (1 de 2), nunca colapsa pra um booleano só", async () => {
     findUnique.mockResolvedValue({
       data: [
         { id: "adset-1", name: "Conjunto X", status: "ACTIVE", effective_status: "CAMPAIGN_PAUSED" },
@@ -727,16 +727,16 @@ describe("getAtivoPorNomeConjunto / getAtivoPorNomeAnuncio — usam effective_st
     const { getAtivoPorNomeConjunto } = await import("../meta-ads");
     const result = await getAtivoPorNomeConjunto(mockPrisma(), ["Conjunto X"]);
 
-    expect(result.get("Conjunto X")).toBe(true);
+    expect(result.get("Conjunto X")).toEqual({ ativos: 1, total: 2 });
   });
 
-  it("nome não encontrado na lista crua (ex: filtrado pelo effective_status da query) devolve false, nunca true por omissão", async () => {
+  it("nome não encontrado na lista crua (ex: filtrado pelo effective_status da query) devolve 0/0, nunca ativo por omissão", async () => {
     findUnique.mockResolvedValue({ data: [], updatedAt: new Date() });
 
     const { getAtivoPorNomeAnuncio } = await import("../meta-ads");
     const result = await getAtivoPorNomeAnuncio(mockPrisma(), ["Não Existe"]);
 
-    expect(result.get("Não Existe")).toBe(false);
+    expect(result.get("Não Existe")).toEqual({ ativos: 0, total: 0 });
   });
 });
 
@@ -775,7 +775,7 @@ describe("TTL do cache da lista crua é decoupled entre 'ativo' (gateia visibili
     const result = await getAtivoPorNomeConjunto(mockPrisma(), ["Conjunto X"]);
 
     expect(fetchMock).toHaveBeenCalled(); // refez a busca — não confiou no cache de 20min
-    expect(result.get("Conjunto X")).toBe(true); // refletiu o dado FRESCO (reativado), não o stale (PAUSED)
+    expect(result.get("Conjunto X")).toEqual({ ativos: 1, total: 1 }); // refletiu o dado FRESCO (reativado), não o stale (PAUSED)
   });
 
   it("getStatusPorNomeConjunto: o MESMO cache de 20min ainda é tratado como fresco (dentro das 12h do uso cosmético) — não bate a API de novo", async () => {
