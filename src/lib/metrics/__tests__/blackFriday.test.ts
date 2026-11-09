@@ -489,7 +489,7 @@ describe("montarComparativoMetaDiariaBlackFriday", () => {
   });
 
   // Card "Crescimento anual (acumulado)" — pedido do Rodrigo em 2026-11-08.
-  it("crescimento anual acumulado soma só os dias COM dado de 2025 (comparação justa)", () => {
+  it("crescimento anual acumulado soma só os dias COM dado de 2025 E já ocorridos (<= hoje) — comparação justa", () => {
     const metas = [
       { data: "2026-11-01", metaReceita2026: 5000, receitaReal2025: 2000, acao: null },
       { data: "2026-11-02", metaReceita2026: 5000, receitaReal2025: 3000, acao: null },
@@ -501,7 +501,7 @@ describe("montarComparativoMetaDiariaBlackFriday", () => {
       ["2026-11-03", 9000], // fica de fora da comparação (dia sem 2025)
     ]);
 
-    const resumo = montarComparativoMetaDiariaBlackFriday(metas, receitaRealPorDia);
+    const resumo = montarComparativoMetaDiariaBlackFriday(metas, receitaRealPorDia, "2026-11-03");
 
     // 2026: 4000+6000=10000 (NUNCA inclui os 9000 do dia sem 2025) | 2025: 2000+3000=5000
     expect(resumo.acumulado.receitaReal2026ComparavelA2025).toBe(10000);
@@ -511,10 +511,43 @@ describe("montarComparativoMetaDiariaBlackFriday", () => {
 
   it("crescimento anual acumulado fica indisponível (null) quando NENHUM dia da janela tem dado de 2025", () => {
     const metas = [{ data: "2026-11-01", metaReceita2026: 5000, receitaReal2025: null, acao: null }];
-    const resumo = montarComparativoMetaDiariaBlackFriday(metas, new Map([["2026-11-01", 4000]]));
+    const resumo = montarComparativoMetaDiariaBlackFriday(metas, new Map([["2026-11-01", 4000]]), "2026-11-01");
 
     expect(resumo.acumulado.receitaReal2026ComparavelA2025).toBeNull();
     expect(resumo.acumulado.receitaReal2025Acumulada).toBeNull();
+    expect(resumo.acumulado.crescimentoAnualAcumuladoPct).toBeNull();
+  });
+
+  // Bug real corrigido em 2026-11-09: a planilha de 2025 é histórico completo, com
+  // receitaReal2025 preenchido pra TODOS os 30 dias da campanha — mesmo os que ainda não
+  // chegaram em 2026. Sem o corte por "hoje", a soma de 2026 incluía dias futuros (sempre 0,
+  // porque ainda não aconteceram) contra a soma CHEIA de 2025 (já realizado), fazendo o
+  // crescimento parecer uma queda gigante e falsa.
+  it("dia futuro (ainda não chegou em 2026) NUNCA entra na comparação acumulada, mesmo tendo dado de 2025", () => {
+    const metas = [
+      { data: "2026-11-01", metaReceita2026: 5000, receitaReal2025: 1000, acao: null }, // já aconteceu
+      { data: "2026-11-02", metaReceita2026: 5000, receitaReal2025: 1000, acao: null }, // já aconteceu
+      { data: "2026-11-20", metaReceita2026: 5000, receitaReal2025: 50000, acao: null }, // FUTURO (hoje = 11-02)
+    ];
+    const receitaRealPorDia = new Map([
+      ["2026-11-01", 1200],
+      ["2026-11-02", 1100],
+      // 2026-11-20 nem aparece aqui — ainda não aconteceu, getSalesByDay nunca devolveria isso.
+    ]);
+
+    const resumo = montarComparativoMetaDiariaBlackFriday(metas, receitaRealPorDia, "2026-11-02");
+
+    // Só 11-01 e 11-02 entram — o dia futuro (11-20, com R$50.000 de 2025) fica de fora dos DOIS
+    // lados, nunca puxando o crescimento pra uma queda falsa.
+    expect(resumo.acumulado.receitaReal2026ComparavelA2025).toBe(2300); // 1200+1100
+    expect(resumo.acumulado.receitaReal2025Acumulada).toBe(2000); // 1000+1000, nunca +50000
+    expect(resumo.acumulado.crescimentoAnualAcumuladoPct).toBeCloseTo(15, 5); // 2300/2000 = +15%
+  });
+
+  it("hojeStr não informado (fora da janela cadastrada) -> nenhum dia comparável, nunca usa a janela inteira como fallback", () => {
+    const metas = [{ data: "2026-11-01", metaReceita2026: 5000, receitaReal2025: 1000, acao: null }];
+    const resumo = montarComparativoMetaDiariaBlackFriday(metas, new Map([["2026-11-01", 1200]])); // sem hojeStr
+
     expect(resumo.acumulado.crescimentoAnualAcumuladoPct).toBeNull();
   });
 
