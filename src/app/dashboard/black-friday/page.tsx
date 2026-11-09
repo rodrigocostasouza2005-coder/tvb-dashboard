@@ -487,9 +487,6 @@ export default async function BlackFridayPage({
             <StatTile label="Recorrentes" value={formatNumber(cac.recorrentes)} subValue={cac.participacaoRecorrentesPct != null ? formatPercent(cac.participacaoRecorrentesPct) : undefined} />
             <StatTile label="Investimento em mídia" value={cac.investimentoIndisponivel ? "indisponível" : formatBRL(cac.investimento)} />
           </section>
-          <p className="mb-6 rounded-lg border border-[var(--status-warning)] bg-[var(--surface-1)] p-3 text-xs text-[var(--text-secondary)]">
-            <strong>Limitação deste número (leia antes de usar o CAC pra decisão):</strong> {cac.motivoLimitacao}
-          </p>
 
           {/* ── CAC diário (drill-down diário) ── */}
           <h3 className="mb-2 text-sm font-medium text-[var(--text-secondary)]">CAC diário</h3>
