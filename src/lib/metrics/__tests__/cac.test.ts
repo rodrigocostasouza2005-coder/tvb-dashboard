@@ -244,15 +244,26 @@ describe("getNovosClientesDiarioEcommerce — novo/recorrente por dia via client
     expect(result.get("2026-11-01")).toEqual({ novos: 0, recorrentes: 1, naoIdentificados: 0 });
   });
 
-  it("venda sem clienteCadastroId resolvido (nem ID nem NOME) nunca é classificada novo/recorrente — vai pra naoIdentificados", async () => {
+  it("venda SEM clienteCadastroId mas COM clienteNome cai no fallback por nome (pedido 2026-11-08: nunca mais 'não identificado' havendo qualquer identidade) — classifica novo/recorrente normalmente", async () => {
     queryRaw
-      .mockResolvedValueOnce([{ day: new Date("2026-11-01T00:00:00.000Z"), clienteCadastroId: null, clienteNome: "Sem Vinculo" }]);
-    // Sem nenhum id resolvido -> função nem chama as outras 2 queries de 1ª compra.
+      .mockResolvedValueOnce([{ day: new Date("2026-11-01T00:00:00.000Z"), clienteCadastroId: null, clienteNome: "Sem Vinculo" }])
+      .mockResolvedValueOnce([{ norm: "SEM VINCULO", first: new Date("2026-11-01T10:00:00-03:00") }]) // primeiraPorNome -> cai no mesmo dia, é novo
+      .mockResolvedValueOnce([]); // externaPorNome (ClienteCadastro.primeiraCompraExterna via nome)
 
     const { getNovosClientesDiarioEcommerce } = await import("../cac");
     const result = await getNovosClientesDiarioEcommerce(CD_STORE_ID, FROM_DIA, TO_DIA);
 
-    expect(result.get("2026-11-01")).toEqual({ novos: 0, recorrentes: 0, naoIdentificados: 1 });
+    expect(result.get("2026-11-01")).toEqual({ novos: 1, recorrentes: 0, naoIdentificados: 0 });
+  });
+
+  it("venda sem NENHUMA identidade (sem clienteCadastroId e sem clienteNome) continua sem classificação — único caso residual de naoIdentificados, mas nem aparece no Map (dia sem nenhum comprador identificável)", async () => {
+    queryRaw.mockResolvedValueOnce([{ day: new Date("2026-11-01T00:00:00.000Z"), clienteCadastroId: null, clienteNome: null }]);
+    // Nem id nem nome resolvido -> função nem chama as queries de 1ª compra (nenhum id/nome pra buscar).
+
+    const { getNovosClientesDiarioEcommerce } = await import("../cac");
+    const result = await getNovosClientesDiarioEcommerce(CD_STORE_ID, FROM_DIA, TO_DIA);
+
+    expect(result.has("2026-11-01")).toBe(false);
     expect(queryRaw).toHaveBeenCalledTimes(1);
   });
 
@@ -284,6 +295,35 @@ describe("getNovosClientesDiarioEcommerce — novo/recorrente por dia via client
     const result = await getNovosClientesDiarioEcommerce(CD_STORE_ID, FROM_DIA, TO_DIA);
 
     // primeiraCompraExterna (2022) é mais antiga que a venda do dia -> recorrente, não novo.
+    expect(result.get("2026-11-01")).toEqual({ novos: 0, recorrentes: 1, naoIdentificados: 0 });
+  });
+
+  it("mesmo dia com 1 venda via id (clienteCadastroId) e 1 via fallback de nome são somadas no mesmo dia", async () => {
+    queryRaw
+      .mockResolvedValueOnce([
+        { day: new Date("2026-11-01T00:00:00.000Z"), clienteCadastroId: "cc-x", clienteNome: "Com Cadastro" },
+        { day: new Date("2026-11-01T00:00:00.000Z"), clienteCadastroId: null, clienteNome: "Sem Cadastro" },
+      ])
+      .mockResolvedValueOnce([{ clienteCadastroId: "cc-x", first: new Date("2025-01-01T00:00:00-03:00") }]) // primeiraPorSale -> recorrente
+      .mockResolvedValueOnce([]) // externaRows (por id)
+      .mockResolvedValueOnce([{ norm: "SEM CADASTRO", first: new Date("2026-11-01T08:00:00-03:00") }]) // primeiraPorNome -> novo
+      .mockResolvedValueOnce([]); // externaPorNome
+
+    const { getNovosClientesDiarioEcommerce } = await import("../cac");
+    const result = await getNovosClientesDiarioEcommerce(CD_STORE_ID, FROM_DIA, TO_DIA);
+
+    expect(result.get("2026-11-01")).toEqual({ novos: 1, recorrentes: 1, naoIdentificados: 0 });
+  });
+
+  it("ClienteCadastro.primeiraCompraExterna via NOME (sem id vinculado) mais antiga que a venda vence -> recorrente", async () => {
+    queryRaw
+      .mockResolvedValueOnce([{ day: new Date("2026-11-01T00:00:00.000Z"), clienteCadastroId: null, clienteNome: "Cliente Antigo Sem Id" }])
+      .mockResolvedValueOnce([{ norm: "CLIENTE ANTIGO SEM ID", first: new Date("2026-11-01T09:00:00-03:00") }]) // primeiraPorNome
+      .mockResolvedValueOnce([{ norm: "CLIENTE ANTIGO SEM ID", first: new Date("2021-03-01T00:00:00-03:00") }]); // externaPorNome, mais antiga
+
+    const { getNovosClientesDiarioEcommerce } = await import("../cac");
+    const result = await getNovosClientesDiarioEcommerce(CD_STORE_ID, FROM_DIA, TO_DIA);
+
     expect(result.get("2026-11-01")).toEqual({ novos: 0, recorrentes: 1, naoIdentificados: 0 });
   });
 

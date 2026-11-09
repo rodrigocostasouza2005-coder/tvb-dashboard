@@ -185,8 +185,9 @@ export async function getNovosClientesDiarioEcommerce(
   if (rows.length === 0) return new Map();
 
   const idsPorDia = new Map<string, Set<string>>();
-  const naoIdentificadosPorDia = new Map<string, Set<string>>();
+  const nomesPorDia = new Map<string, Set<string>>();
   const todosIds = new Set<string>();
+  const todosNomes = new Set<string>();
 
   for (const r of rows) {
     const day = new Date(r.day).toISOString().slice(0, 10);
@@ -196,25 +197,22 @@ export async function getNovosClientesDiarioEcommerce(
       set.add(r.clienteCadastroId);
       idsPorDia.set(day, set);
     } else if (r.clienteNome) {
-      // Sem clienteCadastroId resolvido — não dá pra classificar novo/recorrente com segurança
-      // (é exatamente a fragilidade que a PR #65 resolveu pra quem TEM o vínculo). Deduplicado só
-      // por nome normalizado, melhor esforço, só pra contagem de "naoIdentificados" do dia.
+      // Sem clienteCadastroId resolvido (pedido do Rodrigo 2026-11-08: "eu quero que ou seja
+      // recorrente ou novo" — nunca "não identificado" enquanto houver QUALQUER identidade, nem
+      // que seja fraca). Fallback: mesma lógica de nome normalizado que getPrimeiraCompraGlobalPorCliente
+      // já usava pra TODO MUNDO antes da PR #65 — risco de homônimo já aceito/documentado ali, não
+      // é um risco novo sendo introduzido aqui.
       const norm = r.clienteNome.trim().toUpperCase();
-      const set = naoIdentificadosPorDia.get(day) ?? new Set<string>();
+      todosNomes.add(norm);
+      const set = nomesPorDia.get(day) ?? new Set<string>();
       set.add(norm);
-      naoIdentificadosPorDia.set(day, set);
+      nomesPorDia.set(day, set);
     }
     // Sem clienteCadastroId E sem clienteNome: não há nenhuma identidade (nem fraca) pra contar
-    // como "um comprador" — fica de fora de todos os três buckets, de propósito.
+    // como "um comprador" — esse é o ÚNICO caso residual que ainda vira "naoIdentificados".
   }
 
-  const result = new Map<string, NovosClientesDiarioDia>();
-  if (todosIds.size === 0) {
-    for (const [day, nomes] of naoIdentificadosPorDia) {
-      result.set(day, { novos: 0, recorrentes: 0, naoIdentificados: nomes.size });
-    }
-    return result;
-  }
+  const todosDias = new Set([...idsPorDia.keys(), ...nomesPorDia.keys()]);
 
   // 1ª compra GLOBAL por clienteCadastroId — qualquer loja/canal da empresa, SEM restrição de
   // storeId (mesmo racional de getPrimeiraCompraGlobalPorCliente/getNovosCompradoresEcommerce:
@@ -222,18 +220,31 @@ export async function getNovosClientesDiarioEcommerce(
   // SITE). Inclui ClienteCadastro.primeiraCompraExterna (site antigo pré-DAPIC) pelo mesmo motivo
   // que getPrimeiraCompraGlobalPorCliente inclui.
   const idsArray = [...todosIds];
-  const [primeiraPorSale, externaRows] = await Promise.all([
-    prisma.$queryRaw<{ clienteCadastroId: string; first: Date }[]>`
-      SELECT "clienteCadastroId", MIN("saleDate") AS first
-      FROM "Sale"
-      WHERE "status" != 'Cancelada' AND "clienteCadastroId" = ANY(${idsArray})
-      GROUP BY "clienteCadastroId"
-    `,
-    prisma.$queryRaw<{ id: string; first: Date }[]>`
-      SELECT "id", "primeiraCompraExterna" AS first
-      FROM "ClienteCadastro"
-      WHERE "id" = ANY(${idsArray}) AND "primeiraCompraExterna" IS NOT NULL
-    `,
+  const nomesArray = [...todosNomes];
+  const [primeiraPorSale, externaRows, primeiraPorNome] = await Promise.all([
+    idsArray.length > 0
+      ? prisma.$queryRaw<{ clienteCadastroId: string; first: Date }[]>`
+          SELECT "clienteCadastroId", MIN("saleDate") AS first
+          FROM "Sale"
+          WHERE "status" != 'Cancelada' AND "clienteCadastroId" = ANY(${idsArray})
+          GROUP BY "clienteCadastroId"
+        `
+      : Promise.resolve([]),
+    idsArray.length > 0
+      ? prisma.$queryRaw<{ id: string; first: Date }[]>`
+          SELECT "id", "primeiraCompraExterna" AS first
+          FROM "ClienteCadastro"
+          WHERE "id" = ANY(${idsArray}) AND "primeiraCompraExterna" IS NOT NULL
+        `
+      : Promise.resolve([]),
+    nomesArray.length > 0
+      ? prisma.$queryRaw<{ norm: string; first: Date }[]>`
+          SELECT UPPER(TRIM("clienteNome")) AS norm, MIN("saleDate") AS first
+          FROM "Sale"
+          WHERE "status" != 'Cancelada' AND UPPER(TRIM("clienteNome")) = ANY(${nomesArray})
+          GROUP BY norm
+        `
+      : Promise.resolve([]),
   ]);
 
   const primeiraGlobalPorId = new Map<string, Date>();
@@ -244,7 +255,24 @@ export async function getNovosClientesDiarioEcommerce(
     if (!cur || d < cur) primeiraGlobalPorId.set(r.id, d);
   }
 
-  const todosDias = new Set([...idsPorDia.keys(), ...naoIdentificadosPorDia.keys()]);
+  // Mesmo merge com ClienteCadastro.primeiraCompraExterna, mas via nome normalizado (não via id) —
+  // cliente antigo do site pré-DAPIC, sem vínculo de id, mas com cadastro batendo pelo nome.
+  const primeiraGlobalPorNome = new Map<string, Date>(primeiraPorNome.map((r) => [r.norm, new Date(r.first)]));
+  if (nomesArray.length > 0) {
+    const externaPorNome = await prisma.$queryRaw<{ norm: string; first: Date }[]>`
+      SELECT UPPER(TRIM("nome")) AS norm, MIN("primeiraCompraExterna") AS first
+      FROM "ClienteCadastro"
+      WHERE UPPER(TRIM("nome")) = ANY(${nomesArray}) AND "primeiraCompraExterna" IS NOT NULL
+      GROUP BY norm
+    `;
+    for (const r of externaPorNome) {
+      const d = new Date(r.first);
+      const cur = primeiraGlobalPorNome.get(r.norm);
+      if (!cur || d < cur) primeiraGlobalPorNome.set(r.norm, d);
+    }
+  }
+
+  const result = new Map<string, NovosClientesDiarioDia>();
   for (const day of todosDias) {
     const dayStart = brasiliaDayStart(day);
     const dayEnd = brasiliaDayEnd(day);
@@ -258,7 +286,13 @@ export async function getNovosClientesDiarioEcommerce(
       if (first >= dayStart && first <= dayEnd) novos++;
       else recorrentes++;
     }
-    result.set(day, { novos, recorrentes, naoIdentificados: naoIdentificadosPorDia.get(day)?.size ?? 0 });
+    for (const nome of nomesPorDia.get(day) ?? []) {
+      const first = primeiraGlobalPorNome.get(nome);
+      if (!first) continue;
+      if (first >= dayStart && first <= dayEnd) novos++;
+      else recorrentes++;
+    }
+    result.set(day, { novos, recorrentes, naoIdentificados: 0 });
   }
   return result;
 }
