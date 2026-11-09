@@ -1,4 +1,5 @@
 import { isUfLitoranea } from "./estados-litoraneos";
+import type { SituacaoCadastral } from "./motor-elegibilidade";
 
 /**
  * Núcleo testável da importação nacional da Receita Federal pro Neon (unificação da ingestão,
@@ -19,6 +20,48 @@ export type RegistroReceita = {
   cnpj: string;
   uf: string;
 };
+
+/**
+ * Melhoria 1 (piloto RJ, nov/2026): o critério EXISTENCIA do motor (motor-elegibilidade.ts) só
+ * sai de INCONCLUSIVO quando `situacaoCadastral` está preenchido — e até aqui SÓ o Serpro
+ * preenchia esse campo, que o Rodrigo decidiu não contratar. Mas `extrair-parquet-receita.py` já
+ * filtra por situação ativa ('02') direto na fonte (Receita Federal/dados abertos, dataset
+ * `cnpjaberto`) antes de gerar qualquer candidato — esse dado só não era propagado pro prospect.
+ * Este mapa decodifica o código bruto de 2 dígitos (ver layout oficial da Receita) pro mesmo tipo
+ * `SituacaoCadastral` que o motor consome, usando a MESMA semântica de código->situação que
+ * src/lib/prospeccao/consulta-cnpj-serpro.ts já usa pro Serpro (lá os códigos vêm sem zero à
+ * esquerda; aqui vêm com — "02" e "2" significam a mesma coisa).
+ *
+ * Deliberadamente NUNCA assume "ATIVA" por padrão: código ausente/vazio vira NAO_INFORMADA,
+ * código presente mas desconhecido vira DESCONHECIDA — só os 5 códigos oficiais abaixo decodificam
+ * para um valor definitivo. Isso é o que impede qualquer bug futuro de inflar a confiança de um
+ * cadastro que não foi de fato confirmado como ativo.
+ */
+const CODIGOS_SITUACAO_CADASTRAL_RECEITA: Record<string, SituacaoCadastral> = {
+  "01": "NULA",
+  "02": "ATIVA",
+  "03": "SUSPENSA",
+  "04": "INAPTA",
+  "08": "BAIXADA",
+};
+
+export function mapearSituacaoCadastralReceita(codigoBruto: string | null | undefined): SituacaoCadastral {
+  const codigo = (codigoBruto ?? "").trim();
+  if (!codigo) return "NAO_INFORMADA";
+  return CODIGOS_SITUACAO_CADASTRAL_RECEITA[codigo] ?? "DESCONHECIDA";
+}
+
+/**
+ * Marcador gravado em `AtacadoProspect.confiancaPesquisa` quando `situacaoCadastral` vem do
+ * snapshot mensal da Receita Federal (extração própria), nunca de consulta oficial Serpro em
+ * tempo real. Deliberadamente distinto de "CADASTRAL_OFICIAL" (usado só por
+ * scripts/prospeccao/consultar-cnpj-serpro.ts) — ver restrição do Rodrigo: não inflar a confiança
+ * de um dado de competência passada como se fosse verificação em tempo real. Não existe campo de
+ * confiança dedicado à identidade cadastral no schema (AtacadoProspect reaproveita
+ * `confiancaPesquisa`, um campo de texto livre, pros dois casos); criar um campo novo exigiria
+ * migration, fora do escopo autorizado desta mudança — ver limitação documentada no relatório.
+ */
+export const FONTE_SITUACAO_CADASTRAL_RECEITA_SNAPSHOT = "CADASTRAL_RECEITA_SNAPSHOT" as const;
 
 export type RegistroRejeitado<T> = {
   registro: T;
