@@ -349,3 +349,35 @@ export async function getOportunidadesTransferencia(
   }
   return oportunidades.sort((a, b) => b.quantidadeSugerida - a.quantidadeSugerida);
 }
+
+export type GrupoTransferenciaPorPar = {
+  lojaOrigem: string;
+  lojaDestino: string;
+  itens: OportunidadeTransferencia[];
+  totalQuantidade: number;
+};
+
+// Pedido do Rodrigo (2026-11-10): tanto a tela quanto o Excel exportado pra equipe das lojas
+// precisam mostrar as sugestões agrupadas por par loja origem→destino (ex: tudo de "Leblon →
+// Barra" junto, depois "Barra → Leblon", etc.) — cada loja só separa o que é dela, então o
+// agrupamento por par é o que faz sentido pra quem vai executar, em vez da lista corrida só
+// ordenada por quantidade. Pura (sem banco) — preserva a ordem relativa dos itens dentro de cada
+// grupo (já vêm ordenados por quantidadeSugerida desc, ver getOportunidadesTransferencia); só os
+// GRUPOS em si são ordenados, alfabeticamente por origem e depois por destino (determinístico,
+// não depende de qual grupo "pesa" mais).
+export function agruparOportunidadesPorPar(oportunidades: OportunidadeTransferencia[]): GrupoTransferenciaPorPar[] {
+  const grupos = new Map<string, GrupoTransferenciaPorPar>();
+  for (const o of oportunidades) {
+    const chave = `${o.lojaOrigem}::${o.lojaDestino}`;
+    let grupo = grupos.get(chave);
+    if (!grupo) {
+      grupo = { lojaOrigem: o.lojaOrigem, lojaDestino: o.lojaDestino, itens: [], totalQuantidade: 0 };
+      grupos.set(chave, grupo);
+    }
+    grupo.itens.push(o);
+    grupo.totalQuantidade += o.quantidadeSugerida;
+  }
+  return [...grupos.values()].sort(
+    (a, b) => a.lojaOrigem.localeCompare(b.lojaOrigem, "pt-BR") || a.lojaDestino.localeCompare(b.lojaDestino, "pt-BR")
+  );
+}

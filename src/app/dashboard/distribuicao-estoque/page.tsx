@@ -58,16 +58,29 @@ export default async function DistribuicaoEstoquePage({
           )
         );
 
+  const exportParams = new URLSearchParams();
+  for (const g of grupoFiltro) exportParams.append("grupo", g);
+  for (const c of colecaoFiltro) exportParams.append("colecao", c);
+  if (busca.trim()) exportParams.set("busca", busca.trim());
+
   return (
     <div>
-      <p className="mb-4 text-sm text-[var(--text-secondary)]">
-        Compara o mesmo produto (SKU: cor+tamanho) entre as lojas físicas de varejo (Leblon, Barra,
-        Rio Sul) — <strong>não é uma ferramenta de compra</strong>: nunca sugere quanto produzir
-        ou comprar, só aponta quando vale a pena transferir estoque de uma loja pra outra. Isso é
-        decidido pelo Mapa de Compras, uma ferramenta separada. Toda sugestão aqui é uma
-        recomendação — a aprovação e a execução da transferência são feitas pela equipe, fora do
-        Radar.
-      </p>
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <p className="text-sm text-[var(--text-secondary)]">
+          Compara o mesmo produto (SKU: cor+tamanho) entre as lojas físicas de varejo (Leblon, Barra,
+          Rio Sul) — <strong>não é uma ferramenta de compra</strong>: nunca sugere quanto produzir
+          ou comprar, só aponta quando vale a pena transferir estoque de uma loja pra outra. Isso é
+          decidido pelo Mapa de Compras, uma ferramenta separada. Toda sugestão aqui é uma
+          recomendação — a aprovação e a execução da transferência são feitas pela equipe, fora do
+          Radar.
+        </p>
+        <a
+          href={`/api/export/distribuicao-estoque?${exportParams.toString()}`}
+          className="whitespace-nowrap rounded-md border border-[var(--border)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--page-plane)]"
+        >
+          Exportar Excel
+        </a>
+      </div>
 
       <ResumoDistribuicao comparacoes={comparacoesTodas} oportunidades={oportunidades} />
 

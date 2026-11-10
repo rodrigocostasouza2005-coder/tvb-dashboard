@@ -2,8 +2,33 @@ import { describe, it, expect } from "vitest";
 import {
   diagnosticarVariante,
   calcularOportunidadeTransferencia,
+  agruparOportunidadesPorPar,
   type VariantePorLoja,
+  type OportunidadeTransferencia,
 } from "../distribuicao-estoque";
+
+function oportunidade(overrides: Partial<OportunidadeTransferencia> = {}): OportunidadeTransferencia {
+  return {
+    cod: "COD-1",
+    produto: "Classic Blue",
+    grupo: "Camisetas",
+    cor: "Azul",
+    tamanho: "M",
+    lojaOrigem: "Rio Sul",
+    lojaDestino: "Leblon",
+    estoqueOrigemAntes: 10,
+    estoqueOrigemDepois: 5,
+    estoqueDestinoAntes: 0,
+    estoqueDestinoDepois: 5,
+    coberturaOrigemAntes: 90,
+    coberturaOrigemDepois: 45,
+    coberturaDestinoAntes: 0,
+    coberturaDestinoDepois: 30,
+    quantidadeSugerida: 5,
+    justificativa: [],
+    ...overrides,
+  };
+}
 
 function variante(overrides: Partial<VariantePorLoja> = {}): VariantePorLoja {
   const base: VariantePorLoja = {
@@ -174,5 +199,47 @@ describe("calcularOportunidadeTransferencia", () => {
     const origemParada = variante({ storeId: "rio-sul", storeName: "Rio Sul", estoqueAtual: 50, vendasDias30: 0, vendasDias90: 0 });
     const resultado = calcularOportunidadeTransferencia([semDado, origemParada], contextoBase);
     expect(resultado).toHaveLength(0);
+  });
+});
+
+describe("agruparOportunidadesPorPar", () => {
+  it("junta itens do mesmo par origem→destino num grupo só, somando a quantidade", () => {
+    const itens = [
+      oportunidade({ cod: "A", lojaOrigem: "Rio Sul", lojaDestino: "Leblon", quantidadeSugerida: 5 }),
+      oportunidade({ cod: "B", lojaOrigem: "Rio Sul", lojaDestino: "Leblon", quantidadeSugerida: 3 }),
+    ];
+    const grupos = agruparOportunidadesPorPar(itens);
+    expect(grupos).toHaveLength(1);
+    expect(grupos[0]).toMatchObject({ lojaOrigem: "Rio Sul", lojaDestino: "Leblon", totalQuantidade: 8 });
+    expect(grupos[0].itens.map((i) => i.cod)).toEqual(["A", "B"]);
+  });
+
+  it("nunca mistura pares diferentes, mesmo com as mesmas 2 lojas em sentido invertido", () => {
+    const itens = [
+      oportunidade({ cod: "A", lojaOrigem: "Rio Sul", lojaDestino: "Leblon", quantidadeSugerida: 5 }),
+      oportunidade({ cod: "B", lojaOrigem: "Leblon", lojaDestino: "Rio Sul", quantidadeSugerida: 2 }),
+    ];
+    const grupos = agruparOportunidadesPorPar(itens);
+    expect(grupos).toHaveLength(2);
+    expect(grupos.find((g) => g.lojaOrigem === "Rio Sul")?.lojaDestino).toBe("Leblon");
+    expect(grupos.find((g) => g.lojaOrigem === "Leblon")?.lojaDestino).toBe("Rio Sul");
+  });
+
+  it("ordena os grupos alfabeticamente por origem e depois por destino, não por tamanho do grupo", () => {
+    const itens = [
+      oportunidade({ cod: "A", lojaOrigem: "Rio Sul", lojaDestino: "Leblon", quantidadeSugerida: 100 }),
+      oportunidade({ cod: "B", lojaOrigem: "Barra", lojaDestino: "Rio Sul", quantidadeSugerida: 1 }),
+      oportunidade({ cod: "C", lojaOrigem: "Barra", lojaDestino: "Leblon", quantidadeSugerida: 1 }),
+    ];
+    const grupos = agruparOportunidadesPorPar(itens);
+    expect(grupos.map((g) => `${g.lojaOrigem}->${g.lojaDestino}`)).toEqual([
+      "Barra->Leblon",
+      "Barra->Rio Sul",
+      "Rio Sul->Leblon",
+    ]);
+  });
+
+  it("lista vazia -> nenhum grupo", () => {
+    expect(agruparOportunidadesPorPar([])).toEqual([]);
   });
 });
