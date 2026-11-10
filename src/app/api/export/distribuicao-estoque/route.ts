@@ -6,12 +6,12 @@ import { getGrupoRestriction, getStoreRestriction } from "@/lib/permissions";
 import { toArray, type RawSearchParams } from "@/lib/filters";
 import ExcelJS from "exceljs";
 
-// Picking list pra mandar pras lojas separarem (pedido do Rodrigo, 2026-11-10) — agrupado por par
-// loja origem→destino, mesmo agrupamento da tela (agruparOportunidadesPorPar, ver
-// sugestoes-transferencia.tsx), pra planilha e tela baterem exatamente. Colunas deliberadamente
-// enxutas (sem cobertura/justificativa, que são pra análise, não pra quem vai separar a peça
-// física): o cabeçalho de cada seção já diz origem→destino, as colunas só precisam dizer O QUE e
-// QUANTO.
+// Picking list pra mandar pras lojas separarem (pedido do Rodrigo, 2026-11-10). Tabela única com
+// loja origem/destino como colunas, mesmo padrão das outras exportações (Reposição, Retirada) —
+// sem títulos mesclados nem cabeçalho repetido por grupo. Agrupamento por par (agruparOportunidadesPorPar,
+// ver sugestoes-transferencia.tsx) ainda define a ordem das linhas, pra planilha e tela baterem.
+// Colunas deliberadamente enxutas (sem cobertura/justificativa, que são pra análise, não pra quem
+// vai separar a peça física).
 export async function GET(request: NextRequest) {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -45,6 +45,8 @@ export async function GET(request: NextRequest) {
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet("Transferências");
   ws.columns = [
+    { width: 22 }, // Loja origem
+    { width: 22 }, // Loja destino
     { width: 32 }, // Produto
     { width: 14 }, // Cor
     { width: 10 }, // Tamanho
@@ -53,25 +55,21 @@ export async function GET(request: NextRequest) {
     { width: 18 }, // Quantidade a separar
   ];
 
-  const ITENS_HEADER = ["Produto", "Cor", "Tamanho", "Código", "Estoque atual (origem)", "Quantidade a separar"];
+  ws.addRow(["Loja origem", "Loja destino", "Produto", "Cor", "Tamanho", "Código", "Estoque atual (origem)", "Quantidade a separar"]);
 
   for (const grupo of grupos) {
-    const linhaTitulo = ws.addRow([`${grupo.lojaOrigem} → ${grupo.lojaDestino} (${grupo.totalQuantidade} un.)`]);
-    ws.mergeCells(linhaTitulo.number, 1, linhaTitulo.number, ITENS_HEADER.length);
-    linhaTitulo.font = { bold: true, size: 12 };
-    linhaTitulo.getCell(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE2EFDA" } };
-
-    const linhaHeader = ws.addRow(ITENS_HEADER);
-    linhaHeader.font = { bold: true };
-    linhaHeader.eachCell((cell) => {
-      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF2F2F2" } };
-    });
-
     for (const item of grupo.itens) {
-      ws.addRow([item.produto, item.cor ?? "", item.tamanho ?? "", item.cod, item.estoqueOrigemAntes, item.quantidadeSugerida]);
+      ws.addRow([
+        grupo.lojaOrigem,
+        grupo.lojaDestino,
+        item.produto,
+        item.cor ?? "",
+        item.tamanho ?? "",
+        item.cod,
+        item.estoqueOrigemAntes,
+        item.quantidadeSugerida,
+      ]);
     }
-
-    ws.addRow([]); // linha em branco separando o próximo par
   }
 
   if (grupos.length === 0) {
