@@ -1,7 +1,12 @@
 import { GetForm } from "../get-form";
 import { FilterDropdown, CheckboxList } from "../filter-bar";
 
-export type NivelDesequilibrio = "todos" | "critico" | "excesso";
+// "desequilibrio" (default, pedido do Rodrigo em 2026-11-10: "está muito difícil de ver") —
+// antes o default era "todos" (literalmente sem filtro nenhum), e numa base de catálogo grande
+// isso virava uma parede de ~700 variantes × 3 lojas, a maioria "Sem dado suficiente" (achado real
+// na própria sessão: ~10 mil células nesse estado, dominando qualquer coisa que importasse de
+// verdade). "tudo" preserva o comportamento antigo como opção explícita pra quem quiser auditar.
+export type NivelDesequilibrio = "desequilibrio" | "critico" | "excesso" | "tudo";
 
 export type DistribuicaoFiltrosValue = {
   grupoIn: string[];
@@ -52,9 +57,10 @@ export function DistribuicaoFiltros({
           defaultValue={value.nivel}
           className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-xs text-[var(--text-primary)]"
         >
-          <option value="todos">Todos</option>
+          <option value="desequilibrio">Só com desequilíbrio (padrão)</option>
           <option value="critico">Só ruptura/cobertura crítica</option>
           <option value="excesso">Só excesso/estoque parado</option>
+          <option value="tudo">Tudo (inclui equilibrado/sem dado)</option>
         </select>
       </label>
 

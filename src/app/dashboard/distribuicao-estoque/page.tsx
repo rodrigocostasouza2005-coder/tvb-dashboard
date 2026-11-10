@@ -8,7 +8,7 @@ import { DistribuicaoTable } from "./distribuicao-table";
 import { SugestoesTransferencia } from "./sugestoes-transferencia";
 import { ResumoDistribuicao } from "./resumo-distribuicao";
 
-const NIVEIS_VALIDOS: NivelDesequilibrio[] = ["todos", "critico", "excesso"];
+const NIVEIS_VALIDOS: NivelDesequilibrio[] = ["desequilibrio", "critico", "excesso", "tudo"];
 
 export default async function DistribuicaoEstoquePage({
   searchParams,
@@ -23,8 +23,8 @@ export default async function DistribuicaoEstoquePage({
   const grupoFiltro = toArray(rawParams.grupo);
   const colecaoFiltro = toArray(rawParams.colecao);
   const busca = typeof rawParams.busca === "string" ? rawParams.busca : "";
-  const nivelRaw = typeof rawParams.nivel === "string" ? rawParams.nivel : "todos";
-  const nivel: NivelDesequilibrio = (NIVEIS_VALIDOS as string[]).includes(nivelRaw) ? (nivelRaw as NivelDesequilibrio) : "todos";
+  const nivelRaw = typeof rawParams.nivel === "string" ? rawParams.nivel : "desequilibrio";
+  const nivel: NivelDesequilibrio = (NIVEIS_VALIDOS as string[]).includes(nivelRaw) ? (nivelRaw as NivelDesequilibrio) : "desequilibrio";
 
   const grupoRestricao = await getGrupoRestriction(user.role);
   const allowedStores = getStoreRestriction(user);
@@ -46,16 +46,20 @@ export default async function DistribuicaoEstoquePage({
 
   // Filtro de "nível de desequilíbrio" é só de exibição (não muda o cálculo de oportunidades,
   // que já é sempre sobre o universo completo do filtro de grupo/coleção/busca) — reduz a lista
-  // de produtos mostrados na tabela comparativa pra quem só quer ver os casos extremos.
+  // de variantes mostradas na tabela comparativa pra quem só quer ver os casos que importam.
+  // "desequilibrio" (default) é NOVO (2026-11-10): qualquer status que não seja neutro
+  // (equilibrado/sem_dado) em pelo menos 1 loja — sem isso, "todos" (agora "tudo", não mais
+  // default) mostrava literalmente o catálogo inteiro, a maioria das linhas sem informação real
+  // (ver comentário em filtros.tsx).
   const comparacoes =
-    nivel === "todos"
+    nivel === "tudo"
       ? comparacoesTodas
       : comparacoesTodas.filter((c) =>
-          c.porLoja.some((l) =>
-            nivel === "critico"
-              ? l.diagnostico === "ruptura" || l.diagnostico === "cobertura_critica"
-              : l.diagnostico === "cobertura_excessiva" || l.diagnostico === "estoque_parado"
-          )
+          c.porLoja.some((l) => {
+            if (nivel === "critico") return l.diagnostico === "ruptura" || l.diagnostico === "cobertura_critica";
+            if (nivel === "excesso") return l.diagnostico === "cobertura_excessiva" || l.diagnostico === "estoque_parado";
+            return l.diagnostico !== "equilibrado" && l.diagnostico !== "sem_dado";
+          })
         );
 
   const exportParams = new URLSearchParams();
@@ -93,6 +97,12 @@ export default async function DistribuicaoEstoquePage({
 
       <SugestoesTransferencia oportunidades={oportunidades} />
 
+      <p className="mb-2 text-xs text-[var(--text-muted)]">
+        Mostrando {comparacoes.length.toLocaleString("pt-BR")} de {comparacoesTodas.length.toLocaleString("pt-BR")}{" "}
+        variantes no filtro de grupo/coleção/busca atual
+        {nivel !== "tudo" && " — as com estoque equilibrado ou sem dado suficiente ficam escondidas por padrão"}.
+        {nivel !== "tudo" && " Use \"Nível de desequilíbrio: Tudo\" acima pra ver o catálogo completo."}
+      </p>
       <DistribuicaoTable variantes={comparacoes} />
     </div>
   );

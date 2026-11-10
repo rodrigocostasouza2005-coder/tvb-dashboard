@@ -75,14 +75,25 @@ function ProdutoTabela({ produto, variantes }: { produto: string; variantes: Com
                     );
                   }
                   const info = diagnosticoInfo(l.diagnostico);
+                  // "equilibrado"/"sem_dado" são o caso NORMAL/sem informação útil (achado real:
+                  // ~75% das células do catálogo inteiro caem num dos dois) — badge colorido pros
+                  // dois só adicionava ruído visual sem avisar de nada que precise de atenção.
+                  // Detalhe completo continua no tooltip (title), só a exibição inline encolhe.
+                  const neutro = l.diagnostico === "equilibrado" || l.diagnostico === "sem_dado";
                   return (
                     <td key={loja.storeId} className="px-3 py-1.5 text-right" colSpan={2}>
                       <span className="inline-flex items-center justify-end gap-3 whitespace-nowrap">
                         <span className="tabular-nums">{formatNumero(l.estoqueAtual)}</span>
-                        <span className="inline-flex items-center gap-1.5" title={tituloDiagnostico(l)}>
-                          <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: info.color }} />
-                          {info.label}
-                        </span>
+                        {neutro ? (
+                          <span className="text-[var(--text-muted)]" title={tituloDiagnostico(l)}>
+                            {l.diagnostico === "sem_dado" ? "—" : "ok"}
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1.5" title={tituloDiagnostico(l)}>
+                            <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: info.color }} />
+                            {info.label}
+                          </span>
+                        )}
                       </span>
                     </td>
                   );
