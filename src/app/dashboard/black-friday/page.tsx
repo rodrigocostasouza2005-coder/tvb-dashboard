@@ -15,6 +15,7 @@ import {
   getVendasPorEstadoEcommerce,
   getTop20ProdutosComDesconto,
   getTop20GruposComDesconto,
+  getStores,
   type DashboardFilters,
 } from "@/lib/metrics";
 import {
@@ -32,7 +33,8 @@ import { todayBrasiliaStr } from "@/lib/filters";
 import { defaultFiltroBlackFridayStr } from "@/lib/black-friday-banner";
 import { formatBRL, formatNumber, formatPercent } from "@/lib/format";
 import { StatTile } from "../stat-tile";
-import { GetForm } from "../get-form";
+import { FilterBar } from "../filter-bar";
+import { CollapsibleFilters } from "../collapsible-filters";
 import { IndicatorChart } from "../indicadores/indicator-chart";
 import { BrazilMap } from "../brazil-map";
 import { CanalTable } from "./canal-table";
@@ -80,8 +82,20 @@ export default async function BlackFridayPage({
   const fromStr = typeof rawParams.from === "string" && rawParams.from ? rawParams.from : defaults.from;
   const toStr = typeof rawParams.to === "string" && rawParams.to ? rawParams.to : defaults.to;
   const allowedStoreIds = getStoreRestriction(user);
-  const filters: DashboardFilters = parseFilters(rawParams, { allowedStoreIds });
+  // fromStr/toStr (acima) já resolvem "o que vai aparecer nos campos de data" (query string, senão
+  // o padrão da campanha). Passar os dois explicitamente pro parseFilters garante que o filtro que
+  // de fato roda nas queries é SEMPRE o mesmo que aparece preenchido na tela — antes, parseFilters
+  // recebia rawParams puro e caía no PRÓPRIO default dele (últimos 30 dias) sempre que from/to não
+  // vinham na URL, diferente do default da campanha mostrado nos inputs. Bug achado pelo Rodrigo
+  // em 2026-11-10: a tela abria mostrando "De 10/11 Até 10/11" mas os números batiam com os
+  // últimos 30 dias.
+  const filters: DashboardFilters = parseFilters({ ...rawParams, from: fromStr, to: toStr }, { allowedStoreIds });
   const anterior = periodoAnterior(filters.from, filters.to);
+  const filtrosOpen = rawParams.filtros === "1";
+  // getStores já agrupa CD+ATACADO numa opção só ("TVB Site e Atacado") — ATACADO nunca aparece
+  // como opção separada aqui, então não precisa de tratamento extra: mesmo se o usuário escolher
+  // essa opção agrupada, getFiltrosSemAtacado (abaixo) sempre remove o id do ATACADO do resultado.
+  const stores = await getStores(allowedStoreIds);
 
   // Pedido do Rodrigo (2026-11-05, reforçado em 2026-11-06: "eu quero que tire qualquer venda do
   // atacado dessa aba"). Afeta TODA a Central Black Friday agora, inclusive a tabela "Por canal"
@@ -231,33 +245,18 @@ export default async function BlackFridayPage({
         produtos e CAC. Só visão — nenhum desconto ou preço é alterado automaticamente por aqui.
       </p>
 
-      <GetForm action="/dashboard/black-friday" className="mb-4 flex flex-wrap items-end gap-3 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-3">
-        <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-[var(--text-muted)]" htmlFor="from">De</label>
-          <input
-            id="from"
-            type="date"
-            name="from"
-            defaultValue={fromStr}
-            className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-sm text-[var(--text-primary)]"
-            style={{ colorScheme: "light dark" }}
-          />
-        </div>
-        <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-[var(--text-muted)]" htmlFor="to">Até</label>
-          <input
-            id="to"
-            type="date"
-            name="to"
-            defaultValue={toStr}
-            className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1.5 text-sm text-[var(--text-primary)]"
-            style={{ colorScheme: "light dark" }}
-          />
-        </div>
-        <button type="submit" className="rounded-md bg-[var(--series-1)] px-4 py-1.5 text-sm font-medium text-white">
-          Aplicar
-        </button>
-      </GetForm>
+      <CollapsibleFilters defaultOpen={filtrosOpen}>
+        <FilterBar
+          action="/dashboard/black-friday"
+          stores={stores}
+          marcas={[]}
+          filters={filters}
+          showMarca={false}
+          showTabelaPreco={false}
+          showColecao={false}
+          showDate
+        />
+      </CollapsibleFilters>
 
       <div className="mb-6">
         <FonteStatus status={syncStatus} />
