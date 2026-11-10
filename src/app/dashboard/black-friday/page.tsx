@@ -269,7 +269,7 @@ export default async function BlackFridayPage({
         <StatTile label="Pedidos" value={formatNumber(resumo.pedidos)} subValue={changeLabel(pedidosChange)} status={trendPoint(pedidosChange)} />
         {showFinancials && (
           <>
-            <StatTile label="Faturamento líquido" value={formatBRL(resumo.faturamento)} subValue={changeLabel(faturamentoChange)} status={trendPoint(faturamentoChange)} />
+            <StatTile label="Faturamento líquido (todas as lojas)" value={formatBRL(resumo.faturamento)} subValue={changeLabel(faturamentoChange)} status={trendPoint(faturamentoChange)} />
             <StatTile label="Ticket médio" value={resumo.ticketMedio != null ? formatBRL(resumo.ticketMedio) : "—"} subValue={changeLabel(ticketChange)} status={trendPoint(ticketChange)} />
             <StatTile
               label="Investimento em mídia"
@@ -300,17 +300,20 @@ export default async function BlackFridayPage({
       </section>
 
       {/* ── Meta diária (campanha) ── */}
-      <h2 className="mb-3 text-base font-semibold">Meta vs. real — campanha</h2>
+      <h2 className="mb-3 text-base font-semibold">Meta vs. real — campanha (só e-commerce)</h2>
       <p className="mb-3 text-xs text-[var(--text-muted)]">
-        Meta de faturamento 2026 e real de 2025, dia a dia, da planilha da campanha — escopo
-        restrito ao período que ela cobre (não o filtro De/Até acima). Faturamento real 2026 já
-        sem Atacado, mesma regra do resto desta aba.
+        <strong>Escopo diferente do resto da tela:</strong> aqui "real" é só a loja CD
+        (e-commerce/site) — não inclui Leblon, Rio Sul nem Barra. Por isso os valores aqui NÃO
+        batem com o card "Faturamento líquido" da Visão geral acima (esse soma todas as lojas
+        físicas + site, menos Atacado). Meta de faturamento 2026 e real de 2025, dia a dia, vêm da
+        planilha da campanha — escopo de período também restrito ao que ela cobre (não o filtro
+        De/Até do topo da página).
       </p>
       {showFinancials ? (
         <>
           <section className="mb-3 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
             <StatTile
-              label="Faturamento hoje"
+              label="Faturamento hoje (e-commerce)"
               value={comparativoMetaDiaria.hoje ? formatBRL(comparativoMetaDiaria.hoje.receitaReal2026) : "—"}
               subValue={comparativoMetaDiaria.hoje ? undefined : "Hoje está fora do período da campanha cadastrado"}
             />
@@ -339,7 +342,7 @@ export default async function BlackFridayPage({
             />
           </section>
           <section className="mb-3 grid grid-cols-2 gap-4 sm:grid-cols-4">
-            <StatTile label="Acumulado real 2026" value={formatBRL(comparativoMetaDiaria.acumulado.receitaReal2026)} />
+            <StatTile label="Acumulado real 2026 (e-commerce)" value={formatBRL(comparativoMetaDiaria.acumulado.receitaReal2026)} />
             <StatTile label="Meta acumulada" value={formatBRL(comparativoMetaDiaria.acumulado.metaReceita2026)} />
             <StatTile
               label="% atingimento acumulado"
@@ -359,7 +362,7 @@ export default async function BlackFridayPage({
         <p className="mb-3 text-sm text-[var(--text-muted)]">Sem permissão para ver dado financeiro (meta/real da campanha).</p>
       )}
       <section className="mb-10 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
-        <h3 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Meta 2026 vs. real 2026 vs. real 2025, por dia</h3>
+        <h3 className="mb-3 text-sm font-medium text-[var(--text-secondary)]">Meta 2026 vs. real 2026 vs. real 2025, por dia (só e-commerce)</h3>
         {comparativoMetaDiaria.dias.length === 0 ? (
           <p className="text-sm text-[var(--text-muted)]">
             Nenhuma meta diária importada ainda — use o botão &quot;Importar meta diária Black Friday&quot; no Admin.
