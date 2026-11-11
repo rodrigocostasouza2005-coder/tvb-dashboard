@@ -7,6 +7,7 @@ import { FilterBar } from "../filter-bar";
 import { CollapsibleFilters } from "../collapsible-filters";
 import { StatTile } from "../stat-tile";
 import { PhoneLink } from "../phone-link";
+import { NotasFiscaisCliente, type NotaFiscalRow } from "./notas-fiscais-cliente";
 
 const PRECO_LABEL: Record<string, string> = {
   full_price: "Preço cheio",
@@ -207,6 +208,32 @@ export default async function ClientesFichaPage({
                 {ficha.topTamanhos.length === 0 && <li className="text-[var(--text-muted)]">—</li>}
               </ul>
             </div>
+          </div>
+
+          {/* Notas Fiscais — pedido do Rodrigo em 2026-11-11: lista de notas do cliente
+              (independente de loja/canal), cada uma com dropdown próprio pros produtos daquela
+              nota específica. Fica DEPOIS do que já existia, não polui a visão default (produtos
+              só aparecem expandidos). Derivada 100% do que getClienteFicha já buscou — nenhuma
+              query nova nessa seção, só a busca sob demanda dentro do componente client. */}
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
+            <h3 className="mb-3 text-xs font-medium text-[var(--text-muted)]">
+              Notas fiscais ({ficha.notas.length})
+            </h3>
+            <NotasFiscaisCliente
+              clienteNome={ficha.cliente}
+              showFinancials={showFinancials}
+              notas={ficha.notas.map<NotaFiscalRow>((n) => ({
+                storeId: n.storeId,
+                dapicVendaId: n.dapicVendaId,
+                loja: n.loja,
+                canal: n.canal,
+                dataFormatada: formatData(n.data),
+                valorBruto: n.valorBruto,
+                valorDevolvido: n.valorDevolvido,
+                itens: n.itens,
+                devolucao: n.devolucao,
+              }))}
+            />
           </div>
         </div>
       )}

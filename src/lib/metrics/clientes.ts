@@ -1211,6 +1211,9 @@ export type ClienteFicha = {
   topLojas: { loja: string; pedidos: number; datas: Date[] }[];
   // bruta — devolução não é atribuída a mês aqui (só ao produto, ver comentário na função).
   historicoMensal: { month: string; receita: number; unidades: number }[];
+  // Lista de notas fiscais (1 por pedidoKey storeId::dapicVendaId) — ver ClienteNotaResumo abaixo.
+  // Número/chave de acesso NÃO vêm aqui (busca ao vivo no DAPIC, sob demanda por nota).
+  notas: ClienteNotaResumo[];
 };
 
 // Ficha do cliente: histórico COMPLETO (não o período do filtro — uma ficha é um perfil, não um
@@ -1262,7 +1265,9 @@ export async function getClienteFicha(
       select: {
         saleDate: true, dapicVendaId: true, storeId: true, valorTotalLiquido: true,
         quantidade: true, tabelaPreco: true, produto: true, tamanho: true, grupo: true, cidade: true, estado: true,
-        store: { select: { name: true, displayGroup: true } },
+        // store.code (não só name/displayGroup) — necessário pra classificar o canal de cada nota
+        // (loja física vs Site/Atacado, ver montarNotasCliente abaixo).
+        store: { select: { name: true, displayGroup: true, code: true } },
       },
     }),
     prisma.clienteCadastro.findMany({ where: { nome: { in: variantes } } }),
@@ -1327,6 +1332,14 @@ export async function getClienteFicha(
   // Data de cada pedido (todas as linhas de um mesmo pedido têm a mesma data) — pra listar
   // quando foi cada visita em "onde comprou". Pedido do Rodrigo em 2026-08-31.
   const pedidoKeyToData = new Map<string, Date>();
+  // Dados por pedido usados só na lista de Notas Fiscais (ver montarNotasCliente abaixo) — valor
+  // BRUTO (soma de Sale, é o valor fiscal real emitido), quantidade de linhas/itens, código da
+  // loja (pra classificar o canal) e a tabelaPreco (1ª linha do pedido — numa mesma venda todas as
+  // linhas normalmente compartilham a mesma tabela).
+  const pedidoValorBruto = new Map<string, number>();
+  const pedidoItensCount = new Map<string, number>();
+  const pedidoStoreCode = new Map<string, string>();
+  const pedidoTabelaPreco = new Map<string, string | null>();
 
   for (const s of sales) {
     const pedidoKey = `${s.storeId}::${s.dapicVendaId}`;
@@ -1365,6 +1378,10 @@ export async function getClienteFicha(
     storeIdToLoja.set(s.storeId, loja);
     pedidoKeyToLoja.set(pedidoKey, loja);
     pedidoKeyToData.set(pedidoKey, s.saleDate);
+    pedidoValorBruto.set(pedidoKey, (pedidoValorBruto.get(pedidoKey) ?? 0) + s.valorTotalLiquido);
+    pedidoItensCount.set(pedidoKey, (pedidoItensCount.get(pedidoKey) ?? 0) + 1);
+    if (!pedidoStoreCode.has(pedidoKey)) pedidoStoreCode.set(pedidoKey, s.store.code);
+    if (!pedidoTabelaPreco.has(pedidoKey)) pedidoTabelaPreco.set(pedidoKey, s.tabelaPreco);
 
     const mes = s.saleDate.toISOString().slice(0, 7);
     const m = porMes.get(mes) ?? { receita: 0, unidades: 0 };
@@ -1400,6 +1417,13 @@ export async function getClienteFicha(
   const devolvidoPorTamanho = new Map<string, number>();
   const devolvidoPorLoja = new Map<string, number>();
   const pedidoUnidadesDevolvido = new Map<string, number>();
+  // Valor devolvido por pedido (não só por produto/grupo) — usado só pra marcar o indicador de
+  // devolução parcial/total na lista de Notas Fiscais (ver montarNotasCliente abaixo). O valor da
+  // nota em si é mostrado BRUTO (é o valor fiscal real emitido) — a devolução fica como selo
+  // visual separado, não é subtraída silenciosamente (decisão de produto, pedido do Rodrigo
+  // 2026-11-11: a nota é um documento fiscal, seu valor não "muda" quando o cliente devolve algo
+  // depois).
+  const pedidoValorDevolvido = new Map<string, number>();
   let devolvidoUnidadesTotal = 0, devolvidoValorTotal = 0;
   for (const r of returnsCliente) {
     const pedidoKey = `${r.storeId}::${r.dapicVendaId}`;
@@ -1421,6 +1445,7 @@ export async function getClienteFicha(
     if (loja) devolvidoPorLoja.set(loja, (devolvidoPorLoja.get(loja) ?? 0) + r.quantidade);
 
     pedidoUnidadesDevolvido.set(pedidoKey, (pedidoUnidadesDevolvido.get(pedidoKey) ?? 0) + r.quantidade);
+    pedidoValorDevolvido.set(pedidoKey, (pedidoValorDevolvido.get(pedidoKey) ?? 0) + r.valorTotal);
 
     devolvidoUnidadesTotal += r.quantidade;
     devolvidoValorTotal += r.valorTotal;
@@ -1449,6 +1474,39 @@ export async function getClienteFicha(
       datasPorLoja.set(loja, arr);
     }
   }
+
+  // Lista de Notas Fiscais (pedido do Rodrigo em 2026-11-11) — 1 "nota" por pedidoKey
+  // (storeId::dapicVendaId), a MESMA chave já usada acima em "onde comprou"/pedidoKeyToLoja.
+  // Derivada 100% do array `sales` já buscado (sem query nova) — número/chave de acesso ficam de
+  // fora daqui de propósito (busca ao vivo no DAPIC, sob demanda, ver /api/clientes-ficha/nota-info).
+  const notas: ClienteNotaResumo[] = [...pedidoValorBruto.keys()]
+    .map((pedidoKey) => {
+      const [storeId, dapicVendaIdStr] = pedidoKey.split("::");
+      const dapicVendaId = Number(dapicVendaIdStr);
+      const storeCode = pedidoStoreCode.get(pedidoKey) ?? "";
+      const canal = classificarCanalNota(storeCode, pedidoTabelaPreco.get(pedidoKey) ?? null, clienteNomeConhecidoB2B, b2bClientesHistorico);
+      const valorBruto = pedidoValorBruto.get(pedidoKey) ?? 0;
+      const valorDevolvido = pedidoValorDevolvido.get(pedidoKey) ?? 0;
+      const unidadesDevolvidas = pedidoUnidadesDevolvido.get(pedidoKey) ?? 0;
+      const unidadesBrutasPedido = pedidoUnidadesBruto.get(pedidoKey) ?? 0;
+      const devolucao: ClienteNotaResumo["devolucao"] =
+        unidadesDevolvidas <= 0 ? "nenhuma" : unidadesDevolvidas >= unidadesBrutasPedido ? "total" : "parcial";
+      return {
+        storeId,
+        dapicVendaId,
+        loja: pedidoKeyToLoja.get(pedidoKey) ?? storeCode,
+        canal,
+        data: pedidoKeyToData.get(pedidoKey) ?? sales[0].saleDate,
+        // BRUTO de propósito — é o valor fiscal real emitido na nota. Devolução posterior não
+        // "edita" o valor da nota, só vira o selo `devolucao` abaixo (ver comentário acima de
+        // pedidoValorDevolvido).
+        valorBruto,
+        valorDevolvido,
+        itens: pedidoItensCount.get(pedidoKey) ?? 0,
+        devolucao,
+      };
+    })
+    .sort((a, b) => b.data.getTime() - a.data.getTime());
 
   const cad = cadastro[0];
   // Nome de exibição: a variante de capitalização mais longa (heurística simples — geralmente é
@@ -1538,7 +1596,110 @@ export async function getClienteFicha(
     historicoMensal: [...porMes.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([month, v]) => ({ month, ...v })),
+    notas,
   };
+}
+
+// Códigos de Store de loja física (ver classifySaleChannel/canalWhere em core.ts pra regra
+// equivalente de B2B/B2C — aqui é só a camada extra de distinguir loja física de Site/Atacado).
+const CODES_LOJA_FISICA = new Set(["Leblon", "Rio Sul", "Barra"]);
+
+// Canal de exibição de 1 nota, pra lista de Notas Fiscais da Ficha do Cliente. Não é uma
+// dimensão nova no banco — deduzido em memória, mesma regra usada no resto do projeto:
+// loja física (Leblon/Rio Sul/Barra) sempre é "Loja física <nome>"; CD/ATACADO usa
+// classifySaleChannel (tabelaPreco + histórico do cliente) pra decidir Atacado (B2B) vs Site
+// (B2C/DESCONHECIDO).
+function classificarCanalNota(
+  storeCode: string,
+  tabelaPreco: string | null,
+  clienteNomeConhecidoB2B: string | null,
+  b2bClientesHistorico: Set<string>
+): string {
+  if (CODES_LOJA_FISICA.has(storeCode)) return `Loja física ${storeCode}`;
+  const { channel } = classifySaleChannel(tabelaPreco, clienteNomeConhecidoB2B, b2bClientesHistorico);
+  return channel === "B2B" ? "Atacado" : "Site";
+}
+
+export type ClienteNotaResumo = {
+  storeId: string;
+  dapicVendaId: number;
+  loja: string;
+  canal: string;
+  data: Date;
+  // BRUTO (soma de Sale, valor fiscal real emitido) — ver comentário em pedidoValorDevolvido
+  // dentro de getClienteFicha pra por que não é netado por devolução aqui.
+  valorBruto: number;
+  valorDevolvido: number;
+  itens: number;
+  devolucao: "nenhuma" | "parcial" | "total";
+};
+
+export type ClienteNotaItem = {
+  produto: string;
+  cod: string;
+  tamanho: string | null;
+  cor: string | null;
+  colecao: string | null;
+  quantidade: number;
+  valorUnitario: number;
+  valorTotal: number;
+};
+
+// Produtos de UMA nota específica (storeId + dapicVendaId), buscados sob demanda — chamado pelo
+// client component só quando o usuário expande aquela nota (não no load da página, ver pedido
+// original: "não carregar itens de todas as notas de uma vez"). Reaproveita a mesma chave
+// storeId+dapicVendaId já usada em getClienteFicha/"onde comprou" — sem isso o relacionamento
+// nota↔itens ficaria inventado. Filtra por clienteNome (variantes) pra nunca misturar item de
+// outro cliente que por acaso caiu no mesmo pedidoKey (não deveria acontecer — pedidoKey já é
+// específico de 1 venda — mas é uma trava barata de defesa, mesmo padrão de segurança que o resto
+// do arquivo usa pra nunca vazar dado de cliente errado).
+export async function getClienteNotaItens(
+  variantesNome: string[],
+  storeId: string,
+  dapicVendaId: number
+): Promise<ClienteNotaItem[]> {
+  const sales = await prisma.sale.findMany({
+    where: { storeId, dapicVendaId, clienteNome: { in: variantesNome } },
+    select: { produto: true, cod: true, tamanho: true, cor: true, colecao: true, quantidade: true, valorTotalLiquido: true },
+    orderBy: { itemIndex: "asc" },
+  });
+  return sales.map((s) => ({
+    produto: s.produto,
+    cod: s.cod,
+    tamanho: s.tamanho,
+    cor: s.cor,
+    colecao: s.colecao,
+    quantidade: s.quantidade,
+    valorUnitario: s.quantidade > 0 ? s.valorTotalLiquido / s.quantidade : s.valorTotalLiquido,
+    valorTotal: s.valorTotalLiquido,
+  }));
+}
+
+// Mesma resolução de variantes de nome usada em getClienteFicha (nome exato OU CPF/CNPJ) —
+// extraída pra ser reaproveitada pela rota de itens de nota (getClienteNotaItens precisa do
+// MESMO conjunto de variantes, pra não deixar a trava de defesa acima vazar/bloquear à toa).
+export async function resolveClienteVariantes(busca: string): Promise<string[]> {
+  let norm = busca.trim().toUpperCase();
+  if (!norm) return [];
+
+  let variantRows = await prisma.$queryRaw<{ nome: string }[]>`
+    SELECT DISTINCT "clienteNome" AS nome FROM "Sale" WHERE UPPER(TRIM("clienteNome")) = ${norm}
+  `;
+  if (variantRows.length === 0) {
+    const somenteDigitos = busca.replace(/\D/g, "");
+    if (somenteDigitos.length >= 8) {
+      const cadastroPorCpf = await prisma.$queryRaw<{ nome: string }[]>`
+        SELECT "nome" FROM "ClienteCadastro" WHERE regexp_replace("cpfCnpj", '[^0-9]', '', 'g') = ${somenteDigitos} LIMIT 1
+      `;
+      if (cadastroPorCpf.length > 0) {
+        norm = cadastroPorCpf[0].nome.trim().toUpperCase();
+        variantRows = await prisma.$queryRaw<{ nome: string }[]>`
+          SELECT DISTINCT "clienteNome" AS nome FROM "Sale" WHERE UPPER(TRIM("clienteNome")) = ${norm}
+        `;
+      }
+    }
+  }
+  return variantRows.map((r) => r.nome);
 }
 
 // Aniversariantes de um mês específico (1-12), independente do ano de nascimento — pra
