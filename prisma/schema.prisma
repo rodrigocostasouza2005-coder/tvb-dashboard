@@ -660,6 +660,15 @@ model NotaFiscalCache {
   dapicVendaId Int
   numero       String?
   resolvedAt   DateTime @default(now())
+  // Campos adicionados em 2026-11-11 pra seção de Notas Fiscais da Ficha do Cliente — nullable,
+  // preenchidos só a partir de agora (registros antigos de "numero" ficam com esses 3 null pra
+  // sempre, não há reprocessamento automático). chaveAcesso: 44 dígitos, só disponível pra
+  // Site+Atacado (fatura) ou, raramente, NFE de loja física via /notasfiscais/{id} (best-effort,
+  // ver fetchNotaFiscalDetalhe em connectors/dapic.ts) — NFC-e de loja física nunca tem.
+  chaveAcesso  String?
+  numeroSerie  Int?
+  // "FATURA" (Site+Atacado) | "NFCE" | "NFE" | "CFE" (loja física) | null (não resolvido/erro).
+  tipo         String?
 
   @@unique([storeId, dapicVendaId])
 }

@@ -378,6 +378,29 @@ export class DapicClient {
     return this.fetch<DapicVendaPdvDetalhe>(`/vendaspdv/${id}`);
   }
 
+  // Best-effort — endpoint NUNCA TESTADO contra dado real (só existe como menção na doc/comentário
+  // acima, como possível jeito de pegar a chave de 44 dígitos de uma NFE de loja física, quando
+  // IdNotaFiscal vem preenchido). Implementado em 2026-11-11 pra Ficha do Cliente/Notas Fiscais —
+  // formato de resposta não confirmado, por isso essa função nunca lança e valida o shape antes de
+  // confiar nele (chave tem que ter exatamente 44 dígitos). Se o endpoint não existir, mudar de
+  // formato ou devolver algo inesperado, retorna null silenciosamente — a UI mostra "chave não
+  // disponível" nesse caso, igual já faz pra NFC-e (que de fato nunca tem chave pela API).
+  async fetchNotaFiscalDetalhe(idNotaFiscal: number): Promise<{ chaveAcesso: string; numeroSerie: number | null } | null> {
+    try {
+      const raw = await this.fetch<Record<string, unknown>>(`/notasfiscais/${idNotaFiscal}`);
+      const chave = typeof raw?.ChaveNotaFiscal === "string" ? raw.ChaveNotaFiscal
+        : typeof raw?.Chave === "string" ? raw.Chave
+        : typeof raw?.ChaveAcesso === "string" ? raw.ChaveAcesso
+        : null;
+      if (!chave || !/^\d{44}$/.test(chave)) return null;
+      const numeroSerieRaw = raw?.NumeroSerie ?? raw?.Serie;
+      const numeroSerie = typeof numeroSerieRaw === "number" ? numeroSerieRaw : null;
+      return { chaveAcesso: chave, numeroSerie };
+    } catch {
+      return null;
+    }
+  }
+
   // Catálogo de tabelas de preço (ex: Varejo, Atacado) — nenhuma venda vem com esse campo
   // direto (nem /vendaspdv nem /faturas), só o endpoint abandonado /pedidosvendas tinha.
   // Achado em 2026-08-10, usado a partir de 2026-08-11 pra inferir qual tabela valeu numa venda

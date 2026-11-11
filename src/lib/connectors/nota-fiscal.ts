@@ -30,47 +30,90 @@ async function storeClientMap(): Promise<Map<string, DapicClient>> {
   return map;
 }
 
-// Número da nota/cupom fiscal de uma venda, buscado ao vivo no DAPIC (não gravado no banco —
-// pedido do Rodrigo em 2026-09-09, só pro follow-up pós-compra, volume baixo demais pra
-// justificar mexer no sync em lote ou no schema).
+// Número + chave de acesso (44 dígitos) de uma venda, buscados ao vivo no DAPIC. Começou em
+// 2026-09-09 só com o número (pedido do Rodrigo pro follow-up pós-compra); estendido em
+// 2026-11-11 pra também trazer a chave de acesso, pedido da seção de Notas Fiscais da Ficha do
+// Cliente (ver getClienteNotas em metrics/clientes.ts).
 //
-// Site+Atacado: a venda vem de /faturas, cujo detalhe já traz o bloco Fiscal com NumeroNota.
+// Site+Atacado: a venda vem de /faturas, cujo detalhe já traz o bloco Fiscal com NumeroNota +
+// ChaveNotaFiscal (SEMPRE disponível pra esse canal — emissão passa pelo próprio DAPIC via
+// Shopify).
 // Loja física: a venda vem de /vendaspdv — a maioria é cupom fiscal (NFCE), que só tem número
-// mesmo (sem chave de 44 dígitos disponível pela API); raramente é NFE (nota fiscal de verdade,
-// mais comum em devolução/entrada). CFE existe no schema mas nunca visto preenchido até agora.
+// mesmo (a API NÃO expõe chave de 44 dígitos pra NFC-e — limitação real confirmada, não um bug
+// pra resolver). Raramente é NFE (nota fiscal de verdade, mais comum em devolução/entrada): nesse
+// caso IdNotaFiscal vem preenchido e tentamos /notasfiscais/{id} (fetchNotaFiscalDetalhe,
+// best-effort, endpoint nunca confirmado contra dado real antes dessa entrega) como último
+// recurso pra achar a chave. CFE existe no schema mas nunca visto preenchido até agora.
 //
-// Nunca lança — se a busca falhar ou não achar nada, retorna null e a mensagem de follow-up
-// simplesmente sai sem a linha da nota (decisão do Rodrigo, não trava o resto da mensagem).
+// Nunca lança — se a busca falhar ou não achar nada, as 2 funções devolvem o que tiverem (numero
+// e/ou chaveAcesso podem ficar null) em vez de travar a tela/mensagem que está chamando.
 //
-// Cacheado em NotaFiscalCache (achado em 2026-09-10: buscar ao vivo pra ~100 clientes toda vez
-// que a aba de Sugestões de Contato abre deixava a página perto de 1min) — a nota de uma venda
-// passada nunca muda, então só busca de verdade na 1ª vez que aquela venda aparece no follow-up.
+// Cacheado PERMANENTEMENTE em NotaFiscalCache, 1 linha por (storeId, dapicVendaId) — a nota de
+// uma venda passada nunca muda, então só busca de verdade na 1ª vez que aquela venda aparece (no
+// follow-up OU agora na Ficha do Cliente). Achado em 2026-09-10: buscar ao vivo sem cache pra
+// ~100 clientes toda vez que uma tela abria deixava a página perto de 1min.
 export async function getNumeroNotaFiscal(storeId: string, dapicVendaId: number): Promise<string | null> {
-  const cached = await prisma.notaFiscalCache.findUnique({ where: { storeId_dapicVendaId: { storeId, dapicVendaId } } });
-  if (cached) return cached.numero;
-
-  const numero = await buscarNumeroNotaFiscal(storeId, dapicVendaId);
-  await prisma.notaFiscalCache
-    .create({ data: { storeId, dapicVendaId, numero } })
-    .catch(() => {}); // corrida rara (2 requests simultâneos pra mesma venda nova) — não é fatal, só perde o cache dessa vez.
-  return numero;
+  const info = await getNotaFiscalInfo(storeId, dapicVendaId);
+  return info.numero;
 }
 
-async function buscarNumeroNotaFiscal(storeId: string, dapicVendaId: number): Promise<string | null> {
+export type NotaFiscalInfo = {
+  numero: string | null;
+  chaveAcesso: string | null;
+  numeroSerie: number | null;
+  tipo: string | null;
+};
+
+export async function getNotaFiscalInfo(storeId: string, dapicVendaId: number): Promise<NotaFiscalInfo> {
+  const cached = await prisma.notaFiscalCache.findUnique({ where: { storeId_dapicVendaId: { storeId, dapicVendaId } } });
+  if (cached) {
+    return { numero: cached.numero, chaveAcesso: cached.chaveAcesso, numeroSerie: cached.numeroSerie, tipo: cached.tipo };
+  }
+
+  const info = await buscarNotaFiscalInfo(storeId, dapicVendaId);
+  await prisma.notaFiscalCache
+    .create({ data: { storeId, dapicVendaId, ...info } })
+    .catch(() => {}); // corrida rara (2 requests simultâneos pra mesma venda nova) — não é fatal, só perde o cache dessa vez.
+  return info;
+}
+
+async function buscarNotaFiscalInfo(storeId: string, dapicVendaId: number): Promise<NotaFiscalInfo> {
+  const vazio: NotaFiscalInfo = { numero: null, chaveAcesso: null, numeroSerie: null, tipo: null };
   try {
     const map = await storeClientMap();
     const client = map.get(storeId);
-    if (!client) return null;
+    if (!client) return vazio;
 
     if (client.label === "cd-atacado") {
       const fatura = await client.fetchFaturaDetalhe(dapicVendaId);
-      return fatura.Fiscal ? String(fatura.Fiscal.NumeroNota) : null;
+      if (!fatura.Fiscal) return vazio;
+      return {
+        numero: String(fatura.Fiscal.NumeroNota),
+        chaveAcesso: fatura.Fiscal.ChaveNotaFiscal ?? null,
+        numeroSerie: fatura.Fiscal.NumeroSerie ?? null,
+        tipo: "FATURA",
+      };
     }
 
     const venda = await client.fetchVendaPdvDetalhe(dapicVendaId);
     const numero = venda.NFCE ?? venda.NFE ?? venda.CFE;
-    return numero != null ? String(numero) : null;
+    const tipo = venda.NFCE != null ? "NFCE" : venda.NFE != null ? "NFE" : venda.CFE != null ? "CFE" : null;
+
+    // Chave de 44 dígitos só é tentada pro caso raro de NFE de loja física (NFC-e não tem, ver
+    // comentário no topo do arquivo) — best-effort, nunca lança (fetchNotaFiscalDetalhe já se
+    // protege por dentro).
+    let chaveAcesso: string | null = null;
+    let numeroSerie: number | null = null;
+    if (venda.NFE != null && venda.IdNotaFiscal != null) {
+      const detalhe = await client.fetchNotaFiscalDetalhe(venda.IdNotaFiscal);
+      if (detalhe) {
+        chaveAcesso = detalhe.chaveAcesso;
+        numeroSerie = detalhe.numeroSerie;
+      }
+    }
+
+    return { numero: numero != null ? String(numero) : null, chaveAcesso, numeroSerie, tipo };
   } catch {
-    return null;
+    return vazio;
   }
 }
