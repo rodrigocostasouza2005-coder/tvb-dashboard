@@ -5,7 +5,11 @@ import { defineConfig } from "@playwright/test";
 // de DOM). webServer sobe o `next dev` já existente contra o .env.local (Neon dev).
 export default defineConfig({
   testDir: "./e2e",
-  timeout: 60_000,
+  // 120s (era 60s): as telas de inteligência de estoque agregam o catálogo inteiro (2.6k SKUs ×
+  // 4 posições) e, no `next dev` (compilação sob demanda, sem build otimizado), a PRIMEIRA abertura
+  // de cada rota passava de 60s — não é lentidão em produção, é o custo do dev server. É um teto,
+  // não uma espera: teste rápido continua terminando rápido.
+  timeout: 120_000,
   use: {
     baseURL: "http://localhost:3100",
     headless: true,

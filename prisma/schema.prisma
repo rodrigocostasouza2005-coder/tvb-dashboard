@@ -267,6 +267,79 @@ model DecisaoCompra {
   @@index([cod])
 }
 
+// Direção de uma movimentação de estoque entre posições (ver src/lib/metrics/distribuicao-estoque.ts).
+// CD e Site são UMA posição só (Store.displayGroup = "TVB Site e Atacado"), por isso não existe
+// "CD_SITE_CD_SITE" nem direções separadas pra CD e pra Site.
+enum TipoMovimentacaoEstoque {
+  LOJA_LOJA
+  CD_SITE_LOJA
+  LOJA_CD_SITE
+}
+
+enum ClassificacaoMovimentacaoEstoque {
+  REDISTRIBUIR
+  RECOLHER_PARA_CD_SITE
+  MANTER
+}
+
+// Ciclo pedido pelo Rodrigo (2026-11-11): recomendação gerada → aprovada → movimentação executada
+// → recusada → pendente. PENDENTE = recomendação que alguém marcou pra acompanhar, sem decisão
+// ainda; EXECUTADA só é gravada quando a equipe confirma que a peça foi de fato movida (o Radar
+// NUNCA executa movimentação física, ver cabeçalho de distribuicao-estoque.ts).
+enum StatusMovimentacaoEstoque {
+  PENDENTE
+  APROVADA
+  EXECUTADA
+  RECUSADA
+}
+
+// Decisão humana sobre uma recomendação de distribuição — mesmo padrão e mesma motivação de
+// DecisaoCompra (acima): o cálculo da recomendação é função PURA, sem efeito em banco; só grava
+// quando um humano decide algo. Antes desta tabela, Reposição/Cobertura/Retirada/Distribuição não
+// tinham NENHUMA persistência de decisão (só o Mapa de Compras tinha), então não havia como saber
+// se uma transferência sugerida na semana passada foi feita, recusada ou simplesmente esquecida.
+//
+// origemPosicaoId/destinoPosicaoId guardam o id da POSIÇÃO, não necessariamente de um Store: pro
+// CD/Site é "storeIdCD|storeIdATACADO" (mesma convenção de groupStoresForFilter). O NOME também é
+// gravado junto, de propósito e desnormalizado — se o cadastro de loja mudar, o histórico continua
+// legível ("de onde pra onde isso foi recomendado naquele dia").
+//
+// premissas (Json, não normalizado) guarda a recomendação como ela era NO MOMENTO da decisão
+// (quantidade, cobertura, justificativa, avisos de confiança) — mesmo motivo de DecisaoCompra:
+// auditar depois por que a sugestão daquele dia era aquele número, mesmo que venda/estoque mudem.
+model DecisaoMovimentacaoEstoque {
+  id                  String                           @id @default(cuid())
+  cod                 String
+  produto             String
+  grupo               String
+  cor                 String?
+  tamanho             String?
+  origemPosicaoId     String
+  origemNome          String
+  destinoPosicaoId    String
+  destinoNome         String
+  tipoMovimentacao    TipoMovimentacaoEstoque
+  classificacao       ClassificacaoMovimentacaoEstoque
+  quantidadeSugerida  Int
+  quantidadeAprovada  Int?
+  quantidadeExecutada Int?
+  status              StatusMovimentacaoEstoque        @default(PENDENTE)
+  // "alta" | "media" | "baixa" — mesma escala de avaliarConfianca(). Texto livre de propósito:
+  // é um rótulo de qualidade do DADO naquele momento, não uma dimensão de domínio estável.
+  confianca           String
+  premissas           Json
+  recomendadoEm       DateTime                         @default(now())
+  decididoEm          DateTime?
+  decididoPor         String?
+  executadoEm         DateTime?
+  executadoPor        String?
+  observacao          String?
+
+  @@index([cod])
+  @@index([status])
+  @@index([recomendadoEm])
+}
+
 // Token pra conectar o Radar num Custom GPT (ChatGPT) ou Conector MCP (Claude) — pedido do
 // Rodrigo em 2026-09-08. Uma linha só (id fixo "radar-api"), gerada/trocada e RE-VISUALIZADA
 // pelo Painel Admin (pedido dele: não quer ser forçado a reconectar ChatGPT/Claude só porque

@@ -119,8 +119,8 @@ export function DistribuicaoTable({ variantes }: { variantes: ComparacaoVariante
   if (produtos.length === 0) {
     return (
       <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-6 text-center text-sm text-[var(--text-muted)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-        Nenhum produto encontrado no filtro atual — verifique se há pelo menos 2 das lojas físicas
-        (Leblon, Barra, Rio Sul) liberadas pra este usuário.
+        Nenhum produto encontrado no filtro atual — verifique se há pelo menos 2 posições de estoque
+        comerciais (lojas de varejo ou CD/Site) liberadas pra este usuário.
       </div>
     );
   }
