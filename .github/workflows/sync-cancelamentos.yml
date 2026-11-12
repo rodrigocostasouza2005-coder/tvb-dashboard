@@ -16,10 +16,24 @@ name: Sync rápido de cancelamentos
 # cadastrar um 2º monitor em cron-job.org apontando pra
 # https://tvb-dashboard.vercel.app/api/sync-cancelamentos a cada ~5min (mesma credencial que ele já
 # tem salva lá pro sync-frequent) — nenhuma mudança de código é necessária pro endpoint em si.
-# Mantemos este workflow como fallback best-effort (gratuito, sem risco) até isso ser configurado.
+#
+# DESATIVADO EM 2026-11-12 (auditoria): o secret `EXTERNAL_SYNC_SECRET` nos GitHub Actions Secrets
+# deste repo está datado de 2026-10-06 (`gh secret list`), mas o valor em produção na Vercel foi
+# trocado há ~11 dias (~2026-11-01) — por isso toda execução agendada retorna HTTP 401 desde
+# 2026-11-02, sem gerar nenhum alerta (ninguém assiste falha de Action aqui). Como o próprio
+# parágrafo acima já diz, este workflow NUNCA entregou cadência melhor que os 5 crons diários do
+# sync completo — era só um fallback "de graça, sem risco" enquanto não existia alternativa melhor.
+# Hoje a reconciliação de cancelamento já é coberta por 3 camadas independentes que NÃO dependem
+# deste workflow nem do EXTERNAL_SYNC_SECRET do GitHub: o sync completo via cron-job.org (10min,
+# EXTERNAL_SYNC_SECRET próprio salvo lá, fora do GitHub), os 5 crons diários da Vercel (CRON_SECRET,
+# injetado automaticamente pela própria Vercel) e o self-heal (`scheduleCatchupSyncIfStale`, que
+# roda o sync completo direto em processo sempre que alguém abre o dashboard e o último sucesso
+# passou de 5h — sem HTTP, sem segredo nenhum). Por isso o disparo automático foi desligado aqui
+# em vez de só corrigido: manter um workflow que nunca agregou cadência real e que falha
+# silenciosamente toda vez é pior que não ter nenhum. `workflow_dispatch` continua disponível pra
+# rodar manualmente (ex: validar depois de atualizar o secret, se o Rodrigo decidir usar este
+# caminho de novo em vez do cron-job.org).
 on:
-  schedule:
-    - cron: "*/15 * * * *"
   workflow_dispatch: {}
 
 permissions:
