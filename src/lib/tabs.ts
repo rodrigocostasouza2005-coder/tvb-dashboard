@@ -91,8 +91,9 @@ export const TABS: TabEntry[] = [
   { key: "estoque-retirada", label: "Sugestão de Retirada", href: "/dashboard/estoque-retirada", group: "estoque" },
   { key: "mapa-compras", label: "Mapa de Compras", href: "/dashboard/mapa-compras", group: "estoque" },
   // Agente de Inteligência de Distribuição (2026-10-30) — deliberadamente separado do Mapa de
-  // Compras: aqui não se calcula compra, só compara o mesmo produto entre as lojas de varejo. Ver
-  // src/lib/metrics/distribuicao-estoque.ts.
+  // Compras: aqui não se calcula compra, só compara o mesmo produto entre as posições de estoque
+  // comerciais. Desde 2026-11-11 isso inclui o CD/Site nas 3 direções (loja↔loja, CD/Site→loja,
+  // loja→CD/Site), não só varejo-com-varejo. Ver src/lib/metrics/distribuicao-estoque.ts.
   { key: "distribuicao-estoque", label: "Inteligência de Distribuição", href: "/dashboard/distribuicao-estoque", group: "estoque" },
 
   // atacado

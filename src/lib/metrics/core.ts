@@ -480,6 +480,120 @@ export async function getRawStores() {
   return prisma.store.findMany({ orderBy: { name: "asc" } });
 }
 
+// ---------------------------------------------------------------------------
+// POSIÇÕES DE ESTOQUE REAIS (loja de varejo vs. CD/Site) — fonte única
+// ---------------------------------------------------------------------------
+// Criado em 2026-11-11 pra generalizar a allowlist hardcoded CODES_LOJAS_VAREJO que vivia dentro
+// de distribuicao-estoque.ts ("Leblon", "Rio Sul", "Barra"), sem herdar o bug que ela existia pra
+// contornar: `sellsProducts: true` NÃO significa "é loja de verdade" — o banco real tem
+// "Uniformes", "Matérias-primas" e "Produtos acabados" com sellsProducts=true só porque o nome
+// deles não bate com o regex NAO_VENDE de armazenadores.ts (ver comentário lá; mesma classe de bug
+// do primaryStoreId do "Conserto").
+//
+// A regra aqui NÃO é um regex de nome (seria o mesmo tipo de armadilha, só com outra lista de
+// palavras). É um AND de três sinais, sendo o segundo o que realmente decide:
+//   1. sellsProducts = true  (exclui Defeito/Lixeira/Bonificação/Matriz/Conserto/Extraviados);
+//   2. tem venda REAL registrada (Sale) — checagem de DADO, não de nome. Validado no banco de dev
+//      em 2026-11-11: os 3 armazéns-impostores (Uniformes, Matérias-primas, Produtos acabados)
+//      têm ZERO linha em Sale, enquanto as 3 lojas reais têm 2.4k–19k. Loja de varejo é uma
+//      posição que VENDE; armazém de insumo nunca vende, por definição.
+//   3. não faz parte do displayGroup do CD/Site (essa é uma posição própria, ver abaixo).
+// O regex de nome continua existindo só como rede extra (NAO_E_POSICAO_COMERCIAL) pro caso de um
+// armazém de insumo aparecer com alguma venda lançada por engano — nunca como critério principal.
+//
+// Limitação consciente: loja de varejo RECÉM-ABERTA, ainda sem nenhuma venda, não aparece aqui
+// (fica em `ignoradas`, que a tela expõe em vez de esconder). Preferimos isso a voltar ao
+// comportamento antigo, em que um armazém de aviamento virava "loja" silenciosamente.
+export const CD_SITE_DISPLAY_GROUP = "TVB Site e Atacado";
+
+const NAO_E_POSICAO_COMERCIAL = /mat[ée]ria|insumo|aviamento|produtos?\s*acabados?|uniforme|amostra|mostru[áa]rio/i;
+
+export type PosicaoEstoque = {
+  // Chave estável da POSIÇÃO (não do Store): pro CD/Site são 2 storeIds (CD + ATACADO) juntos,
+  // porque é uma posição de estoque única (ver displayGroup em schema.prisma / groupStoresForFilter).
+  // Formato "id1|id2", mesma convenção já usada por groupStoresForFilter/parseFilters.
+  posicaoId: string;
+  storeIds: string[];
+  nome: string;
+  tipo: "loja" | "cd_site";
+  // Só pro CD/Site: o storeId do armazenador "CD" especificamente, que é onde a sync grava a
+  // venda do SITE (ecommerce). ATACADO (o outro store do mesmo displayGroup) recebe a venda de
+  // FATURA (B2B). O ESTOQUE é uma posição só (decisão de produto: não duplicar CD/Site), mas o
+  // sinal de "potencial de venda online" precisa ser só do site — somar atacado aqui faria um
+  // produto de revenda parecer que tem demanda de ecommerce. Ver sync-runner.ts/getSiteAtacadoStoreIds.
+  storeIdEcommerce?: string;
+};
+
+export type PosicoesEstoque = {
+  lojas: PosicaoEstoque[];
+  cdSite: PosicaoEstoque | null;
+  // Armazéns com sellsProducts=true que foram DESCARTADOS como posição comercial, com o motivo —
+  // existe pra tela poder dizer "ignorei X porque nunca vendeu" em vez de simplesmente omitir.
+  ignoradas: { nome: string; motivo: string }[];
+};
+
+const VENDA_RECENTE_DIAS = 365;
+
+// Fonte única de "quais posições de estoque entram numa comparação comercial". Usada pela
+// inteligência de distribuição (lojas + CD/Site); qualquer tela nova que precise de "as lojas de
+// verdade" deve chamar isto em vez de filtrar por sellsProducts.
+export async function getPosicoesEstoque(allowedStoreIds?: string[]): Promise<PosicoesEstoque> {
+  const stores = await prisma.store.findMany({
+    where: { sellsProducts: true, ...(allowedStoreIds && allowedStoreIds.length > 0 ? { id: { in: allowedStoreIds } } : {}) },
+    orderBy: { name: "asc" },
+  });
+
+  const desde = new Date(Date.now() - VENDA_RECENTE_DIAS * 86_400_000);
+  const comVenda = await prisma.sale.groupBy({
+    by: ["storeId"],
+    where: { status: { not: "Cancelada" }, storeId: { in: stores.map((s) => s.id) }, saleDate: { gte: desde } },
+    _count: { _all: true },
+  });
+  const vendeuPorStore = new Map(comVenda.map((v) => [v.storeId, v._count._all]));
+
+  const lojas: PosicaoEstoque[] = [];
+  const ignoradas: { nome: string; motivo: string }[] = [];
+  const cdSiteStores: typeof stores = [];
+
+  for (const s of stores) {
+    if (s.displayGroup === CD_SITE_DISPLAY_GROUP) {
+      cdSiteStores.push(s);
+      continue;
+    }
+    if (NAO_E_POSICAO_COMERCIAL.test(s.name) || NAO_E_POSICAO_COMERCIAL.test(s.code)) {
+      ignoradas.push({ nome: s.name, motivo: "armazém de insumo/uniforme, não é posição de venda" });
+      continue;
+    }
+    if (!vendeuPorStore.has(s.id)) {
+      ignoradas.push({ nome: s.name, motivo: `nenhuma venda nos últimos ${VENDA_RECENTE_DIAS} dias` });
+      continue;
+    }
+    lojas.push({ posicaoId: s.id, storeIds: [s.id], nome: s.name, tipo: "loja" });
+  }
+
+  const cdSite: PosicaoEstoque | null =
+    cdSiteStores.length > 0
+      ? {
+          posicaoId: cdSiteStores
+            .map((s) => s.id)
+            .sort()
+            .join("|"),
+          storeIds: cdSiteStores.map((s) => s.id),
+          nome: CD_SITE_DISPLAY_GROUP,
+          tipo: "cd_site",
+          storeIdEcommerce: cdSiteStores.find((s) => s.code === "CD")?.id,
+        }
+      : null;
+
+  return { lojas, cdSite, ignoradas };
+}
+
+// Açúcar pra quem só quer as lojas de varejo reais (sem o CD/Site) — ex: telas que comparam
+// loja-com-loja. Mesmo critério de getPosicoesEstoque, uma fonte só.
+export async function getLojasVarejoReais(allowedStoreIds?: string[]): Promise<PosicaoEstoque[]> {
+  return (await getPosicoesEstoque(allowedStoreIds)).lojas;
+}
+
 // IDs dos 2 armazenadores por trás de "TVB Site e Atacado" (CD + ATACADO) — usado em toda função
 // que precisa achar venda de atacado (canalWhere("b2b")) por baixo do token cd-atacado. Achado
 // em 2026-09-23: até então venda/devolução de atacado (faturas) e venda de site ficavam TODAS
