@@ -54,6 +54,34 @@ Substitua caminhos e competência pelos arquivos efetivamente baixados. Inclua t
 
 A suíte em `scripts/prospeccao/tests/` cobre seleção de estabelecimentos ativos do RJ, CNAE-alvo, validação de CNPJ numérico e do exemplo alfanumérico oficial da Receita, competência inválida e falha para layout curto. O workflow `.github/workflows/prospeccao-python-tests.yml` executa esses testes. CI aprovado não equivale a validação com o dump real da Receita.
 
+## Situação cadastral sem Serpro (nov/2026)
+
+O piloto real do RJ revelou que o critério EXISTENCIA do motor de qualificação
+(`src/lib/prospeccao/motor-elegibilidade.ts`) só sai de `INCONCLUSIVO` quando o prospect tem
+`situacaoCadastral` preenchido — e até esta mudança só a consulta oficial Serpro
+(`scripts/prospeccao/consultar-cnpj-serpro.ts`) preenchia esse campo. Como o Rodrigo decidiu não
+contratar o Serpro, nenhum prospect avançava além de `EM_INVESTIGACAO`/`REPROVADO`.
+
+A extração (`scripts/prospeccao/extrair-parquet-receita.py`) já filtra por situação cadastral
+ativa (`'02'`) direto na fonte antes de gerar qualquer candidato — esse dado só não era exportado.
+Agora o script também exporta a coluna `situacao_cadastral` (código bruto de 2 dígitos da Receita),
+e `scripts/prospeccao/importar-receita.ts` decodifica esse código via
+`mapearSituacaoCadastralReceita` (em `src/lib/prospeccao/importador-receita.ts`) e grava
+`situacaoCadastral`/`situacaoCadastralCodigo` no prospect — sem chamar o Serpro.
+
+**Limitação conhecida:** esse dado é um retrato (snapshot) mensal da Receita Federal — a
+competência exportada pelo script —, não uma verificação em tempo real como a consulta Serpro
+seria. Para não inflar a confiança desse dado, ele é gravado com
+`confiancaPesquisa = "CADASTRAL_RECEITA_SNAPSHOT"` (nunca `"CADASTRAL_OFICIAL"`, reservado ao
+Serpro) e a observação do prospect registra explicitamente a competência de origem. O schema não
+tem um campo de confiança dedicado à identidade cadastral (`confiancaPesquisa` é texto livre
+reaproveitado para múltiplos sentidos ao longo do pipeline); criar um campo novo exigiria
+migration, fora do escopo desta mudança — ver o código para o detalhe completo do porquê.
+
+O caminho Serpro continua existindo e intacto como opção futura (ex.: para confirmar cadastros que
+a extração não cobre, ou reverificar em tempo real); só deixou de ser a única fonte possível desse
+critério.
+
 ## Limitações conhecidas
 
 - O cadastro é um retrato da competência, não um feed em tempo real.

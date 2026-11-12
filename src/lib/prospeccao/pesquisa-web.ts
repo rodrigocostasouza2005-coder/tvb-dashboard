@@ -114,3 +114,78 @@ export function extrairEvidenciasSite(url:string,html:string):EvidenciaSite {
   };
 }
 export function calcularConfiancaPesquisa(input:{nomeLoja:string;cidade:string|null;titulo:string;descricao:string;texto:string}):"ALTA"|"MEDIA"|"BAIXA"{const norm=(s:string)=>s.normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase();const parts=norm(input.nomeLoja).split(/\s+/).filter(x=>x.length>2);const evidence=norm(`${input.titulo} ${input.descricao} ${input.texto}`);const ratio=parts.length?parts.filter(x=>evidence.includes(x)).length/parts.length:0;const city=!!input.cidade&&evidence.includes(norm(input.cidade));if(ratio>=.7&&city)return"ALTA";if(ratio>=.5||(ratio>=.35&&city))return"MEDIA";return"BAIXA";}
+
+/**
+ * Melhoria 2 (piloto RJ, nov/2026): a busca via DuckDuckGo (`extrairResultadosBusca` acima) est\u00e1
+ * sendo bloqueada por anti-bot (403/captcha) em qualquer infraestrutura de nuvem testada \u2014 n\u00e3o \u00e9
+ * algo que vamos resolver agora (exigiria API de busca paga, recusada pelo Rodrigo). Mas a
+ * extra\u00e7\u00e3o de candidatos j\u00e1 exige telefone OU e-mail presente (ver extrair-parquet-receita.py); e
+ * quando o e-mail tem dom\u00ednio pr\u00f3prio (n\u00e3o \u00e9 um provedor gen\u00e9rico de e-mail pessoal), esse
+ * dom\u00ednio costuma ser o site da pr\u00f3pria loja \u2014 d\u00e1 pra tentar acessar ele DIRETO, sem motor de
+ * busca nenhum.
+ *
+ * Lista fechada de provedores gen\u00e9ricos \u2014 nunca \u00e9 o site da pr\u00f3pria loja. Combina os dom\u00ednios
+ * explicitamente listados pelo Rodrigo com outros provedores comuns de e-mail pessoal no Brasil.
+ */
+const DOMINIOS_EMAIL_GENERICOS = new Set([
+  "gmail.com","googlemail.com",
+  "hotmail.com","hotmail.com.br","outlook.com","outlook.com.br","live.com","live.com.br","msn.com",
+  "yahoo.com","yahoo.com.br","ymail.com","rocketmail.com",
+  "bol.com.br","uol.com.br","terra.com.br","globo.com","globomail.com","ig.com.br","r7.com",
+  "icloud.com","me.com","mac.com",
+  "aol.com","protonmail.com","proton.me","zoho.com","gmx.com","mail.com","yandex.com","yandex.com.br",
+  "pop.com.br","zipmail.com.br","click21.com.br","superig.com.br","oi.com.br",
+]);
+
+export function hostEhProvedorEmailGenerico(dominio: string): boolean {
+  return DOMINIOS_EMAIL_GENERICOS.has(dominio.trim().toLowerCase());
+}
+
+/** Extrai o dom\u00ednio de um e-mail; `null` se o valor n\u00e3o tiver o formato m\u00ednimo de e-mail v\u00e1lido. */
+export function derivarDominioEmail(email: string | null | undefined): string | null {
+  const valor = (email ?? "").trim().toLowerCase();
+  const arroba = valor.lastIndexOf("@");
+  if (arroba <= 0 || arroba === valor.length - 1) return null;
+  const dominio = valor.slice(arroba + 1);
+  if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(dominio)) return null;
+  return dominio;
+}
+
+/**
+ * Deriva as URLs candidatas (`https://dominio` e `https://www.dominio`) a partir do dom\u00ednio do
+ * e-mail do prospect. Nunca deriva nada de um provedor de e-mail gen\u00e9rico (gmail, hotmail etc.) \u2014
+ * essa \u00e9 a \u00fanica r\u00e9gua: n\u00e3o afrouxa nem refor\u00e7a o que conta como evid\u00eancia de marca depois, s\u00f3
+ * decide QUAL URL tentar antes de recorrer \u00e0 busca.
+ */
+export function derivarUrlsCandidatasPorEmail(email: string | null | undefined): string[] {
+  const dominio = derivarDominioEmail(email);
+  if (!dominio || hostEhProvedorEmailGenerico(dominio)) return [];
+  return [`https://${dominio}`, `https://www.${dominio}`];
+}
+
+export type TentativaSiteDominio = { url: string; html: string };
+
+/**
+ * Orquestra a tentativa de fallback por dom\u00ednio de e-mail \u2014 tenta cada URL candidata, na ordem,
+ * at\u00e9 achar uma que (a) o robots.txt permite visitar e (b) responde com HTML. Recebe os efeitos de
+ * rede j\u00e1 injetados (`podeVisitar`/`buscarHtml`) em vez de chamar fetch/DNS diretamente: \u00e9 isso que
+ * permite testar com mocks, sem depender de rede real, no mesmo padr\u00e3o de
+ * `importador-receita.ts` (n\u00facleo test\u00e1vel separado do script que injeta I/O real).
+ *
+ * Nunca decide por si s\u00f3 se o conte\u00fado \u00e9 evid\u00eancia v\u00e1lida de multimarcas \u2014 isso continua sendo
+ * `extrairEvidenciasSite`/`calcularConfiancaPesquisa` (mesma r\u00e9gua de sempre), chamados por quem
+ * usa o HTML retornado aqui. Se nenhuma URL candidata responder, devolve `null` \u2014 quem chama decide
+ * cair para a busca via DuckDuckGo, comportamento inalterado.
+ */
+export async function tentarSiteViaDominioEmail(params: {
+  email: string | null | undefined;
+  podeVisitar: (url: string) => Promise<boolean>;
+  buscarHtml: (url: string) => Promise<string | null>;
+}): Promise<TentativaSiteDominio | null> {
+  for (const url of derivarUrlsCandidatasPorEmail(params.email)) {
+    if (!(await params.podeVisitar(url))) continue;
+    const html = await params.buscarHtml(url);
+    if (html) return { url, html };
+  }
+  return null;
+}

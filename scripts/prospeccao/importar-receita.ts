@@ -11,7 +11,11 @@
  */
 import { readFile } from "node:fs/promises";
 import { PrismaClient } from "@prisma/client";
-import { importarComValidacaoUf } from "../../src/lib/prospeccao/importador-receita";
+import {
+  importarComValidacaoUf,
+  mapearSituacaoCadastralReceita,
+  FONTE_SITUACAO_CADASTRAL_RECEITA_SNAPSHOT,
+} from "../../src/lib/prospeccao/importador-receita";
 
 type ProspectRow = {
   nome_fantasia: string;
@@ -31,6 +35,11 @@ type ProspectRow = {
   origem: string;
   evidencia_url: string;
   competencia: string;
+  // Melhoria 1 (piloto RJ, nov/2026): código bruto de situação cadastral exportado por
+  // extrair-parquet-receita.py ('02' etc.); coluna opcional — ausente em CSVs mais antigos ou
+  // gerados por gerar-prospects-rj.py, que ainda não a exporta. Decodificado via
+  // mapearSituacaoCadastralReceita antes de gravar.
+  situacao_cadastral: string;
 };
 
 function parseCsvLine(line: string, delimiter = ";"): string[] {
@@ -86,6 +95,7 @@ function parseCsv(raw: string): ProspectRow[] {
       origem: get("origem"),
       evidencia_url: get("evidencia_url"),
       competencia: get("competencia"),
+      situacao_cadastral: get("situacao_cadastral"),
     };
     if (!row.nome_fantasia || !/^[A-Z]{2}$/.test(row.uf) || !/^[A-Z0-9]{12}[0-9]{2}$/.test(row.cnpj)) {
       throw new Error(`Linha ${lineIndex + 2}: nome, CNPJ ou UF inválido.`);
@@ -148,31 +158,49 @@ async function main() {
         },
         inserirLote: async (novos) => {
           const result = await prisma!.atacadoProspect.createMany({
-            data: novos.map((row) => ({
-              nomeFantasia: row.nome_fantasia.slice(0, 160),
-              razaoSocial: row.razao_social.slice(0, 180) || null,
-              cnpj: row.cnpj,
-              cidade: row.cidade.slice(0, 100) || null,
-              codigoMunicipio: row.codigo_municipio.slice(0, 10) || null,
-              estado: row.uf,
-              telefone: row.telefone.slice(0, 40) || null,
-              email: row.email.slice(0, 180) || null,
-              site: safeUrl(row.site),
-              origem: "receita_federal_dados_abertos",
-              origemAgente: "AGENTE_CAPTACAO_RECEITA_V1",
-              evidenciaUrl: safeUrl(row.evidencia_url),
-              observacoes: [
-                `Coleta cadastral Receita Federal — competência ${competence}`,
-                row.cnae_principal ? `CNAE principal: ${row.cnae_principal}` : "",
-                row.cnae_correspondente ? `CNAE de moda identificado: ${row.cnae_correspondente}` : "",
-                row.tipo_correspondencia === "PRINCIPAL" ? "Correspondência CNAE: atividade principal" : "Correspondência CNAE: atividade secundária — validar aderência comercial",
-                row.cnae_descricao,
-                row.porte ? `Porte cadastral: ${row.porte}` : "",
-                row.nome_fantasia === "NOME COMERCIAL NÃO IDENTIFICADO" ? "Nome fantasia ausente na Receita; razão social mantida separadamente e nome comercial pendente de pesquisa." : "",
-                "Grupo comercial pendente de pesquisa; CNAE não é suficiente para classificar A/B/C/D.",
-                "Lead cadastral não verificado comercialmente.",
-              ].filter(Boolean).join(" | "),
-            })),
+            data: novos.map((row) => {
+              // Melhoria 1 (piloto RJ, nov/2026): propaga situação cadastral do snapshot da
+              // Receita (sem Serpro) — ver src/lib/prospeccao/importador-receita.ts para a
+              // justificativa completa e a régua de decodificação. Código ausente (CSV antigo,
+              // ou gerado por gerar-prospects-rj.py, que ainda não exporta essa coluna) mapeia
+              // para NAO_INFORMADA, nunca para ATIVA por padrão.
+              const situacaoCadastral = mapearSituacaoCadastralReceita(row.situacao_cadastral);
+              const situacaoAtivaNaOrigem = situacaoCadastral === "ATIVA";
+              return {
+                nomeFantasia: row.nome_fantasia.slice(0, 160),
+                razaoSocial: row.razao_social.slice(0, 180) || null,
+                cnpj: row.cnpj,
+                cidade: row.cidade.slice(0, 100) || null,
+                codigoMunicipio: row.codigo_municipio.slice(0, 10) || null,
+                estado: row.uf,
+                telefone: row.telefone.slice(0, 40) || null,
+                email: row.email.slice(0, 180) || null,
+                site: safeUrl(row.site),
+                origem: "receita_federal_dados_abertos",
+                origemAgente: "AGENTE_CAPTACAO_RECEITA_V1",
+                evidenciaUrl: safeUrl(row.evidencia_url),
+                situacaoCadastral,
+                situacaoCadastralCodigo: row.situacao_cadastral || null,
+                // Nunca grava CADASTRAL_OFICIAL aqui — esse marcador é exclusivo de
+                // consultar-cnpj-serpro.ts (consulta real, paga, em tempo real). Isto é só um
+                // snapshot mensal; fica marcado como tal para não inflar a confiança do dado.
+                confiancaPesquisa: situacaoCadastral !== "NAO_INFORMADA" ? FONTE_SITUACAO_CADASTRAL_RECEITA_SNAPSHOT : null,
+                observacoes: [
+                  `Coleta cadastral Receita Federal — competência ${competence}`,
+                  row.cnae_principal ? `CNAE principal: ${row.cnae_principal}` : "",
+                  row.cnae_correspondente ? `CNAE de moda identificado: ${row.cnae_correspondente}` : "",
+                  row.tipo_correspondencia === "PRINCIPAL" ? "Correspondência CNAE: atividade principal" : "Correspondência CNAE: atividade secundária — validar aderência comercial",
+                  row.cnae_descricao,
+                  row.porte ? `Porte cadastral: ${row.porte}` : "",
+                  row.nome_fantasia === "NOME COMERCIAL NÃO IDENTIFICADO" ? "Nome fantasia ausente na Receita; razão social mantida separadamente e nome comercial pendente de pesquisa." : "",
+                  situacaoAtivaNaOrigem
+                    ? `Situação cadastral ATIVA conforme snapshot mensal da Receita Federal (competência ${competence}) — não é verificação em tempo real; Serpro não foi consultado.`
+                    : "Situação cadastral não confirmada na extração (código ausente ou não reconhecido); permanece pendente de verificação oficial.",
+                  "Grupo comercial pendente de pesquisa; CNAE não é suficiente para classificar A/B/C/D.",
+                  "Lead cadastral não verificado comercialmente.",
+                ].filter(Boolean).join(" | "),
+              };
+            }),
             skipDuplicates: true,
           });
           const insertedRows = await prisma!.atacadoProspect.findMany({

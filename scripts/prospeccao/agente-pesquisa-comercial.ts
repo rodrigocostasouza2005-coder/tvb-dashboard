@@ -14,7 +14,7 @@
  */
 import { PrismaClient, Prisma } from "@prisma/client";
 import { isSafePublicHttpsUrl } from "../../src/lib/prospeccao/url-segura";
-import { calcularConfiancaPesquisa, extrairEvidenciasSite, extrairResultadosBusca, hostEhRedeSocial, type ResultadoBusca } from "../../src/lib/prospeccao/pesquisa-web";
+import { calcularConfiancaPesquisa, extrairEvidenciasSite, extrairResultadosBusca, hostEhRedeSocial, tentarSiteViaDominioEmail, type ResultadoBusca } from "../../src/lib/prospeccao/pesquisa-web";
 import { aprenderPerfis, pontuarAderenciaPerfil } from "../../src/lib/prospeccao/aprendizado-comercial";
 import { qualificarProspect } from "../../src/lib/prospeccao/motor-qualificacao";
 import type { SituacaoCadastral } from "../../src/lib/prospeccao/motor-elegibilidade";
@@ -40,7 +40,50 @@ async function search(q:string):Promise<ResultadoBusca[]>{const html=await getHt
 function matchesStore(result:ResultadoBusca,nome:string):boolean{const norm=(v:string)=>v.normalize("NFD").replace(/[\\u0300-\\u036f]/g,"").toLowerCase();const ignored=new Set(["loja","moda","roupa","comercio","ltda","me","epp","de","da","do","e"]);const tokens=norm(nome).split(/[^a-z0-9]+/).filter(x=>x.length>2&&!ignored.has(x));if(!tokens.length)return false;const evidence=norm(`${result.titulo} ${result.trecho} ${new URL(result.url).pathname}`);return tokens.filter(x=>evidence.includes(x)).length/tokens.length>=0.5;}
 function siteResult(results:ResultadoBusca[],nome:string){return results.find(x=>!hostEhRedeSocial(x.url)&&matchesStore(x,nome)&&!/google\\.|bing\\.|duckduckgo\\.|maps\\./i.test(new URL(x.url).hostname))??null;}
 function instagramResult(results:ResultadoBusca[],nome:string){return results.find(x=>{try{return new URL(x.url).hostname.replace(/^www\\./,"")==="instagram.com"&&matchesStore(x,nome);}catch{return false;}})??null;}
-async function research(p:{id:string;nomeFantasia:string;cidade:string|null;estado:string|null;site:string|null;instagram:string|null;observacoes:string|null}){const loc=[p.cidade,p.estado].filter(Boolean).join(" ");const base=`"${p.nomeFantasia}" "${loc}" loja`;const [social,commercial]=await Promise.all([search(`${base} Instagram`),search(`${base} moda masculina multimarcas site oficial`)]);const ig=p.instagram?null:instagramResult(social,p.nomeFantasia);const candidate=p.site?null:siteResult(commercial,p.nomeFantasia);const urlToCheck=p.site??candidate?.url??null;let evidence:ReturnType<typeof extrairEvidenciasSite>|null=null;let site:string|null=null;let confidence:"ALTA"|"MEDIA"|"BAIXA"="BAIXA";if(urlToCheck&&await mayVisit(urlToCheck)){const html=await getHtml(urlToCheck);if(html){evidence=extrairEvidenciasSite(urlToCheck,html);confidence=calcularConfiancaPesquisa({nomeLoja:p.nomeFantasia,cidade:p.cidade,titulo:evidence.titulo,descricao:evidence.descricao,texto:evidence.texto});if(confidence!=="BAIXA")site=urlToCheck;}}return{instagram:p.instagram??ig?.url??null,ig,site,candidate,evidence,confidence,at:new Date()};}
+// Melhoria 2 (piloto RJ, nov/2026): a busca via DuckDuckGo abaixo (`search`) está sendo bloqueada
+// por anti-bot (403/captcha) em qualquer infraestrutura de nuvem testada. Antes de recorrer a ela
+// pra achar o site da loja, tenta o domínio do e-mail do prospect DIRETO (tentarSiteViaDominioEmail,
+// pesquisa-web.ts) — todo candidato já tem telefone OU e-mail (exigido na extração), e quando o
+// e-mail tem domínio próprio (não gmail/hotmail/etc.) esse domínio costuma ser o site da loja. Se o
+// domínio não for genérico mas o fetch falhar (DNS/timeout/404/robots) ou a confiança ficar BAIXA,
+// cai pro comportamento de busca de sempre — mesma régua de evidência de marca em qualquer caminho.
+async function siteViaDominioEmail(p:{nomeFantasia:string;cidade:string|null;email:string|null}){
+  const tentativa=await tentarSiteViaDominioEmail({email:p.email,podeVisitar:mayVisit,buscarHtml:getHtml});
+  if(!tentativa)return null;
+  const evidence=extrairEvidenciasSite(tentativa.url,tentativa.html);
+  const confidence=calcularConfiancaPesquisa({nomeLoja:p.nomeFantasia,cidade:p.cidade,titulo:evidence.titulo,descricao:evidence.descricao,texto:evidence.texto});
+  if(confidence==="BAIXA")return null; // página não é da mesma loja; cai pra busca, igual sempre
+  return {url:tentativa.url,evidence,confidence};
+}
+async function research(p:{id:string;nomeFantasia:string;cidade:string|null;estado:string|null;site:string|null;instagram:string|null;observacoes:string|null;email:string|null}){
+  const loc=[p.cidade,p.estado].filter(Boolean).join(" ");
+  const base=`"${p.nomeFantasia}" "${loc}" loja`;
+  let evidence:ReturnType<typeof extrairEvidenciasSite>|null=null;
+  let site:string|null=null;
+  let confidence:"ALTA"|"MEDIA"|"BAIXA"="BAIXA";
+  if(!p.site){
+    const viaDominio=await siteViaDominioEmail(p);
+    if(viaDominio){site=viaDominio.url;evidence=viaDominio.evidence;confidence=viaDominio.confidence;}
+  }
+  const [social,commercial]=await Promise.all([
+    search(`${base} Instagram`),
+    site?Promise.resolve([] as ResultadoBusca[]):search(`${base} moda masculina multimarcas site oficial`),
+  ]);
+  const ig=p.instagram?null:instagramResult(social,p.nomeFantasia);
+  const candidate=(p.site||site)?null:siteResult(commercial,p.nomeFantasia);
+  if(!site){
+    const urlToCheck=p.site??candidate?.url??null;
+    if(urlToCheck&&await mayVisit(urlToCheck)){
+      const html=await getHtml(urlToCheck);
+      if(html){
+        evidence=extrairEvidenciasSite(urlToCheck,html);
+        confidence=calcularConfiancaPesquisa({nomeLoja:p.nomeFantasia,cidade:p.cidade,titulo:evidence.titulo,descricao:evidence.descricao,texto:evidence.texto});
+        if(confidence!=="BAIXA")site=urlToCheck;
+      }
+    }
+  }
+  return{instagram:p.instagram??ig?.url??null,ig,site,candidate,evidence,confidence,at:new Date()};
+}
 async function main(){const args=process.argv.slice(2);const arg=(k:string,d:string)=>{const i=args.indexOf(k);return i>=0?args[i+1]??d:d;};const apply=args.includes("--apply");const uf=arg("--uf","RJ").toUpperCase();const limit=Math.max(1,Math.min(25,Number(arg("--limit","10"))||10));if(!/^[A-Z]{2}$/.test(uf))throw new Error("UF inválida.");const atividadesAprendizado=await prisma.atacadoProspectActivity.findMany({where:{tipo:"INTERACAO_BRUCE",resultado:{not:null}},orderBy:{createdAt:"desc"},take:5000,select:{prospectId:true,resultado:true,prospect:{select:{segmentoComercial:true,perfilLoja:true,faixaPreco:true,estado:true,status:true}}}});
 const perfisAprendidos=aprenderPerfis(atividadesAprendizado.map(a=>({prospectId:a.prospectId,resultado:a.resultado as "INTERESSADO"|"SEM_RESPOSTA"|"RECUSOU"|"PEDIU_CATALOGO"|"PEDIU_PRECO"|"NEGOCIANDO"|"PEDIDO_REALIZADO"|"RECOMPRA"|"SEM_ADERENCIA"|"DADOS_INVALIDOS"|"OUTRO"|null,segmentoComercial:a.prospect.segmentoComercial,perfilLoja:a.prospect.perfilLoja,faixaPreco:a.prospect.faixaPreco,estado:a.prospect.estado,status:a.prospect.status})));
 const candidatos=await prisma.atacadoProspect.findMany({where:{estado:uf,status:{in:["NOVO","EM_QUALIFICACAO"]},grupoComercial:"PENDENTE",origem:{in:["receita_federal_dados_abertos","manual","importacao","pesquisa_web"]},AND:[{OR:[{responsavel:null},{responsavel:"AGENTE_PESQUISA_COMERCIAL_WEB_V1"},{responsavel:"AGENTE_QUALIFICACAO_RECEITA_V1"}]},{OR:[{pesquisadoEm:null},{confiancaPesquisa:"BAIXA"},{confiancaPesquisa:"CADASTRAL"}]}]},orderBy:[{pesquisadoEm:"asc"},{updatedAt:"asc"}],take:250,select:{id:true,nomeFantasia:true,cidade:true,estado:true,site:true,instagram:true,observacoes:true,segmentoComercial:true,perfilLoja:true,faixaPreco:true,situacaoCadastral:true,cnpj:true,telefone:true,email:true,confiancaPesquisa:true}});
@@ -95,7 +138,11 @@ for (const p of prospects) {
         responsavel: "AGENTE_PESQUISA_COMERCIAL_WEB_V1",
         site: r.site ?? undefined,
         instagram: r.instagram,
-        evidenciaUrl: r.candidate?.url ?? r.ig?.url ?? undefined,
+        // Inclui r.site primeiro: achado pré-existente ao implementar o fallback de domínio de
+        // e-mail (Melhoria 2) — quando o site já vem confirmado (seja por domínio de e-mail ou por
+        // já estar cadastrado em p.site), `candidate` fica null e o evidenciaUrl ficava vazio por
+        // engano, mesmo com um site confirmado disponível.
+        evidenciaUrl: r.site ?? r.candidate?.url ?? r.ig?.url ?? undefined,
         evidenciaEm: r.at,
         pesquisadoEm: r.at,
         ultimaValidacaoEm: r.at,

@@ -77,7 +77,7 @@ def main() -> int:
           s.cnpj_basico, s.cnpj_ordem, s.cnpj_dv, s.nome_fantasia,
           s.cnae_fiscal_principal, s.cnae_fiscal_secundaria,
           s.uf, s.municipio, s.ddd1, s.telefone1, s.ddd2, s.telefone2,
-          s.correio_eletronico
+          s.correio_eletronico, s.situacao_cadastral
         FROM read_parquet('{establishments}') s
         WHERE s.uf IN ({ufs_sql})
           AND s.situacao_cadastral = '02'
@@ -108,7 +108,13 @@ def main() -> int:
         coalesce(e.porte_empresa, '') AS porte,
         'receita_federal_dados_abertos' AS origem,
         'https://dados.gov.br/dados/conjuntos-dados/cadastro-nacional-da-pessoa-juridica---cnpj' AS evidencia_url,
-        '{args.competencia}' AS competencia
+        '{args.competencia}' AS competencia,
+        -- Código bruto de situação cadastral da Receita (01/02/03/04/08 — ver dicionário em
+        -- src/lib/prospeccao/importador-receita.ts, mapearSituacaoCadastralReceita). Hoje este
+        -- valor é SEMPRE '02' (ATIVA) porque o filtro WHERE acima já exige isso na fonte; exportar
+        -- o código (em vez de inferir "ativa" aqui) é o que permite ao importador decodificar de
+        -- forma auditável e nunca assumir ativa por padrão caso o filtro mude no futuro.
+        f.situacao_cadastral AS situacao_cadastral
       FROM filtrados f
       LEFT JOIN read_parquet('{companies}') e USING (cnpj_basico)
       LEFT JOIN read_parquet('{municipalities}') m
@@ -148,7 +154,14 @@ def main() -> int:
                 "contact_logic": "telefone OR email"
             },
             "commercially_verified": False,
-            "neon_imported": False
+            "neon_imported": False,
+            # Documenta explicitamente que o código de situação cadastral exportado na coluna
+            # `situacao_cadastral` vem de um retrato mensal da Receita Federal (esta competência),
+            # não de consulta em tempo real (Serpro) — ver scripts/prospeccao/importar-receita.ts
+            # e src/lib/prospeccao/importador-receita.ts (mapearSituacaoCadastralReceita), que
+            # gravam essa distinção em AtacadoProspect.confiancaPesquisa ao importar.
+            "situacao_cadastral_fonte": "receita_federal_dados_abertos_snapshot_mensal",
+            "situacao_cadastral_tempo_real": False
         }
         manifest_path = output_path.with_suffix(output_path.suffix + ".manifest.json")
         manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

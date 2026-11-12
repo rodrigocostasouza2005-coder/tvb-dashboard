@@ -44,5 +44,37 @@ class CnaeBijuteriaRegressionTests(unittest.TestCase):
         )
 
 
+class SituacaoCadastralExportadaTests(unittest.TestCase):
+    """Melhoria 1 (piloto RJ, nov/2026): o motor de qualificação (EXISTENCIA) só sai de
+    INCONCLUSIVO com `situacaoCadastral` preenchido, e o Rodrigo decidiu não pagar Serpro. A
+    extração já filtra por situação ativa ('02') direto na fonte — este teste garante que esse
+    dado passa a ser EXPORTADO (não só usado como filtro interno) para o importador poder
+    propagar `situacaoCadastral` sem depender do Serpro.
+    """
+
+    def setUp(self):
+        self.source = SCRIPT.read_text(encoding="utf-8")
+
+    def test_situacao_cadastral_e_selecionada_na_cte_de_filtrados(self):
+        self.assertIn(
+            "s.situacao_cadastral",
+            self.source,
+            "A coluna situacao_cadastral do estabelecimento precisa ser selecionada na CTE "
+            "`filtrados` para poder ser exportada depois.",
+        )
+
+    def test_situacao_cadastral_e_exportada_na_selecao_final(self):
+        self.assertIn(
+            "f.situacao_cadastral AS situacao_cadastral",
+            self.source,
+            "A coluna situacao_cadastral precisa aparecer na SELECT final (saída do COPY) para "
+            "chegar ao CSV/parquet consumido pelo importador.",
+        )
+
+    def test_manifesto_documenta_que_e_snapshot_mensal_nao_tempo_real(self):
+        self.assertIn('"situacao_cadastral_fonte"', self.source)
+        self.assertIn('"situacao_cadastral_tempo_real": False', self.source)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -53,6 +53,27 @@ agente-pesquisa-comercial.ts`) pro formato que o motor entende. Mantém a mesma 
 de sempre: marca citada "de passagem" (sem sinal textual explícito de revenda multimarcas) nunca
 entra na contagem, mesmo que apareça no site.
 
+### Descoberta de site: busca via DuckDuckGo bloqueada em nuvem — fallback por domínio de e-mail (nov/2026)
+
+O piloto real do RJ confirmou, em dois ambientes de nuvem diferentes, que a busca via DuckDuckGo
+usada por `agente-pesquisa-comercial.ts` (`search`, que raspa `html.duckduckgo.com/html`) é
+bloqueada por anti-bot (403/captcha) em qualquer infraestrutura de nuvem — não é algo que será
+resolvido agora (exigiria API de busca paga, recusada pelo Rodrigo).
+
+Como a extração (`extrair-parquet-receita.py`) já exige telefone OU e-mail presente, e quando o
+e-mail tem domínio próprio (não é um provedor genérico de e-mail pessoal) esse domínio costuma ser
+o site da própria loja, `agente-pesquisa-comercial.ts` agora tenta acessar esse domínio DIRETO
+(`https://dominio` e `https://www.dominio`) antes de recorrer à busca — via
+`tentarSiteViaDominioEmail`/`derivarUrlsCandidatasPorEmail` em `src/lib/prospeccao/pesquisa-web.ts`.
+Se o domínio for um provedor genérico (gmail, hotmail etc.) ou o fetch direto falhar (DNS, timeout,
+404, robots.txt ou confiança BAIXA — página não é da mesma loja), cai para a busca via DuckDuckGo
+de sempre, que pode continuar bloqueada — comportamento inalterado nesse caso.
+
+Isso é só sobre QUAL URL tentar primeiro; a régua de evidência de marca (sinal explícito de
+multimarcas, mínimo de 2 marcas distintas) não mudou. **Limitação conhecida:** este fallback só
+cobre prospects com e-mail de domínio próprio — quem só tem telefone continua dependendo
+exclusivamente da busca via DuckDuckGo, que permanece bloqueada em nuvem.
+
 ### 17 estados litorâneos
 
 Lista fechada usada em todo filtro geográfico de prospecção:
