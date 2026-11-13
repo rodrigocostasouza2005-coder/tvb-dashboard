@@ -203,6 +203,7 @@ async function AbaMovimentacoes({
     <MovimentacoesTable
       movimentacoes={resultado.movimentacoes}
       manter={resultado.manter}
+      necessidadesNaoAtendidas={resultado.necessidadesNaoAtendidas}
       totalAntesDoFiltro={resultado.totalAntesDoFiltro}
       podeDecidir={podeDecidir}
     />
