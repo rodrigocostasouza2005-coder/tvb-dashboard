@@ -145,11 +145,28 @@ for (const p of prospects) {
   // cadastrado nem domínio de e-mail próprio, a única fonte de conteúdo real é a busca, que está
   // bloqueada — `r.evidence` fica null porque NENHUMA página real foi de fato examinada, não
   // porque a loja não tem evidência. Gravar um REPROVADO nesse caso seria fingir pesquisa que não
-  // aconteceu (regra do Rodrigo: nunca inventar/inferir evidência). Pula a gravação e deixa o
-  // registro como está (confiancaPesquisa=CADASTRAL, pesquisadoEm antigo) para ser retomado numa
-  // rodada futura com busca funcionando — não é perda de progresso, é não fabricar progresso.
+  // aconteceu (regra do Rodrigo: nunca inventar/inferir evidência) — então classificacaoProspect/
+  // statusComercial/confiancaPesquisa/grupoComercial NUNCA são tocados aqui, continuam exatamente
+  // como a etapa cadastral deixou (ainda elegível pra uma pesquisa real futura, via a mesma regra
+  // de confiancaPesquisa="CADASTRAL" na query de candidatos acima).
+  // Só avança `pesquisadoEm` (usado no orderBy acima) pra não travar a fila nos mesmos ~23/25
+  // registros sem fallback de domínio pra sempre — sem isso, toda rodada futura re-selecionaria
+  // exatamente os mesmos candidatos já tentados e nunca chegaria aos outros ~460 na fila. Fica
+  // registrado como atividade (nunca como resultado de qualificação) pra auditoria.
   if (!r.evidence) {
-    console.log("PULADO (sem gravação): nenhuma página real foi examinada nesta rodada (sem site cadastrado, sem domínio de e-mail próprio viável, e busca via DuckDuckGo bloqueada) — registro mantido em CADASTRAL para nova tentativa.");
+    console.log("PULADO (sem classificação): nenhuma página real foi examinada nesta rodada (sem site cadastrado, sem domínio de e-mail próprio viável, e busca via DuckDuckGo bloqueada) — avançando checkpoint sem alterar classificação.");
+    await prisma.$transaction([
+      prisma.atacadoProspect.update({ where: { id: p.id }, data: { pesquisadoEm: r.at } }),
+      prisma.atacadoProspectActivity.create({
+        data: {
+          prospectId: p.id,
+          tipo: "PESQUISA_COMERCIAL_BLOQUEADA",
+          etapa: "PRESENCA_DIGITAL",
+          criadoPor: "AGENTE_PESQUISA_COMERCIAL_WEB_V1",
+          descricao: "Nenhuma página real examinada: sem site cadastrado, sem domínio de e-mail próprio viável, e busca via DuckDuckGo bloqueada por anti-bot (HTTP 202, página inicial genérica, não um resultado de busca real). Nenhuma classificação foi alterada; checkpoint avançado para permitir retomada do restante da fila.",
+        },
+      }),
+    ]);
     continue;
   }
   const notes = [p.observacoes, summary].filter(Boolean).join("\n").slice(0, 8000);
