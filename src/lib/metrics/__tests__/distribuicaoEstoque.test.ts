@@ -11,10 +11,13 @@ import {
   montarMatrizGrade,
   resumirGrupoGrade,
   vendasEfetivasCdSite,
+  anexarProducaoEmAndamento,
   type VariantePorLoja,
   type MovimentacaoRecomendada,
   type ContextoMovimentacao,
   type GradePosicao,
+  type NecessidadeNaoAtendida,
+  type RecomendacaoManter,
 } from "../distribuicao-estoque";
 
 function variante(overrides: Partial<VariantePorLoja> = {}): VariantePorLoja {
@@ -1050,5 +1053,85 @@ describe("resumirGrupoGrade", () => {
     expect(r.excessoEstimado).toBe(8);
     expect(r.necessidadeEstimada).toBe(0);
     expect(r.porTamanho[0].nucleo).toBe(false);
+  });
+});
+
+describe("anexarProducaoEmAndamento", () => {
+  function necessidade(overrides: Partial<NecessidadeNaoAtendida> = {}): NecessidadeNaoAtendida {
+    return {
+      cod: "COD-1",
+      produto: "Classic Lisa Azul",
+      grupo: "Classic Lisa",
+      cor: "Azul",
+      tamanho: "40",
+      posicaoId: "loja-leblon",
+      posicaoNome: "Leblon",
+      necessidadeRestante: 10,
+      diagnostico: "ruptura",
+      ...overrides,
+    };
+  }
+
+  function manterItem(overrides: Partial<RecomendacaoManter> = {}): RecomendacaoManter {
+    return {
+      cod: "COD-2",
+      produto: "Classic Lisa Preto",
+      grupo: "Classic Lisa",
+      cor: "Preto",
+      tamanho: "40",
+      posicaoId: "cd-site",
+      posicaoNome: "CD/Site",
+      estoqueAtual: 0,
+      diagnostico: "sem_dado",
+      confianca: "alta",
+      motivo: [],
+      necessidadeReposicao: true,
+      ...overrides,
+    };
+  }
+
+  it("sem produção em aberto pra esse cod, não anexa nada", () => {
+    const n = [necessidade()];
+    const m = [manterItem()];
+    anexarProducaoEmAndamento(n, m, new Map());
+    expect(n[0].producaoEmAndamento).toBeUndefined();
+    expect(m[0].producaoEmAndamento).toBeUndefined();
+  });
+
+  it("produção cobre só parte da necessidade de loja → cobertura parcial, necessidadeRestante intacta", () => {
+    const n = [necessidade({ necessidadeRestante: 10 })];
+    anexarProducaoEmAndamento(n, [], new Map([["COD-1", [{ quantidade: 6 }]]]));
+    expect(n[0].producaoEmAndamento).toEqual({ quantidade: 6, cobertura: "parcial" });
+    expect(n[0].necessidadeRestante).toBe(10);
+  });
+
+  it("produção cobre a necessidade de loja inteira (ou mais) → cobertura total", () => {
+    const n = [necessidade({ necessidadeRestante: 10 })];
+    anexarProducaoEmAndamento(n, [], new Map([["COD-1", [{ quantidade: 15 }]]]));
+    expect(n[0].producaoEmAndamento).toEqual({ quantidade: 15, cobertura: "total" });
+  });
+
+  it("soma múltiplos pedidos de produção em aberto do mesmo cod", () => {
+    const n = [necessidade({ necessidadeRestante: 10 })];
+    anexarProducaoEmAndamento(n, [], new Map([["COD-1", [{ quantidade: 4 }, { quantidade: 3 }]]]));
+    expect(n[0].producaoEmAndamento).toEqual({ quantidade: 7, cobertura: "parcial" });
+  });
+
+  it("CD/Site zerado (necessidadeReposicao) com produção em aberto → cobertura total (sem número de necessidade pra comparar)", () => {
+    const m = [manterItem()];
+    anexarProducaoEmAndamento([], m, new Map([["COD-2", [{ quantidade: 5 }]]]));
+    expect(m[0].producaoEmAndamento).toEqual({ quantidade: 5, cobertura: "total" });
+  });
+
+  it("item MANTER sem necessidadeReposicao nunca ganha producaoEmAndamento, mesmo com produção em aberto pro cod", () => {
+    const m = [manterItem({ necessidadeReposicao: false })];
+    anexarProducaoEmAndamento([], m, new Map([["COD-2", [{ quantidade: 5 }]]]));
+    expect(m[0].producaoEmAndamento).toBeUndefined();
+  });
+
+  it("produção em aberto com quantidade zero não conta como produção em andamento", () => {
+    const n = [necessidade()];
+    anexarProducaoEmAndamento(n, [], new Map([["COD-1", [{ quantidade: 0 }]]]));
+    expect(n[0].producaoEmAndamento).toBeUndefined();
   });
 });
