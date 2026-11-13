@@ -757,6 +757,68 @@ describe("runSync — falha TOTAL de 1 loja não derruba as outras (integração
   });
 });
 
+// Achado na auditoria de falsos sucessos de 2026-11-12/13: diferente de STOCK/SALES/RETURNS/
+// GIFTS (que checam falhasEstoque/falhasVendas antes de decidir o status), o SyncLog(source=
+// "PRODUCTION") gravava "SUCCESS" incondicionalmente — o `.catch` de syncOrdensProducao engolia
+// qualquer erro real da API e devolvia só `0`, indistinguível de "matriz não configurada" ou
+// "zero ordens de produção de verdade no período" (ambos legítimos). Corrigido pra propagar
+// {ok, count} através do catch, e o SyncLog agora reflete a falha real.
+describe("SyncLog(source=\"PRODUCTION\") reflete falha real, não SUCCESS incondicional", () => {
+  it("syncOrdensProducao falha na API da matriz -> SyncLog(PRODUCTION) sai FAILED, não SUCCESS", async () => {
+    storeFindFirst.mockResolvedValue(null);
+    storeCreate.mockImplementation(({ data }: { data: { code: string } }) => Promise.resolve({ id: `store-${data.code}` }));
+
+    const clientA = {
+      label: "loja-a",
+      fetchArmazenadores: () => Promise.resolve([{ Id: 1, Descricao: "Loja A" }]),
+      fetchEstoqueTodosArmazenadores: () => Promise.resolve([]),
+      fetchVendasPdv: () => Promise.resolve([]),
+      fetchVendaPdvDetalhe: () => Promise.resolve(null),
+      fetchVendasPdvModificadas: () => Promise.resolve([]),
+    } as unknown as DapicClient;
+
+    const matrizClient = {
+      label: "matriz",
+      // Simula a API da matriz fora do ar — diferente de "matriz não configurada" (client
+      // undefined, já tratado como 0 legítimo em syncOrdensProducao: `if (!client) return 0`).
+      fetchOrdensProducaoProdutos: () => Promise.reject(new Error("DAPIC: matriz indisponível (503)")),
+    } as unknown as DapicClient;
+
+    createDapicClientsMock.mockImplementationOnce(() => [clientA, matrizClient]);
+
+    const { runSync } = await import("../sync-runner");
+    await runSync({ silent: true });
+
+    const productionLogCall = syncLogCreate.mock.calls.find((c) => c[0]?.data?.source === "PRODUCTION");
+    expect(productionLogCall?.[0]?.data?.status).toBe("FAILED");
+    expect(productionLogCall?.[0]?.data?.message).toContain("matriz indisponível");
+  });
+
+  it("matriz não configurada (client ausente) -> SyncLog(PRODUCTION) continua SUCCESS com 0 (comportamento legítimo preservado)", async () => {
+    storeFindFirst.mockResolvedValue(null);
+    storeCreate.mockImplementation(({ data }: { data: { code: string } }) => Promise.resolve({ id: `store-${data.code}` }));
+
+    const clientA = {
+      label: "loja-a",
+      fetchArmazenadores: () => Promise.resolve([{ Id: 1, Descricao: "Loja A" }]),
+      fetchEstoqueTodosArmazenadores: () => Promise.resolve([]),
+      fetchVendasPdv: () => Promise.resolve([]),
+      fetchVendaPdvDetalhe: () => Promise.resolve(null),
+      fetchVendasPdvModificadas: () => Promise.resolve([]),
+    } as unknown as DapicClient;
+
+    // Sem client "matriz" na lista — mesmo cenário de dev (token da matriz não configurado).
+    createDapicClientsMock.mockImplementationOnce(() => [clientA]);
+
+    const { runSync } = await import("../sync-runner");
+    await runSync({ silent: true });
+
+    const productionLogCall = syncLogCreate.mock.calls.find((c) => c[0]?.data?.source === "PRODUCTION");
+    expect(productionLogCall?.[0]?.data?.status).toBe("SUCCESS");
+    expect(productionLogCall?.[0]?.data?.recordsSynced).toBe(0);
+  });
+});
+
 // Missão Black Friday (2026-11, continuação) — fecha a lacuna já documentada no relatório
 // anterior (achado #3): Meta Ads/GA4 agora têm SyncSource próprio (META_ADS/GA4, ver
 // prisma/schema.prisma) e analytics-site/page.tsx grava um SyncLog por fonte a cada carregamento
