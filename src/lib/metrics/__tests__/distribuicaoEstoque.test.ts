@@ -474,7 +474,7 @@ describe("calcularMovimentacoes — direção Loja → CD/Site (recolhimento)", 
     expect(manter[0].motivo.join(" ")).toContain("ainda vende");
   });
 
-  it("CD/Site zerado e sem venda no site → sinaliza necessidade de reposição, não 'sem interesse'", () => {
+  it("CD/Site zerado e sem venda no site → sinaliza necessidade de reposição no CD/Site, não 'sem interesse' na loja", () => {
     const rioSul = variante({ storeId: "rio-sul", storeName: "Rio Sul", estoqueAtual: 12 });
     const cdSiteZerado = cd({ estoqueAtual: 0, vendasDias30: 0, vendasDias90: 0, velocidadeDiaria: 0, coberturaDias: null });
     const { movimentacoes, manter } = calcularMovimentacoes(
@@ -482,9 +482,29 @@ describe("calcularMovimentacoes — direção Loja → CD/Site (recolhimento)", 
       contextoMov({ vendasSite90: 0, gradePorPosicao: { "rio-sul": grade(1, 3) } })
     );
     expect(movimentacoes.filter((m) => m.tipoMovimentacao === "loja_cd_site")).toHaveLength(0);
-    const manterRioSul = manter.find((m) => m.posicaoNome === "Rio Sul")!;
-    expect(manterRioSul.necessidadeReposicao).toBe(true);
-    expect(manterRioSul.motivo.join(" ")).toContain("necessidade de reposição");
+    // O fato é sobre o CD/Site (zerado), não sobre a Rio Sul — registrar na loja faria o mesmo fato
+    // duplicar por loja candidata quando mais de uma loja tem excesso do mesmo SKU (ver teste
+    // seguinte). Por isso a posição sinalizada é "TVB Site e Atacado" (cdSite), não "Rio Sul".
+    expect(manter.find((m) => m.posicaoNome === "Rio Sul")).toBeUndefined();
+    const manterCdSite = manter.find((m) => m.posicaoNome === "TVB Site e Atacado")!;
+    expect(manterCdSite.necessidadeReposicao).toBe(true);
+    expect(manterCdSite.motivo.join(" ")).toContain("necessidade de reposição");
+    expect(manterCdSite.motivo.join(" ")).toContain("Rio Sul");
+  });
+
+  it("2 lojas com excesso do mesmo SKU e CD/Site zerado → UMA única necessidade de reposição, não duplicada por loja", () => {
+    const rioSul = variante({ storeId: "rio-sul", storeName: "Rio Sul", estoqueAtual: 50, vendasDias90: 0 }); // estoque_parado
+    const leblon = variante({ storeId: "leblon", storeName: "Leblon", estoqueAtual: 60, vendasDias90: 0 }); // estoque_parado
+    const cdSiteZerado = cd({ estoqueAtual: 0, vendasDias30: 0, vendasDias90: 0, velocidadeDiaria: 0, coberturaDias: null });
+    const { manter } = calcularMovimentacoes(
+      [rioSul, leblon, cdSiteZerado],
+      contextoMov({ vendasSite90: 0 })
+    );
+    const comNecessidadeReposicao = manter.filter((m) => m.necessidadeReposicao);
+    expect(comNecessidadeReposicao).toHaveLength(1);
+    expect(comNecessidadeReposicao[0].posicaoNome).toBe("TVB Site e Atacado");
+    expect(comNecessidadeReposicao[0].motivo.join(" ")).toContain("Rio Sul");
+    expect(comNecessidadeReposicao[0].motivo.join(" ")).toContain("Leblon");
   });
 
   it("CD/Site com estoque disponível e sem venda no site → MANTER por falta de demanda (não ruptura)", () => {

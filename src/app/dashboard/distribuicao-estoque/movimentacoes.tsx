@@ -12,11 +12,13 @@ import {
 import { registrarDecisaoMovimentacaoAction } from "./actions";
 
 // Aba 2 — Movimentações, em 4 áreas (pedido Rodrigo 2026-11-13): Abastecimento (CD/Site→loja +
-// loja→loja, a mesma pergunta "quem cobre a necessidade da loja", só a origem muda — badge de
-// prioridade na coluna Origem distingue as duas), Recolhimento (loja→CD/Site), Precisa de produção
-// (necessidadesNaoAtendidas + manter.necessidadeReposicao, juntos só na apresentação, nunca no
-// dado) e Mantido. Expansível no clique. Client component só por causa da expansão e do envio da
-// decisão — os dados em si vêm prontos do servidor.
+// loja→loja, a mesma pergunta "quem cobre a necessidade da loja", só a origem muda — 2 SUB-BLOCOS
+// com cabeçalho próprio "Prioridade 1 — CD/Site → loja" / "Prioridade 2 — loja → loja", não só uma
+// badge: Rodrigo foi explícito que não quer que o usuário precise interpretar só uma badge pra
+// entender a origem), Recolhimento (loja→CD/Site), Precisa de produção (necessidadesNaoAtendidas +
+// manter.necessidadeReposicao, juntos só na apresentação, nunca no dado) e Mantido. Expansível no
+// clique. Client component só por causa da expansão e do envio da decisão — os dados em si vêm
+// prontos do servidor.
 //
 // Nada aqui executa movimentação física: "Aprovar" grava a DECISÃO humana sobre a recomendação
 // (DecisaoMovimentacaoEstoque), que é o que a equipe usa pra acompanhar o que foi feito. A peça só
@@ -200,24 +202,28 @@ function DetalheLinha({ m, podeDecidir }: { m: MovimentacaoRecomendada; podeDeci
   );
 }
 
-// Badge de origem só pras áreas de abastecimento/recolhimento — prioridadeOrigem só existe pro
-// Passo 1/2 da hierarquia (CD/Site=1, Loja=2); recolhimento (loja→CD/Site) não tem prioridade de
-// origem (é outra direção, fora da hierarquia CD→lojas→produção), então a badge não aparece ali.
-function BadgeOrigem({ prioridadeOrigem }: { prioridadeOrigem?: 1 | 2 }) {
-  if (!prioridadeOrigem) return null;
-  return prioridadeOrigem === 1 ? (
-    <Badge color="var(--series-1)" title="CD/Site é sempre a prioridade 1 de abastecimento">
-      CD/Site
-    </Badge>
-  ) : (
-    <Badge color="var(--text-muted)" title="Loja com excedente, só cobrindo o que o CD/Site não atendeu">
-      Loja
-    </Badge>
-  );
-}
-
-function BadgeProducao({ info }: { info?: { quantidade: number; cobertura: "parcial" | "total" } }) {
+// semQuantidadeComparavel: true só pro caso de CD/Site zerado (RecomendacaoManter.necessidadeReposicao)
+// — ali não existe uma quantidade de necessidade pra comparar (é ruptura agregada booleana, não um
+// pedido com número), então "cobertura: total" nesse caso é só "existe produção > 0", não uma prova
+// real de que cobre o suficiente. Não afirmar "cobre tudo" quando não há base numérica pra isso.
+function BadgeProducao({
+  info,
+  semQuantidadeComparavel,
+}: {
+  info?: { quantidade: number; cobertura: "parcial" | "total" };
+  semQuantidadeComparavel?: boolean;
+}) {
   if (!info) return null;
+  if (semQuantidadeComparavel) {
+    return (
+      <Badge
+        color="var(--status-warning)"
+        title="Produção em andamento (ProductionOrder) — não é estoque físico disponível. Sem uma necessidade quantificada aqui (ruptura agregada do CD/Site), não é possível afirmar se a quantidade em produção é suficiente."
+      >
+        Produção em aberto: {formatNumero(info.quantidade)} un. (necessidade não quantificada)
+      </Badge>
+    );
+  }
   return (
     <Badge
       color={info.cobertura === "total" ? "var(--status-good)" : "var(--status-warning)"}
@@ -228,14 +234,109 @@ function BadgeProducao({ info }: { info?: { quantidade: number; cobertura: "parc
   );
 }
 
-// Tabela reaproveitada pelas 2 áreas de transferência (Abastecimento e Recolhimento) — mesmas
-// colunas, só filtra a lista de entrada e o texto do cabeçalho mudam por área.
+// Cabeçalho de colunas compartilhado por todas as tabelas de movimentação (Abastecimento,
+// Recolhimento e os 2 sub-blocos de prioridade dentro de Abastecimento).
+function CabecalhoColunasMovimentacao() {
+  return (
+    <tr className="border-b border-[var(--gridline)] bg-[var(--page-plane)] text-left text-[var(--text-muted)]">
+      <th className="px-3 py-1.5 font-medium whitespace-nowrap">Produto</th>
+      <th className="px-3 py-1.5 font-medium whitespace-nowrap">Origem</th>
+      <th className="px-3 py-1.5 font-medium whitespace-nowrap">Destino</th>
+      <th className="px-3 py-1.5 text-right font-medium whitespace-nowrap">Qtd.</th>
+      <th className="px-3 py-1.5 font-medium whitespace-nowrap">Prioridade</th>
+      <th className="px-3 py-1.5 font-medium whitespace-nowrap">Classificação</th>
+      <th className="px-3 py-1.5 font-medium">Motivo</th>
+    </tr>
+  );
+}
+
+// Linhas de uma lista de movimentações — reaproveitado tanto por uma tabela única (Recolhimento)
+// quanto por cada sub-bloco de prioridade dentro de Abastecimento. Origem/destino/quantidade/
+// motivo sempre visíveis na própria linha, nunca só dentro de uma badge (pedido Rodrigo
+// 2026-11-13: não quer que o usuário precise interpretar só uma badge pra entender a origem).
+function LinhasMovimentacao({
+  movimentacoes,
+  podeDecidir,
+  idPrefixo,
+  aberta,
+  setAberta,
+}: {
+  movimentacoes: MovimentacaoRecomendada[];
+  podeDecidir: boolean;
+  idPrefixo: string;
+  aberta: string | null;
+  setAberta: (id: string | null) => void;
+}) {
+  return (
+    <>
+      {movimentacoes.map((m, i) => {
+        const id = `${idPrefixo}-${m.cod}-${m.origemPosicaoId}-${m.destinoPosicaoId}-${i}`;
+        const cls = classificacaoInfo(m.classificacao);
+        const pri = prioridadeInfo(m.prioridade);
+        const conf = confiancaInfo(m.confianca);
+        const estaAberta = aberta === id;
+        return (
+          <Fragment key={id}>
+            <tr
+              className="cursor-pointer border-b border-[var(--gridline)] hover:bg-[var(--page-plane)]"
+              onClick={() => setAberta(estaAberta ? null : id)}
+              aria-expanded={estaAberta}
+              data-testid="movimentacao-linha"
+            >
+              <td className="px-3 py-1.5 text-[var(--text-primary)]">
+                <span aria-hidden className="mr-1 inline-block text-[var(--text-muted)]">
+                  {estaAberta ? "▾" : "▸"}
+                </span>
+                {m.produto}
+                <span className="text-[var(--text-muted)]">
+                  {m.cor ? ` · ${m.cor}` : ""}
+                  {m.tamanho ? ` · ${m.tamanho}` : ""} ({m.cod})
+                </span>
+              </td>
+              <td className="px-3 py-1.5 whitespace-nowrap text-[var(--text-secondary)]">{m.origemNome}</td>
+              <td className="px-3 py-1.5 whitespace-nowrap text-[var(--text-secondary)]">{m.destinoNome}</td>
+              <td className="px-3 py-1.5 text-right tabular-nums font-medium text-[var(--text-primary)]">
+                {formatNumero(m.quantidadeSugerida)}
+              </td>
+              <td className="px-3 py-1.5">
+                <Badge color={pri.color}>{pri.label}</Badge>
+              </td>
+              <td className="px-3 py-1.5">
+                <span className="inline-flex flex-wrap items-center gap-1">
+                  <Badge color={cls.color} title={cls.descricao}>
+                    {cls.label}
+                  </Badge>
+                  {m.confianca !== "alta" && (
+                    <Badge color={conf.color} title={m.avisos.join(" ")}>
+                      {m.confianca === "baixa" ? "Baixa confiança" : "Conf. média"}
+                    </Badge>
+                  )}
+                </span>
+              </td>
+              <td className="max-w-[28rem] px-3 py-1.5 text-[var(--text-muted)]">
+                <span className="line-clamp-2">{m.justificativa[0]}</span>
+              </td>
+            </tr>
+            {estaAberta && (
+              <tr className="border-b border-[var(--gridline)]">
+                <td colSpan={7} className="p-0">
+                  <DetalheLinha m={m} podeDecidir={podeDecidir} />
+                </td>
+              </tr>
+            )}
+          </Fragment>
+        );
+      })}
+    </>
+  );
+}
+
+// Tabela de uma área só (Recolhimento) — 1 tabela, sem sub-blocos de prioridade.
 function SecaoMovimentacoes({
   titulo,
   subtitulo,
   movimentacoes,
   podeDecidir,
-  mostrarPrioridadeOrigem,
   idPrefixo,
   aberta,
   setAberta,
@@ -245,7 +346,6 @@ function SecaoMovimentacoes({
   subtitulo?: string;
   movimentacoes: MovimentacaoRecomendada[];
   podeDecidir: boolean;
-  mostrarPrioridadeOrigem: boolean;
   idPrefixo: string;
   aberta: string | null;
   setAberta: (id: string | null) => void;
@@ -265,84 +365,113 @@ function SecaoMovimentacoes({
       <div className="overflow-x-auto">
         <table className="w-full text-xs">
           <thead>
-            <tr className="border-b border-[var(--gridline)] bg-[var(--page-plane)] text-left text-[var(--text-muted)]">
-              <th className="px-3 py-1.5 font-medium whitespace-nowrap">Produto</th>
-              <th className="px-3 py-1.5 font-medium whitespace-nowrap">Origem</th>
-              <th className="px-3 py-1.5 font-medium whitespace-nowrap">Destino</th>
-              <th className="px-3 py-1.5 text-right font-medium whitespace-nowrap">Qtd.</th>
-              <th className="px-3 py-1.5 font-medium whitespace-nowrap">Prioridade</th>
-              <th className="px-3 py-1.5 font-medium whitespace-nowrap">Classificação</th>
-              <th className="px-3 py-1.5 font-medium">Justificativa</th>
-            </tr>
+            <CabecalhoColunasMovimentacao />
           </thead>
           <tbody>
-            {movimentacoes.map((m, i) => {
-              const id = `${idPrefixo}-${m.cod}-${m.origemPosicaoId}-${m.destinoPosicaoId}-${i}`;
-              const cls = classificacaoInfo(m.classificacao);
-              const pri = prioridadeInfo(m.prioridade);
-              const conf = confiancaInfo(m.confianca);
-              const estaAberta = aberta === id;
-              return (
-                <Fragment key={id}>
-                  <tr
-                    className="cursor-pointer border-b border-[var(--gridline)] hover:bg-[var(--page-plane)]"
-                    onClick={() => setAberta(estaAberta ? null : id)}
-                    aria-expanded={estaAberta}
-                    data-testid="movimentacao-linha"
-                  >
-                    <td className="px-3 py-1.5 text-[var(--text-primary)]">
-                      <span aria-hidden className="mr-1 inline-block text-[var(--text-muted)]">
-                        {estaAberta ? "▾" : "▸"}
-                      </span>
-                      {m.produto}
-                      <span className="text-[var(--text-muted)]">
-                        {m.cor ? ` · ${m.cor}` : ""}
-                        {m.tamanho ? ` · ${m.tamanho}` : ""} ({m.cod})
-                      </span>
-                    </td>
-                    <td className="px-3 py-1.5 whitespace-nowrap text-[var(--text-secondary)]">
-                      <span className="inline-flex items-center gap-1.5">
-                        {mostrarPrioridadeOrigem && <BadgeOrigem prioridadeOrigem={m.prioridadeOrigem} />}
-                        {m.origemNome}
-                      </span>
-                    </td>
-                    <td className="px-3 py-1.5 whitespace-nowrap text-[var(--text-secondary)]">{m.destinoNome}</td>
-                    <td className="px-3 py-1.5 text-right tabular-nums font-medium text-[var(--text-primary)]">
-                      {formatNumero(m.quantidadeSugerida)}
-                    </td>
-                    <td className="px-3 py-1.5">
-                      <Badge color={pri.color}>{pri.label}</Badge>
-                    </td>
-                    <td className="px-3 py-1.5">
-                      <span className="inline-flex flex-wrap items-center gap-1">
-                        <Badge color={cls.color} title={cls.descricao}>
-                          {cls.label}
-                        </Badge>
-                        {m.confianca !== "alta" && (
-                          <Badge color={conf.color} title={m.avisos.join(" ")}>
-                            {m.confianca === "baixa" ? "Baixa confiança" : "Conf. média"}
-                          </Badge>
-                        )}
-                      </span>
-                    </td>
-                    <td className="max-w-[28rem] px-3 py-1.5 text-[var(--text-muted)]">
-                      <span className="line-clamp-2">{m.justificativa[0]}</span>
-                    </td>
-                  </tr>
-                  {estaAberta && (
-                    <tr className="border-b border-[var(--gridline)]">
-                      <td colSpan={7} className="p-0">
-                        <DetalheLinha m={m} podeDecidir={podeDecidir} />
-                      </td>
-                    </tr>
-                  )}
-                </Fragment>
-              );
-            })}
+            <LinhasMovimentacao
+              movimentacoes={movimentacoes}
+              podeDecidir={podeDecidir}
+              idPrefixo={idPrefixo}
+              aberta={aberta}
+              setAberta={setAberta}
+            />
             {movimentacoes.length === 0 && (
               <tr>
                 <td colSpan={7} className="px-3 py-4 text-center text-[var(--text-muted)]">
                   {vazio}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+// Abastecimento junta CD/Site→loja e loja→loja (pedido Rodrigo 2026-11-13: continuar com 4 áreas,
+// não 5 — ambas respondem "quem cobre a necessidade da loja", só a origem muda), mas em 2 SUB-
+// BLOCOS com cabeçalho próprio explicando a prioridade e a condição — não só uma badge pequena na
+// coluna Origem. Cada sub-bloco é uma tabela própria com origem/destino/quantidade/motivo sempre
+// visíveis, igual Recolhimento.
+function SecaoAbastecimento({
+  cdSiteLoja,
+  lojaLoja,
+  podeDecidir,
+  aberta,
+  setAberta,
+}: {
+  cdSiteLoja: MovimentacaoRecomendada[];
+  lojaLoja: MovimentacaoRecomendada[];
+  podeDecidir: boolean;
+  aberta: string | null;
+  setAberta: (id: string | null) => void;
+}) {
+  const total = cdSiteLoja.length + lojaLoja.length;
+  return (
+    <section className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--gridline)] px-4 py-2.5">
+        <h2 className="text-sm font-medium text-[var(--text-secondary)]">Abastecimento ({formatNumero(total)})</h2>
+        <span className="text-xs text-[var(--text-muted)]">Clique numa linha pra abrir o detalhe</span>
+      </div>
+
+      <div className="border-b border-[var(--gridline)] bg-[color-mix(in_srgb,var(--series-1)_6%,transparent)] px-4 py-2">
+        <p className="text-xs font-semibold text-[var(--text-primary)]">
+          Prioridade 1 — CD/Site → loja: abastecimento prioritário
+        </p>
+        <p className="text-[11px] text-[var(--text-muted)]">
+          O CD/Site é sempre a primeira origem tentada pra cobrir a necessidade de uma loja.
+        </p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <CabecalhoColunasMovimentacao />
+          </thead>
+          <tbody>
+            <LinhasMovimentacao
+              movimentacoes={cdSiteLoja}
+              podeDecidir={podeDecidir}
+              idPrefixo="abast-p1"
+              aberta={aberta}
+              setAberta={setAberta}
+            />
+            {cdSiteLoja.length === 0 && (
+              <tr>
+                <td colSpan={7} className="px-3 py-3 text-center text-[var(--text-muted)]">
+                  Nenhum abastecimento pelo CD/Site no filtro atual.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="border-b border-t border-[var(--gridline)] bg-[color-mix(in_srgb,var(--text-muted)_6%,transparent)] px-4 py-2">
+        <p className="text-xs font-semibold text-[var(--text-primary)]">
+          Prioridade 2 — loja → loja: redistribuição entre lojas
+        </p>
+        <p className="text-[11px] text-[var(--text-muted)]">
+          Somente para a necessidade que permaneceu depois da tentativa de abastecimento pelo CD/Site.
+        </p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <CabecalhoColunasMovimentacao />
+          </thead>
+          <tbody>
+            <LinhasMovimentacao
+              movimentacoes={lojaLoja}
+              podeDecidir={podeDecidir}
+              idPrefixo="abast-p2"
+              aberta={aberta}
+              setAberta={setAberta}
+            />
+            {lojaLoja.length === 0 && (
+              <tr>
+                <td colSpan={7} className="px-3 py-3 text-center text-[var(--text-muted)]">
+                  Nenhuma redistribuição entre lojas pendente no filtro atual.
                 </td>
               </tr>
             )}
@@ -369,13 +498,15 @@ export function MovimentacoesTable({
   const [aberta, setAberta] = useState<string | null>(null);
 
   // Abastecimento junta CD/Site→loja (prioridade 1) e loja→loja (prioridade 2, só o residual que o
-  // CD não cobriu) — as duas são "cobrir a necessidade de uma loja", só a origem muda; a badge de
-  // prioridade na coluna Origem já deixa claro qual é qual.
-  const abastecimento = movimentacoes.filter((m) => m.tipoMovimentacao !== "loja_cd_site");
+  // CD não cobriu) em 2 sub-blocos explícitos dentro da mesma área (SecaoAbastecimento) — pedido
+  // Rodrigo 2026-11-13: não quer que o usuário precise interpretar só uma badge pra entender a
+  // origem, quer o cabeçalho "Prioridade 1 — CD/Site → loja" / "Prioridade 2 — loja → loja" visível.
+  const cdSiteLoja = movimentacoes.filter((m) => m.tipoMovimentacao === "cd_site_loja");
+  const lojaLoja = movimentacoes.filter((m) => m.tipoMovimentacao === "loja_loja");
   const recolhimento = movimentacoes.filter((m) => m.tipoMovimentacao === "loja_cd_site");
   const precisaProducao = manter.filter((k) => k.necessidadeReposicao);
   const mantido = manter.filter((k) => !k.necessidadeReposicao);
-  const totalFiltrado = abastecimento.length + recolhimento.length;
+  const totalFiltrado = cdSiteLoja.length + lojaLoja.length + recolhimento.length;
 
   return (
     <div className="space-y-4">
@@ -385,16 +516,12 @@ export function MovimentacoesTable({
         </p>
       )}
 
-      <SecaoMovimentacoes
-        titulo="Abastecimento — CD/Site e lojas cobrindo necessidade"
-        subtitulo="CD/Site é sempre tentado primeiro; loja só complementa o que sobrou depois do CD/Site."
-        movimentacoes={abastecimento}
+      <SecaoAbastecimento
+        cdSiteLoja={cdSiteLoja}
+        lojaLoja={lojaLoja}
         podeDecidir={podeDecidir}
-        mostrarPrioridadeOrigem
-        idPrefixo="abast"
         aberta={aberta}
         setAberta={setAberta}
-        vazio="Nenhuma necessidade de loja sem cobertura no filtro atual."
       />
 
       <SecaoMovimentacoes
@@ -402,7 +529,6 @@ export function MovimentacoesTable({
         subtitulo="Só quando há venda real comprovada no site nos últimos 90 dias — vender bem na loja física, por si só, nunca justifica recolher."
         movimentacoes={recolhimento}
         podeDecidir={podeDecidir}
-        mostrarPrioridadeOrigem={false}
         idPrefixo="recol"
         aberta={aberta}
         setAberta={setAberta}
@@ -481,7 +607,7 @@ export function MovimentacoesTable({
                         </span>
                       </td>
                       <td className="px-3 py-1.5">
-                        <BadgeProducao info={k.producaoEmAndamento} />
+                        <BadgeProducao info={k.producaoEmAndamento} semQuantidadeComparavel />
                       </td>
                     </tr>
                   );
