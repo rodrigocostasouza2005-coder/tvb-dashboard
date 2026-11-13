@@ -202,6 +202,85 @@ describe("syncArmazenadores — âncora do primaryStoreId e alerta de armazém n
     expect(resultado.primaryStoreId).toBe("store-cd");
   });
 
+  // Achado na auditoria de falsos sucessos de 2026-11-12/13: resposta vazia de /armazenadores
+  // nunca é legítima (todo token conhecido tem pelo menos 1 armazém) — sem esta correção,
+  // primaryStoreId ficava null e storeByDapicId ficava vazio SEM lançar nada, o que fazia
+  // syncVendas/syncEstoque silenciosamente reportarem zero como se fosse sucesso real.
+  it("resposta vazia de /armazenadores -> lança erro (nunca é 'sem armazém' legítimo pra um token conhecido)", async () => {
+    const client = fakeClient("cd-atacado", []);
+    const { syncArmazenadores } = await import("../sync-runner");
+    await expect(syncArmazenadores(client)).rejects.toThrow(/0 armazenadores/);
+  });
+
+  // Achado na FASE DE VALIDAÇÃO (não corrigido nesta rodada — risco residual documentado, ver
+  // docs/validacao-prs-falsos-sucessos-2026-11-12.md): a correção acima só cobre /armazenadores
+  // TOTALMENTE vazio. Se a API devolver uma lista NÃO vazia mas incompleta (ex: só o armazém de
+  // "Defeito", que não vende), para um token SEM âncora (leblon/rio-sul/barra, que usam a regra
+  // antiga "o primeiro que vende") primaryStoreId continua null, SEM lançar e SEM alertar (só
+  // cd-atacado tem o fallback+alerta de armazém âncora ausente, linha ~129-151). Este teste
+  // DOCUMENTA o comportamento atual (não corrigido) — se um dia alguém "corrigir" isso sem querer
+  // e o teste passar a falhar, é sinal de que o comportamento mudou e o relatório de validação
+  // precisa ser atualizado.
+  it("[RISCO RESIDUAL DOCUMENTADO, NÃO CORRIGIDO] /armazenadores não-vazio mas sem nenhum armazém que vende, token sem âncora -> primaryStoreId fica null silenciosamente", async () => {
+    storeFindFirst.mockResolvedValue(null);
+    storeCreate.mockImplementation(({ data }: { data: { code: string } }) => Promise.resolve({ id: `store-${data.code}` }));
+
+    // "leblon" não tem PRIMARY_STORE_CODE_BY_CLIENT_LABEL configurado (só cd-atacado tem) — a
+    // única entrada devolvida é um armazém que sellsProducts() classifica como NÃO-venda.
+    const client = fakeClient("leblon", [{ Id: 50, Descricao: "Defeito" }]);
+    const { syncArmazenadores } = await import("../sync-runner");
+    const resultado = await syncArmazenadores(client);
+
+    // Comportamento ATUAL: nenhum erro, nenhum alerta — primaryStoreId fica null silenciosamente.
+    expect(resultado.primaryStoreId).toBeNull();
+  });
+
+  // Achado relacionado (mesma categoria de risco residual): mesmo com /armazenadores não-vazio E
+  // com um primaryStoreId resolvido, se a API de ESTOQUE (/armazenadores/produtos, endpoint
+  // DIFERENTE) referenciar um IdArmazenador que não apareceu na resposta de /armazenadores (ex:
+  // uma inconsistência pontual entre os 2 endpoints, ou um armazém novo criado entre as 2
+  // chamadas), a linha de estoque é descartada silenciosamente (`if (!storeId) continue` em
+  // syncEstoque) — sem erro, sem log, mesmo com `data.length > 0` (outras linhas válidas mascaram
+  // o descarte). Documentado como risco residual, não corrigido nesta rodada (ver seção de
+  // validação) — bloquear isso sem mais cuidado arriscaria falso-FAILED numa corrida legítima de
+  // "armazém novo criado entre as 2 chamadas".
+  it("[RISCO RESIDUAL DOCUMENTADO, NÃO CORRIGIDO] /armazenadores/produtos cita um IdArmazenador que /armazenadores não devolveu -> linha descartada silenciosamente, sync continua SUCCESS", async () => {
+    storeFindFirst.mockResolvedValue(null);
+    storeCreate.mockImplementation(({ data }: { data: { code: string } }) => Promise.resolve({ id: `store-${data.code}` }));
+
+    const client = {
+      label: "loja-a",
+      // /armazenadores só devolve o armazém Id=1 — Id=2 não existe nesta resposta.
+      fetchArmazenadores: () => Promise.resolve([{ Id: 1, Descricao: "Loja A" }]),
+      // /armazenadores/produtos (endpoint DIFERENTE) traz uma linha válida pro Id=1 e uma linha
+      // pro Id=2, que /armazenadores não devolveu nesta mesma sync — inconsistência entre os 2
+      // endpoints (ex: armazém criado entre as 2 chamadas, ou falha pontual de 1 dos 2).
+      fetchEstoqueTodosArmazenadores: () =>
+        Promise.resolve([
+          { IdArmazenador: 1, IdGradeProduto: 500, Produto: "Camisa Conhecida", Grupo: "Camisas", QuantidadeReal: 10 },
+          { IdArmazenador: 2, IdGradeProduto: 600, Produto: "Camisa Órfã", Grupo: "Camisas", QuantidadeReal: 999 },
+        ]),
+      fetchVendasPdv: () => Promise.resolve([]),
+      fetchVendaPdvDetalhe: () => Promise.resolve(null),
+      fetchVendasPdvModificadas: () => Promise.resolve([]),
+    } as unknown as DapicClient;
+
+    createDapicClientsMock.mockImplementationOnce(() => [client]);
+
+    const { runSync } = await import("../sync-runner");
+    const response = await runSync({ silent: true });
+    const body = await response.json();
+
+    // Comportamento ATUAL: nenhuma falha reportada (a linha órfã é descartada silenciosamente,
+    // mas como a linha do armazém 1 é válida, data.length > 0 e o upsert/SyncLog seguem SUCCESS).
+    expect(body.falhasParciais).toHaveLength(0);
+    const stockLogCall = syncLogCreate.mock.calls.find((c) => c[0]?.data?.source === "STOCK");
+    expect(stockLogCall?.[0]?.data?.status).toBe("SUCCESS");
+    // As 999 unidades do armazém "órfão" nunca aparecem em lugar nenhum — nem no total, nem
+    // num aviso. O total de estoque reflete só a linha que teve mapeamento conhecido (1 produto).
+    expect(body.estoque).toBe(1);
+  });
+
   it("CD ausente na resposta da API, mas já existe no banco -> usa o registro conhecido + alerta", async () => {
     storeFindFirst.mockResolvedValue(null); // "Conserto" é novo, não existe ainda
     storeCreate.mockResolvedValue({ id: "store-conserto" });
