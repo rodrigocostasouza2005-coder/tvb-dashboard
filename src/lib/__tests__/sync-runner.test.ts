@@ -202,6 +202,85 @@ describe("syncArmazenadores — âncora do primaryStoreId e alerta de armazém n
     expect(resultado.primaryStoreId).toBe("store-cd");
   });
 
+  // Achado na auditoria de falsos sucessos de 2026-11-12/13: resposta vazia de /armazenadores
+  // nunca é legítima (todo token conhecido tem pelo menos 1 armazém) — sem esta correção,
+  // primaryStoreId ficava null e storeByDapicId ficava vazio SEM lançar nada, o que fazia
+  // syncVendas/syncEstoque silenciosamente reportarem zero como se fosse sucesso real.
+  it("resposta vazia de /armazenadores -> lança erro (nunca é 'sem armazém' legítimo pra um token conhecido)", async () => {
+    const client = fakeClient("cd-atacado", []);
+    const { syncArmazenadores } = await import("../sync-runner");
+    await expect(syncArmazenadores(client)).rejects.toThrow(/0 armazenadores/);
+  });
+
+  // Achado na FASE DE VALIDAÇÃO (não corrigido nesta rodada — risco residual documentado, ver
+  // docs/validacao-prs-falsos-sucessos-2026-11-12.md): a correção acima só cobre /armazenadores
+  // TOTALMENTE vazio. Se a API devolver uma lista NÃO vazia mas incompleta (ex: só o armazém de
+  // "Defeito", que não vende), para um token SEM âncora (leblon/rio-sul/barra, que usam a regra
+  // antiga "o primeiro que vende") primaryStoreId continua null, SEM lançar e SEM alertar (só
+  // cd-atacado tem o fallback+alerta de armazém âncora ausente, linha ~129-151). Este teste
+  // DOCUMENTA o comportamento atual (não corrigido) — se um dia alguém "corrigir" isso sem querer
+  // e o teste passar a falhar, é sinal de que o comportamento mudou e o relatório de validação
+  // precisa ser atualizado.
+  it("[RISCO RESIDUAL DOCUMENTADO, NÃO CORRIGIDO] /armazenadores não-vazio mas sem nenhum armazém que vende, token sem âncora -> primaryStoreId fica null silenciosamente", async () => {
+    storeFindFirst.mockResolvedValue(null);
+    storeCreate.mockImplementation(({ data }: { data: { code: string } }) => Promise.resolve({ id: `store-${data.code}` }));
+
+    // "leblon" não tem PRIMARY_STORE_CODE_BY_CLIENT_LABEL configurado (só cd-atacado tem) — a
+    // única entrada devolvida é um armazém que sellsProducts() classifica como NÃO-venda.
+    const client = fakeClient("leblon", [{ Id: 50, Descricao: "Defeito" }]);
+    const { syncArmazenadores } = await import("../sync-runner");
+    const resultado = await syncArmazenadores(client);
+
+    // Comportamento ATUAL: nenhum erro, nenhum alerta — primaryStoreId fica null silenciosamente.
+    expect(resultado.primaryStoreId).toBeNull();
+  });
+
+  // Achado relacionado (mesma categoria de risco residual): mesmo com /armazenadores não-vazio E
+  // com um primaryStoreId resolvido, se a API de ESTOQUE (/armazenadores/produtos, endpoint
+  // DIFERENTE) referenciar um IdArmazenador que não apareceu na resposta de /armazenadores (ex:
+  // uma inconsistência pontual entre os 2 endpoints, ou um armazém novo criado entre as 2
+  // chamadas), a linha de estoque é descartada silenciosamente (`if (!storeId) continue` em
+  // syncEstoque) — sem erro, sem log, mesmo com `data.length > 0` (outras linhas válidas mascaram
+  // o descarte). Documentado como risco residual, não corrigido nesta rodada (ver seção de
+  // validação) — bloquear isso sem mais cuidado arriscaria falso-FAILED numa corrida legítima de
+  // "armazém novo criado entre as 2 chamadas".
+  it("[RISCO RESIDUAL DOCUMENTADO, NÃO CORRIGIDO] /armazenadores/produtos cita um IdArmazenador que /armazenadores não devolveu -> linha descartada silenciosamente, sync continua SUCCESS", async () => {
+    storeFindFirst.mockResolvedValue(null);
+    storeCreate.mockImplementation(({ data }: { data: { code: string } }) => Promise.resolve({ id: `store-${data.code}` }));
+
+    const client = {
+      label: "loja-a",
+      // /armazenadores só devolve o armazém Id=1 — Id=2 não existe nesta resposta.
+      fetchArmazenadores: () => Promise.resolve([{ Id: 1, Descricao: "Loja A" }]),
+      // /armazenadores/produtos (endpoint DIFERENTE) traz uma linha válida pro Id=1 e uma linha
+      // pro Id=2, que /armazenadores não devolveu nesta mesma sync — inconsistência entre os 2
+      // endpoints (ex: armazém criado entre as 2 chamadas, ou falha pontual de 1 dos 2).
+      fetchEstoqueTodosArmazenadores: () =>
+        Promise.resolve([
+          { IdArmazenador: 1, IdGradeProduto: 500, Produto: "Camisa Conhecida", Grupo: "Camisas", QuantidadeReal: 10 },
+          { IdArmazenador: 2, IdGradeProduto: 600, Produto: "Camisa Órfã", Grupo: "Camisas", QuantidadeReal: 999 },
+        ]),
+      fetchVendasPdv: () => Promise.resolve([]),
+      fetchVendaPdvDetalhe: () => Promise.resolve(null),
+      fetchVendasPdvModificadas: () => Promise.resolve([]),
+    } as unknown as DapicClient;
+
+    createDapicClientsMock.mockImplementationOnce(() => [client]);
+
+    const { runSync } = await import("../sync-runner");
+    const response = await runSync({ silent: true });
+    const body = await response.json();
+
+    // Comportamento ATUAL: nenhuma falha reportada (a linha órfã é descartada silenciosamente,
+    // mas como a linha do armazém 1 é válida, data.length > 0 e o upsert/SyncLog seguem SUCCESS).
+    expect(body.falhasParciais).toHaveLength(0);
+    const stockLogCall = syncLogCreate.mock.calls.find((c) => c[0]?.data?.source === "STOCK");
+    expect(stockLogCall?.[0]?.data?.status).toBe("SUCCESS");
+    // As 999 unidades do armazém "órfão" nunca aparecem em lugar nenhum — nem no total, nem
+    // num aviso. O total de estoque reflete só a linha que teve mapeamento conhecido (1 produto).
+    expect(body.estoque).toBe(1);
+  });
+
   it("CD ausente na resposta da API, mas já existe no banco -> usa o registro conhecido + alerta", async () => {
     storeFindFirst.mockResolvedValue(null); // "Conserto" é novo, não existe ainda
     storeCreate.mockResolvedValue({ id: "store-conserto" });
@@ -754,6 +833,141 @@ describe("runSync — falha TOTAL de 1 loja não derruba as outras (integração
     expect(body.falhasParciais).toHaveLength(1);
     expect(body.falhasParciais[0]).toContain("loja-b");
     expect(body.falhasParciais[0]).toContain("armazenadores");
+  });
+
+  // Achado na investigação forense de 2026-11-12: diferente do teste acima (loja B falha com
+  // exceção de rede/token), aqui a API responde HTTP 200 com lista VAZIA — antes da correção,
+  // isso não lançava nada, syncEstoque devolvia 0 silenciosamente, e o ciclo todo (inclusive a
+  // loja B) saía marcado SUCCESS no SyncLog, com StockSnapshot da loja B intocado e sem nenhum
+  // aviso. Este teste prova que isso agora é tratado como falha real, pelo mesmo caminho que
+  // qualquer outro erro de API (falhaDeLoja), não como "estoque zerado válido".
+  it("DAPIC responde 200 com lista vazia de estoque -> tratado como falha, não como sucesso com zero registros", async () => {
+    storeFindFirst.mockResolvedValue(null);
+    storeCreate.mockImplementation(({ data }: { data: { code: string } }) => Promise.resolve({ id: `store-${data.code}` }));
+
+    const clientA = {
+      label: "loja-a",
+      fetchArmazenadores: () => Promise.resolve([{ Id: 1, Descricao: "Loja A" }]),
+      fetchEstoqueTodosArmazenadores: () =>
+        Promise.resolve([
+          { IdArmazenador: 1, IdGradeProduto: 500, Produto: "Camisa X", Grupo: "Camisas", QuantidadeReal: 10 },
+        ]),
+      fetchVendasPdv: () => Promise.resolve([]),
+      fetchVendaPdvDetalhe: () => Promise.resolve(null),
+      fetchVendasPdvModificadas: () => Promise.resolve([]),
+    } as unknown as DapicClient;
+
+    const clientB = {
+      label: "loja-b",
+      fetchArmazenadores: () => Promise.resolve([{ Id: 2, Descricao: "Loja B" }]),
+      // O caso real investigado: nenhum erro, nenhum 429, nenhum 401 — só uma lista vazia.
+      fetchEstoqueTodosArmazenadores: () => Promise.resolve([]),
+      fetchVendasPdv: () => Promise.resolve([]),
+      fetchVendaPdvDetalhe: () => Promise.resolve(null),
+      fetchVendasPdvModificadas: () => Promise.resolve([]),
+    } as unknown as DapicClient;
+
+    createDapicClientsMock.mockImplementationOnce(() => [clientA, clientB]);
+
+    const { runSync } = await import("../sync-runner");
+    const response = await runSync({ silent: true });
+    const body = await response.json();
+
+    // A loja A continua sincronizando normalmente — a falha de B não contamina o resultado dela.
+    expect(body.estoque).toBeGreaterThanOrEqual(1);
+    // A falha de B aparece isolada e identificada como falha de "estoque" — nunca como
+    // estoque:0 silencioso misturado no resultado agregado como se fosse sucesso.
+    expect(body.falhasParciais.some((f: string) => f.includes("loja-b") && f.includes("estoque"))).toBe(true);
+
+    // SyncLog(source="STOCK") deste ciclo tem que registrar a falha de verdade — é exatamente
+    // isso que impede `atualizadoEm` (getLastEstoqueSyncTime) de avançar como se o estoque da
+    // loja B tivesse sido atualizado.
+    const stockLogCall = syncLogCreate.mock.calls.find((c) => c[0]?.data?.source === "STOCK");
+    expect(stockLogCall?.[0]?.data?.status).toBe("FAILED");
+  });
+
+  // Fase de validação (docs/validacao-prs-falsos-sucessos-2026-11-12.md), cenário pedido
+  // explicitamente: erro HTTP real (não lista vazia) na API de estoque especificamente — já
+  // funcionava antes da correção (o catch de syncOneClient sempre tratou exceção real), mas não
+  // havia teste dedicado pra esse estágio específico (só pra "armazenadores", no teste de falha
+  // TOTAL mais acima). Confirma que a correção do PR #81 não regrediu esse caminho já existente.
+  it("API de estoque rejeita com erro HTTP real (não vazio) -> continua caindo em falhaDeLoja('estoque'), sem regressão", async () => {
+    storeFindFirst.mockResolvedValue(null);
+    storeCreate.mockImplementation(({ data }: { data: { code: string } }) => Promise.resolve({ id: `store-${data.code}` }));
+
+    const clientA = {
+      label: "loja-a",
+      fetchArmazenadores: () => Promise.resolve([{ Id: 1, Descricao: "Loja A" }]),
+      fetchEstoqueTodosArmazenadores: () =>
+        Promise.resolve([
+          { IdArmazenador: 1, IdGradeProduto: 500, Produto: "Camisa X", Grupo: "Camisas", QuantidadeReal: 10 },
+        ]),
+      fetchVendasPdv: () => Promise.resolve([]),
+      fetchVendaPdvDetalhe: () => Promise.resolve(null),
+      fetchVendasPdvModificadas: () => Promise.resolve([]),
+    } as unknown as DapicClient;
+
+    const clientB = {
+      label: "loja-b",
+      fetchArmazenadores: () => Promise.resolve([{ Id: 2, Descricao: "Loja B" }]),
+      // Erro HTTP real (ex: 500 depois de esgotar o retry de dapic.ts), não lista vazia.
+      fetchEstoqueTodosArmazenadores: () => Promise.reject(new Error("DAPIC /armazenadores/produtos (loja-b) -> 500 Internal Server Error")),
+      fetchVendasPdv: () => Promise.resolve([]),
+      fetchVendaPdvDetalhe: () => Promise.resolve(null),
+      fetchVendasPdvModificadas: () => Promise.resolve([]),
+    } as unknown as DapicClient;
+
+    createDapicClientsMock.mockImplementationOnce(() => [clientA, clientB]);
+
+    const { runSync } = await import("../sync-runner");
+    const response = await runSync({ silent: true });
+    const body = await response.json();
+
+    expect(body.estoque).toBeGreaterThanOrEqual(1); // loja A não contaminada
+    expect(body.falhasParciais.some((f: string) => f.includes("loja-b") && f.includes("estoque") && f.includes("500"))).toBe(true);
+    const stockLogCall = syncLogCreate.mock.calls.find((c) => c[0]?.data?.source === "STOCK");
+    expect(stockLogCall?.[0]?.data?.status).toBe("FAILED");
+  });
+
+  // Cenário pedido explicitamente: falha durante a PERSISTÊNCIA (não na busca da API) — a API
+  // devolve dado real, mas o upsert em si falha (ex: conexão com o Neon caiu no meio do lote).
+  it("API de estoque devolve dado real, mas a persistência (upsert) falha -> continua caindo em falhaDeLoja('estoque'), nunca mascarado como sucesso", async () => {
+    storeFindFirst.mockResolvedValue(null);
+    storeCreate.mockImplementation(({ data }: { data: { code: string } }) => Promise.resolve({ id: `store-${data.code}` }));
+    // A 1ª chamada real a $executeRaw em todo runSync() é o advisory lock de acquireSyncLock
+    // (`SELECT pg_advisory_xact_lock(...)`, sync-runner.ts:1438) — não tem nada a ver com estoque.
+    // Deixa ela passar normal e só a 2ª chamada (o upsert de StockSnapshot da loja única deste
+    // teste) falha. Descoberto depurando um falso-negativo: sem isso, o mock "consumia" o lock em
+    // vez do upsert, e o teste falhava com um erro não relacionado, uncaught, antes de qualquer
+    // lógica de sync rodar.
+    executeRaw.mockResolvedValueOnce(undefined); // advisory lock
+    executeRaw.mockImplementationOnce(async () => {
+      throw new Error("Neon: conexão perdida no meio do lote");
+    });
+
+    const client = {
+      label: "loja-a",
+      fetchArmazenadores: () => Promise.resolve([{ Id: 1, Descricao: "Loja A" }]),
+      fetchEstoqueTodosArmazenadores: () =>
+        Promise.resolve([
+          { IdArmazenador: 1, IdGradeProduto: 500, Produto: "Camisa X", Grupo: "Camisas", QuantidadeReal: 10 },
+        ]),
+      fetchVendasPdv: () => Promise.resolve([]),
+      fetchVendaPdvDetalhe: () => Promise.resolve(null),
+      fetchVendasPdvModificadas: () => Promise.resolve([]),
+    } as unknown as DapicClient;
+
+    createDapicClientsMock.mockImplementationOnce(() => [client]);
+
+    const { runSync } = await import("../sync-runner");
+    const response = await runSync({ silent: true });
+    const body = await response.json();
+
+    expect(body.falhasParciais.some((f: string) => f.includes("loja-a") && f.includes("estoque"))).toBe(true);
+    const stockLogCall = syncLogCreate.mock.calls.find((c) => c[0]?.data?.source === "STOCK");
+    expect(stockLogCall?.[0]?.data?.status).toBe("FAILED");
+    // Nunca "SUCCESS" com um número que na verdade não foi persistido.
+    expect(stockLogCall?.[0]?.data?.status).not.toBe("SUCCESS");
   });
 });
 

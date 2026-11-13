@@ -35,6 +35,24 @@ async function carregarClienteCadastroIndex(): Promise<ClienteCadastroIndex> {
 
 export async function syncArmazenadores(client: DapicClient) {
   const armazenadores = await client.fetchArmazenadores();
+  // Achado na auditoria de falsos sucessos de 2026-11-12/13 (continuação da investigação do PR
+  // #81): um token sempre tem pelo menos o próprio armazém (e, na prática, vários — CD/ATACADO/
+  // Defeito/Bonificação/etc para cd-atacado, por exemplo) — resposta vazia aqui nunca é legítima
+  // pra nenhum dos 5 tokens já configurados. Sem esta checagem, uma resposta vazia transitória da
+  // API (HTTP 200 sem exceção, mesmo bug de transporte do PR #81, um nível acima) não lançava
+  // nada: `storeByDapicId` ficava um Map vazio e `primaryStoreId` ficava `null`, e ISSO SE
+  // PROPAGAVA: syncVendas/syncFaturas devolvem {vendas:0,...} na hora quando storeId é null (ver
+  // `if (!storeId) return ...` logo no início de syncVendas), e syncEstoque descartava TODA linha
+  // de estoque recebida via `if (!storeId) continue` — mesmo que a API de estoque (endpoint
+  // diferente) tivesse devolvido dado real. O resultado era "sucesso" (ok:true, tudo zero) pra
+  // vendas E estoque da loja inteira no ciclo, sem nenhum erro, sem SyncLog FAILED, sem aviso.
+  // Lançar aqui fecha a cascata na origem, reusando o mesmo caminho de falha que já existe
+  // (catch mais externo de syncOneClient, estágio "armazenadores") — nenhuma infraestrutura nova.
+  if (armazenadores.length === 0) {
+    throw new Error(
+      `DAPIC /armazenadores (${client.label}) devolveu 0 armazenadores — tratando como falha (todo token conhecido tem pelo menos 1), não como ausência legítima`
+    );
+  }
   const storeByDapicId = new Map<number, string>();
   let primaryStoreId: string | null = null;
   let atacadoStoreId: string | null = null;
@@ -158,6 +176,22 @@ export async function syncArmazenadores(client: DapicClient) {
 
 async function syncEstoque(client: DapicClient, storeByDapicId: Map<number, string>) {
   const linhas = await client.fetchEstoqueTodosArmazenadores();
+  // Achado na investigação forense de 2026-11-12 (defasagem real de ~3h no estoque de produção):
+  // a API do DAPIC responder HTTP 200 com lista vazia (hiccup transitório do lado deles, nunca
+  // confirmado estoque genuinamente zerado em TODOS os produtos de uma loja ativa de verdade) não
+  // lançava exceção nenhuma aqui. `data` ficava vazio, o upsert era pulado (`if (data.length)`
+  // abaixo) e a função devolvia `0` normalmente — syncOneClient tratava isso como sucesso
+  // (estoque: 0), e o SyncLog(source="STOCK") do ciclo saía como SUCCESS com finishedAt=agora,
+  // fazendo `atualizadoEm` (getLastEstoqueSyncTime) avançar mesmo com o StockSnapshot daquela loja
+  // intocado — dado antigo sendo reportado como fresco, sem nenhum aviso em lugar nenhum. Lançar
+  // aqui reusa o caminho de falha que JÁ EXISTE (falhaDeLoja em syncOneClient, mesmo tratamento de
+  // qualquer outra falha de API) — não inventa retry nem log novo, só impede que "vazio" seja
+  // tratado como "sucesso com zero registros".
+  if (linhas.length === 0) {
+    throw new Error(
+      `DAPIC /armazenadores/produtos (${client.label}) devolveu 0 linhas — tratando como falha (estoque de loja ativa nunca é zero de verdade), não como estoque vazio legítimo`
+    );
+  }
   const data: StockSnapshotRow[] = [];
   for (const l of linhas) {
     const storeId = storeByDapicId.get(l.IdArmazenador);

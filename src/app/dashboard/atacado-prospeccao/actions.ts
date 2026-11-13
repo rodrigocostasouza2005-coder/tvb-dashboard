@@ -477,3 +477,52 @@ export async function aprovarCandidatosDescobertosAction(formData: FormData) {
   revalidatePath("/dashboard/atacado-prospeccao");
   redirect(`/dashboard/atacado-prospeccao?revisao=concluida&novos=${criados}&duplicados=${duplicados}`);
 }
+
+// --- Exclusão definitiva (faxina de qualidade, 2026-11-13) ---------------------------------
+// Separado de DESCARTAR (atualizarStatusProspectAction, acima — só muda `status`, reversível,
+// qualquer usuário com acesso à aba): exclusão é permanente e mexe em dado real, então segue o
+// mesmo padrão de outras ações críticas do Radar (mapa-compras/estoque-minimo) — só ADMIN/GESTAO.
+// Cascade já cobre as tabelas relacionadas (AtacadoProspectActivity, AtacadoProspectBrand têm
+// onDelete: Cascade no schema — nenhuma órfã fica pra trás, nenhuma migration necessária).
+async function requireGestaoProspeccao(): Promise<{ email: string; name: string }> {
+  const user = await getSessionUser();
+  if (!user || (user.role !== "ADMIN" && user.role !== "GESTAO")) {
+    throw new Error("Sem permissão para excluir prospectos.");
+  }
+  return { email: user.email, name: user.name };
+}
+
+function parseIds(formData: FormData): string[] {
+  return formData
+    .getAll("ids")
+    .map((v) => String(v).trim())
+    .filter(Boolean);
+}
+
+// Etapa 1: nunca exclui direto do clique na lista — só redireciona pra uma tela de confirmação
+// com os IDs selecionados na URL (são cuids internos, nenhum dado sensível) e a contagem real.
+// Pedido explícito: "exibição da quantidade de registros que serão excluídos" + "confirmação
+// explícita antes da exclusão" — como passo SEPARADO do clique de seleção, não um window.confirm.
+export async function prepararExclusaoProspectosAction(formData: FormData) {
+  const user = await getSessionUser();
+  if (!user) redirect("/login");
+  requireTabAccess(user, user.role, "atacado-prospeccao");
+
+  const ids = parseIds(formData);
+  if (ids.length === 0) redirect("/dashboard/atacado-prospeccao?erro=sem-selecao");
+  redirect(`/dashboard/atacado-prospeccao?confirmarExclusao=${ids.join(",")}`);
+}
+
+// Etapa 2: exclusão de fato, só depois da tela de confirmação ter mostrado nomes + contagem.
+export async function excluirProspectosDefinitivamenteAction(formData: FormData) {
+  const { name } = await requireGestaoProspeccao();
+  const ids = parseIds(formData);
+  if (ids.length === 0) redirect("/dashboard/atacado-prospeccao?erro=sem-selecao");
+
+  // deleteMany + cascade — Activity/Brand do prospecto somem junto (onDelete: Cascade no
+  // schema), nunca ficam órfãs. Nenhuma outra tabela do Radar referencia AtacadoProspect.
+  const resultado = await prisma.atacadoProspect.deleteMany({ where: { id: { in: ids } } });
+
+  revalidatePath("/dashboard/atacado-prospeccao");
+  redirect(`/dashboard/atacado-prospeccao?excluidos=${resultado.count}&excluidoPor=${encodeURIComponent(name)}`);
+}
