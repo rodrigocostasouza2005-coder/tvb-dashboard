@@ -206,6 +206,27 @@ async function main() {
     );
   }
 
+  // Dimensiona o total de devoluções "órfãs de verdade" (dapicVendaId preenchido mas sem Sale
+  // correspondente em NENHUMA loja/status) — é o grupo que inclui o caso de TVB Site e Atacado
+  // acima. Separa em pedidos distintos (dapicVendaId) pra saber se é 1 evento isolado ou
+  // sistemático, e vê a faixa de datas das devoluções envolvidas.
+  const todasDapicVendaIds = [...new Set(returns.filter((r) => r.dapicVendaId != null).map((r) => r.dapicVendaId as number))];
+  const salesPorVendaId = await prisma.sale.findMany({
+    where: { dapicVendaId: { in: todasDapicVendaIds } },
+    select: { dapicVendaId: true },
+    distinct: ["dapicVendaId"],
+  });
+  const vendaIdsComSale = new Set(salesPorVendaId.map((s) => s.dapicVendaId));
+  const returnsOrfaosDeVerdade = returns.filter((r) => r.dapicVendaId != null && !vendaIdsComSale.has(r.dapicVendaId));
+  const pedidosOrfaosDistintos = new Set(returnsOrfaosDeVerdade.map((r) => r.dapicVendaId));
+  const valorOrfaos = returnsOrfaosDeVerdade.reduce((s, r) => s + r.valorTotal, 0);
+  const datasOrfaos = returnsOrfaosDeVerdade.map((r) => r.returnDate.getTime());
+  console.log(`\n=== Devoluções "órfãs de verdade" (dapicVendaId preenchido, sale não existe em NENHUMA loja) ===`);
+  console.log(`  ${returnsOrfaosDeVerdade.length} linhas de devolução | ${pedidosOrfaosDistintos.size} pedidos (dapicVendaId) distintos | valor total R$ ${valorOrfaos.toFixed(2)}`);
+  if (datasOrfaos.length > 0) {
+    console.log(`  Datas de devolução entre ${new Date(Math.min(...datasOrfaos)).toISOString().slice(0, 10)} e ${new Date(Math.max(...datasOrfaos)).toISOString().slice(0, 10)}`);
+  }
+
   console.log("\n(Diagnóstico concluído — somente leitura, nenhum registro foi alterado.)");
 }
 
