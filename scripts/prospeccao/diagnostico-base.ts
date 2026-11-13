@@ -113,6 +113,11 @@ async function main() {
   const comDominioProprio = pendentesComEmail.filter((p) => derivarUrlsCandidatasPorEmail(p.email).length > 0).length;
   console.log(`\nPendentes com e-mail de domínio próprio (fallback sem depender de busca): ${comDominioProprio} de ${pendentesComEmail.length}`);
 
+  const pendentesComSite = await prisma.atacadoProspect.count({
+    where: { status: "EM_QUALIFICACAO", grupoComercial: "PENDENTE", site: { not: null } },
+  });
+  console.log(`Pendentes com site já cadastrado (fetch direto, também não depende de busca): ${pendentesComSite} de ${pendentesComEmail.length}`);
+
   console.log("\n(Diagnóstico concluído — nenhum registro foi alterado.)");
 }
 

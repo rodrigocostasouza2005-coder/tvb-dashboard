@@ -139,6 +139,19 @@ for (const p of prospects) {
   ].join(" | ");
   console.log(`\n${p.nomeFantasia} · ${p.cidade??"cidade não informada"}/${uf}\nprioridade por padrões históricos: ${p.prioridadeAprendida.pontos}/9 (${p.prioridadeAprendida.correspondencias.join(", ")||"sem correspondência"})\n${summary}`);
   if (!apply) continue;
+  // Guarda (Fase 2, 2026-11-13): DuckDuckGo está bloqueado por anti-bot em infra de nuvem (ver
+  // comentário em pesquisa-web.ts, "Melhoria 2") — confirmado de novo nesta rodada (HTTP 202 +
+  // página inicial genérica da DuckDuckGo, nunca um resultado de busca real). Sem site já
+  // cadastrado nem domínio de e-mail próprio, a única fonte de conteúdo real é a busca, que está
+  // bloqueada — `r.evidence` fica null porque NENHUMA página real foi de fato examinada, não
+  // porque a loja não tem evidência. Gravar um REPROVADO nesse caso seria fingir pesquisa que não
+  // aconteceu (regra do Rodrigo: nunca inventar/inferir evidência). Pula a gravação e deixa o
+  // registro como está (confiancaPesquisa=CADASTRAL, pesquisadoEm antigo) para ser retomado numa
+  // rodada futura com busca funcionando — não é perda de progresso, é não fabricar progresso.
+  if (!r.evidence) {
+    console.log("PULADO (sem gravação): nenhuma página real foi examinada nesta rodada (sem site cadastrado, sem domínio de e-mail próprio viável, e busca via DuckDuckGo bloqueada) — registro mantido em CADASTRAL para nova tentativa.");
+    continue;
+  }
   const notes = [p.observacoes, summary].filter(Boolean).join("\n").slice(0, 8000);
   await prisma.$transaction([
     prisma.atacadoProspect.update({
