@@ -755,6 +755,141 @@ describe("runSync — falha TOTAL de 1 loja não derruba as outras (integração
     expect(body.falhasParciais[0]).toContain("loja-b");
     expect(body.falhasParciais[0]).toContain("armazenadores");
   });
+
+  // Achado na investigação forense de 2026-11-12: diferente do teste acima (loja B falha com
+  // exceção de rede/token), aqui a API responde HTTP 200 com lista VAZIA — antes da correção,
+  // isso não lançava nada, syncEstoque devolvia 0 silenciosamente, e o ciclo todo (inclusive a
+  // loja B) saía marcado SUCCESS no SyncLog, com StockSnapshot da loja B intocado e sem nenhum
+  // aviso. Este teste prova que isso agora é tratado como falha real, pelo mesmo caminho que
+  // qualquer outro erro de API (falhaDeLoja), não como "estoque zerado válido".
+  it("DAPIC responde 200 com lista vazia de estoque -> tratado como falha, não como sucesso com zero registros", async () => {
+    storeFindFirst.mockResolvedValue(null);
+    storeCreate.mockImplementation(({ data }: { data: { code: string } }) => Promise.resolve({ id: `store-${data.code}` }));
+
+    const clientA = {
+      label: "loja-a",
+      fetchArmazenadores: () => Promise.resolve([{ Id: 1, Descricao: "Loja A" }]),
+      fetchEstoqueTodosArmazenadores: () =>
+        Promise.resolve([
+          { IdArmazenador: 1, IdGradeProduto: 500, Produto: "Camisa X", Grupo: "Camisas", QuantidadeReal: 10 },
+        ]),
+      fetchVendasPdv: () => Promise.resolve([]),
+      fetchVendaPdvDetalhe: () => Promise.resolve(null),
+      fetchVendasPdvModificadas: () => Promise.resolve([]),
+    } as unknown as DapicClient;
+
+    const clientB = {
+      label: "loja-b",
+      fetchArmazenadores: () => Promise.resolve([{ Id: 2, Descricao: "Loja B" }]),
+      // O caso real investigado: nenhum erro, nenhum 429, nenhum 401 — só uma lista vazia.
+      fetchEstoqueTodosArmazenadores: () => Promise.resolve([]),
+      fetchVendasPdv: () => Promise.resolve([]),
+      fetchVendaPdvDetalhe: () => Promise.resolve(null),
+      fetchVendasPdvModificadas: () => Promise.resolve([]),
+    } as unknown as DapicClient;
+
+    createDapicClientsMock.mockImplementationOnce(() => [clientA, clientB]);
+
+    const { runSync } = await import("../sync-runner");
+    const response = await runSync({ silent: true });
+    const body = await response.json();
+
+    // A loja A continua sincronizando normalmente — a falha de B não contamina o resultado dela.
+    expect(body.estoque).toBeGreaterThanOrEqual(1);
+    // A falha de B aparece isolada e identificada como falha de "estoque" — nunca como
+    // estoque:0 silencioso misturado no resultado agregado como se fosse sucesso.
+    expect(body.falhasParciais.some((f: string) => f.includes("loja-b") && f.includes("estoque"))).toBe(true);
+
+    // SyncLog(source="STOCK") deste ciclo tem que registrar a falha de verdade — é exatamente
+    // isso que impede `atualizadoEm` (getLastEstoqueSyncTime) de avançar como se o estoque da
+    // loja B tivesse sido atualizado.
+    const stockLogCall = syncLogCreate.mock.calls.find((c) => c[0]?.data?.source === "STOCK");
+    expect(stockLogCall?.[0]?.data?.status).toBe("FAILED");
+  });
+
+  // Fase de validação (docs/validacao-prs-falsos-sucessos-2026-11-12.md), cenário pedido
+  // explicitamente: erro HTTP real (não lista vazia) na API de estoque especificamente — já
+  // funcionava antes da correção (o catch de syncOneClient sempre tratou exceção real), mas não
+  // havia teste dedicado pra esse estágio específico (só pra "armazenadores", no teste de falha
+  // TOTAL mais acima). Confirma que a correção do PR #81 não regrediu esse caminho já existente.
+  it("API de estoque rejeita com erro HTTP real (não vazio) -> continua caindo em falhaDeLoja('estoque'), sem regressão", async () => {
+    storeFindFirst.mockResolvedValue(null);
+    storeCreate.mockImplementation(({ data }: { data: { code: string } }) => Promise.resolve({ id: `store-${data.code}` }));
+
+    const clientA = {
+      label: "loja-a",
+      fetchArmazenadores: () => Promise.resolve([{ Id: 1, Descricao: "Loja A" }]),
+      fetchEstoqueTodosArmazenadores: () =>
+        Promise.resolve([
+          { IdArmazenador: 1, IdGradeProduto: 500, Produto: "Camisa X", Grupo: "Camisas", QuantidadeReal: 10 },
+        ]),
+      fetchVendasPdv: () => Promise.resolve([]),
+      fetchVendaPdvDetalhe: () => Promise.resolve(null),
+      fetchVendasPdvModificadas: () => Promise.resolve([]),
+    } as unknown as DapicClient;
+
+    const clientB = {
+      label: "loja-b",
+      fetchArmazenadores: () => Promise.resolve([{ Id: 2, Descricao: "Loja B" }]),
+      // Erro HTTP real (ex: 500 depois de esgotar o retry de dapic.ts), não lista vazia.
+      fetchEstoqueTodosArmazenadores: () => Promise.reject(new Error("DAPIC /armazenadores/produtos (loja-b) -> 500 Internal Server Error")),
+      fetchVendasPdv: () => Promise.resolve([]),
+      fetchVendaPdvDetalhe: () => Promise.resolve(null),
+      fetchVendasPdvModificadas: () => Promise.resolve([]),
+    } as unknown as DapicClient;
+
+    createDapicClientsMock.mockImplementationOnce(() => [clientA, clientB]);
+
+    const { runSync } = await import("../sync-runner");
+    const response = await runSync({ silent: true });
+    const body = await response.json();
+
+    expect(body.estoque).toBeGreaterThanOrEqual(1); // loja A não contaminada
+    expect(body.falhasParciais.some((f: string) => f.includes("loja-b") && f.includes("estoque") && f.includes("500"))).toBe(true);
+    const stockLogCall = syncLogCreate.mock.calls.find((c) => c[0]?.data?.source === "STOCK");
+    expect(stockLogCall?.[0]?.data?.status).toBe("FAILED");
+  });
+
+  // Cenário pedido explicitamente: falha durante a PERSISTÊNCIA (não na busca da API) — a API
+  // devolve dado real, mas o upsert em si falha (ex: conexão com o Neon caiu no meio do lote).
+  it("API de estoque devolve dado real, mas a persistência (upsert) falha -> continua caindo em falhaDeLoja('estoque'), nunca mascarado como sucesso", async () => {
+    storeFindFirst.mockResolvedValue(null);
+    storeCreate.mockImplementation(({ data }: { data: { code: string } }) => Promise.resolve({ id: `store-${data.code}` }));
+    // A 1ª chamada real a $executeRaw em todo runSync() é o advisory lock de acquireSyncLock
+    // (`SELECT pg_advisory_xact_lock(...)`, sync-runner.ts:1438) — não tem nada a ver com estoque.
+    // Deixa ela passar normal e só a 2ª chamada (o upsert de StockSnapshot da loja única deste
+    // teste) falha. Descoberto depurando um falso-negativo: sem isso, o mock "consumia" o lock em
+    // vez do upsert, e o teste falhava com um erro não relacionado, uncaught, antes de qualquer
+    // lógica de sync rodar.
+    executeRaw.mockResolvedValueOnce(undefined); // advisory lock
+    executeRaw.mockImplementationOnce(async () => {
+      throw new Error("Neon: conexão perdida no meio do lote");
+    });
+
+    const client = {
+      label: "loja-a",
+      fetchArmazenadores: () => Promise.resolve([{ Id: 1, Descricao: "Loja A" }]),
+      fetchEstoqueTodosArmazenadores: () =>
+        Promise.resolve([
+          { IdArmazenador: 1, IdGradeProduto: 500, Produto: "Camisa X", Grupo: "Camisas", QuantidadeReal: 10 },
+        ]),
+      fetchVendasPdv: () => Promise.resolve([]),
+      fetchVendaPdvDetalhe: () => Promise.resolve(null),
+      fetchVendasPdvModificadas: () => Promise.resolve([]),
+    } as unknown as DapicClient;
+
+    createDapicClientsMock.mockImplementationOnce(() => [client]);
+
+    const { runSync } = await import("../sync-runner");
+    const response = await runSync({ silent: true });
+    const body = await response.json();
+
+    expect(body.falhasParciais.some((f: string) => f.includes("loja-a") && f.includes("estoque"))).toBe(true);
+    const stockLogCall = syncLogCreate.mock.calls.find((c) => c[0]?.data?.source === "STOCK");
+    expect(stockLogCall?.[0]?.data?.status).toBe("FAILED");
+    // Nunca "SUCCESS" com um número que na verdade não foi persistido.
+    expect(stockLogCall?.[0]?.data?.status).not.toBe("SUCCESS");
+  });
 });
 
 // Missão Black Friday (2026-11, continuação) — fecha a lacuna já documentada no relatório
