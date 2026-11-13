@@ -755,6 +755,57 @@ describe("runSync — falha TOTAL de 1 loja não derruba as outras (integração
     expect(body.falhasParciais[0]).toContain("loja-b");
     expect(body.falhasParciais[0]).toContain("armazenadores");
   });
+
+  // Achado na investigação forense de 2026-11-12: diferente do teste acima (loja B falha com
+  // exceção de rede/token), aqui a API responde HTTP 200 com lista VAZIA — antes da correção,
+  // isso não lançava nada, syncEstoque devolvia 0 silenciosamente, e o ciclo todo (inclusive a
+  // loja B) saía marcado SUCCESS no SyncLog, com StockSnapshot da loja B intocado e sem nenhum
+  // aviso. Este teste prova que isso agora é tratado como falha real, pelo mesmo caminho que
+  // qualquer outro erro de API (falhaDeLoja), não como "estoque zerado válido".
+  it("DAPIC responde 200 com lista vazia de estoque -> tratado como falha, não como sucesso com zero registros", async () => {
+    storeFindFirst.mockResolvedValue(null);
+    storeCreate.mockImplementation(({ data }: { data: { code: string } }) => Promise.resolve({ id: `store-${data.code}` }));
+
+    const clientA = {
+      label: "loja-a",
+      fetchArmazenadores: () => Promise.resolve([{ Id: 1, Descricao: "Loja A" }]),
+      fetchEstoqueTodosArmazenadores: () =>
+        Promise.resolve([
+          { IdArmazenador: 1, IdGradeProduto: 500, Produto: "Camisa X", Grupo: "Camisas", QuantidadeReal: 10 },
+        ]),
+      fetchVendasPdv: () => Promise.resolve([]),
+      fetchVendaPdvDetalhe: () => Promise.resolve(null),
+      fetchVendasPdvModificadas: () => Promise.resolve([]),
+    } as unknown as DapicClient;
+
+    const clientB = {
+      label: "loja-b",
+      fetchArmazenadores: () => Promise.resolve([{ Id: 2, Descricao: "Loja B" }]),
+      // O caso real investigado: nenhum erro, nenhum 429, nenhum 401 — só uma lista vazia.
+      fetchEstoqueTodosArmazenadores: () => Promise.resolve([]),
+      fetchVendasPdv: () => Promise.resolve([]),
+      fetchVendaPdvDetalhe: () => Promise.resolve(null),
+      fetchVendasPdvModificadas: () => Promise.resolve([]),
+    } as unknown as DapicClient;
+
+    createDapicClientsMock.mockImplementationOnce(() => [clientA, clientB]);
+
+    const { runSync } = await import("../sync-runner");
+    const response = await runSync({ silent: true });
+    const body = await response.json();
+
+    // A loja A continua sincronizando normalmente — a falha de B não contamina o resultado dela.
+    expect(body.estoque).toBeGreaterThanOrEqual(1);
+    // A falha de B aparece isolada e identificada como falha de "estoque" — nunca como
+    // estoque:0 silencioso misturado no resultado agregado como se fosse sucesso.
+    expect(body.falhasParciais.some((f: string) => f.includes("loja-b") && f.includes("estoque"))).toBe(true);
+
+    // SyncLog(source="STOCK") deste ciclo tem que registrar a falha de verdade — é exatamente
+    // isso que impede `atualizadoEm` (getLastEstoqueSyncTime) de avançar como se o estoque da
+    // loja B tivesse sido atualizado.
+    const stockLogCall = syncLogCreate.mock.calls.find((c) => c[0]?.data?.source === "STOCK");
+    expect(stockLogCall?.[0]?.data?.status).toBe("FAILED");
+  });
 });
 
 // Missão Black Friday (2026-11, continuação) — fecha a lacuna já documentada no relatório
