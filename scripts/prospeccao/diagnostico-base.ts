@@ -9,6 +9,7 @@
  */
 import { PrismaClient } from "@prisma/client";
 import { detectarPossivelDuplicata, type CandidatoDedup } from "../../src/lib/prospeccao/motor-qualificacao";
+import { derivarUrlsCandidatasPorEmail } from "../../src/lib/prospeccao/pesquisa-web";
 
 const prisma = new PrismaClient();
 
@@ -100,6 +101,17 @@ async function main() {
   for (const row of porEstado.sort((a, b) => b._count._all - a._count._all)) {
     console.log(`  ${row.estado ?? "(null)"}: ${row._count._all}`);
   }
+
+  // Quantos pendentes (EM_QUALIFICACAO, grupoComercial PENDENTE) têm e-mail com domínio próprio
+  // (não genérico) — único caminho real de pesquisa comercial que não depende do DuckDuckGo
+  // (ver pesquisa-web.ts, Melhoria 2: DuckDuckGo bloqueado por anti-bot em infra de nuvem). Só
+  // conta e-mails (nunca imprime o valor) — compatível com a política de log deste script.
+  const pendentesComEmail = await prisma.atacadoProspect.findMany({
+    where: { status: "EM_QUALIFICACAO", grupoComercial: "PENDENTE" },
+    select: { email: true },
+  });
+  const comDominioProprio = pendentesComEmail.filter((p) => derivarUrlsCandidatasPorEmail(p.email).length > 0).length;
+  console.log(`\nPendentes com e-mail de domínio próprio (fallback sem depender de busca): ${comDominioProprio} de ${pendentesComEmail.length}`);
 
   console.log("\n(Diagnóstico concluído — nenhum registro foi alterado.)");
 }
