@@ -118,6 +118,47 @@ async function main() {
   });
   console.log(`Pendentes com site já cadastrado (fetch direto, também não depende de busca): ${pendentesComSite} de ${pendentesComEmail.length}`);
 
+  // Resultado real desta rodada (Fase 2, 2026-11-13): resultadoEliminacao só é gravado pelo motor
+  // completo (qualificarProspect) — nunca pelo skip-guard (que só toca pesquisadoEm). Então
+  // "resultadoEliminacao IS NOT NULL" é exatamente o conjunto que teve pesquisa comercial REAL
+  // (página real examinada) nesta sessão, distinto dos pulados por bloqueio de busca.
+  const pesquisadosReal = await prisma.atacadoProspect.count({ where: { resultadoEliminacao: { not: null } } });
+  console.log(`\nPesquisados com evidência REAL nesta sessão (resultadoEliminacao preenchido): ${pesquisadosReal}`);
+
+  const porResultadoEliminacao = await prisma.atacadoProspect.groupBy({ by: ["resultadoEliminacao"], _count: { _all: true } });
+  console.log("Por resultadoEliminacao:");
+  for (const row of porResultadoEliminacao.sort((a, b) => b._count._all - a._count._all)) {
+    console.log(`  ${row.resultadoEliminacao ?? "(null, ainda não pesquisado ou pulado)"}: ${row._count._all}`);
+  }
+
+  // Dentro de REPROVADO, separa por tipo de motivo (sem reescrever o motor — só lê
+  // motivosEliminacao, já gravado por motor-elegibilidade.ts) pra mapear pro vocabulário de
+  // negócio: CADASTRO_INATIVO_OU_INVALIDO -> Inválido; qualquer outro motivo -> Inadequado.
+  const reprovadosComMotivo = await prisma.atacadoProspect.findMany({
+    where: { resultadoEliminacao: "REPROVADO" },
+    select: { motivosEliminacao: true },
+  });
+  const invalidoCount = reprovadosComMotivo.filter((p) =>
+    p.motivosEliminacao.some((m) => m.toLowerCase().includes("situação cadastral")),
+  ).length;
+  console.log(`  REPROVADO -> Inválido (situação cadastral inativa/inválida): ${invalidoCount}`);
+  console.log(`  REPROVADO -> Inadequado (demais motivos): ${reprovadosComMotivo.length - invalidoCount}`);
+
+  const comMarcaEvidenciada = await prisma.atacadoProspect.count({ where: { resultadoEliminacao: "APROVADO_GATE" } });
+  console.log(`  APROVADO_GATE (passou no gate, foi pra pontuação): ${comMarcaEvidenciada}`);
+
+  const blockedActivities = await prisma.atacadoProspectActivity.findMany({
+    where: { tipo: "PESQUISA_COMERCIAL_BLOQUEADA" },
+    select: { prospectId: true },
+  });
+  const blockedDistinct = new Set(blockedActivities.map((a) => a.prospectId)).size;
+  console.log(`\nEventos de pesquisa pulada por bloqueio (PESQUISA_COMERCIAL_BLOQUEADA): ${blockedActivities.length} (${blockedDistinct} prospects distintos)`);
+
+  const aindaNaoPesquisados = await prisma.atacadoProspect.count({
+    where: { status: "EM_QUALIFICACAO", grupoComercial: "PENDENTE", confiancaPesquisa: "CADASTRAL" },
+  });
+  console.log(`Ainda sem pesquisa comercial real (confiancaPesquisa=CADASTRAL, pendente): ${aindaNaoPesquisados}`);
+
   console.log("\n(Diagnóstico concluído — nenhum registro foi alterado.)");
 }
 
