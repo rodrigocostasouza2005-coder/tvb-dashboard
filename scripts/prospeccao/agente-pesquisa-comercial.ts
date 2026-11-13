@@ -11,6 +11,16 @@
  * score 0-100 misturando eliminação e pontuação num único número) não é mais usada aqui; foi
  * substituída pelo motor novo. statusComercial nunca sai desta etapa como APROVADO — o motor
  * mesmo garante isso (ver motor-qualificacao.ts); só uma pessoa promove manualmente depois.
+ *
+ * Fix (Fase 2, 2026-11-13): o filtro de elegibilidade abaixo (candidatos) checava `responsavel`
+ * contra ["AGENTE_PESQUISA_COMERCIAL_WEB_V1", "AGENTE_QUALIFICACAO_RECEITA_V1"] — mas a etapa
+ * cadastral (agente-qualificacao.ts -> avaliacao-cadastral.ts) grava em `responsavel` sempre
+ * "AGENTE_PESQUISA_TVB" ou "AGENTE_VALIDACAO_TVB" ("AGENTE_QUALIFICACAO_RECEITA_V1" é o valor de
+ * `origemAgente`, uma coluna diferente — nunca aparece em `responsavel`). Resultado confirmado
+ * em produção: 500/500 prospects reais com confiancaPesquisa=CADASTRAL e responsavel=
+ * AGENTE_VALIDACAO_TVB nunca eram selecionados por nenhuma UF (lojas=0 sempre) — 100% da fila
+ * ficava presa, mesmo com `--apply`. Adicionados os dois valores reais à lista; nenhum critério
+ * de qualificação foi alterado, só quem entra na fila de pesquisa.
  */
 import { PrismaClient, Prisma } from "@prisma/client";
 import { isSafePublicHttpsUrl } from "../../src/lib/prospeccao/url-segura";
@@ -86,7 +96,7 @@ async function research(p:{id:string;nomeFantasia:string;cidade:string|null;esta
 }
 async function main(){const args=process.argv.slice(2);const arg=(k:string,d:string)=>{const i=args.indexOf(k);return i>=0?args[i+1]??d:d;};const apply=args.includes("--apply");const uf=arg("--uf","RJ").toUpperCase();const limit=Math.max(1,Math.min(25,Number(arg("--limit","10"))||10));if(!/^[A-Z]{2}$/.test(uf))throw new Error("UF inválida.");const atividadesAprendizado=await prisma.atacadoProspectActivity.findMany({where:{tipo:"INTERACAO_BRUCE",resultado:{not:null}},orderBy:{createdAt:"desc"},take:5000,select:{prospectId:true,resultado:true,prospect:{select:{segmentoComercial:true,perfilLoja:true,faixaPreco:true,estado:true,status:true}}}});
 const perfisAprendidos=aprenderPerfis(atividadesAprendizado.map(a=>({prospectId:a.prospectId,resultado:a.resultado as "INTERESSADO"|"SEM_RESPOSTA"|"RECUSOU"|"PEDIU_CATALOGO"|"PEDIU_PRECO"|"NEGOCIANDO"|"PEDIDO_REALIZADO"|"RECOMPRA"|"SEM_ADERENCIA"|"DADOS_INVALIDOS"|"OUTRO"|null,segmentoComercial:a.prospect.segmentoComercial,perfilLoja:a.prospect.perfilLoja,faixaPreco:a.prospect.faixaPreco,estado:a.prospect.estado,status:a.prospect.status})));
-const candidatos=await prisma.atacadoProspect.findMany({where:{estado:uf,status:{in:["NOVO","EM_QUALIFICACAO"]},grupoComercial:"PENDENTE",origem:{in:["receita_federal_dados_abertos","manual","importacao","pesquisa_web"]},AND:[{OR:[{responsavel:null},{responsavel:"AGENTE_PESQUISA_COMERCIAL_WEB_V1"},{responsavel:"AGENTE_QUALIFICACAO_RECEITA_V1"}]},{OR:[{pesquisadoEm:null},{confiancaPesquisa:"BAIXA"},{confiancaPesquisa:"CADASTRAL"}]}]},orderBy:[{pesquisadoEm:"asc"},{updatedAt:"asc"}],take:250,select:{id:true,nomeFantasia:true,cidade:true,estado:true,site:true,instagram:true,observacoes:true,segmentoComercial:true,perfilLoja:true,faixaPreco:true,situacaoCadastral:true,cnpj:true,telefone:true,email:true,confiancaPesquisa:true}});
+const candidatos=await prisma.atacadoProspect.findMany({where:{estado:uf,status:{in:["NOVO","EM_QUALIFICACAO"]},grupoComercial:"PENDENTE",origem:{in:["receita_federal_dados_abertos","manual","importacao","pesquisa_web"]},AND:[{OR:[{responsavel:null},{responsavel:"AGENTE_PESQUISA_COMERCIAL_WEB_V1"},{responsavel:"AGENTE_QUALIFICACAO_RECEITA_V1"},{responsavel:"AGENTE_PESQUISA_TVB"},{responsavel:"AGENTE_VALIDACAO_TVB"}]},{OR:[{pesquisadoEm:null},{confiancaPesquisa:"BAIXA"},{confiancaPesquisa:"CADASTRAL"}]}]},orderBy:[{pesquisadoEm:"asc"},{updatedAt:"asc"}],take:250,select:{id:true,nomeFantasia:true,cidade:true,estado:true,site:true,instagram:true,observacoes:true,segmentoComercial:true,perfilLoja:true,faixaPreco:true,situacaoCadastral:true,cnpj:true,telefone:true,email:true,confiancaPesquisa:true}});
 const prospects=candidatos.map(p=>({p,prioridade:pontuarAderenciaPerfil(p,perfisAprendidos)})).sort((a,b)=>b.prioridade.pontos-a.prioridade.pontos).slice(0,limit).map(x=>({...x.p,prioridadeAprendida:x.prioridade}));
 console.log(`PESQUISA COMERCIAL | UF=${uf} | lojas=${prospects.length} | perfis aprendidos=${perfisAprendidos.length} | modo=${apply?"APLICAR":"PRÉVIA"}`);
 for (const p of prospects) {
@@ -129,6 +139,36 @@ for (const p of prospects) {
   ].join(" | ");
   console.log(`\n${p.nomeFantasia} · ${p.cidade??"cidade não informada"}/${uf}\nprioridade por padrões históricos: ${p.prioridadeAprendida.pontos}/9 (${p.prioridadeAprendida.correspondencias.join(", ")||"sem correspondência"})\n${summary}`);
   if (!apply) continue;
+  // Guarda (Fase 2, 2026-11-13): DuckDuckGo está bloqueado por anti-bot em infra de nuvem (ver
+  // comentário em pesquisa-web.ts, "Melhoria 2") — confirmado de novo nesta rodada (HTTP 202 +
+  // página inicial genérica da DuckDuckGo, nunca um resultado de busca real). Sem site já
+  // cadastrado nem domínio de e-mail próprio, a única fonte de conteúdo real é a busca, que está
+  // bloqueada — `r.evidence` fica null porque NENHUMA página real foi de fato examinada, não
+  // porque a loja não tem evidência. Gravar um REPROVADO nesse caso seria fingir pesquisa que não
+  // aconteceu (regra do Rodrigo: nunca inventar/inferir evidência) — então classificacaoProspect/
+  // statusComercial/confiancaPesquisa/grupoComercial NUNCA são tocados aqui, continuam exatamente
+  // como a etapa cadastral deixou (ainda elegível pra uma pesquisa real futura, via a mesma regra
+  // de confiancaPesquisa="CADASTRAL" na query de candidatos acima).
+  // Só avança `pesquisadoEm` (usado no orderBy acima) pra não travar a fila nos mesmos ~23/25
+  // registros sem fallback de domínio pra sempre — sem isso, toda rodada futura re-selecionaria
+  // exatamente os mesmos candidatos já tentados e nunca chegaria aos outros ~460 na fila. Fica
+  // registrado como atividade (nunca como resultado de qualificação) pra auditoria.
+  if (!r.evidence) {
+    console.log("PULADO (sem classificação): nenhuma página real foi examinada nesta rodada (sem site cadastrado, sem domínio de e-mail próprio viável, e busca via DuckDuckGo bloqueada) — avançando checkpoint sem alterar classificação.");
+    await prisma.$transaction([
+      prisma.atacadoProspect.update({ where: { id: p.id }, data: { pesquisadoEm: r.at } }),
+      prisma.atacadoProspectActivity.create({
+        data: {
+          prospectId: p.id,
+          tipo: "PESQUISA_COMERCIAL_BLOQUEADA",
+          etapa: "PRESENCA_DIGITAL",
+          criadoPor: "AGENTE_PESQUISA_COMERCIAL_WEB_V1",
+          descricao: "Nenhuma página real examinada: sem site cadastrado, sem domínio de e-mail próprio viável, e busca via DuckDuckGo bloqueada por anti-bot (HTTP 202, página inicial genérica, não um resultado de busca real). Nenhuma classificação foi alterada; checkpoint avançado para permitir retomada do restante da fila.",
+        },
+      }),
+    ]);
+    continue;
+  }
   const notes = [p.observacoes, summary].filter(Boolean).join("\n").slice(0, 8000);
   await prisma.$transaction([
     prisma.atacadoProspect.update({

@@ -9,6 +9,7 @@
  */
 import { PrismaClient } from "@prisma/client";
 import { detectarPossivelDuplicata, type CandidatoDedup } from "../../src/lib/prospeccao/motor-qualificacao";
+import { derivarUrlsCandidatasPorEmail } from "../../src/lib/prospeccao/pesquisa-web";
 
 const prisma = new PrismaClient();
 
@@ -67,6 +68,96 @@ async function main() {
   for (const [tipo, count] of duplicatasPorTipo) {
     console.log(`  ${tipo}: ${count} ocorrências`);
   }
+
+  // Diagnóstico temporário (branch diagnostico-pesquisa-comercial-temp, não mergeado em main):
+  // investigar por que agente-pesquisa-comercial.ts retornou lojas=0 pra UF=RJ mesmo com
+  // candidatos em EM_QUALIFICACAO — somente leitura, não altera nada.
+  const porResponsavel = await prisma.atacadoProspect.groupBy({ by: ["responsavel"], _count: { _all: true } });
+  console.log("\nPor responsavel:");
+  for (const row of porResponsavel.sort((a, b) => b._count._all - a._count._all)) {
+    console.log(`  ${row.responsavel ?? "(null)"}: ${row._count._all}`);
+  }
+
+  const porOrigem = await prisma.atacadoProspect.groupBy({ by: ["origem"], _count: { _all: true } });
+  console.log("\nPor origem:");
+  for (const row of porOrigem.sort((a, b) => b._count._all - a._count._all)) {
+    console.log(`  ${row.origem}: ${row._count._all}`);
+  }
+
+  const porGrupoComercial = await prisma.atacadoProspect.groupBy({ by: ["grupoComercial"], _count: { _all: true } });
+  console.log("\nPor grupoComercial:");
+  for (const row of porGrupoComercial.sort((a, b) => b._count._all - a._count._all)) {
+    console.log(`  ${row.grupoComercial}: ${row._count._all}`);
+  }
+
+  const porConfiancaPesquisa = await prisma.atacadoProspect.groupBy({ by: ["confiancaPesquisa"], _count: { _all: true } });
+  console.log("\nPor confiancaPesquisa:");
+  for (const row of porConfiancaPesquisa.sort((a, b) => b._count._all - a._count._all)) {
+    console.log(`  ${row.confiancaPesquisa ?? "(null)"}: ${row._count._all}`);
+  }
+
+  const porEstado = await prisma.atacadoProspect.groupBy({ by: ["estado"], _count: { _all: true } });
+  console.log("\nPor estado:");
+  for (const row of porEstado.sort((a, b) => b._count._all - a._count._all)) {
+    console.log(`  ${row.estado ?? "(null)"}: ${row._count._all}`);
+  }
+
+  // Quantos pendentes (EM_QUALIFICACAO, grupoComercial PENDENTE) têm e-mail com domínio próprio
+  // (não genérico) — único caminho real de pesquisa comercial que não depende do DuckDuckGo
+  // (ver pesquisa-web.ts, Melhoria 2: DuckDuckGo bloqueado por anti-bot em infra de nuvem). Só
+  // conta e-mails (nunca imprime o valor) — compatível com a política de log deste script.
+  const pendentesComEmail = await prisma.atacadoProspect.findMany({
+    where: { status: "EM_QUALIFICACAO", grupoComercial: "PENDENTE" },
+    select: { email: true },
+  });
+  const comDominioProprio = pendentesComEmail.filter((p) => derivarUrlsCandidatasPorEmail(p.email).length > 0).length;
+  console.log(`\nPendentes com e-mail de domínio próprio (fallback sem depender de busca): ${comDominioProprio} de ${pendentesComEmail.length}`);
+
+  const pendentesComSite = await prisma.atacadoProspect.count({
+    where: { status: "EM_QUALIFICACAO", grupoComercial: "PENDENTE", site: { not: null } },
+  });
+  console.log(`Pendentes com site já cadastrado (fetch direto, também não depende de busca): ${pendentesComSite} de ${pendentesComEmail.length}`);
+
+  // Resultado real desta rodada (Fase 2, 2026-11-13): resultadoEliminacao só é gravado pelo motor
+  // completo (qualificarProspect) — nunca pelo skip-guard (que só toca pesquisadoEm). Então
+  // "resultadoEliminacao IS NOT NULL" é exatamente o conjunto que teve pesquisa comercial REAL
+  // (página real examinada) nesta sessão, distinto dos pulados por bloqueio de busca.
+  const pesquisadosReal = await prisma.atacadoProspect.count({ where: { resultadoEliminacao: { not: null } } });
+  console.log(`\nPesquisados com evidência REAL nesta sessão (resultadoEliminacao preenchido): ${pesquisadosReal}`);
+
+  const porResultadoEliminacao = await prisma.atacadoProspect.groupBy({ by: ["resultadoEliminacao"], _count: { _all: true } });
+  console.log("Por resultadoEliminacao:");
+  for (const row of porResultadoEliminacao.sort((a, b) => b._count._all - a._count._all)) {
+    console.log(`  ${row.resultadoEliminacao ?? "(null, ainda não pesquisado ou pulado)"}: ${row._count._all}`);
+  }
+
+  // Dentro de REPROVADO, separa por tipo de motivo (sem reescrever o motor — só lê
+  // motivosEliminacao, já gravado por motor-elegibilidade.ts) pra mapear pro vocabulário de
+  // negócio: CADASTRO_INATIVO_OU_INVALIDO -> Inválido; qualquer outro motivo -> Inadequado.
+  const reprovadosComMotivo = await prisma.atacadoProspect.findMany({
+    where: { resultadoEliminacao: "REPROVADO" },
+    select: { motivosEliminacao: true },
+  });
+  const invalidoCount = reprovadosComMotivo.filter((p) =>
+    p.motivosEliminacao.some((m) => m.toLowerCase().includes("situação cadastral")),
+  ).length;
+  console.log(`  REPROVADO -> Inválido (situação cadastral inativa/inválida): ${invalidoCount}`);
+  console.log(`  REPROVADO -> Inadequado (demais motivos): ${reprovadosComMotivo.length - invalidoCount}`);
+
+  const comMarcaEvidenciada = await prisma.atacadoProspect.count({ where: { resultadoEliminacao: "APROVADO_GATE" } });
+  console.log(`  APROVADO_GATE (passou no gate, foi pra pontuação): ${comMarcaEvidenciada}`);
+
+  const blockedActivities = await prisma.atacadoProspectActivity.findMany({
+    where: { tipo: "PESQUISA_COMERCIAL_BLOQUEADA" },
+    select: { prospectId: true },
+  });
+  const blockedDistinct = new Set(blockedActivities.map((a) => a.prospectId)).size;
+  console.log(`\nEventos de pesquisa pulada por bloqueio (PESQUISA_COMERCIAL_BLOQUEADA): ${blockedActivities.length} (${blockedDistinct} prospects distintos)`);
+
+  const aindaNaoPesquisados = await prisma.atacadoProspect.count({
+    where: { status: "EM_QUALIFICACAO", grupoComercial: "PENDENTE", confiancaPesquisa: "CADASTRAL" },
+  });
+  console.log(`Ainda sem pesquisa comercial real (confiancaPesquisa=CADASTRAL, pendente): ${aindaNaoPesquisados}`);
 
   console.log("\n(Diagnóstico concluído — nenhum registro foi alterado.)");
 }
