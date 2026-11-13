@@ -1,0 +1,28 @@
+name: Diagnóstico somente-leitura da base de prospecção
+
+# Levanta números reais (contagens por status/statusComercial, pesquisa já feita, duplicidade
+# possível) antes de qualquer decisão de limpeza — nunca escreve nada. Mesmo padrão de
+# reconcile-production-prisma.yml: DATABASE_URL de produção injetado como secret do GitHub,
+# nunca passa pela camada HTTP da aplicação (não depende do EXTERNAL_SYNC_SECRET, que está
+# desatualizado — ver PR #79).
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostico:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Rodar diagnóstico (somente leitura)
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: npx tsx scripts/prospeccao/diagnostico-base.ts
