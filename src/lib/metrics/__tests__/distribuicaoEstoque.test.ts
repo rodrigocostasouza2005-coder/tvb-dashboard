@@ -352,16 +352,75 @@ describe("calcularMovimentacoes — direção Loja → CD/Site (recolhimento)", 
     expect(movimentacoes[0].justificativa.join(" ")).toContain("12 un.");
   });
 
-  it("recolhe quando há demanda local baixa E grade quebrada (sem precisar de venda online)", () => {
+  it("recolhe quando há demanda local baixa E grade quebrada, COM venda online comprovada", () => {
     const rioSul = variante({ storeId: "rio-sul", storeName: "Rio Sul", estoqueAtual: 12 });
     const cdSite = cd({ estoqueAtual: 30, vendasDias30: 10, vendasDias90: 30, velocidadeDiaria: 10 / 30, coberturaDias: 90 });
     const { movimentacoes } = calcularMovimentacoes(
       [rioSul, cdSite],
-      contextoMov({ vendasSite90: 0, gradePorPosicao: { "rio-sul": grade(1, 3) } })
+      contextoMov({ vendasSite90: 7, gradePorPosicao: { "rio-sul": grade(1, 3) } })
     );
     expect(movimentacoes).toHaveLength(1);
     expect(movimentacoes[0].tipoMovimentacao).toBe("loja_cd_site");
     expect(movimentacoes[0].justificativa.join(" ")).toContain("Grade quebrada");
+  });
+
+  // Regra revista 2026-11-13 (pedido Rodrigo): venda no site passou de "1 sinal entre 3" pra
+  // OBRIGATÓRIA — demanda local baixa + grade quebrada SEM venda real no site não justifica mais
+  // recolher. Este teste documentava o comportamento antigo (nome antigo: "...sem precisar de
+  // venda online") e foi invertido pra travar a regra nova.
+  it("NÃO recolhe só com demanda local baixa + grade quebrada, sem venda real no site", () => {
+    const rioSul = variante({ storeId: "rio-sul", storeName: "Rio Sul", estoqueAtual: 12 });
+    const cdSite = cd({ estoqueAtual: 30, vendasDias30: 10, vendasDias90: 30, velocidadeDiaria: 10 / 30, coberturaDias: 90 });
+    const { movimentacoes, manter } = calcularMovimentacoes(
+      [rioSul, cdSite],
+      contextoMov({ vendasSite90: 0, gradePorPosicao: { "rio-sul": grade(1, 3) } })
+    );
+    expect(movimentacoes.filter((m) => m.tipoMovimentacao === "loja_cd_site")).toHaveLength(0);
+    expect(manter[0].motivo.join(" ")).toContain("sem venda no site");
+  });
+
+  it("NÃO recolhe só por venda comprovada no site, sem sinal local (loja ainda precisa da peça)", () => {
+    const rioSul = variante({
+      storeId: "rio-sul",
+      storeName: "Rio Sul",
+      estoqueAtual: 40,
+      vendasDias30: 15,
+      vendasDias90: 45,
+      velocidadeDiaria: 0.5,
+      coberturaDias: 80,
+    });
+    const cdSite = cd({ estoqueAtual: 30, vendasDias30: 10, vendasDias90: 30, velocidadeDiaria: 10 / 30, coberturaDias: 90 });
+    const { movimentacoes, manter } = calcularMovimentacoes(
+      [rioSul, cdSite],
+      contextoMov({ vendasSite90: 50, gradePorPosicao: { "rio-sul": grade(4, 4) } })
+    );
+    expect(movimentacoes.filter((m) => m.tipoMovimentacao === "loja_cd_site")).toHaveLength(0);
+    expect(manter[0].motivo.join(" ")).toContain("ainda vende");
+  });
+
+  it("CD/Site zerado e sem venda no site → sinaliza necessidade de reposição, não 'sem interesse'", () => {
+    const rioSul = variante({ storeId: "rio-sul", storeName: "Rio Sul", estoqueAtual: 12 });
+    const cdSiteZerado = cd({ estoqueAtual: 0, vendasDias30: 0, vendasDias90: 0, velocidadeDiaria: 0, coberturaDias: null });
+    const { movimentacoes, manter } = calcularMovimentacoes(
+      [rioSul, cdSiteZerado],
+      contextoMov({ vendasSite90: 0, gradePorPosicao: { "rio-sul": grade(1, 3) } })
+    );
+    expect(movimentacoes.filter((m) => m.tipoMovimentacao === "loja_cd_site")).toHaveLength(0);
+    const manterRioSul = manter.find((m) => m.posicaoNome === "Rio Sul")!;
+    expect(manterRioSul.necessidadeReposicao).toBe(true);
+    expect(manterRioSul.motivo.join(" ")).toContain("necessidade de reposição");
+  });
+
+  it("CD/Site com estoque disponível e sem venda no site → MANTER por falta de demanda (não ruptura)", () => {
+    const rioSul = variante({ storeId: "rio-sul", storeName: "Rio Sul", estoqueAtual: 12 });
+    const cdSite = cd({ estoqueAtual: 30, vendasDias30: 10, vendasDias90: 30, velocidadeDiaria: 10 / 30, coberturaDias: 90 });
+    const { manter } = calcularMovimentacoes(
+      [rioSul, cdSite],
+      contextoMov({ vendasSite90: 0, gradePorPosicao: { "rio-sul": grade(1, 3) } })
+    );
+    const manterRioSul = manter.find((m) => m.posicaoNome === "Rio Sul")!;
+    expect(manterRioSul.necessidadeReposicao).toBeUndefined();
+    expect(manterRioSul.motivo.join(" ")).toContain("sem venda no site");
   });
 
   it("NÃO recolhe peça isolada com um sinal só — vira MANTER com motivo escrito", () => {
@@ -521,12 +580,17 @@ describe("avaliarConfianca — gap de estoque reservado tratado como gap, não i
   });
 
   it("toda movimentação com confiança != alta carrega pelo menos um aviso legível", () => {
+    // vendasSite90 precisa ser > 0 (regra 2026-11-13: venda no site passou a ser obrigatória pra
+    // recolher) — com 0 aqui a movimentação nem seria gerada e o loop abaixo ficaria vazio sem
+    // testar nada de verdade. 2un. já basta pra satisfazer o gate e manter o cenário de baixa
+    // confiança (tipoCompra null → aviso "sem classificação Best Seller/Drop").
     const rioSul = variante({ storeId: "rio-sul", storeName: "Rio Sul", estoqueAtual: 12 });
     const cdSite = cd({ estoqueAtual: 30, vendasDias30: 10, vendasDias90: 30, velocidadeDiaria: 10 / 30, coberturaDias: 90 });
     const { movimentacoes } = calcularMovimentacoes(
       [rioSul, cdSite],
-      contextoMov({ vendasSite90: 0, gradePorPosicao: { "rio-sul": grade(1, 3) } })
+      contextoMov({ vendasSite90: 2, gradePorPosicao: { "rio-sul": grade(1, 3) } })
     );
+    expect(movimentacoes.length).toBeGreaterThan(0);
     for (const m of movimentacoes) {
       if (m.confianca !== "alta") expect(m.avisos.length).toBeGreaterThan(0);
     }
