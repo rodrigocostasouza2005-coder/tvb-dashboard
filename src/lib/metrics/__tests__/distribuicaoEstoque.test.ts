@@ -10,6 +10,7 @@ import {
   agruparMovimentacoesPorPar,
   montarMatrizGrade,
   resumirGrupoGrade,
+  vendasEfetivasCdSite,
   type VariantePorLoja,
   type MovimentacaoRecomendada,
   type ContextoMovimentacao,
@@ -135,6 +136,51 @@ describe("diagnosticarVariante", () => {
   it("limiarExcessivo expõe o parâmetro usado por cada tipo de posição", () => {
     expect(limiarExcessivo("loja")).toBe(60);
     expect(limiarExcessivo("cd_site")).toBe(90);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// vendasEfetivasCdSite — correção do bug de diagnóstico do CD/Site (2026-11-13)
+// ---------------------------------------------------------------------------
+describe("vendasEfetivasCdSite — venda direta do CD/Site + demanda das lojas que ele abastece", () => {
+  it("soma venda direta com demanda das lojas, não substitui", () => {
+    expect(vendasEfetivasCdSite(10, 45)).toBe(55);
+  });
+
+  it("loja comum nunca recebe demanda de lojas (sempre 0) — resultado é só a própria venda", () => {
+    expect(vendasEfetivasCdSite(20, 0)).toBe(20);
+  });
+
+  it("CD sem venda direta nenhuma, mas abastecendo lojas de verdade, não fica em zero", () => {
+    expect(vendasEfetivasCdSite(0, 45)).toBe(45);
+  });
+
+  // Prova end-to-end do bug E da correção, usando diagnosticarVariante (pura, agnóstica de onde o
+  // número vem) — exatamente o teste pedido pelo Rodrigo: "CD com venda direta baixa mas lojas
+  // consumindo bastante" não pode virar estoque_parado/cobertura_excessiva por engano.
+  it("CD com venda direta baixa mas lojas consumindo bastante NÃO é diagnosticado como parado", () => {
+    const vendaDiretaSite90 = 0;
+    const demandaLojas90 = 45; // lojas abastecidas pelo CD consumindo normalmente
+    const vendasDias90 = vendasEfetivasCdSite(vendaDiretaSite90, demandaLojas90);
+    const velocidadeDiaria = vendasDias90 / 90;
+    const estoqueAtual = 40; // cobertura = 40 / 0.5 = 80 dias: dentro da faixa normal pro CD (<90)
+    const coberturaDias = Math.round((estoqueAtual / velocidadeDiaria) * 10) / 10;
+
+    const semCorrecao = diagnosticarVariante(
+      { estoqueAtual, vendasDias30: 0, vendasDias90: vendaDiretaSite90, velocidadeDiaria: 0, coberturaDias: null },
+      "cd_site"
+    );
+    const comCorrecao = diagnosticarVariante(
+      { estoqueAtual, vendasDias30: 0, vendasDias90, velocidadeDiaria, coberturaDias },
+      "cd_site"
+    );
+
+    // Prova do bug: só com venda direta (sem a correção), esse mesmo CD seria "estoque_parado".
+    expect(semCorrecao).toBe("estoque_parado");
+    // Com a correção (site + demanda das lojas), o CD é reconhecido girando normalmente.
+    expect(comCorrecao).not.toBe("estoque_parado");
+    expect(comCorrecao).not.toBe("cobertura_excessiva");
+    expect(comCorrecao).toBe("equilibrado");
   });
 });
 

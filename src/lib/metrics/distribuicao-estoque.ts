@@ -109,6 +109,24 @@ export function diagnosticarVariante(
   return "equilibrado";
 }
 
+// BUG REAL confirmado pelo Rodrigo em produção (2026-11-13): vendasDias30/60/90 do CD/Site vinham
+// só de Sale do próprio storeId (venda direta/e-commerce do site). O abastecimento que o CD manda
+// pra loja NUNCA é registrado como Sale — essa saída real de estoque ficava invisível pro cálculo
+// de velocidade/cobertura do CD, então um CD saudável, girando normal via distribuição, podia ser
+// diagnosticado como parado/excesso por engano.
+//
+// Correção confirmada por ele ("usar demanda das lojas + site"): pra fins de
+// diagnóstico/velocidade/cobertura DA POSIÇÃO CD/SITE (nunca de uma loja comum — quem chama decide
+// isso passando demandaLojas=0 pra lojas, ver montarComparacaoSemCache), soma a venda direta do
+// site/atacado (o que já existia) com a demanda agregada das lojas de varejo reais que esse CD/Site
+// abastece no MESMO período — proxy de "quanto está saindo do CD de verdade", já que fisicamente é
+// o CD que abastece essas lojas. NÃO substitui a venda direta, SOMA às duas. Função pura e
+// trivial de propósito: existe separada só pra poder ser testada sem banco (convenção do projeto —
+// a camada de dados real, onde a soma de fato é usada, nunca tem teste unitário próprio).
+export function vendasEfetivasCdSite(vendaDiretaCdSite: number, demandaLojas: number): number {
+  return vendaDiretaCdSite + demandaLojas;
+}
+
 // ---------------------------------------------------------------------------
 // ALOCAÇÃO (pura) — núcleo compartilhado pelas 3 direções
 // ---------------------------------------------------------------------------
@@ -1211,9 +1229,15 @@ async function montarComparacaoSemCache(filters: ComparacaoFiltro): Promise<Comp
     const porLoja: VariantePorLoja[] = todasPosicoes.map((p) => {
       const k = key(p.posicaoId, cod);
       const estoqueAtual = estoquePorPosicao.get(k) ?? 0;
-      const vendasDias30 = v30.get(k) ?? 0;
-      const vendasDias60 = v60.get(k) ?? 0;
-      const vendasDias90 = v90.get(k) ?? 0;
+      // Demanda das lojas só entra pra posição CD/Site (ver vendasEfetivasCdSite) — pra uma loja
+      // comum isto é sempre 0, então vendasEfetivasCdSite(própria, 0) = própria, sem mudar nada.
+      // `vendasSite90PorCod` (sinal de potencial online, usado só no recolhimento) continua
+      // site-only, propositalmente não tocado aqui.
+      const demandaLojas = (mapa: Map<string, number>) =>
+        p.tipo === "cd_site" ? posicoes.lojas.reduce((soma, l) => soma + (mapa.get(key(l.posicaoId, cod)) ?? 0), 0) : 0;
+      const vendasDias30 = vendasEfetivasCdSite(v30.get(k) ?? 0, demandaLojas(v30));
+      const vendasDias60 = vendasEfetivasCdSite(v60.get(k) ?? 0, demandaLojas(v60));
+      const vendasDias90 = vendasEfetivasCdSite(v90.get(k) ?? 0, demandaLojas(v90));
       const velocidadeDiaria = vendasDias30 > 0 ? vendasDias30 / 30 : vendasDias90 / 90;
       const coberturaDias = velocidadeDiaria > 0 ? Math.round((estoqueAtual / velocidadeDiaria) * 10) / 10 : null;
       // Mínimo vigente: StockMinimumRule (regra manual do Rodrigo, mais específica ganha —
