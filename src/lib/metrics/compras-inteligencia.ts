@@ -686,7 +686,7 @@ async function getVendaMediaDiariaPorCod(cods: string[]): Promise<Map<string, { 
 // dataFinalizacaoProducao (quando terminou, null enquanto aberta) — por isso todo recebimento
 // vindo daqui entra como confiavel=false até a TVB cadastrar uma previsão real. Sem isso, o motor
 // de Best Seller nunca teria uma data pra comparar com o horizonte.
-async function getPedidosEmAbertoPorCod(cods: string[]): Promise<Map<string, RecebimentoPrevisto[]>> {
+export async function getPedidosEmAbertoPorCod(cods: string[]): Promise<Map<string, RecebimentoPrevisto[]>> {
   if (cods.length === 0) return new Map();
   const rows = await prisma.productionOrder.groupBy({
     by: ["cod"],

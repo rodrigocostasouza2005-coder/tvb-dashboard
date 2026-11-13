@@ -9,6 +9,7 @@ import {
   type PosicoesEstoque,
 } from "./core";
 import { matchMinimumRule } from "./estoque";
+import { getPedidosEmAbertoPorCod } from "./compras-inteligencia";
 
 // ---------------------------------------------------------------------------
 // AGENTE DE INTELIGÊNCIA DE DISTRIBUIÇÃO DE ESTOQUE
@@ -346,6 +347,11 @@ export type RecomendacaoManter = {
   // como "sem interesse" comum. Sinaliza necessidade de reposição, nunca recolhimento (pedido
   // Rodrigo 2026-11-13).
   necessidadeReposicao?: boolean;
+  // Anexado depois, em getMovimentacoesRecomendadas (cruzamento em lote com ProductionOrder) — só
+  // metadado informativo. NUNCA reduz/suprime necessidadeReposicao nem é tratado como estoque
+  // físico disponível em nenhum outro lugar do motor (pedido Rodrigo 2026-11-13: evitar duplicar o
+  // alerta quando já existe produção cobrindo, sem fingir que a peça já está disponível).
+  producaoEmAndamento?: { quantidade: number; cobertura: "parcial" | "total" };
 };
 
 // Prioridade 3 da hierarquia pedida pelo Rodrigo em 2026-11-13: sobrou necessidade depois de
@@ -363,6 +369,8 @@ export type NecessidadeNaoAtendida = {
   posicaoNome: string;
   necessidadeRestante: number;
   diagnostico: Diagnostico;
+  // Mesmo cruzamento/mesma ressalva de RecomendacaoManter.producaoEmAndamento.
+  producaoEmAndamento?: { quantidade: number; cobertura: "parcial" | "total" };
 };
 
 export type ResultadoMovimentacoes = {
@@ -423,6 +431,33 @@ export function avaliarConfianca(args: {
   }
 
   return { confianca, avisos };
+}
+
+// Cruzamento puro (sem Prisma, testável isolado) entre necessidades reais e produção em aberto já
+// buscada em lote (getPedidosEmAbertoPorCod). Muta os arrays recebidos (mesmo padrão de
+// registrarManter, abaixo) — nunca cria necessidade nova nem altera necessidadeRestante/
+// necessidadeReposicao, só anexa o metadado informativo producaoEmAndamento.
+export function anexarProducaoEmAndamento(
+  necessidadesNaoAtendidas: NecessidadeNaoAtendida[],
+  manter: RecomendacaoManter[],
+  pedidosPorCod: Map<string, { quantidade: number }[]>
+): void {
+  const quantidadeEmProducao = (cod: string) =>
+    (pedidosPorCod.get(cod) ?? []).reduce((soma, p) => soma + p.quantidade, 0);
+
+  for (const n of necessidadesNaoAtendidas) {
+    const qtd = quantidadeEmProducao(n.cod);
+    n.producaoEmAndamento = qtd > 0 ? { quantidade: qtd, cobertura: qtd >= n.necessidadeRestante ? "total" : "parcial" } : undefined;
+  }
+  for (const m of manter) {
+    if (!m.necessidadeReposicao) continue;
+    // RecomendacaoManter não tem uma quantidade numérica de necessidade (é ruptura agregada
+    // booleana, não um pedido com quantidade) — qualquer produção em aberto > 0 já é informação
+    // relevante; sem número pra comparar, cobertura é sempre "total" aqui (decisão documentada no
+    // relatório de entrega, não uma garantia real de que cobre o suficiente).
+    const qtd = quantidadeEmProducao(m.cod);
+    m.producaoEmAndamento = qtd > 0 ? { quantidade: qtd, cobertura: "total" } : undefined;
+  }
 }
 
 type AcumuladorManter = Map<string, RecomendacaoManter>;
@@ -638,10 +673,17 @@ export function calcularMovimentacoes(
   //   C) potencial online comprovado (o SKU vendeu no site nos últimos 90 dias) — agora OBRIGATÓRIO.
   // Recolhe SOMENTE se C E (A OU B). C sozinho (sem sinal local) também não recolhe: a loja ainda
   // precisa da peça, só porque o site vende não significa que aqui sobra.
+  // Lojas cuja candidatura a recolhimento já foi avaliada neste loop — independente de qual
+  // posicaoId o registrarManter resultante usou (o caso de CD/Site zerado registra por cdSite.
+  // storeId, não pela loja, pra não duplicar a mesma necessidade uma vez por loja candidata — ver
+  // abaixo). O catch-all de "MANTER pelas sobras" (fim da função) usa este Set, não o Map de
+  // manter, pra saber se a loja já foi decidida aqui.
+  const lojasAvaliadasRecolhimento = new Set<string>();
   {
     for (const origem of origensLoja) {
       const v = origem.v;
       if (origem.disponivel <= 0) continue; // já doado pro varejo no passo 1
+      lojasAvaliadasRecolhimento.add(v.storeId);
 
       const grade = contexto.gradePorPosicao[v.storeId];
       const demandaLocalBaixa = v.vendasDias90 <= DEMANDA_LOCAL_BAIXA_90D;
@@ -673,10 +715,16 @@ export function calcularMovimentacoes(
       // necessidade de reposição explicitamente (recolher da loja não resolveria uma ruptura no
       // site: o problema é falta de peça em algum ponto da cadeia, não má alocação).
       if (cdSite && cdSite.estoqueAtual === 0 && !potencialOnline) {
+        // registrarManter(cdSite...) — não registrarManter(v...): o fato é sobre o CD/Site (zerado
+        // pra esse cod), não sobre a loja sendo avaliada aqui. Usar `v` faria o MESMO fato aparecer
+        // UMA VEZ POR LOJA candidata a recolhimento (registrarManter dedupe por posicaoId, que
+        // varia por loja) — produzindo necessidades duplicadas em "Precisa de produção" quando mais
+        // de uma loja tem excesso/parado do mesmo SKU. Usando cdSite.storeId, todas as lojas que
+        // passarem por aqui pro mesmo cod convergem numa linha só (motivo acumula os nomes).
         registrarManter(
           manter,
           baseManter(
-            v,
+            cdSite,
             contexto,
             [
               `CD/Site está com 0 un. desse SKU e sem venda registrada no site nos últimos 90 dias — não dá pra distinguir falta de demanda de ruptura impedindo a venda ali. Sinalizando necessidade de reposição, não recolhimento de ${v.storeName}: recolher não resolveria uma ruptura no site.`,
@@ -827,7 +875,7 @@ export function calcularMovimentacoes(
   const posicoesComMovimento = new Set(movimentacoes.map((m) => m.origemPosicaoId));
   for (const origem of origensLoja) {
     if (posicoesComMovimento.has(origem.v.storeId)) continue;
-    if (manter.has(origem.v.storeId)) continue;
+    if (lojasAvaliadasRecolhimento.has(origem.v.storeId)) continue;
     registrarManter(
       manter,
       baseManter(
@@ -1420,6 +1468,20 @@ export async function getMovimentacoesRecomendadas(
     movimentacoes.push(...r.movimentacoes);
     manter.push(...r.manter);
     necessidadesNaoAtendidas.push(...r.necessidadesNaoAtendidas);
+  }
+
+  // Anexa produção em andamento (ProductionOrder) às necessidades reais — nunca suprime/reduz
+  // nenhuma delas, só evita que pareçam "esquecidas" quando já existe produção cobrindo (pedido
+  // Rodrigo 2026-11-13). Busca em lote (1 query pros cods todos); o cálculo em si é puro
+  // (anexarProducaoEmAndamento), pra poder ser testado sem Prisma.
+  {
+    const codsParaChecar = new Set<string>();
+    for (const n of necessidadesNaoAtendidas) codsParaChecar.add(n.cod);
+    for (const m of manter) if (m.necessidadeReposicao) codsParaChecar.add(m.cod);
+    if (codsParaChecar.size > 0) {
+      const pedidosPorCod = await getPedidosEmAbertoPorCod([...codsParaChecar]);
+      anexarProducaoEmAndamento(necessidadesNaoAtendidas, manter, pedidosPorCod);
+    }
   }
 
   // Grade por tamanho das duas pontas, pra linha expandida (só camada de dados — ver
