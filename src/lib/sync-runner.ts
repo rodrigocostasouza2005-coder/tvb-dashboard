@@ -1286,7 +1286,7 @@ async function doSync() {
   // outra coisa (self-heal, Force Sync manual) acontecer no mesmo instante.
   const STAGGER_MS = 2_000;
 
-  const [results, totalOrdensProducao, totalClientes] = await Promise.all([
+  const [results, ordensProducaoResult, totalClientes] = await Promise.all([
     (async () => {
       const outrosResultados = await Promise.all(
         outrasLojas.map((client, i) => sleep(i * STAGGER_MS).then(() => syncOneClient(client)))
@@ -1295,10 +1295,21 @@ async function doSync() {
       return [...outrosResultados, ...cdResultado];
     })(),
     // Não fatal: se o token da matriz ainda não estiver configurado (ex: só em dev, não em
-    // produção), syncOrdensProducao devolve 0 sem quebrar o resto da sync.
+    // produção), syncOrdensProducao devolve 0 sem quebrar o resto da sync. Achado na auditoria de
+    // falsos sucessos de 2026-11-12/13: o `.catch` antigo devolvia só `0`, indistinguível de
+    // "zero ordens de produção de verdade neste período" — e o SyncLog(source="PRODUCTION") mais
+    // abaixo gravava "SUCCESS" incondicionalmente, sem nenhuma checagem de falha (diferente de
+    // STOCK/SALES/RETURNS/GIFTS, que checam falhasEstoque/falhasVendas antes de decidir o status).
+    // Agora devolve {ok, count} pra distinguir "matriz não configurada ou 0 ordens de verdade"
+    // (ok:true, legítimo — zero produção num período é plausível) de "a chamada à API falhou"
+    // (ok:false), e o SyncLog usa isso pra não mentir "SUCCESS" quando foi erro.
     sleep(outrasLojas.length * STAGGER_MS)
       .then(() => syncOrdensProducao(matrizClient))
-      .catch((e) => { console.error("[syncOrdensProducao] falhou:", e?.message ?? e); return 0; }),
+      .then((count) => ({ ok: true as const, count }))
+      .catch((e) => {
+        console.error("[syncOrdensProducao] falhou:", e?.message ?? e);
+        return { ok: false as const, count: 0, mensagem: e instanceof Error ? e.message : String(e) };
+      }),
     // Clientes — 1 token basta, não é fatal se falhar
     sleep((outrasLojas.length + 1) * STAGGER_MS)
       .then(() => (cdAtacadoClient ? syncClientes(cdAtacadoClient) : Promise.resolve(0)))
@@ -1386,7 +1397,13 @@ async function doSync() {
     },
   });
   await prisma.syncLog.create({
-    data: { source: "PRODUCTION", status: "SUCCESS", recordsSynced: totalOrdensProducao, finishedAt: new Date() },
+    data: {
+      source: "PRODUCTION",
+      status: ordensProducaoResult.ok ? "SUCCESS" : "FAILED",
+      recordsSynced: ordensProducaoResult.count,
+      message: ordensProducaoResult.ok ? null : `Falha: ${ordensProducaoResult.mensagem}`,
+      finishedAt: new Date(),
+    },
   });
   await prisma.syncLog.create({
     data: {
@@ -1404,7 +1421,7 @@ async function doSync() {
     estoque: totalEstoque,
     vendas: totalVendas,
     devolucoes: totalDevolucoes,
-    ordensProducao: totalOrdensProducao,
+    ordensProducao: ordensProducaoResult.count,
     brindes: totalBrindes,
     vendasCanceladas: totalVendasCanceladas,
     devolucoesCanceladas: totalDevolucoesCanceladas,
