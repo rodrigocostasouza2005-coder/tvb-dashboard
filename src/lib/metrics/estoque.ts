@@ -224,6 +224,13 @@ async function getProductionByDimension(
 // o que daria sell-through impossível tipo 800%). Nesses casos cai pro cálculo antigo. Pedido do
 // Rodrigo em 2026-08-11 depois de eu mostrar os números reais de cobertura/inconsistência.
 export function resolveSellThrough(unitsSoldAllTime: number, currentStock: number, produzido: number) {
+  // Zero venda (em NENHUM canal, histórico completo) não é "0% de sell-through" - é ausência de
+  // histórico, não dá pra julgar bom/atenção/crítico. Sem esse guard, as duas fórmulas abaixo dão
+  // 0% pra um produto que nunca vendeu (com ou sem produzido>0), e statusFor(0) devolve "Crítico" -
+  // bug real relatado pelo Rodrigo em 2026-11-13 (produto sem venda no site aparecendo crítico nas
+  // abas Sellthrough/Pesquisa/Marketing/Promoção). null já é o valor que essas telas tratam como
+  // "sem dado"/"—", então nenhuma delas precisa mudar.
+  if (unitsSoldAllTime === 0) return null;
   if (produzido > 0 && produzido >= unitsSoldAllTime) {
     return Math.min((unitsSoldAllTime / produzido) * 100, 100);
   }
