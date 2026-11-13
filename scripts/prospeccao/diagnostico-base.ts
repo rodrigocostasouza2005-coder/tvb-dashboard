@@ -68,6 +68,39 @@ async function main() {
     console.log(`  ${tipo}: ${count} ocorrências`);
   }
 
+  // Diagnóstico temporário (branch diagnostico-pesquisa-comercial-temp, não mergeado em main):
+  // investigar por que agente-pesquisa-comercial.ts retornou lojas=0 pra UF=RJ mesmo com
+  // candidatos em EM_QUALIFICACAO — somente leitura, não altera nada.
+  const porResponsavel = await prisma.atacadoProspect.groupBy({ by: ["responsavel"], _count: { _all: true } });
+  console.log("\nPor responsavel:");
+  for (const row of porResponsavel.sort((a, b) => b._count._all - a._count._all)) {
+    console.log(`  ${row.responsavel ?? "(null)"}: ${row._count._all}`);
+  }
+
+  const porOrigem = await prisma.atacadoProspect.groupBy({ by: ["origem"], _count: { _all: true } });
+  console.log("\nPor origem:");
+  for (const row of porOrigem.sort((a, b) => b._count._all - a._count._all)) {
+    console.log(`  ${row.origem}: ${row._count._all}`);
+  }
+
+  const porGrupoComercial = await prisma.atacadoProspect.groupBy({ by: ["grupoComercial"], _count: { _all: true } });
+  console.log("\nPor grupoComercial:");
+  for (const row of porGrupoComercial.sort((a, b) => b._count._all - a._count._all)) {
+    console.log(`  ${row.grupoComercial}: ${row._count._all}`);
+  }
+
+  const porConfiancaPesquisa = await prisma.atacadoProspect.groupBy({ by: ["confiancaPesquisa"], _count: { _all: true } });
+  console.log("\nPor confiancaPesquisa:");
+  for (const row of porConfiancaPesquisa.sort((a, b) => b._count._all - a._count._all)) {
+    console.log(`  ${row.confiancaPesquisa ?? "(null)"}: ${row._count._all}`);
+  }
+
+  const porEstado = await prisma.atacadoProspect.groupBy({ by: ["estado"], _count: { _all: true } });
+  console.log("\nPor estado:");
+  for (const row of porEstado.sort((a, b) => b._count._all - a._count._all)) {
+    console.log(`  ${row.estado ?? "(null)"}: ${row._count._all}`);
+  }
+
   console.log("\n(Diagnóstico concluído — nenhum registro foi alterado.)");
 }
 
