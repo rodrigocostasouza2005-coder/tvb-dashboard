@@ -341,6 +341,11 @@ export type RecomendacaoManter = {
   diagnostico: Diagnostico;
   confianca: Confianca;
   motivo: string[];
+  // true só quando o CD/Site agregado está zerado e sem venda no site nos últimos 90 dias —
+  // ambíguo (pode ser ruptura impedindo a venda, não falta de demanda), então não pode ser lido
+  // como "sem interesse" comum. Sinaliza necessidade de reposição, nunca recolhimento (pedido
+  // Rodrigo 2026-11-13).
+  necessidadeReposicao?: boolean;
 };
 
 // Prioridade 3 da hierarquia pedida pelo Rodrigo em 2026-11-13: sobrou necessidade depois de
@@ -431,7 +436,13 @@ function registrarManter(acc: AcumuladorManter, item: RecomendacaoManter) {
   acc.set(item.posicaoId, item);
 }
 
-function baseManter(v: VariantePorLoja, contexto: ContextoMovimentacao, motivo: string[], confianca: Confianca): RecomendacaoManter {
+function baseManter(
+  v: VariantePorLoja,
+  contexto: ContextoMovimentacao,
+  motivo: string[],
+  confianca: Confianca,
+  necessidadeReposicao = false
+): RecomendacaoManter {
   return {
     cod: contexto.cod,
     produto: contexto.produto,
@@ -444,6 +455,7 @@ function baseManter(v: VariantePorLoja, contexto: ContextoMovimentacao, motivo: 
     diagnostico: v.diagnostico,
     confianca,
     motivo,
+    ...(necessidadeReposicao ? { necessidadeReposicao } : {}),
   };
 }
 
@@ -618,14 +630,14 @@ export function calcularMovimentacoes(
     }));
 
   // ---- Passo 3: Loja → CD/Site (recolhimento) -------------------------------
-  // Nunca é um corte binário "peça isolada → recolhe" nem "grade quebrada → recolhe" (pedido
-  // explícito do Rodrigo: uma peça pode ter baixa relevância numa loja e bom potencial no
-  // ecommerce — e também o contrário). Ponderação com 3 sinais, exige PELO MENOS DOIS:
-  //   A) demanda local baixa (<= 1 un. em 90 dias naquela loja);
-  //   B) grade quebrada na loja (ela já não tem estoque em todos os tamanhos que ela mesma vendeu
-  //      nos últimos 90 dias — base histórica real, não grade ideal fixa);
-  //   C) potencial online comprovado (o SKU vendeu no site nos últimos 90 dias).
-  // Um sinal só não move nada — vira MANTER com o motivo escrito.
+  // Regra revista em 2026-11-13 (pedido explícito do Rodrigo): vender bem OU mal numa loja física,
+  // por si só, NUNCA justifica recolher pro CD/Site — isso só otimiza alocação quando existe
+  // demanda REAL comprovada no ecommerce pra receber a peça. Por isso:
+  //   A) demanda local baixa (<= 1 un. em 90 dias naquela loja) — sinal local, nunca suficiente só;
+  //   B) grade quebrada na loja (idem, sinal local, nunca suficiente só);
+  //   C) potencial online comprovado (o SKU vendeu no site nos últimos 90 dias) — agora OBRIGATÓRIO.
+  // Recolhe SOMENTE se C E (A OU B). C sozinho (sem sinal local) também não recolhe: a loja ainda
+  // precisa da peça, só porque o site vende não significa que aqui sobra.
   {
     for (const origem of origensLoja) {
       const v = origem.v;
@@ -654,22 +666,46 @@ export function calcularMovimentacoes(
         continue;
       }
 
-      const sinais = [demandaLocalBaixa, gradeQuebrada, potencialOnline].filter(Boolean).length;
-      if (sinais < 2) {
+      // Ambíguo, não "sem interesse": CD/Site agregado zerado (não existe campo de estoque do site
+      // isolado hoje, só o agregado CD+Atacado+Site) e zero venda no site em 90 dias pode ser falta
+      // de demanda OU pode ser a própria ruptura impedindo a venda — não dá pra saber qual com o
+      // dado disponível. Em vez de cair num MANTER silencioso de "sem interesse", sinaliza
+      // necessidade de reposição explicitamente (recolher da loja não resolveria uma ruptura no
+      // site: o problema é falta de peça em algum ponto da cadeia, não má alocação).
+      if (cdSite && cdSite.estoqueAtual === 0 && !potencialOnline) {
+        registrarManter(
+          manter,
+          baseManter(
+            v,
+            contexto,
+            [
+              `CD/Site está com 0 un. desse SKU e sem venda registrada no site nos últimos 90 dias — não dá pra distinguir falta de demanda de ruptura impedindo a venda ali. Sinalizando necessidade de reposição, não recolhimento de ${v.storeName}: recolher não resolveria uma ruptura no site.`,
+            ],
+            "media",
+            true
+          )
+        );
+        continue;
+      }
+
+      const sinalLocal = demandaLocalBaixa || gradeQuebrada;
+      if (!potencialOnline || !sinalLocal) {
         const motivo: string[] = [];
         if (!demandaLocalBaixa) {
           motivo.push(
             `${v.storeName} ainda vende o SKU (${v.vendasDias90} un. em 90 dias) — recolher tiraria a peça de uma unidade onde ela tem saída.`
           );
         }
-        if (demandaLocalBaixa && !potencialOnline && !gradeQuebrada) {
+        if (!potencialOnline && sinalLocal) {
           motivo.push(
-            `Peça com pouca saída em ${v.storeName}, mas sem venda no site nos últimos 90 dias e com a grade local ainda íntegra — recolher não aumentaria a chance de venda, só mudaria a peça de lugar.`
+            `Sinal local presente (${
+              [demandaLocalBaixa && "demanda baixa", gradeQuebrada && "grade quebrada"].filter(Boolean).join(" + ")
+            }) em ${v.storeName}, mas sem venda no site nos últimos 90 dias — vender bem ou mal na loja física não basta: só recolhe com demanda real comprovada no ecommerce.`
           );
         }
         if (motivo.length === 0) {
           motivo.push(
-            `Apenas 1 dos 3 sinais de recolhimento presente (demanda local baixa / grade quebrada / potencial online) — a regra exige 2 pra recomendar movimentação.`
+            `Sem demanda real comprovada no site nos últimos 90 dias e sem sinal local de baixa saída/grade quebrada em ${v.storeName} — nada aqui justifica recolher.`
           );
         }
         registrarManter(manter, baseManter(v, contexto, motivo, contexto.tipoCompra === null ? "media" : "alta"));
