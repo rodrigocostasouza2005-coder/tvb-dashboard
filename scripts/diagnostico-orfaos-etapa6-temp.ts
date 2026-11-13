@@ -48,17 +48,20 @@ async function main() {
   const datas = orfaosCdAtacado.map((r) => r.returnDate.getTime());
   console.log(`Faixa de returnDate: ${new Date(Math.min(...datas)).toISOString().slice(0,10)} a ${new Date(Math.max(...datas)).toISOString().slice(0,10)}`);
 
-  console.log("\n=== DADOS COMPLETOS (JSON, para processamento — sem nome/cliente, so campos de Return) ===");
-  console.log(JSON.stringify(orfaosCdAtacado.map((r) => ({
-    dapicVendaId: r.dapicVendaId,
-    storeId: r.storeId,
-    cod: r.cod,
-    produto: r.produto,
-    tamanho: r.tamanho,
-    quantidade: r.quantidade,
-    valorTotal: r.valorTotal,
-    returnDate: r.returnDate.toISOString(),
-  }))));
+  console.log("\n=== DADOS COMPLETOS (1 JSON por linha, prefixo ROW| — sem nome/cliente, so campos de Return) ===");
+  for (const r of orfaosCdAtacado) {
+    console.log("ROW|" + JSON.stringify({
+      dapicVendaId: r.dapicVendaId,
+      storeId: r.storeId,
+      cod: r.cod,
+      produto: r.produto,
+      tamanho: r.tamanho,
+      quantidade: r.quantidade,
+      valorTotal: r.valorTotal,
+      returnDate: r.returnDate.toISOString(),
+    }));
+  }
+  console.log(`=== FIM DADOS (${orfaosCdAtacado.length} linhas) ===`);
 
   console.log("\n(Diagnostico concluido — somente leitura, nenhum registro foi alterado.)");
 }
