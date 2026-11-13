@@ -1,0 +1,29 @@
+name: Diagnóstico temporário somente-leitura de receita líquida negativa
+
+# Temporário (branch diagnostico-receita-negativa-temp, não mergeado em main) — autorizado por
+# Rodrigo em 2026-11-13 pra investigar por que faturamento líquido (bruta - devolvido) aparece
+# negativo pra loja/mês. Execução exclusivamente manual (workflow_dispatch, sem gatilho
+# automático). Mesmo padrão de diagnostico-prospeccao.yml: DATABASE_URL de produção injetado
+# como secret do GitHub (nunca impresso em log), somente leitura (script não tem nenhum
+# update/create/delete), nenhuma alteração nos arquivos de cálculo existentes.
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostico:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Rodar diagnóstico (somente leitura)
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: npx tsx scripts/diagnostico-receita-negativa-temp.ts
