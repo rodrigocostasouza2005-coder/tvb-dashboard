@@ -177,3 +177,38 @@ test("filtro por município na seção Qualificação B2B restringe a lista sem 
   const aprovadosTable = page.getByTestId("qualificacao-aprovados");
   await expect(aprovadosTable.getByText("E2E Surf Multimarcas")).toHaveCount(0);
 });
+
+// Fase 3 (2026-11-13): "Bruce só deve trabalhar com quem já foi confirmado Qualificado" — a
+// Carteira de prospectos (pipeline legado onde Bruce trabalha, campo `status`) não pode mais
+// vazar EM_INVESTIGACAO/PENDENTE_REVISAO_HUMANA/REPROVADO só porque não é explicitamente
+// REPROVADO; só statusComercial=APROVADO entra, por padrão.
+test("Carteira de prospectos (pipeline do Bruce) só expõe prospects Qualificados por padrão", async ({ page }) => {
+  await login(page);
+  await page.goto("/dashboard/atacado-prospeccao?uf=SC");
+
+  const carteira = page.locator("section", { has: page.getByRole("heading", { name: /Carteira de prospectos/ }) });
+  await expect(carteira.getByText("E2E Surf Multimarcas")).toBeVisible();
+  await expect(carteira.getByText("E2E Loja Pendente")).toHaveCount(0);
+  await expect(carteira.getByText("E2E Loja Reprovada")).toHaveCount(0);
+});
+
+// Tela de confirmação de exclusão em massa precisa mostrar a classificação de cada registro
+// (não só nome/contagem) antes do botão definitivo — pedido explícito da Fase 3.
+test("confirmação de exclusão em massa mostra a classificação de cada prospect antes de excluir", async ({ page }) => {
+  await login(page);
+  await page.goto("/dashboard/atacado-prospeccao?qEstado=SC");
+
+  const reprovadosDetails = page.getByTestId("qualificacao-reprovados");
+  await reprovadosDetails.locator("summary").click();
+  await reprovadosDetails.getByRole("checkbox", { name: "Selecionar E2E Loja Reprovada" }).check();
+  await reprovadosDetails.getByRole("button", { name: "Excluir selecionados" }).click();
+
+  const dialog = page.getByRole("alertdialog", { name: "Confirmar exclusão definitiva" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText("Confirmar exclusão definitiva de 1 prospecto(s)?")).toBeVisible();
+  await expect(dialog.getByText("E2E Loja Reprovada")).toBeVisible();
+  await expect(dialog.getByText(/Inadequado \/ Inválido/)).toBeVisible();
+
+  // Não confirma de fato — só valida que a tela mostra classificação antes do botão existir.
+  await dialog.getByRole("link", { name: "Cancelar" }).click();
+});

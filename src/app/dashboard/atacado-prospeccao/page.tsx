@@ -28,6 +28,7 @@ import { ProspectosAprovadosTable } from "./prospectos-aprovados-table";
 import { ProspectosPendentesTable } from "./prospectos-pendentes-table";
 import { ProspectosReprovadosTable } from "./prospectos-reprovados-table";
 import { SelectAllCheckbox } from "./select-all-checkbox";
+import { ESTAGIO_COMERCIAL_LABEL, STATUS_COMERCIAL_NEGOCIO_LABEL } from "./qualificacao-labels";
 
 const STATUS: Record<string, string> = {
   NOVO: "Novo",
@@ -55,29 +56,47 @@ export default async function AtacadoProspeccaoPage({
   const cidade = params.cidade?.trim().slice(0, 100) || undefined;
   const cadastroValores = ["ATIVA", "SUSPENSA", "INAPTA", "BAIXADA", "NULA", "NAO_INFORMADA"];
   const cadastro = params.cadastro && cadastroValores.includes(params.cadastro) ? params.cadastro : undefined;
-  // Visão operacional padrão (Carteira + Bruce): nunca mistura descartado (pipeline manual) nem
-  // reprovado pelo motor (statusComercial) — ambos continuam consultáveis, só não por padrão.
-  // "Descartado" via filtro de Status explícito continua funcionando normalmente (visão
-  // administrativa). Reprovados pelo motor já têm seção própria em "Qualificação B2B" acima.
-  const where = {
-    ...(status ? { status } : { status: { not: "DESCARTADO" } }),
-    ...(status !== "DESCARTADO" ? { statusComercial: { not: "REPROVADO" as const } } : {}),
-    ...(uf ? { estado: uf } : {}),
-    ...(cidade ? { cidade: { contains: cidade, mode: "insensitive" as const } } : {}),
-    ...(cadastro ? { situacaoCadastral: cadastro } : {}),
-  };
-  const prospects = await prisma.atacadoProspect.findMany({
-    where,
-    orderBy: [{ updatedAt: "desc" }],
-    take: 250,
-    include: { activities: { orderBy: { createdAt: "desc" }, take: 3 } },
-  });
+  // Visão operacional padrão (Carteira + Bruce) — pedido explícito do Rodrigo (2026-11-13):
+  // "Bruce só deve trabalhar com quem já foi confirmado Qualificado". Qualificado = statusComercial
+  // APROVADO (único valor que representa promoção manual após revisão — ver motor-qualificacao.ts).
+  // Por isso a Carteira exige statusComercial=APROVADO, não só "diferente de REPROVADO": do
+  // contrário EM_INVESTIGACAO (grande maioria da base hoje, pesquisa ainda rodando em paralelo) e
+  // PENDENTE_REVISAO_HUMANA ("Pendente de validação" — ainda não decidido por uma pessoa) vazariam
+  // pra fila do Bruce, que não é o que foi pedido. Única exceção: Status=DESCARTADO explícito no
+  // filtro continua sendo visão administrativa (auditoria do pipeline manual do Bruce), por isso
+  // ignora statusComercial de propósito — alguém pode descartar manualmente mesmo um lead que o
+  // motor nunca chegou a aprovar. Reprovados pelo motor (Inadequado/Inválido) já têm seção própria
+  // em "Qualificação B2B" acima e nunca aparecem aqui fora dessa visão administrativa de Descartado.
+  const where = status === "DESCARTADO"
+    ? {
+        status: "DESCARTADO" as const,
+        ...(uf ? { estado: uf } : {}),
+        ...(cidade ? { cidade: { contains: cidade, mode: "insensitive" as const } } : {}),
+        ...(cadastro ? { situacaoCadastral: cadastro } : {}),
+      }
+    : {
+        statusComercial: "APROVADO" as const,
+        ...(status ? { status } : { status: { not: "DESCARTADO" as const } }),
+        ...(uf ? { estado: uf } : {}),
+        ...(cidade ? { cidade: { contains: cidade, mode: "insensitive" as const } } : {}),
+        ...(cadastro ? { situacaoCadastral: cadastro } : {}),
+      };
+  const [prospects, totalCarteira] = await Promise.all([
+    prisma.atacadoProspect.findMany({
+      where,
+      orderBy: [{ updatedAt: "desc" }],
+      take: 250,
+      include: { activities: { orderBy: { createdAt: "desc" }, take: 3 } },
+    }),
+    prisma.atacadoProspect.count({ where }),
+  ]);
 
-  // Tela de confirmação de exclusão (etapa 2 do fluxo) — nomes + contagem reais antes do botão
-  // definitivo existir na tela. IDs vêm da URL (cuids internos, não sensíveis).
+  // Tela de confirmação de exclusão (etapa 2 do fluxo) — nomes + contagem reais, e também a
+  // classificação de cada registro (estágio do pipeline do Bruce + decisão do motor), antes do
+  // botão definitivo existir na tela. IDs vêm da URL (cuids internos, não sensíveis).
   const idsParaExcluir = params.confirmarExclusao?.split(",").map((s) => s.trim()).filter(Boolean) ?? [];
   const prospectsParaExcluir = idsParaExcluir.length
-    ? await prisma.atacadoProspect.findMany({ where: { id: { in: idsParaExcluir } }, select: { id: true, nomeFantasia: true, cidade: true, estado: true } })
+    ? await prisma.atacadoProspect.findMany({ where: { id: { in: idsParaExcluir } }, select: { id: true, nomeFantasia: true, cidade: true, estado: true, status: true, statusComercial: true } })
     : [];
 
   // Filtros da seção "Qualificação B2B" — params próprios (qEstado/qMunicipio/qCapital/qClasse),
@@ -96,12 +115,18 @@ export default async function AtacadoProspeccaoPage({
     listarMunicipiosDisponiveis(qEstado),
   ]);
 
+  // novos/emPesquisa/qualificados/contatados exigem statusComercial=APROVADO pra bater com o que
+  // clicar em cada tile de fato mostra (a Carteira abaixo, ver `where` acima) — sem isso o tile
+  // "NOVOS" contaria qualquer status=NOVO (inclusive a maioria ainda EM_INVESTIGACAO), mas abrir
+  // a fila mostraria uma lista vazia ou menor, uma inconsistência visível pro usuário.
+  // "descartados" é a única exceção, de propósito: é visão administrativa, sempre por `status`
+  // legado sozinho, igual ao `where` acima quando status=DESCARTADO é escolhido explicitamente.
   const [total, novos, emPesquisa, qualificados, contatados, descartados, cidades] = await Promise.all([
     prisma.atacadoProspect.count(),
-    prisma.atacadoProspect.count({ where: { status: "NOVO" } }),
-    prisma.atacadoProspect.count({ where: { status: "EM_QUALIFICACAO" } }),
-    prisma.atacadoProspect.count({ where: { status: "QUALIFICADO" } }),
-    prisma.atacadoProspect.count({ where: { status: "CONTATADO" } }),
+    prisma.atacadoProspect.count({ where: { status: "NOVO", statusComercial: "APROVADO" } }),
+    prisma.atacadoProspect.count({ where: { status: "EM_QUALIFICACAO", statusComercial: "APROVADO" } }),
+    prisma.atacadoProspect.count({ where: { status: "QUALIFICADO", statusComercial: "APROVADO" } }),
+    prisma.atacadoProspect.count({ where: { status: "CONTATADO", statusComercial: "APROVADO" } }),
     prisma.atacadoProspect.count({ where: { status: "DESCARTADO" } }),
     prisma.atacadoProspect.findMany({ where: { estado: uf ?? "RJ" }, distinct: ["cidade"], select: { cidade: true }, orderBy: { cidade: "asc" }, take: 300 }),
   ]);
@@ -128,7 +153,15 @@ export default async function AtacadoProspeccaoPage({
           <p className="text-sm font-semibold text-red-700">Confirmar exclusão definitiva de {prospectsParaExcluir.length} prospecto(s)?</p>
           <p className="mt-1 text-xs text-[var(--text-muted)]">Esta ação não pode ser desfeita. Histórico de interações e marcas evidenciadas desses prospectos serão excluídos junto.</p>
           <ul className="mt-2 max-h-40 list-disc space-y-0.5 overflow-y-auto pl-5 text-xs text-[var(--text-secondary)]">
-            {prospectsParaExcluir.map((p) => <li key={p.id}>{p.nomeFantasia}{p.cidade ? ` — ${p.cidade}${p.estado ? "/" + p.estado : ""}` : ""}</li>)}
+            {prospectsParaExcluir.map((p) => (
+              <li key={p.id}>
+                {p.nomeFantasia}{p.cidade ? ` — ${p.cidade}${p.estado ? "/" + p.estado : ""}` : ""}
+                {" · "}
+                <span className="font-medium">{STATUS_COMERCIAL_NEGOCIO_LABEL[p.statusComercial] ?? p.statusComercial}</span>
+                {" · "}
+                {ESTAGIO_COMERCIAL_LABEL[p.status] ?? p.status}
+              </li>
+            ))}
           </ul>
           <div className="mt-3 flex gap-2">
             <form action={excluirProspectosDefinitivamenteAction}>
@@ -242,8 +275,8 @@ export default async function AtacadoProspeccaoPage({
       <section className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)]">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border)] px-4 py-3">
           <h2 className="text-sm font-semibold">
-            Carteira de prospectos ({prospects.length}{total > 250 ? " de " + total : ""})
-            {!status && <span className="ml-2 text-xs font-normal text-[var(--text-muted)]">— descartados e reprovados pelo motor ocultos por padrão</span>}
+            Carteira de prospectos ({prospects.length}{totalCarteira > 250 ? " de " + totalCarteira : ""})
+            {!status && <span className="ml-2 text-xs font-normal text-[var(--text-muted)]">— só prospects Qualificados (aprovados pelo motor); descartados, reprovados e pendentes de validação ficam fora por padrão</span>}
           </h2>
           <ProspectFilters
             uf={uf ?? ""}
@@ -421,7 +454,7 @@ export default async function AtacadoProspeccaoPage({
                   <td className="whitespace-nowrap px-4 py-3 text-xs text-[var(--text-muted)]">{p.updatedAt.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" })}</td>
                 </tr>
               ))}
-              {prospects.length === 0 && <tr><td colSpan={podeExcluir ? 9 : 8} className="px-4 py-8 text-center text-sm text-[var(--text-muted)]">Nenhum prospecto cadastrado{!status ? " (ou só restam descartados/reprovados — veja o filtro de Status)" : ""}.</td></tr>}
+              {prospects.length === 0 && <tr><td colSpan={podeExcluir ? 9 : 8} className="px-4 py-8 text-center text-sm text-[var(--text-muted)]">Nenhum prospecto cadastrado{!status ? " (ou nenhum confirmado Qualificado ainda — veja a seção Qualificação B2B acima ou o filtro de Status)" : ""}.</td></tr>}
             </tbody>
           </table>
         </div>

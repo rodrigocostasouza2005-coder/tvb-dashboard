@@ -74,3 +74,17 @@ export const ESTAGIO_COMERCIAL_LABEL: Record<string, string> = {
   CONVERTIDO: "Convertido",
   DESCARTADO: "Descartado",
 };
+
+// Tradução dos 4 estados de NEGÓCIO pedidos pelo Rodrigo (Qualificado/Pendente de
+// validação/Inadequado/Inválido) pro enum real StatusComercialProspect — usada em telas
+// administrativas (ex.: confirmação de exclusão em massa) que precisam mostrar a classificação
+// de cada registro antes de uma ação destrutiva. "Inadequado" e "Inválido" hoje colapsam no
+// mesmo REPROVADO no schema (ver comentário em prospeccao-qualificacao.ts sobre como diferenciar
+// os dois via evidenciasQualificacao sem migration, se um dia a UI precisar distingui-los); aqui
+// basta o rótulo de negócio mais honesto disponível sem inventar um estado que o schema não tem.
+export const STATUS_COMERCIAL_NEGOCIO_LABEL: Record<string, string> = {
+  APROVADO: "Qualificado",
+  PENDENTE_REVISAO_HUMANA: "Pendente de validação",
+  EM_INVESTIGACAO: "Pendente de validação (em investigação)",
+  REPROVADO: "Inadequado / Inválido (reprovado pelo motor)",
+};
