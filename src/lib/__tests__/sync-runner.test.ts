@@ -202,6 +202,16 @@ describe("syncArmazenadores — âncora do primaryStoreId e alerta de armazém n
     expect(resultado.primaryStoreId).toBe("store-cd");
   });
 
+  // Achado na auditoria de falsos sucessos de 2026-11-12/13: resposta vazia de /armazenadores
+  // nunca é legítima (todo token conhecido tem pelo menos 1 armazém) — sem esta correção,
+  // primaryStoreId ficava null e storeByDapicId ficava vazio SEM lançar nada, o que fazia
+  // syncVendas/syncEstoque silenciosamente reportarem zero como se fosse sucesso real.
+  it("resposta vazia de /armazenadores -> lança erro (nunca é 'sem armazém' legítimo pra um token conhecido)", async () => {
+    const client = fakeClient("cd-atacado", []);
+    const { syncArmazenadores } = await import("../sync-runner");
+    await expect(syncArmazenadores(client)).rejects.toThrow(/0 armazenadores/);
+  });
+
   it("CD ausente na resposta da API, mas já existe no banco -> usa o registro conhecido + alerta", async () => {
     storeFindFirst.mockResolvedValue(null); // "Conserto" é novo, não existe ainda
     storeCreate.mockResolvedValue({ id: "store-conserto" });
