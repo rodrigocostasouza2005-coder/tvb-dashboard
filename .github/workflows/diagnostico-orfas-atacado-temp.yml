@@ -1,0 +1,26 @@
+name: Diagnóstico temporário somente-leitura de devoluções orfãs (atacado)
+
+# Temporário — investiga causa raiz dos 377 pedidos de devolução sem Sale correspondente
+# (achado no diagnóstico de receita negativa). Execução exclusivamente manual
+# (workflow_dispatch), somente leitura, DATABASE_URL de produção via secret do GitHub.
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostico:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Rodar diagnóstico (somente leitura)
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: npx tsx scripts/diagnostico-orfas-atacado-temp.ts
