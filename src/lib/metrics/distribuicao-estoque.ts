@@ -109,6 +109,24 @@ export function diagnosticarVariante(
   return "equilibrado";
 }
 
+// BUG REAL confirmado pelo Rodrigo em produção (2026-11-13): vendasDias30/60/90 do CD/Site vinham
+// só de Sale do próprio storeId (venda direta/e-commerce do site). O abastecimento que o CD manda
+// pra loja NUNCA é registrado como Sale — essa saída real de estoque ficava invisível pro cálculo
+// de velocidade/cobertura do CD, então um CD saudável, girando normal via distribuição, podia ser
+// diagnosticado como parado/excesso por engano.
+//
+// Correção confirmada por ele ("usar demanda das lojas + site"): pra fins de
+// diagnóstico/velocidade/cobertura DA POSIÇÃO CD/SITE (nunca de uma loja comum — quem chama decide
+// isso passando demandaLojas=0 pra lojas, ver montarComparacaoSemCache), soma a venda direta do
+// site/atacado (o que já existia) com a demanda agregada das lojas de varejo reais que esse CD/Site
+// abastece no MESMO período — proxy de "quanto está saindo do CD de verdade", já que fisicamente é
+// o CD que abastece essas lojas. NÃO substitui a venda direta, SOMA às duas. Função pura e
+// trivial de propósito: existe separada só pra poder ser testada sem banco (convenção do projeto —
+// a camada de dados real, onde a soma de fato é usada, nunca tem teste unitário próprio).
+export function vendasEfetivasCdSite(vendaDiretaCdSite: number, demandaLojas: number): number {
+  return vendaDiretaCdSite + demandaLojas;
+}
+
 // ---------------------------------------------------------------------------
 // ALOCAÇÃO (pura) — núcleo compartilhado pelas 3 direções
 // ---------------------------------------------------------------------------
@@ -267,6 +285,11 @@ export type MovimentacaoRecomendada = {
   tipoMovimentacao: TipoMovimentacao;
   classificacao: Exclude<ClassificacaoMovimentacao, "MANTER">;
   prioridade: Prioridade;
+  // Prioridade da ORIGEM na hierarquia de abastecimento pedida pelo Rodrigo em 2026-11-13: 1=CD/Site
+  // (sempre tentado primeiro), 2=outra loja (só cobre o que o CD não deu). Só se aplica às
+  // movimentações que cobrem a necessidade de uma loja (cd_site_loja/loja_loja) — recolhimento
+  // (loja_cd_site) não resolve necessidade de ninguém, por isso fica undefined ali.
+  prioridadeOrigem?: 1 | 2;
   confianca: Confianca;
   origemPosicaoId: string;
   origemNome: string;
@@ -320,9 +343,27 @@ export type RecomendacaoManter = {
   motivo: string[];
 };
 
+// Prioridade 3 da hierarquia pedida pelo Rodrigo em 2026-11-13: sobrou necessidade depois de
+// esgotar CD/Site (prioridade 1) e as outras lojas (prioridade 2) — sinaliza que a única origem
+// que resta é produção/reposição central. NUNCA inventa disponibilidade futura: esta função não
+// consulta ProductionOrder nem nenhuma previsão, é só o resíduo real da necessidade que nenhuma
+// posição de estoque hoje cobre.
+export type NecessidadeNaoAtendida = {
+  cod: string;
+  produto: string;
+  grupo: string;
+  cor: string | null;
+  tamanho: string | null;
+  posicaoId: string;
+  posicaoNome: string;
+  necessidadeRestante: number;
+  diagnostico: Diagnostico;
+};
+
 export type ResultadoMovimentacoes = {
   movimentacoes: MovimentacaoRecomendada[];
   manter: RecomendacaoManter[];
+  necessidadesNaoAtendidas: NecessidadeNaoAtendida[];
 };
 
 // Demanda local considerada "baixa" pra efeito de recolhimento: até 1 unidade vendida em 90 dias
@@ -415,6 +456,7 @@ function montarMovimentacao(args: {
   tipoMovimentacao: TipoMovimentacao;
   classificacao: Exclude<ClassificacaoMovimentacao, "MANTER">;
   prioridade: Prioridade;
+  prioridadeOrigem?: 1 | 2;
   justificativa: string[];
   impactoEsperado: string;
 }): MovimentacaoRecomendada {
@@ -439,6 +481,7 @@ function montarMovimentacao(args: {
     tipoMovimentacao: args.tipoMovimentacao,
     classificacao: args.classificacao,
     prioridade: args.prioridade,
+    prioridadeOrigem: args.prioridadeOrigem,
     confianca,
     origemPosicaoId: origem.storeId,
     origemNome: origem.storeName,
@@ -467,12 +510,19 @@ function montarMovimentacao(args: {
 }
 
 // MOTOR ÚNICO das 3 direções. Puro: recebe TODAS as posições (lojas + CD/Site) do MESMO cod.
-// Ordem dos passos é deliberada e não é detalhe de implementação:
-//   1. Loja → Loja primeiro: a peça já está no varejo, transferir entre lojas é o movimento mais
-//      barato e não consome estoque do CD, que atende demanda nacional.
-//   2. CD/Site → Loja depois: cobre o que o varejo não conseguiu cobrir sozinho.
-//   3. Loja → CD/Site por último: só a sobra que NENHUMA loja quis é candidata a recolhimento —
-//      recolher uma peça que outra loja precisava seria o pior dos mundos.
+// Ordem dos passos é deliberada e não é detalhe de implementação — CORRIGIDA em 2026-11-13 por
+// pedido explícito do Rodrigo (inverte a prioridade que valia desde 2026-11-11):
+//   1. CD/Site → Loja PRIMEIRO (prioridade 1): se o CD tem disponível, ele cobre a loja. Nenhuma
+//      transferência loja→loja é sugerida enquanto o CD aguentar a necessidade — o CD existe pra
+//      abastecer, e redistribuir entre lojas quando o CD já cobre seria movimento/frete
+//      desnecessário entre pontos de varejo.
+//   2. Loja → Loja depois (prioridade 2): cobre só a necessidade que sobrou depois do CD (CD
+//      insuficiente ou zerado para aquele produto/cor/tamanho).
+//   3. Loja → CD/Site por último (prioridade 3, recolhimento): só a sobra que NENHUMA loja quis
+//      (nem o CD precisou consumir) é candidata a recolhimento — recolher uma peça que outra loja
+//      ainda precisava seria o pior dos mundos.
+// Quem sobra sem nenhuma origem (nem CD, nem loja) cobrir aparece em `necessidadesNaoAtendidas` —
+// sinal explícito de que falta produção/reposição central, nunca inventado como disponibilidade.
 export function calcularMovimentacoes(
   variantes: VariantePorLoja[],
   contexto: ContextoMovimentacao
@@ -483,34 +533,10 @@ export function calcularMovimentacoes(
   const movimentacoes: MovimentacaoRecomendada[] = [];
   const manter: AcumuladorManter = new Map();
 
-  // ---- Passo 1: Loja → Loja -------------------------------------------------
   const origensLoja = prepararOrigens(lojas);
   const destinosLoja = prepararDestinos(lojas, contexto.coberturaAlvoDias);
 
-  for (const { origem, destino, quantidade, disponivelOrigemAntes } of alocar(origensLoja, destinosLoja)) {
-    movimentacoes.push(
-      montarMovimentacao({
-        contexto,
-        origem: origem.v,
-        destino: destino.v,
-        quantidade,
-        disponivelOrigem: disponivelOrigemAntes,
-        tipoMovimentacao: "loja_loja",
-        classificacao: "REDISTRIBUIR",
-        prioridade: prioridadeDoDestino(destino.v.diagnostico),
-        justificativa: [
-          justificativaDestino(destino.v),
-          justificativaOrigem(origem, disponivelOrigemAntes),
-          `Quantidade = menor valor entre o que ${destino.v.storeName} precisa pra chegar a ${contexto.coberturaAlvoDias} dias de cobertura e o que ${origem.v.storeName} pode doar sem comprometer o próprio estoque.`,
-        ],
-        impactoEsperado: `${destino.v.storeName} sai de ${destino.v.estoqueAtual} para ${
-          destino.v.estoqueAtual + quantidade
-        } un. sem nenhuma compra nova; ${origem.v.storeName} segue acima do próprio mínimo.`,
-      })
-    );
-  }
-
-  // ---- Passo 2: CD/Site → Loja (abastecimento) ------------------------------
+  // ---- Passo 1: CD/Site → Loja (abastecimento, PRIORIDADE 1) ----------------
   // O CD/Site NÃO precisa estar em "cobertura_excessiva" pra abastecer — abastecer é a função
   // dele. O que trava o passo é o contrário: se o próprio CD/Site está em ruptura/cobertura
   // crítica, ele não tem o que doar. O piso continua sendo o mesmo StockMinimumRule + margem de
@@ -519,8 +545,6 @@ export function calcularMovimentacoes(
     const origemCd = construirOrigem(cdSite);
     const disponivelOriginalCd = origemCd.disponivel;
     if (origemCd.disponivel > 0) {
-      // destinosLoja já foi mutado pelo passo 1 — o que sobrou aqui é a necessidade REAL que o
-      // varejo não conseguiu cobrir sozinho.
       for (const { destino, quantidade } of alocar([origemCd], destinosLoja)) {
         movimentacoes.push(
           montarMovimentacao({
@@ -532,13 +556,13 @@ export function calcularMovimentacoes(
             tipoMovimentacao: "cd_site_loja",
             classificacao: "REDISTRIBUIR",
             prioridade: prioridadeDoDestino(destino.v.diagnostico),
+            prioridadeOrigem: 1,
             justificativa: [
               justificativaDestino(destino.v),
               `${destino.v.storeName} vendeu ${destino.v.vendasDias30} un. em 30 dias e ${destino.v.vendasDias90} un. em 90 dias — demanda comercial comprovada nessa unidade, não estimada.`,
               `${cdSite.storeName}: ${cdSite.estoqueAtual} un. em estoque, ${disponivelOriginalCd} un. acima do próprio mínimo${
                 origemCd.margemSeguranca > 0 ? ` + margem de segurança (${origemCd.margemSeguranca} un.)` : ""
-              } — nenhuma loja de varejo tinha sobra pra cobrir essa necessidade.`,
-              `Abastecimento do CD/Site é a última etapa depois de esgotar a redistribuição entre lojas, pra não consumir estoque que atende a demanda nacional do ecommerce sem necessidade.`,
+              } — o CD é a PRIMEIRA origem tentada, antes de qualquer redistribuição entre lojas.`,
             ],
             impactoEsperado: `${destino.v.storeName} sai de ${destino.v.estoqueAtual} para ${
               destino.v.estoqueAtual + quantidade
@@ -548,6 +572,50 @@ export function calcularMovimentacoes(
       }
     }
   }
+
+  // ---- Passo 2: Loja → Loja (PRIORIDADE 2, só o que o CD não cobriu) --------
+  // destinosLoja já foi mutado pelo passo 1 — o que sobra aqui é a necessidade REAL que o CD não
+  // conseguiu cobrir (insuficiente ou zerado para esse produto/cor/tamanho).
+  for (const { origem, destino, quantidade, disponivelOrigemAntes } of alocar(origensLoja, destinosLoja)) {
+    movimentacoes.push(
+      montarMovimentacao({
+        contexto,
+        origem: origem.v,
+        destino: destino.v,
+        quantidade,
+        disponivelOrigem: disponivelOrigemAntes,
+        tipoMovimentacao: "loja_loja",
+        classificacao: "REDISTRIBUIR",
+        prioridade: prioridadeDoDestino(destino.v.diagnostico),
+        prioridadeOrigem: 2,
+        justificativa: [
+          justificativaDestino(destino.v),
+          justificativaOrigem(origem, disponivelOrigemAntes),
+          `Quantidade = menor valor entre o que ${destino.v.storeName} ainda precisa (depois do CD/Site, prioridade 1, não cobrir tudo) e o que ${origem.v.storeName} pode doar sem comprometer o próprio estoque.`,
+        ],
+        impactoEsperado: `${destino.v.storeName} sai de ${destino.v.estoqueAtual} para ${
+          destino.v.estoqueAtual + quantidade
+        } un. sem nenhuma compra nova; ${origem.v.storeName} segue acima do próprio mínimo.`,
+      })
+    );
+  }
+
+  // ---- Necessidade que sobrou depois de CD + lojas (PRIORIDADE 3 = produção) -
+  // Não consulta ProductionOrder nem inventa previsão — é só o resíduo real de quem não teve a
+  // necessidade atendida nem pelo CD nem por nenhuma loja com sobra.
+  const necessidadesNaoAtendidas: NecessidadeNaoAtendida[] = destinosLoja
+    .filter((d) => d.necessidade > 0)
+    .map((d) => ({
+      cod: contexto.cod,
+      produto: contexto.produto,
+      grupo: contexto.grupo,
+      cor: contexto.cor,
+      tamanho: contexto.tamanho,
+      posicaoId: d.v.storeId,
+      posicaoNome: d.v.storeName,
+      necessidadeRestante: d.necessidade,
+      diagnostico: d.v.diagnostico,
+    }));
 
   // ---- Passo 3: Loja → CD/Site (recolhimento) -------------------------------
   // Nunca é um corte binário "peça isolada → recolhe" nem "grade quebrada → recolhe" (pedido
@@ -750,7 +818,7 @@ export function calcularMovimentacoes(
     );
   }
 
-  return { movimentacoes, manter: [...manter.values()] };
+  return { movimentacoes, manter: [...manter.values()], necessidadesNaoAtendidas };
 }
 
 // ---------------------------------------------------------------------------
@@ -1161,9 +1229,15 @@ async function montarComparacaoSemCache(filters: ComparacaoFiltro): Promise<Comp
     const porLoja: VariantePorLoja[] = todasPosicoes.map((p) => {
       const k = key(p.posicaoId, cod);
       const estoqueAtual = estoquePorPosicao.get(k) ?? 0;
-      const vendasDias30 = v30.get(k) ?? 0;
-      const vendasDias60 = v60.get(k) ?? 0;
-      const vendasDias90 = v90.get(k) ?? 0;
+      // Demanda das lojas só entra pra posição CD/Site (ver vendasEfetivasCdSite) — pra uma loja
+      // comum isto é sempre 0, então vendasEfetivasCdSite(própria, 0) = própria, sem mudar nada.
+      // `vendasSite90PorCod` (sinal de potencial online, usado só no recolhimento) continua
+      // site-only, propositalmente não tocado aqui.
+      const demandaLojas = (mapa: Map<string, number>) =>
+        p.tipo === "cd_site" ? posicoes.lojas.reduce((soma, l) => soma + (mapa.get(key(l.posicaoId, cod)) ?? 0), 0) : 0;
+      const vendasDias30 = vendasEfetivasCdSite(v30.get(k) ?? 0, demandaLojas(v30));
+      const vendasDias60 = vendasEfetivasCdSite(v60.get(k) ?? 0, demandaLojas(v60));
+      const vendasDias90 = vendasEfetivasCdSite(v90.get(k) ?? 0, demandaLojas(v90));
       const velocidadeDiaria = vendasDias30 > 0 ? vendasDias30 / 30 : vendasDias90 / 90;
       const coberturaDias = velocidadeDiaria > 0 ? Math.round((estoqueAtual / velocidadeDiaria) * 10) / 10 : null;
       // Mínimo vigente: StockMinimumRule (regra manual do Rodrigo, mais específica ganha —
@@ -1289,6 +1363,7 @@ export async function getMovimentacoesRecomendadas(
 
   const movimentacoes: MovimentacaoRecomendada[] = [];
   const manter: RecomendacaoManter[] = [];
+  const necessidadesNaoAtendidas: NecessidadeNaoAtendida[] = [];
   for (const c of variantes) {
     const gradePorPosicao: Record<string, GradePosicao> = {};
     for (const l of c.porLoja) {
@@ -1308,6 +1383,7 @@ export async function getMovimentacoesRecomendadas(
     });
     movimentacoes.push(...r.movimentacoes);
     manter.push(...r.manter);
+    necessidadesNaoAtendidas.push(...r.necessidadesNaoAtendidas);
   }
 
   // Grade por tamanho das duas pontas, pra linha expandida (só camada de dados — ver
@@ -1356,7 +1432,7 @@ export async function getMovimentacoesRecomendadas(
       (!filters.destinoIn || filters.destinoIn.length === 0 || filters.destinoIn.includes(m.destinoPosicaoId))
   );
 
-  return { movimentacoes: filtradas, manter, colunas, totalAntesDoFiltro };
+  return { movimentacoes: filtradas, manter, necessidadesNaoAtendidas, colunas, totalAntesDoFiltro };
 }
 
 // ---------------------------------------------------------------------------

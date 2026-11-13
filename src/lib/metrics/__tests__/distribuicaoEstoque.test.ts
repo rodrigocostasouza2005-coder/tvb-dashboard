@@ -10,6 +10,7 @@ import {
   agruparMovimentacoesPorPar,
   montarMatrizGrade,
   resumirGrupoGrade,
+  vendasEfetivasCdSite,
   type VariantePorLoja,
   type MovimentacaoRecomendada,
   type ContextoMovimentacao,
@@ -135,6 +136,51 @@ describe("diagnosticarVariante", () => {
   it("limiarExcessivo expõe o parâmetro usado por cada tipo de posição", () => {
     expect(limiarExcessivo("loja")).toBe(60);
     expect(limiarExcessivo("cd_site")).toBe(90);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// vendasEfetivasCdSite — correção do bug de diagnóstico do CD/Site (2026-11-13)
+// ---------------------------------------------------------------------------
+describe("vendasEfetivasCdSite — venda direta do CD/Site + demanda das lojas que ele abastece", () => {
+  it("soma venda direta com demanda das lojas, não substitui", () => {
+    expect(vendasEfetivasCdSite(10, 45)).toBe(55);
+  });
+
+  it("loja comum nunca recebe demanda de lojas (sempre 0) — resultado é só a própria venda", () => {
+    expect(vendasEfetivasCdSite(20, 0)).toBe(20);
+  });
+
+  it("CD sem venda direta nenhuma, mas abastecendo lojas de verdade, não fica em zero", () => {
+    expect(vendasEfetivasCdSite(0, 45)).toBe(45);
+  });
+
+  // Prova end-to-end do bug E da correção, usando diagnosticarVariante (pura, agnóstica de onde o
+  // número vem) — exatamente o teste pedido pelo Rodrigo: "CD com venda direta baixa mas lojas
+  // consumindo bastante" não pode virar estoque_parado/cobertura_excessiva por engano.
+  it("CD com venda direta baixa mas lojas consumindo bastante NÃO é diagnosticado como parado", () => {
+    const vendaDiretaSite90 = 0;
+    const demandaLojas90 = 45; // lojas abastecidas pelo CD consumindo normalmente
+    const vendasDias90 = vendasEfetivasCdSite(vendaDiretaSite90, demandaLojas90);
+    const velocidadeDiaria = vendasDias90 / 90;
+    const estoqueAtual = 40; // cobertura = 40 / 0.5 = 80 dias: dentro da faixa normal pro CD (<90)
+    const coberturaDias = Math.round((estoqueAtual / velocidadeDiaria) * 10) / 10;
+
+    const semCorrecao = diagnosticarVariante(
+      { estoqueAtual, vendasDias30: 0, vendasDias90: vendaDiretaSite90, velocidadeDiaria: 0, coberturaDias: null },
+      "cd_site"
+    );
+    const comCorrecao = diagnosticarVariante(
+      { estoqueAtual, vendasDias30: 0, vendasDias90, velocidadeDiaria, coberturaDias },
+      "cd_site"
+    );
+
+    // Prova do bug: só com venda direta (sem a correção), esse mesmo CD seria "estoque_parado".
+    expect(semCorrecao).toBe("estoque_parado");
+    // Com a correção (site + demanda das lojas), o CD é reconhecido girando normalmente.
+    expect(comCorrecao).not.toBe("estoque_parado");
+    expect(comCorrecao).not.toBe("cobertura_excessiva");
+    expect(comCorrecao).toBe("equilibrado");
   });
 });
 
@@ -305,16 +351,43 @@ describe("calcularMovimentacoes — direção CD/Site → Loja (abastecimento)",
     expect(movimentacoes[0].quantidadeSugerida).toBe(15);
   });
 
-  it("redistribuição entre lojas vem ANTES de consumir o CD/Site (ordem deliberada)", () => {
+  // CORRIGIDO em 2026-11-13 (pedido explícito do Rodrigo, inverte a ordem de 2026-11-11): o CD é
+  // SEMPRE a primeira origem tentada. Antes desta correção o teste esperava o oposto (loja→loja
+  // levava os 12 de Rio Sul e só os 3 que faltavam saíam do CD) — agora o CD cobre a necessidade
+  // inteira de Leblon (15) sozinho, e Rio Sul nem chega a ser consumido pela redistribuição.
+  it("CD/Site é a PRIMEIRA origem tentada — nenhuma redistribuição loja→loja enquanto o CD cobrir", () => {
     const leblon = variante({ storeId: "leblon", storeName: "Leblon", estoqueAtual: 0, vendasDias30: 15, vendasDias90: 40 });
     const rioSul = variante({ storeId: "rio-sul", storeName: "Rio Sul", estoqueAtual: 12 });
     const cdSite = cd({ estoqueAtual: 100, vendasDias30: 10, vendasDias90: 30, velocidadeDiaria: 10 / 30, coberturaDias: 300 });
     const { movimentacoes } = calcularMovimentacoes([leblon, rioSul, cdSite], contextoMov());
     const lojaLoja = movimentacoes.find((m) => m.tipoMovimentacao === "loja_loja");
     const doCd = movimentacoes.find((m) => m.tipoMovimentacao === "cd_site_loja");
-    expect(lojaLoja?.quantidadeSugerida).toBe(12);
-    // Só os 3 que faltaram saem do CD — não os 15 inteiros.
+    // CD cobre a necessidade inteira (15) — zero transferência loja→loja.
+    expect(lojaLoja).toBeUndefined();
+    expect(doCd?.quantidadeSugerida).toBe(15);
+    expect(doCd?.prioridadeOrigem).toBe(1);
+  });
+
+  it("CD/Site parcial: cobre o que tiver, loja cobre só o restante — nunca os 15 inteiros da loja", () => {
+    const leblon = variante({ storeId: "leblon", storeName: "Leblon", estoqueAtual: 0, vendasDias30: 15, vendasDias90: 40 });
+    const rioSul = variante({ storeId: "rio-sul", storeName: "Rio Sul", estoqueAtual: 12 });
+    // CD com só 3 un. disponíveis acima do próprio mínimo (estoqueMinimo alto o suficiente pra
+    // deixar pouca sobra) — cobre só uma parte, o resto tem que vir da loja.
+    const cdSite = cd({
+      estoqueAtual: 13,
+      estoqueMinimo: 9,
+      vendasDias30: 10,
+      vendasDias90: 30,
+      velocidadeDiaria: 10 / 30,
+      coberturaDias: 39,
+    });
+    const { movimentacoes } = calcularMovimentacoes([leblon, rioSul, cdSite], contextoMov());
+    const doCd = movimentacoes.find((m) => m.tipoMovimentacao === "cd_site_loja");
+    const lojaLoja = movimentacoes.find((m) => m.tipoMovimentacao === "loja_loja");
     expect(doCd?.quantidadeSugerida).toBe(3);
+    expect(doCd?.prioridadeOrigem).toBe(1);
+    expect(lojaLoja?.quantidadeSugerida).toBe(12);
+    expect(lojaLoja?.prioridadeOrigem).toBe(2);
   });
 
   it("CD/Site em ruptura/cobertura crítica não abastece ninguém (não tem o que doar)", () => {
@@ -411,7 +484,16 @@ describe("calcularMovimentacoes — direção Loja → CD/Site (recolhimento)", 
     expect(manter[0].motivo.join(" ")).toContain("BEST SELLER");
   });
 
-  it("peça que outra loja precisa é redistribuída, não recolhida", () => {
+  // Esse teste mudou de propósito em 2026-11-13 (consequência esperada, não bug, da correção de
+  // prioridade): antes a redistribuição loja→loja rodava ANTES do CD e consumia o estoque de Rio
+  // Sul inteiro pra cobrir Leblon, então Rio Sul nunca era candidato a recolhimento. Com o CD como
+  // prioridade 1, ele cobre a necessidade de Leblon sozinho (30 disponível ≫ 15 necessários) —
+  // Rio Sul deixa de ser necessário pra cobrir ninguém, e seu excesso (que já tinha os 3 sinais de
+  // recolhimento: demanda local baixa, grade quebrada, potencial online) é corretamente recolhido
+  // pro CD/Site. O teste de "peça reservada pra outra loja não é recolhida" continua existindo,
+  // só com um cenário onde o CD É insuficiente (ver teste seguinte) — é aí que a loja realmente
+  // segue sendo necessária.
+  it("CD cobrindo a necessidade da loja sozinho libera a sobra de outra loja para recolhimento", () => {
     const rioSul = variante({ storeId: "rio-sul", storeName: "Rio Sul", estoqueAtual: 12 });
     const leblon = variante({ storeId: "leblon", storeName: "Leblon", estoqueAtual: 0, vendasDias30: 15, vendasDias90: 40 });
     const cdSite = cd({ estoqueAtual: 30, vendasDias30: 10, vendasDias90: 30, velocidadeDiaria: 10 / 30, coberturaDias: 90 });
@@ -419,14 +501,41 @@ describe("calcularMovimentacoes — direção Loja → CD/Site (recolhimento)", 
       [rioSul, leblon, cdSite],
       contextoMov({ vendasSite90: 99, gradePorPosicao: { "rio-sul": grade(1, 3) } })
     );
-    // Rio Sul tinha TODOS os sinais de recolhimento (parado, grade quebrada, site vendendo 99 un.),
-    // mas Leblon precisava da peça: o estoque dela vai pro varejo, nunca pro CD. O CD só entra
-    // depois, pra cobrir os 3 que faltaram.
+    expect(movimentacoes.find((m) => m.tipoMovimentacao === "loja_loja")).toBeUndefined();
+    expect(movimentacoes.find((m) => m.tipoMovimentacao === "cd_site_loja")).toMatchObject({
+      destinoNome: "Leblon",
+      quantidadeSugerida: 15,
+      prioridadeOrigem: 1,
+    });
+    expect(movimentacoes.find((m) => m.tipoMovimentacao === "loja_cd_site")).toMatchObject({
+      origemNome: "Rio Sul",
+      quantidadeSugerida: 12,
+    });
+  });
+
+  it("peça já redistribuída pra outra loja (CD insuficiente) não é oferecida de novo pra recolhimento", () => {
+    const rioSul = variante({ storeId: "rio-sul", storeName: "Rio Sul", estoqueAtual: 12 });
+    const leblon = variante({ storeId: "leblon", storeName: "Leblon", estoqueAtual: 0, vendasDias30: 15, vendasDias90: 40 });
+    // CD com pouca sobra (3 un.) — insuficiente pra cobrir Leblon sozinho, então Rio Sul segue
+    // sendo necessário pra cobrir o restante e não pode ser oferecido pra recolhimento também.
+    const cdSite = cd({
+      estoqueAtual: 13,
+      estoqueMinimo: 9,
+      vendasDias30: 10,
+      vendasDias90: 30,
+      velocidadeDiaria: 10 / 30,
+      coberturaDias: 39,
+    });
+    const { movimentacoes } = calcularMovimentacoes(
+      [rioSul, leblon, cdSite],
+      contextoMov({ vendasSite90: 99, gradePorPosicao: { "rio-sul": grade(1, 3) } })
+    );
     expect(movimentacoes.filter((m) => m.tipoMovimentacao === "loja_cd_site")).toHaveLength(0);
     expect(movimentacoes.find((m) => m.origemNome === "Rio Sul")).toMatchObject({
       tipoMovimentacao: "loja_loja",
       destinoNome: "Leblon",
       quantidadeSugerida: 12,
+      prioridadeOrigem: 2,
     });
   });
 
@@ -464,6 +573,135 @@ describe("calcularMovimentacoes — direção Loja → CD/Site (recolhimento)", 
     const { manter } = calcularMovimentacoes([rioSul], contextoMov());
     expect(manter).toHaveLength(1);
     expect(manter[0].diagnostico).toBe("estoque_parado");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PRIORIDADE DE ORIGEM: CD > LOJAS > PRODUÇÃO (correção comercial pedida pelo Rodrigo, 2026-11-13)
+// ---------------------------------------------------------------------------
+describe("calcularMovimentacoes — hierarquia de prioridade CD > lojas > produção (2026-11-13)", () => {
+  // Reproduz literalmente o exemplo obrigatório do pedido: CD com 8 un., Loja A precisa 5, Loja B
+  // precisa 4, Loja C tem excedente de 6. Resultado esperado: CD→A 5, CD→B 3 (resto do CD), C→B 1
+  // (resto da necessidade de B), zero C→A, e nenhuma necessidade não atendida (3 do CD + 1 de C
+  // cobrem os 4 de B por completo).
+  it("exemplo obrigatório do pedido: CD 8un, A precisa 5, B precisa 4, C excedente 6", () => {
+    const lojaA = variante({ storeId: "loja-a", storeName: "Loja A", estoqueAtual: 0, vendasDias30: 5, vendasDias90: 15 });
+    const lojaB = variante({ storeId: "loja-b", storeName: "Loja B", estoqueAtual: 0, vendasDias30: 4, vendasDias90: 12 });
+    const lojaC = variante({ storeId: "loja-c", storeName: "Loja C", estoqueAtual: 6, vendasDias30: 0, vendasDias90: 0 });
+    const cdSite = cd({ estoqueAtual: 8, vendasDias30: 0, vendasDias90: 0 });
+
+    const { movimentacoes, necessidadesNaoAtendidas } = calcularMovimentacoes(
+      [lojaA, lojaB, lojaC, cdSite],
+      contextoMov()
+    );
+
+    const doCdParaA = movimentacoes.find((m) => m.tipoMovimentacao === "cd_site_loja" && m.destinoNome === "Loja A");
+    const doCdParaB = movimentacoes.find((m) => m.tipoMovimentacao === "cd_site_loja" && m.destinoNome === "Loja B");
+    const deCparaB = movimentacoes.find((m) => m.tipoMovimentacao === "loja_loja" && m.origemNome === "Loja C" && m.destinoNome === "Loja B");
+    const deCparaA = movimentacoes.find((m) => m.origemNome === "Loja C" && m.destinoNome === "Loja A");
+
+    expect(doCdParaA?.quantidadeSugerida).toBe(5);
+    expect(doCdParaB?.quantidadeSugerida).toBe(3);
+    expect(deCparaB?.quantidadeSugerida).toBe(1);
+    expect(deCparaA).toBeUndefined(); // nunca C→A
+    // Nenhuma origem recebeu mais do que tinha disponível.
+    expect((doCdParaA?.quantidadeSugerida ?? 0) + (doCdParaB?.quantidadeSugerida ?? 0)).toBeLessThanOrEqual(8);
+    // B ficou 100% atendido (3 do CD + 1 de C = 4) — sem necessidade de produção neste exemplo.
+    expect(necessidadesNaoAtendidas).toHaveLength(0);
+  });
+
+  // Cenário 1: CD suficiente — abastecimento exclusivamente pelo CD, zero loja→loja.
+  it("1. CD suficiente: abastece sozinho, zero transferência loja→loja", () => {
+    const leblon = variante({ storeId: "leblon", storeName: "Leblon", estoqueAtual: 0, vendasDias30: 15, vendasDias90: 40 });
+    const rioSul = variante({ storeId: "rio-sul", storeName: "Rio Sul", estoqueAtual: 12 });
+    const cdSite = cd({ estoqueAtual: 100, vendasDias30: 10, vendasDias90: 30, velocidadeDiaria: 10 / 30, coberturaDias: 300 });
+    const { movimentacoes } = calcularMovimentacoes([leblon, rioSul, cdSite], contextoMov());
+    expect(movimentacoes.find((m) => m.tipoMovimentacao === "loja_loja")).toBeUndefined();
+    expect(movimentacoes.find((m) => m.tipoMovimentacao === "cd_site_loja")?.quantidadeSugerida).toBe(15);
+  });
+
+  // Cenário 2: CD parcialmente suficiente — cobre primeiro, loja cobre só o restante.
+  it("2. CD parcial: cobre o que tiver primeiro, loja cobre só o restante", () => {
+    const leblon = variante({ storeId: "leblon", storeName: "Leblon", estoqueAtual: 0, vendasDias30: 15, vendasDias90: 40 });
+    const rioSul = variante({ storeId: "rio-sul", storeName: "Rio Sul", estoqueAtual: 12 });
+    const cdSite = cd({ estoqueAtual: 13, estoqueMinimo: 9, vendasDias30: 10, vendasDias90: 30, velocidadeDiaria: 10 / 30, coberturaDias: 39 });
+    const { movimentacoes } = calcularMovimentacoes([leblon, rioSul, cdSite], contextoMov());
+    expect(movimentacoes.find((m) => m.tipoMovimentacao === "cd_site_loja")?.quantidadeSugerida).toBe(3);
+    expect(movimentacoes.find((m) => m.tipoMovimentacao === "loja_loja")?.quantidadeSugerida).toBe(12);
+  });
+
+  // Cenário 3: CD zerado (ruptura) — procura excedente em outras lojas.
+  it("3. CD zerado: sem o que doar, procura excedente nas lojas", () => {
+    const leblon = variante({ storeId: "leblon", storeName: "Leblon", estoqueAtual: 0, vendasDias30: 15, vendasDias90: 40 });
+    const rioSul = variante({ storeId: "rio-sul", storeName: "Rio Sul", estoqueAtual: 20 });
+    const cdSite = cd({ estoqueAtual: 0, vendasDias30: 5, vendasDias90: 20 }); // ruptura: nada a doar
+    const { movimentacoes, necessidadesNaoAtendidas } = calcularMovimentacoes([leblon, rioSul, cdSite], contextoMov());
+    expect(movimentacoes.find((m) => m.tipoMovimentacao === "cd_site_loja")).toBeUndefined();
+    expect(movimentacoes.find((m) => m.tipoMovimentacao === "loja_loja")).toMatchObject({
+      origemNome: "Rio Sul",
+      destinoNome: "Leblon",
+      quantidadeSugerida: 15,
+      prioridadeOrigem: 2,
+    });
+    expect(necessidadesNaoAtendidas).toHaveLength(0);
+  });
+
+  // Cenário 4 + 7: CD e lojas sem disponibilidade -> sinaliza necessidade de produção, sem
+  // inventar disponibilidade futura (a função não consulta ProductionOrder nem nenhuma previsão —
+  // é estrutural, não um valor que este teste possa forçar a aparecer errado).
+  it("4/7. CD e lojas sem disponibilidade: sinaliza necessidade de produção, nunca inventa disponibilidade", () => {
+    const leblon = variante({ storeId: "leblon", storeName: "Leblon", estoqueAtual: 0, vendasDias30: 15, vendasDias90: 40 });
+    const rioSul = variante({ storeId: "rio-sul", storeName: "Rio Sul", estoqueAtual: 0, vendasDias90: 0 }); // sem sobra nenhuma
+    const cdSite = cd({ estoqueAtual: 0, vendasDias30: 5, vendasDias90: 20 }); // ruptura
+    const { movimentacoes, necessidadesNaoAtendidas } = calcularMovimentacoes([leblon, rioSul, cdSite], contextoMov());
+    expect(movimentacoes).toHaveLength(0);
+    expect(necessidadesNaoAtendidas).toHaveLength(1);
+    expect(necessidadesNaoAtendidas[0]).toMatchObject({ posicaoNome: "Leblon", necessidadeRestante: 15 });
+  });
+
+  // Cenário 5: duas lojas disputando o mesmo estoque do CD — sem dupla alocação, soma nunca
+  // excede o disponível na origem (reforça o exemplo obrigatório acima com um 3º concorrente).
+  it("5. três lojas disputando o CD: soma alocada nunca excede o disponível, sem dupla alocação", () => {
+    const a = variante({ storeId: "a", storeName: "A", estoqueAtual: 0, vendasDias30: 5, vendasDias90: 15 });
+    const b = variante({ storeId: "b", storeName: "B", estoqueAtual: 0, vendasDias30: 4, vendasDias90: 12 });
+    const c = variante({ storeId: "c", storeName: "C", estoqueAtual: 0, vendasDias30: 10, vendasDias90: 30 });
+    const cdSite = cd({ estoqueAtual: 8, vendasDias30: 0, vendasDias90: 0 }); // só 8, insuficiente pras 3
+    const { movimentacoes } = calcularMovimentacoes([a, b, c, cdSite], contextoMov());
+    const doCd = movimentacoes.filter((m) => m.tipoMovimentacao === "cd_site_loja");
+    const somaDoCd = doCd.reduce((s, m) => s + m.quantidadeSugerida, 0);
+    expect(somaDoCd).toBeLessThanOrEqual(8);
+    // Cada loja recebe de no máximo 1 movimentação do CD pra este cod (sem duplicar a mesma
+    // unidade pra dois destinos).
+    const destinosComMovCd = doCd.map((m) => m.destinoNome);
+    expect(new Set(destinosComMovCd).size).toBe(destinosComMovCd.length);
+  });
+
+  // Cenário 6: estoque reservado/comprometido não é oferecido. GAP DE DADO CONHECIDO (mesmo do
+  // cabeçalho do arquivo): StockSnapshot não tem campo reservado/comprometido real — o proxy que
+  // já existe no motor é o próprio StockMinimumRule + margem de segurança (construirOrigem), que
+  // nunca deixa a origem oferecer abaixo do que ela mesma precisa guardar.
+  it("6. estoque abaixo do próprio mínimo (proxy de comprometido) nunca é oferecido pra transferência", () => {
+    const leblon = variante({ storeId: "leblon", storeName: "Leblon", estoqueAtual: 0, vendasDias30: 15, vendasDias90: 40 });
+    const cdNoMinimo = cd({ estoqueAtual: 50, estoqueMinimo: 50, vendasDias30: 0, vendasDias90: 0 });
+    const rioSulNoMinimo = variante({ storeId: "rio-sul", storeName: "Rio Sul", estoqueAtual: 10, estoqueMinimo: 10 });
+    const { movimentacoes } = calcularMovimentacoes([leblon, rioSulNoMinimo, cdNoMinimo], contextoMov());
+    expect(movimentacoes).toHaveLength(0);
+  });
+
+  // Cenário 8: múltiplos produtos/tamanhos são independentes — calcularMovimentacoes é pura e não
+  // muta as VariantePorLoja de entrada (só os wrappers internos de OrigemAlocavel/DestinoAlocavel),
+  // então duas chamadas com o MESMO array de posições mas CONTEXTOS (cods) diferentes nunca vazam
+  // quantidade de uma chamada pra outra.
+  it("8. múltiplos produtos (cods diferentes) calculados independentemente, sem vazar estoque entre chamadas", () => {
+    const leblon = variante({ storeId: "leblon", storeName: "Leblon", estoqueAtual: 0, vendasDias30: 15, vendasDias90: 40 });
+    const cdSite = cd({ estoqueAtual: 100, vendasDias30: 10, vendasDias90: 30, velocidadeDiaria: 10 / 30, coberturaDias: 300 });
+    const variantes = [leblon, cdSite];
+    const resultado1 = calcularMovimentacoes(variantes, contextoMov({ cod: "COD-A" }));
+    const resultado2 = calcularMovimentacoes(variantes, contextoMov({ cod: "COD-B" }));
+    expect(resultado1.movimentacoes[0]?.quantidadeSugerida).toBe(15);
+    expect(resultado2.movimentacoes[0]?.quantidadeSugerida).toBe(15);
+    expect(resultado1.movimentacoes[0]?.cod).toBe("COD-A");
+    expect(resultado2.movimentacoes[0]?.cod).toBe("COD-B");
   });
 });
 
