@@ -162,6 +162,26 @@ async function main() {
     }
   }
 
+  // Checagem extra: os 14 registros sem venda original de TVB Site e Atacado/2026-08 são todos
+  // múltiplos exatos de R$112 (valor de unidade suspeito de dado fictício OU devolução de
+  // atacado em lote por SKU) — confere se dapicVendaId=null é um padrão antigo (dados fictícios
+  // de 2026-08-07, ver scripts/seed-fictional-returns-production.ts) ou um gap real recente de
+  // devolução de atacado sem vínculo de venda.
+  const semVendaPorLoja = await prisma.return.groupBy({
+    by: ["storeId"],
+    where: { dapicVendaId: null, status: { not: "Cancelada" } },
+    _count: { _all: true },
+    _min: { returnDate: true },
+    _max: { returnDate: true },
+    _sum: { valorTotal: true },
+  });
+  console.log(`\n=== Devoluções com dapicVendaId NULO, por loja (todas, não só o pior mês) ===`);
+  for (const row of semVendaPorLoja.sort((a, b) => b._count._all - a._count._all)) {
+    console.log(
+      `  ${nameById.get(row.storeId) ?? row.storeId}: ${row._count._all} registros | valor=R$ ${(row._sum.valorTotal ?? 0).toFixed(2)} | datas de ${row._min.returnDate?.toISOString().slice(0, 10)} a ${row._max.returnDate?.toISOString().slice(0, 10)}`
+    );
+  }
+
   console.log("\n(Diagnóstico concluído — somente leitura, nenhum registro foi alterado.)");
 }
 
