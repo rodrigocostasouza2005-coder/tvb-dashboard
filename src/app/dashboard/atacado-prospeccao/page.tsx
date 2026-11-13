@@ -1,7 +1,14 @@
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
 import { requireTabAccess } from "@/lib/tabs";
-import { criarProspectAction, atualizarStatusProspectAction, registrarInteracaoBruceAction, atualizarPresencaDigitalProspectAction } from "./actions";
+import {
+  criarProspectAction,
+  atualizarStatusProspectAction,
+  registrarInteracaoBruceAction,
+  atualizarPresencaDigitalProspectAction,
+  prepararExclusaoProspectosAction,
+  excluirProspectosDefinitivamenteAction,
+} from "./actions";
 import { CsvImportPreview } from "./csv-import-preview";
 import { ProspeccaoRadarConsole } from "./prospeccao-radar-console";
 import { RevisaoCandidatosWeb } from "./revisao-candidatos-web";
@@ -20,6 +27,7 @@ import { QualificacaoFiltros } from "./qualificacao-filtros";
 import { ProspectosAprovadosTable } from "./prospectos-aprovados-table";
 import { ProspectosPendentesTable } from "./prospectos-pendentes-table";
 import { ProspectosReprovadosTable } from "./prospectos-reprovados-table";
+import { SelectAllCheckbox } from "./select-all-checkbox";
 
 const STATUS: Record<string, string> = {
   NOVO: "Novo",
@@ -34,11 +42,12 @@ const STATUS: Record<string, string> = {
 export default async function AtacadoProspeccaoPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; cidade?: string; uf?: string; erro?: string; criado?: string; importacao?: string; novos?: string; duplicados?: string; invalidos?: string; bruce?: string; revisao?: string; cadastro?: string; presenca?: string; qEstado?: string; qMunicipio?: string; qCapital?: string; qClasse?: string }>;
+  searchParams: Promise<{ status?: string; cidade?: string; uf?: string; erro?: string; criado?: string; importacao?: string; novos?: string; duplicados?: string; invalidos?: string; bruce?: string; revisao?: string; cadastro?: string; presenca?: string; qEstado?: string; qMunicipio?: string; qCapital?: string; qClasse?: string; confirmarExclusao?: string; excluidos?: string; excluidoPor?: string }>;
 }) {
   const user = await getSessionUser();
   if (!user) return null;
   requireTabAccess(user, user.role, "atacado-prospeccao");
+  const podeExcluir = user.role === "ADMIN" || user.role === "GESTAO";
 
   const params = await searchParams;
   const status = params.status && Object.hasOwn(STATUS, params.status) ? params.status : undefined;
@@ -46,8 +55,13 @@ export default async function AtacadoProspeccaoPage({
   const cidade = params.cidade?.trim().slice(0, 100) || undefined;
   const cadastroValores = ["ATIVA", "SUSPENSA", "INAPTA", "BAIXADA", "NULA", "NAO_INFORMADA"];
   const cadastro = params.cadastro && cadastroValores.includes(params.cadastro) ? params.cadastro : undefined;
+  // Visão operacional padrão (Carteira + Bruce): nunca mistura descartado (pipeline manual) nem
+  // reprovado pelo motor (statusComercial) — ambos continuam consultáveis, só não por padrão.
+  // "Descartado" via filtro de Status explícito continua funcionando normalmente (visão
+  // administrativa). Reprovados pelo motor já têm seção própria em "Qualificação B2B" acima.
   const where = {
-    ...(status ? { status } : {}),
+    ...(status ? { status } : { status: { not: "DESCARTADO" } }),
+    ...(status !== "DESCARTADO" ? { statusComercial: { not: "REPROVADO" as const } } : {}),
     ...(uf ? { estado: uf } : {}),
     ...(cidade ? { cidade: { contains: cidade, mode: "insensitive" as const } } : {}),
     ...(cadastro ? { situacaoCadastral: cadastro } : {}),
@@ -58,6 +72,13 @@ export default async function AtacadoProspeccaoPage({
     take: 250,
     include: { activities: { orderBy: { createdAt: "desc" }, take: 3 } },
   });
+
+  // Tela de confirmação de exclusão (etapa 2 do fluxo) — nomes + contagem reais antes do botão
+  // definitivo existir na tela. IDs vêm da URL (cuids internos, não sensíveis).
+  const idsParaExcluir = params.confirmarExclusao?.split(",").map((s) => s.trim()).filter(Boolean) ?? [];
+  const prospectsParaExcluir = idsParaExcluir.length
+    ? await prisma.atacadoProspect.findMany({ where: { id: { in: idsParaExcluir } }, select: { id: true, nomeFantasia: true, cidade: true, estado: true } })
+    : [];
 
   // Filtros da seção "Qualificação B2B" — params próprios (qEstado/qMunicipio/qCapital/qClasse),
   // nunca reaproveitando uf/cidade/status acima (aquilo filtra o pipeline manual legado).
@@ -75,12 +96,13 @@ export default async function AtacadoProspeccaoPage({
     listarMunicipiosDisponiveis(qEstado),
   ]);
 
-  const [total, novos, emPesquisa, qualificados, contatados, cidades] = await Promise.all([
+  const [total, novos, emPesquisa, qualificados, contatados, descartados, cidades] = await Promise.all([
     prisma.atacadoProspect.count(),
     prisma.atacadoProspect.count({ where: { status: "NOVO" } }),
     prisma.atacadoProspect.count({ where: { status: "EM_QUALIFICACAO" } }),
     prisma.atacadoProspect.count({ where: { status: "QUALIFICADO" } }),
     prisma.atacadoProspect.count({ where: { status: "CONTATADO" } }),
+    prisma.atacadoProspect.count({ where: { status: "DESCARTADO" } }),
     prisma.atacadoProspect.findMany({ where: { estado: uf ?? "RJ" }, distinct: ["cidade"], select: { cidade: true }, orderBy: { cidade: "asc" }, take: 300 }),
   ]);
 
@@ -99,11 +121,29 @@ export default async function AtacadoProspeccaoPage({
 
   return (
     <div className="space-y-6">
+      {params.excluidos && <p role="status" className="rounded-md border border-green-600/40 px-3 py-2 text-sm text-green-700">{params.excluidos} prospecto(s) excluído(s) definitivamente{params.excluidoPor ? ` por ${params.excluidoPor}` : ""}.</p>}
+      {erro === "sem-selecao" && <p role="alert" className="rounded-md border border-red-500/40 px-3 py-2 text-sm text-red-600">Selecione pelo menos 1 prospecto antes de excluir.</p>}
+      {prospectsParaExcluir.length > 0 && (
+        <div className="rounded-md border border-red-500/50 bg-red-500/5 p-4" role="alertdialog" aria-label="Confirmar exclusão definitiva">
+          <p className="text-sm font-semibold text-red-700">Confirmar exclusão definitiva de {prospectsParaExcluir.length} prospecto(s)?</p>
+          <p className="mt-1 text-xs text-[var(--text-muted)]">Esta ação não pode ser desfeita. Histórico de interações e marcas evidenciadas desses prospectos serão excluídos junto.</p>
+          <ul className="mt-2 max-h-40 list-disc space-y-0.5 overflow-y-auto pl-5 text-xs text-[var(--text-secondary)]">
+            {prospectsParaExcluir.map((p) => <li key={p.id}>{p.nomeFantasia}{p.cidade ? ` — ${p.cidade}${p.estado ? "/" + p.estado : ""}` : ""}</li>)}
+          </ul>
+          <div className="mt-3 flex gap-2">
+            <form action={excluirProspectosDefinitivamenteAction}>
+              {prospectsParaExcluir.map((p) => <input key={p.id} type="hidden" name="ids" value={p.id} />)}
+              <button type="submit" className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700">Excluir definitivamente ({prospectsParaExcluir.length})</button>
+            </form>
+            <a href="/dashboard/atacado-prospeccao" className="rounded-md border border-[var(--border)] px-3 py-1.5 text-xs">Cancelar</a>
+          </div>
+        </div>
+      )}
       {params.bruce === "registrado" && <p role="status" className="rounded-md border border-green-600/40 px-3 py-2 text-sm text-green-700">Interação registrada no histórico do Radar.</p>}
       {params.bruce === "erro" && <p role="alert" className="rounded-md border border-red-500/40 px-3 py-2 text-sm text-red-600">Não foi possível registrar a interação. Confira os campos e tente novamente.</p>}
       {params.presenca === "salva" && <p role="status" className="rounded-md border border-green-600/40 px-3 py-2 text-sm text-green-700">Presença digital salva no cadastro da loja.</p>}
       {params.presenca === "erro" && <p role="alert" className="rounded-md border border-red-500/40 px-3 py-2 text-sm text-red-600">Não foi possível salvar. Use URLs completas iniciadas por http:// ou https://.</p>}
-      <ProspeccaoRadarConsole total={total} novos={novos} emPesquisa={emPesquisa} qualificados={qualificados} contatados={contatados} />
+      <ProspeccaoRadarConsole total={total} novos={novos} emPesquisa={emPesquisa} qualificados={qualificados} contatados={contatados} descartados={descartados} />
 
       <section className="space-y-4 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4">
         <div>
@@ -122,7 +162,7 @@ export default async function AtacadoProspeccaoPage({
         <ProspectosPendentesTable prospects={pendentesRevisao} />
         <details data-testid="qualificacao-reprovados" className="rounded-lg border border-[var(--border)]">
           <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-[var(--text-secondary)]">Auditoria de reprovações ({reprovados.length})</summary>
-          <ProspectosReprovadosTable prospects={reprovados} />
+          <ProspectosReprovadosTable prospects={reprovados} podeExcluir={podeExcluir} />
         </details>
       </section>
 
@@ -201,7 +241,10 @@ export default async function AtacadoProspeccaoPage({
       </section>
       <section className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)]">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border)] px-4 py-3">
-          <h2 className="text-sm font-semibold">Carteira de prospectos ({prospects.length}{total > 250 ? " de " + total : ""})</h2>
+          <h2 className="text-sm font-semibold">
+            Carteira de prospectos ({prospects.length}{total > 250 ? " de " + total : ""})
+            {!status && <span className="ml-2 text-xs font-normal text-[var(--text-muted)]">— descartados e reprovados pelo motor ocultos por padrão</span>}
+          </h2>
           <ProspectFilters
             uf={uf ?? ""}
             cidade={cidade ?? ""}
@@ -212,10 +255,18 @@ export default async function AtacadoProspeccaoPage({
             cidades={cidades.map((item) => item.cidade).filter((value): value is string => Boolean(value))}
           />
         </div>
+        {podeExcluir && (
+          <div className="flex items-center justify-between border-b border-[var(--border)] bg-[var(--page-plane)] px-4 py-2">
+            <p className="text-xs text-[var(--text-muted)]">Selecione prospectos na tabela abaixo pra excluir em massa.</p>
+            <button type="submit" form="bulk-prospects-form" className="rounded-md border border-red-500/50 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-500/10">Excluir selecionados</button>
+          </div>
+        )}
+        <form id="bulk-prospects-form" action={prepararExclusaoProspectosAction} />
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="text-left text-xs text-[var(--text-muted)]">
               <tr>
+                {podeExcluir && <th className="px-4 py-3 font-medium"><SelectAllCheckbox formId="bulk-prospects-form" name="ids" /></th>}
                 <th className="px-4 py-3 font-medium">Loja</th>
                 <th className="px-4 py-3 font-medium">Presença digital</th>
                 <th className="px-4 py-3 font-medium">Localização</th>
@@ -229,6 +280,11 @@ export default async function AtacadoProspeccaoPage({
             <tbody>
               {prospects.map((p) => (
                 <tr key={p.id} className="border-t border-[var(--border)] align-top">
+                  {podeExcluir && (
+                    <td className="px-4 py-3">
+                      <input type="checkbox" name="ids" value={p.id} form="bulk-prospects-form" aria-label={`Selecionar ${p.nomeFantasia}`} className="h-3.5 w-3.5" />
+                    </td>
+                  )}
                   <td className="px-4 py-3">
                     <div className="font-medium">{p.nomeFantasia === "NOME COMERCIAL NÃO IDENTIFICADO" ? "Nome comercial a pesquisar" : p.nomeFantasia}</div>
                     {p.razaoSocial && <div className="mt-0.5 text-xs text-[var(--text-muted)]">Razão social: {p.razaoSocial}</div>}
@@ -365,7 +421,7 @@ export default async function AtacadoProspeccaoPage({
                   <td className="whitespace-nowrap px-4 py-3 text-xs text-[var(--text-muted)]">{p.updatedAt.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" })}</td>
                 </tr>
               ))}
-              {prospects.length === 0 && <tr><td colSpan={8} className="px-4 py-8 text-center text-sm text-[var(--text-muted)]">Nenhum prospecto cadastrado. Comece adicionando uma loja ou importe uma base numa próxima etapa.</td></tr>}
+              {prospects.length === 0 && <tr><td colSpan={podeExcluir ? 9 : 8} className="px-4 py-8 text-center text-sm text-[var(--text-muted)]">Nenhum prospecto cadastrado{!status ? " (ou só restam descartados/reprovados — veja o filtro de Status)" : ""}.</td></tr>}
             </tbody>
           </table>
         </div>

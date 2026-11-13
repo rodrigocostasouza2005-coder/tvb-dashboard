@@ -6,6 +6,7 @@ type Props = {
   emPesquisa: number;
   qualificados: number;
   contatados: number;
+  descartados: number;
 };
 
 const number = (value: number) => value.toLocaleString("pt-BR");
@@ -22,6 +23,7 @@ export function ProspeccaoRadarConsole({
   emPesquisa,
   qualificados,
   contatados,
+  descartados,
 }: Props) {
   return (
     <div className="space-y-5">
@@ -67,6 +69,14 @@ export function ProspeccaoRadarConsole({
             <div className="text-[9px] font-semibold tracking-widest text-[var(--text-muted)]">CONTATADOS</div>
             <div className="mt-1 font-mono text-xl tabular-nums">{number(contatados)}</div>
             <div className="mt-1 text-[10px] text-[var(--text-muted)]">Abrir fila →</div>
+          </Link>
+        </div>
+        {/* Descartados ficam fora da fila operacional de propósito (pedido do Rodrigo, 2026-11-13:
+            "não quero que o painel fique poluído por registros que já decidi descartar") — só
+            acessível explicitamente aqui, nunca somado em nenhum indicador de oportunidade acima. */}
+        <div className="border-t border-[var(--border)] px-4 py-2.5">
+          <Link href="?status=DESCARTADO" className="inline-flex items-center gap-2 text-[11px] text-[var(--text-muted)] underline-offset-2 hover:underline">
+            Visão administrativa: {number(descartados)} descartado(s) — fora da fila operacional, fora dos indicadores de oportunidade →
           </Link>
         </div>
       </section>
