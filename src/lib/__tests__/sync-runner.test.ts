@@ -817,6 +817,147 @@ describe("SyncLog(source=\"PRODUCTION\") reflete falha real, não SUCCESS incond
     expect(productionLogCall?.[0]?.data?.status).toBe("SUCCESS");
     expect(productionLogCall?.[0]?.data?.recordsSynced).toBe(0);
   });
+
+  // Fase de validação (docs/validacao-prs-falsos-sucessos-2026-11-12.md), cenários pedidos
+  // explicitamente que ainda não tinham teste dedicado.
+  it("matriz configurada, API devolve ordens reais -> SyncLog(PRODUCTION) SUCCESS com count > 0 (caminho feliz, nunca testado explicitamente antes)", async () => {
+    storeFindFirst.mockResolvedValue(null);
+    storeCreate.mockImplementation(({ data }: { data: { code: string } }) => Promise.resolve({ id: `store-${data.code}` }));
+
+    const clientA = {
+      label: "loja-a",
+      fetchArmazenadores: () => Promise.resolve([{ Id: 1, Descricao: "Loja A" }]),
+      fetchEstoqueTodosArmazenadores: () =>
+        Promise.resolve([{ IdArmazenador: 1, IdGradeProduto: 500, Produto: "Camisa X", Grupo: "Camisas", QuantidadeReal: 10 }]),
+      fetchVendasPdv: () => Promise.resolve([]),
+      fetchVendaPdvDetalhe: () => Promise.resolve(null),
+      fetchVendasPdvModificadas: () => Promise.resolve([]),
+    } as unknown as DapicClient;
+
+    const matrizClient = {
+      label: "matriz",
+      fetchOrdensProducaoProdutos: () =>
+        Promise.resolve([
+          {
+            IdOrdemProducao: 1,
+            IdGradeProduto: 900,
+            OrdemProducao: "OP-1",
+            Referencia: "REF-1",
+            Produto: "Camisa Y",
+            Cor: null,
+            Tamanho: "M",
+            Grupo: "Camisas",
+            Marca: null,
+            Colecao: null,
+            Quantidade: 50,
+            QuantidadeOriginal: 50,
+            Status: "Em produção",
+            DataFinalizacaoProducao: null,
+            DataEntradaCelula: null,
+          },
+        ]),
+    } as unknown as DapicClient;
+
+    createDapicClientsMock.mockImplementationOnce(() => [clientA, matrizClient]);
+
+    const { runSync } = await import("../sync-runner");
+    await runSync({ silent: true });
+
+    const productionLogCall = syncLogCreate.mock.calls.find((c) => c[0]?.data?.source === "PRODUCTION");
+    expect(productionLogCall?.[0]?.data?.status).toBe("SUCCESS");
+    expect(productionLogCall?.[0]?.data?.recordsSynced).toBe(1);
+  });
+
+  it("matriz configurada, API devolve resposta inválida (linha sem IdGradeProduto em todas) -> 0 ordens processadas, SUCCESS (zero legítimo, não erro)", async () => {
+    storeFindFirst.mockResolvedValue(null);
+    storeCreate.mockImplementation(({ data }: { data: { code: string } }) => Promise.resolve({ id: `store-${data.code}` }));
+
+    const clientA = {
+      label: "loja-a",
+      fetchArmazenadores: () => Promise.resolve([{ Id: 1, Descricao: "Loja A" }]),
+      fetchEstoqueTodosArmazenadores: () =>
+        Promise.resolve([{ IdArmazenador: 1, IdGradeProduto: 500, Produto: "Camisa X", Grupo: "Camisas", QuantidadeReal: 10 }]),
+      fetchVendasPdv: () => Promise.resolve([]),
+      fetchVendaPdvDetalhe: () => Promise.resolve(null),
+      fetchVendasPdvModificadas: () => Promise.resolve([]),
+    } as unknown as DapicClient;
+
+    const matrizClient = {
+      label: "matriz",
+      // "Resposta inválida": IdGradeProduto null em toda linha — syncOrdensProducao já filtra
+      // isso de propósito (`linhas.filter(l => l.IdGradeProduto != null)`), então o resultado é
+      // 0 processado SEM lançar — comportamento correto e já existente, só não tinha teste
+      // explícito pra esse shape de resposta especificamente.
+      fetchOrdensProducaoProdutos: () =>
+        Promise.resolve([
+          { IdOrdemProducao: 1, IdGradeProduto: null, OrdemProducao: "OP-1", Referencia: "REF-1", Produto: "?", Grupo: "?", Quantidade: 0, QuantidadeOriginal: 0, Status: "?" },
+        ]),
+    } as unknown as DapicClient;
+
+    createDapicClientsMock.mockImplementationOnce(() => [clientA, matrizClient]);
+
+    const { runSync } = await import("../sync-runner");
+    await runSync({ silent: true });
+
+    const productionLogCall = syncLogCreate.mock.calls.find((c) => c[0]?.data?.source === "PRODUCTION");
+    expect(productionLogCall?.[0]?.data?.status).toBe("SUCCESS");
+    expect(productionLogCall?.[0]?.data?.recordsSynced).toBe(0);
+  });
+
+  it("matriz configurada, API devolve ordem real, mas a persistência (upsert) falha -> SyncLog(PRODUCTION) sai FAILED", async () => {
+    storeFindFirst.mockResolvedValue(null);
+    storeCreate.mockImplementation(({ data }: { data: { code: string } }) => Promise.resolve({ id: `store-${data.code}` }));
+    // A 1ª chamada real a $executeRaw em todo runSync() é o advisory lock de acquireSyncLock
+    // (sync-runner.ts:1438) — não tem nada a ver com ordem de produção. Deixa ela passar normal
+    // e só a 2ª (o upsert de ProductionOrder) falha (mesmo achado de depuração do PR #81).
+    executeRaw.mockResolvedValueOnce(undefined); // advisory lock
+    executeRaw.mockImplementationOnce(async () => {
+      throw new Error("Neon: conexão perdida no meio do lote (ProductionOrder)");
+    });
+
+    const clientA = {
+      label: "loja-a",
+      fetchArmazenadores: () => Promise.resolve([{ Id: 1, Descricao: "Loja A" }]),
+      fetchEstoqueTodosArmazenadores: () =>
+        Promise.resolve([{ IdArmazenador: 1, IdGradeProduto: 500, Produto: "Camisa X", Grupo: "Camisas", QuantidadeReal: 10 }]),
+      fetchVendasPdv: () => Promise.resolve([]),
+      fetchVendaPdvDetalhe: () => Promise.resolve(null),
+      fetchVendasPdvModificadas: () => Promise.resolve([]),
+    } as unknown as DapicClient;
+
+    const matrizClient = {
+      label: "matriz",
+      fetchOrdensProducaoProdutos: () =>
+        Promise.resolve([
+          {
+            IdOrdemProducao: 1,
+            IdGradeProduto: 900,
+            OrdemProducao: "OP-1",
+            Referencia: "REF-1",
+            Produto: "Camisa Y",
+            Cor: null,
+            Tamanho: "M",
+            Grupo: "Camisas",
+            Marca: null,
+            Colecao: null,
+            Quantidade: 50,
+            QuantidadeOriginal: 50,
+            Status: "Em produção",
+            DataFinalizacaoProducao: null,
+            DataEntradaCelula: null,
+          },
+        ]),
+    } as unknown as DapicClient;
+
+    createDapicClientsMock.mockImplementationOnce(() => [clientA, matrizClient]);
+
+    const { runSync } = await import("../sync-runner");
+    await runSync({ silent: true });
+
+    const productionLogCall = syncLogCreate.mock.calls.find((c) => c[0]?.data?.source === "PRODUCTION");
+    expect(productionLogCall?.[0]?.data?.status).toBe("FAILED");
+    expect(productionLogCall?.[0]?.data?.message).toContain("conexão perdida");
+  });
 });
 
 // Missão Black Friday (2026-11, continuação) — fecha a lacuna já documentada no relatório
