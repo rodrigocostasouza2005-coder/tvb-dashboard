@@ -141,7 +141,7 @@ async function main() {
 
     const returnsDoMes = await prisma.return.findMany({
       where: { storeId: pior.storeId, returnDate: { gte: inicio, lt: fim }, status: { not: "Cancelada" } },
-      select: { dapicVendaId: true, valorTotal: true, returnDate: true },
+      select: { dapicVendaId: true, valorTotal: true, returnDate: true, cod: true, quantidade: true },
       orderBy: { returnDate: "asc" },
     });
 
@@ -150,10 +150,24 @@ async function main() {
     for (const r of returnsDoMes) {
       const vendaKey = r.dapicVendaId != null ? `${pior.storeId}::${r.dapicVendaId}` : undefined;
       const saleDate = vendaKey ? saleDateByVendaId.get(vendaKey) : undefined;
-      const origem = saleDate
-        ? `venda original em ${saleDate.toISOString().slice(0, 10)}${monthKey(saleDate) !== pior.mes ? " <- MÊS DIFERENTE" : " (mesmo mês)"}`
-        : "venda original NÃO encontrada (dapicVendaId nulo ou sem Sale correspondente)";
-      console.log(`  devolução em ${r.returnDate.toISOString().slice(0, 10)} | valor=R$ ${r.valorTotal.toFixed(2)} | ${origem}`);
+      let origem: string;
+      if (saleDate) {
+        origem = `venda original em ${saleDate.toISOString().slice(0, 10)}${monthKey(saleDate) !== pior.mes ? " <- MÊS DIFERENTE" : " (mesmo mês)"}`;
+      } else if (r.dapicVendaId == null) {
+        origem = "dapicVendaId NULO (sem referência nenhuma à venda original)";
+      } else {
+        // dapicVendaId existe, mas não achamos Sale correspondente ainda-não-cancelada — confere
+        // se existe uma Sale com esse id em QUALQUER status (ex: cancelada) ou se o id simplesmente
+        // não existe em Sale nenhuma (órfão).
+        const saleQualquerStatus = await prisma.sale.findFirst({
+          where: { storeId: pior.storeId, dapicVendaId: r.dapicVendaId },
+          select: { saleDate: true, status: true },
+        });
+        origem = saleQualquerStatus
+          ? `dapicVendaId=${r.dapicVendaId} existe em Sale mas com status="${saleQualquerStatus.status}" (venda em ${saleQualquerStatus.saleDate.toISOString().slice(0, 10)})`
+          : `dapicVendaId=${r.dapicVendaId} não existe em NENHUMA linha de Sale desta loja (órfão)`;
+      }
+      console.log(`  devolução em ${r.returnDate.toISOString().slice(0, 10)} | cod=${r.cod} | qtd=${r.quantidade} | valor=R$ ${r.valorTotal.toFixed(2)} | ${origem}`);
       mostrados++;
       if (mostrados >= 40) {
         console.log(`  ... (${returnsDoMes.length - mostrados} registros adicionais omitidos, mesmo padrão)`);
