@@ -163,9 +163,19 @@ async function main() {
           where: { storeId: pior.storeId, dapicVendaId: r.dapicVendaId },
           select: { saleDate: true, status: true },
         });
-        origem = saleQualquerStatus
-          ? `dapicVendaId=${r.dapicVendaId} existe em Sale mas com status="${saleQualquerStatus.status}" (venda em ${saleQualquerStatus.saleDate.toISOString().slice(0, 10)})`
-          : `dapicVendaId=${r.dapicVendaId} não existe em NENHUMA linha de Sale desta loja (órfão)`;
+        const saleOutraLoja = saleQualquerStatus
+          ? null
+          : await prisma.sale.findFirst({
+              where: { dapicVendaId: r.dapicVendaId },
+              select: { storeId: true, saleDate: true, status: true },
+            });
+        if (saleQualquerStatus) {
+          origem = `dapicVendaId=${r.dapicVendaId} existe em Sale mas com status="${saleQualquerStatus.status}" (venda em ${saleQualquerStatus.saleDate.toISOString().slice(0, 10)})`;
+        } else if (saleOutraLoja) {
+          origem = `dapicVendaId=${r.dapicVendaId} existe em Sale só de OUTRA loja (storeId=${saleOutraLoja.storeId}, venda em ${saleOutraLoja.saleDate.toISOString().slice(0, 10)}, status=${saleOutraLoja.status})`;
+        } else {
+          origem = `dapicVendaId=${r.dapicVendaId} não existe em NENHUMA linha de Sale (de nenhuma loja) — órfão de verdade`;
+        }
       }
       console.log(`  devolução em ${r.returnDate.toISOString().slice(0, 10)} | cod=${r.cod} | qtd=${r.quantidade} | valor=R$ ${r.valorTotal.toFixed(2)} | ${origem}`);
       mostrados++;
