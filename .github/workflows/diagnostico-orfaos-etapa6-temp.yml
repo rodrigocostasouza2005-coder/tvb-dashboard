@@ -1,0 +1,26 @@
+name: Diagnóstico temporário somente-leitura — Etapa 6 (órfãos cd-atacado)
+
+# Temporário — autorização formal explícita de Rodrigo (Etapa 6, 2026-11-13). Execução
+# exclusivamente manual (workflow_dispatch, sem gatilho automático). DATABASE_URL de produção
+# só como secret do GitHub (nunca impresso em log), script sem nenhum update/create/delete.
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostico:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Rodar diagnóstico (somente leitura)
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: npx tsx scripts/diagnostico-orfaos-etapa6-temp.ts
