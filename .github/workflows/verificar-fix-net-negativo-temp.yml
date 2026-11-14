@@ -1,0 +1,26 @@
+name: Verificação temporária somente-leitura do fix de net negativo (pós-PR #97)
+
+# Temporário — chama a função real getSalesByDayPerStore (pós-fix) contra produção, pro dia
+# 10/11/2026, com o filtro real do usuário rodrigo@tvbshorts.com. Execução exclusivamente
+# manual (workflow_dispatch), somente leitura, DATABASE_URL de produção via secret do GitHub.
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Rodar verificação (somente leitura)
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: npx tsx scripts/verificar-fix-net-negativo-temp.ts
