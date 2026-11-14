@@ -1,0 +1,27 @@
+name: Diagnóstico temporário somente-leitura de net negativo (coleção/grupo/produto/tamanho)
+
+# Temporário — continuação do PR #95. Testa se "unidades líquidas" negativas aparecem por
+# coleção (gráfico real da Visão Geral/Vendas) e no agregado por grupo/produto/tamanho,
+# de 2026-11-10 até hoje. Execução exclusivamente manual (workflow_dispatch), somente
+# leitura, DATABASE_URL de produção via secret do GitHub.
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostico:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Rodar diagnóstico (somente leitura)
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: npx tsx scripts/diagnostico-net-negativo-colecao-dimensao-temp.ts
