@@ -186,7 +186,7 @@ export async function getSalesByDay(filters: DashboardFilters) {
         AND "saleDate" >= ${filters.from}
         AND "saleDate" <= ${filters.to}
         ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
-        ${filters.marcas !== undefined ? Prisma.sql`AND "marca" = ANY(${filters.marcas})` : Prisma.empty}
+        ${filters.marcas !== undefined ? Prisma.sql`AND ("marca" = ANY(${filters.marcas}) OR "marca" IS NULL)` : Prisma.empty}
         ${filters.tabelasPreco !== undefined ? Prisma.sql`AND ("tabelaPreco" = ANY(${filters.tabelasPreco}) OR "tabelaPreco" IS NULL)` : Prisma.empty}
         ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
         ${filters.colecaoIn ? Prisma.sql`AND "colecao" = ANY(${filters.colecaoIn})` : Prisma.empty}
@@ -241,6 +241,10 @@ export async function getSalesByDay(filters: DashboardFilters) {
 // Líquido (desconta devolução por dia+loja) — pedido do Rodrigo em 2026-08-31, achou que o
 // "Comparativo entre lojas" da Visão Geral estava bruto (estava mesmo — só somava Sale.quantidade
 // sem descontar Return, diferente do resto do dashboard que já é líquido em todo lugar).
+// "marca" precisa incluir null do lado Sale (ver comentário em saleWhere(), core.ts) — achado em
+// 2026-11-14: Rodrigo viu Barra/Leblon/Rio Sul negativas em 10/11; causa era venda com marca=null
+// sumindo do lado Sale (sem esse OR) enquanto a devolução (nunca filtrada por marca) continuava
+// inteira. Esta função não usa saleWhere() (é $queryRaw puro), por isso repete o OR aqui também.
 export async function getSalesByDayPerStore(filters: DashboardFilters) {
   const [salesRows, returnRows] = await Promise.all([
     prisma.$queryRaw<{ day: Date; storeId: string; units: bigint }[]>`
@@ -253,7 +257,7 @@ export async function getSalesByDayPerStore(filters: DashboardFilters) {
         AND "saleDate" >= ${filters.from}
         AND "saleDate" <= ${filters.to}
         ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
-        ${filters.marcas !== undefined ? Prisma.sql`AND "marca" = ANY(${filters.marcas})` : Prisma.empty}
+        ${filters.marcas !== undefined ? Prisma.sql`AND ("marca" = ANY(${filters.marcas}) OR "marca" IS NULL)` : Prisma.empty}
         ${filters.tabelasPreco !== undefined ? Prisma.sql`AND ("tabelaPreco" = ANY(${filters.tabelasPreco}) OR "tabelaPreco" IS NULL)` : Prisma.empty}
         ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
         ${filters.colecaoIn ? Prisma.sql`AND "colecao" = ANY(${filters.colecaoIn})` : Prisma.empty}
@@ -328,7 +332,7 @@ export async function getSalesByHourPerStore(filters: DashboardFilters) {
       AND "saleDate" >= ${filters.from}
       AND "saleDate" <= ${filters.to}
       ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
-      ${filters.marcas !== undefined ? Prisma.sql`AND "marca" = ANY(${filters.marcas})` : Prisma.empty}
+      ${filters.marcas !== undefined ? Prisma.sql`AND ("marca" = ANY(${filters.marcas}) OR "marca" IS NULL)` : Prisma.empty}
       ${filters.tabelasPreco !== undefined ? Prisma.sql`AND ("tabelaPreco" = ANY(${filters.tabelasPreco}) OR "tabelaPreco" IS NULL)` : Prisma.empty}
       ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
       ${filters.colecaoIn ? Prisma.sql`AND "colecao" = ANY(${filters.colecaoIn})` : Prisma.empty}
@@ -374,7 +378,7 @@ export async function getSalesByDayPerColecao(filters: DashboardFilters) {
         AND "saleDate" >= ${filters.from}
         AND "saleDate" <= ${filters.to}
         ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
-        ${filters.marcas !== undefined ? Prisma.sql`AND "marca" = ANY(${filters.marcas})` : Prisma.empty}
+        ${filters.marcas !== undefined ? Prisma.sql`AND ("marca" = ANY(${filters.marcas}) OR "marca" IS NULL)` : Prisma.empty}
         ${filters.tabelasPreco !== undefined ? Prisma.sql`AND ("tabelaPreco" = ANY(${filters.tabelasPreco}) OR "tabelaPreco" IS NULL)` : Prisma.empty}
         ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
         ${filters.colecaoIn ? Prisma.sql`AND "colecao" = ANY(${filters.colecaoIn})` : Prisma.empty}
@@ -940,7 +944,7 @@ export async function getMonthlySalesByStore(filters: DashboardFilters, canal: C
       AND "saleDate" >= ${filters.from}
       AND "saleDate" <= ${filters.to}
       ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
-      ${filters.marcas !== undefined ? Prisma.sql`AND "marca" = ANY(${filters.marcas})` : Prisma.empty}
+      ${filters.marcas !== undefined ? Prisma.sql`AND ("marca" = ANY(${filters.marcas}) OR "marca" IS NULL)` : Prisma.empty}
       ${filters.tabelasPreco !== undefined ? Prisma.sql`AND ("tabelaPreco" = ANY(${filters.tabelasPreco}) OR "tabelaPreco" IS NULL)` : Prisma.empty}
       ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
       ${canal === "b2b" ? Prisma.sql`AND ("tabelaPreco" = 'Tabela atacado' OR "clienteNome" = ANY(${b2bClientes}))` : Prisma.empty}
@@ -1020,7 +1024,7 @@ async function getMonthlySalesByColuna(
       AND "saleDate" <= ${filters.to}
       ${grupoScope ? Prisma.sql`AND "grupo" = ${grupoScope}` : Prisma.empty}
       ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
-      ${filters.marcas !== undefined ? Prisma.sql`AND "marca" = ANY(${filters.marcas})` : Prisma.empty}
+      ${filters.marcas !== undefined ? Prisma.sql`AND ("marca" = ANY(${filters.marcas}) OR "marca" IS NULL)` : Prisma.empty}
       ${filters.tabelasPreco !== undefined ? Prisma.sql`AND ("tabelaPreco" = ANY(${filters.tabelasPreco}) OR "tabelaPreco" IS NULL)` : Prisma.empty}
       ${!grupoScope && filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
       ${canal === "b2b" ? Prisma.sql`AND ("tabelaPreco" = 'Tabela atacado' OR "clienteNome" = ANY(${b2bClientes}))` : Prisma.empty}
@@ -1124,7 +1128,7 @@ export async function getDailySalesByProduto(
         AND "saleDate" >= ${filters.from}
         AND "saleDate" <= ${filters.to}
         ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
-        ${filters.marcas !== undefined ? Prisma.sql`AND "marca" = ANY(${filters.marcas})` : Prisma.empty}
+        ${filters.marcas !== undefined ? Prisma.sql`AND ("marca" = ANY(${filters.marcas}) OR "marca" IS NULL)` : Prisma.empty}
         ${filters.tabelasPreco !== undefined ? Prisma.sql`AND ("tabelaPreco" = ANY(${filters.tabelasPreco}) OR "tabelaPreco" IS NULL)` : Prisma.empty}
         ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
         ${canal === "b2b" ? Prisma.sql`AND ("tabelaPreco" = 'Tabela atacado' OR "clienteNome" = ANY(${b2bClientes}))` : Prisma.empty}
@@ -1196,7 +1200,7 @@ export async function getDailySalesByProdutoPorLoja(
         AND "saleDate" >= ${filters.from}
         AND "saleDate" <= ${filters.to}
         ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
-        ${filters.marcas !== undefined ? Prisma.sql`AND "marca" = ANY(${filters.marcas})` : Prisma.empty}
+        ${filters.marcas !== undefined ? Prisma.sql`AND ("marca" = ANY(${filters.marcas}) OR "marca" IS NULL)` : Prisma.empty}
         ${filters.tabelasPreco !== undefined ? Prisma.sql`AND ("tabelaPreco" = ANY(${filters.tabelasPreco}) OR "tabelaPreco" IS NULL)` : Prisma.empty}
         ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
       GROUP BY day, "storeId"
@@ -1642,7 +1646,7 @@ export async function getTicketPorFaixaMensal(
       WHERE "status" != 'Cancelada'
         AND "dapicVendaId" IS NOT NULL
         ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
-        ${filters.marcas !== undefined ? Prisma.sql`AND "marca" = ANY(${filters.marcas})` : Prisma.empty}
+        ${filters.marcas !== undefined ? Prisma.sql`AND ("marca" = ANY(${filters.marcas}) OR "marca" IS NULL)` : Prisma.empty}
         ${filters.tabelasPreco !== undefined ? Prisma.sql`AND ("tabelaPreco" = ANY(${filters.tabelasPreco}) OR "tabelaPreco" IS NULL)` : Prisma.empty}
         ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
         ${filters.colecaoIn ? Prisma.sql`AND "colecao" = ANY(${filters.colecaoIn})` : Prisma.empty}
@@ -1716,7 +1720,7 @@ export async function getTamanhoMixMensal(
         AND "grupo" = ${grupo}
         AND "tamanho" IS NOT NULL
         ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
-        ${filters.marcas !== undefined ? Prisma.sql`AND "marca" = ANY(${filters.marcas})` : Prisma.empty}
+        ${filters.marcas !== undefined ? Prisma.sql`AND ("marca" = ANY(${filters.marcas}) OR "marca" IS NULL)` : Prisma.empty}
         ${filters.tabelasPreco !== undefined ? Prisma.sql`AND ("tabelaPreco" = ANY(${filters.tabelasPreco}) OR "tabelaPreco" IS NULL)` : Prisma.empty}
         ${filters.colecaoIn ? Prisma.sql`AND "colecao" = ANY(${filters.colecaoIn})` : Prisma.empty}
       UNION ALL

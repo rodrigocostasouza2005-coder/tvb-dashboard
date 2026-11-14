@@ -192,19 +192,29 @@ export function returnWhere(filters: DashboardFilters): Prisma.ReturnWhereInput 
 // canceladas separadamente — se surgir, deve pedir isso explicitamente (ex: um 2º where com
 // status:"Cancelada"), não reverter essa regra.
 export function saleWhere(filters: DashboardFilters): Prisma.SaleWhereInput {
+  // marca e tabelaPreco: cada um precisa incluir null (= registro sem o campo inferido) junto
+  // com os valores permitidos — null não é "marca/tabela proibida", é só dado que ainda não foi
+  // preenchido (sync grava `item.Marca ?? null`). Isso já valia pra tabelaPreco desde sempre;
+  // marca NUNCA tinha ganhado o mesmo tratamento (achado em 2026-11-14: Return nunca filtra por
+  // marca/tabelaPreco — comentário em returnWhere() — então toda venda com marca=null sumia do
+  // lado Sale enquanto a devolução correspondente continuava contando inteira no lado Return,
+  // produzindo líquido negativo sem nenhum dado corrompido). Cada condição vira um elemento do
+  // array AND (em vez de um `OR` solto no objeto) justamente pra não colidir uma com a outra —
+  // dois `OR` soltos no mesmo objeto por spread se sobrescreveriam (só o último sobreviveria).
+  const orConditions: Prisma.SaleWhereInput[] = [];
+  if (filters.marcas !== undefined) orConditions.push({ OR: [{ marca: { in: filters.marcas } }, { marca: null }] });
+  if (filters.tabelasPreco !== undefined) {
+    orConditions.push({ OR: [{ tabelaPreco: { in: filters.tabelasPreco } }, { tabelaPreco: null }] });
+  }
+
   return {
     status: { not: "Cancelada" },
     saleDate: { gte: filters.from, lte: filters.to },
     ...(filters.storeIds !== undefined ? { storeId: { in: filters.storeIds } } : {}),
-    ...(filters.marcas !== undefined ? { marca: { in: filters.marcas } } : {}),
-    // tabelaPreco: inclui null (= registros antigos sem tabela inferida) junto com os valores
-    // permitidos — null não é "tabela proibida", é só dado que ainda não foi preenchido.
-    ...(filters.tabelasPreco !== undefined
-      ? { OR: [{ tabelaPreco: { in: filters.tabelasPreco } }, { tabelaPreco: null }] }
-      : {}),
     ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
     ...(filters.tamanhoIn ? { tamanho: { in: filters.tamanhoIn } } : {}),
     ...(filters.colecaoIn ? { colecao: { in: filters.colecaoIn } } : {}),
+    ...(orConditions.length ? { AND: orConditions } : {}),
   };
 }
 
