@@ -13,6 +13,32 @@ import { PrismaClient } from "@prisma/client";
 const prisma = new PrismaClient();
 
 async function main() {
+  // Diagnóstico adicional (Rodrigo reportou valor IDÊNTICO ao de antes do fix, mesmo com refresh
+  // forçado) — hipótese revista: a venda excluída pode ter marca REAL diferente das 5 permitidas
+  // (não null), caso em que o fix de "OR marca IS NULL" não teria efeito nenhum. Confere os
+  // valores reais de marca/tabelaPreco de TODA venda de Barra/Leblon/Rio Sul em 10/11, antes de
+  // checar o resultado da função.
+  const stores = await prisma.store.findMany({
+    where: { name: { in: ["TVB Barra", "TVB Leblon", "TVB Rio Sul"] } },
+    select: { id: true, name: true },
+  });
+  const storeIds = stores.map((s) => s.id);
+  const breakdown = await prisma.sale.groupBy({
+    by: ["storeId", "marca", "tabelaPreco"],
+    where: {
+      storeId: { in: storeIds },
+      status: { not: "Cancelada" },
+      saleDate: { gte: new Date("2026-11-10T00:00:00.000-03:00"), lte: new Date("2026-11-10T23:59:59.999-03:00") },
+    },
+    _sum: { quantidade: true },
+  });
+  const nameById = new Map(stores.map((s) => [s.id, s.name]));
+  console.log("=== Breakdown real de marca/tabelaPreco das vendas de Barra/Leblon/Rio Sul em 10/11 ===");
+  for (const r of breakdown) {
+    console.log(`${nameById.get(r.storeId)} | marca=${JSON.stringify(r.marca)} tabelaPreco=${JSON.stringify(r.tabelaPreco)} unidades=${r._sum.quantidade}`);
+  }
+  console.log("");
+
   const user = await prisma.user.findFirst({
     where: { email: "rodrigo@tvbshorts.com" },
     select: { allowedMarcas: true, allowedTabelasPreco: true },
