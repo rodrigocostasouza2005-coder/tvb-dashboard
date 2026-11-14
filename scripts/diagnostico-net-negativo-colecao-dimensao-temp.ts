@@ -12,6 +12,19 @@
  * dado antigo pode continuar null). Se o bucket negativo for concentrado em "(sem coleção)",
  * é esse mismatch. Se for uma coleção nomeada, pode ser só efeito normal de janela curta
  * (devolução no período de uma venda de FORA do período) — não necessariamente bug.
+ *
+ * Hipótese adicional (achada relendo getSalesByDayPerStore, vendas.ts:244-280): a query de Sale
+ * filtra por "marca" = ANY(filters.marcas) e "tabelaPreco" = ANY(filters.tabelasPreco), mas a
+ * query de Return NÃO filtra por nenhum dos dois (comentário no código: Return não tem marca/
+ * tabelaPreco confiáveis). getMarcaRestriction(user) devolve user.allowedMarcas CRU (nunca
+ * undefined), e parseFilters/crossWithAllowed trata um array vazio [] como restrição real
+ * "nada liberado" quando o usuário não escolheu nada no filtro — ou seja, se allowedMarcas (ou
+ * allowedTabelasPreco, já sem "Tabela atacado") não cobrir 100% dos valores reais de marca/
+ * tabelaPreco presentes no período, a Sale pode ficar artificialmente zerada/reduzida enquanto
+ * a Return continua contando tudo — produzindo negativo sem nenhuma venda/devolução órfã ou
+ * duplicada de verdade. Testa isso recomputando o líquido de Barra/Leblon/Rio Sul no dia 10/11
+ * com os mesmos filtros de marca/tabelaPreco de cada usuário ADMIN/GESTAO real (só leitura de
+ * email/role/allowedMarcas/allowedTabelasPreco — nunca passwordHash).
  */
 import { PrismaClient } from "@prisma/client";
 
@@ -126,6 +139,68 @@ async function main() {
     console.log(`\n=== Agregado do período por ${dim} — ${negativos.length} valor(es) negativo(s) de ${allKeys.size} total ===`);
     for (const r of negativos.slice(0, 30)) {
       console.log(`${dim}="${r.k}" | vendido=${r.vendido} devolvido=${r.devolvido} liquido=${r.liquido}`);
+    }
+  }
+
+  // === 4) Hipótese do filtro assimétrico marca/tabelaPreco (Sale filtra, Return não) ===
+  // Reproduz exatamente a lógica de getMarcaRestriction/getTabelaPrecoRestrictionSemAtacado +
+  // crossWithAllowed pra cada usuário real, e recalcula o líquido de Barra/Leblon/Rio Sul no dia
+  // 10/11 (o dia do print) com esse filtro aplicado só na Sale, igual o código de produção faz.
+  console.log("\n=== Teste da hipótese: filtro de marca/tabelaPreco assimétrico (Sale filtra, Return não) ===");
+  const usuarios = await prisma.user.findMany({
+    select: { email: true, role: true, allowedMarcas: true, allowedTabelasPreco: true },
+  });
+  console.log(`${usuarios.length} usuário(s) encontrado(s).`);
+
+  const lojasFisicas = await prisma.store.findMany({
+    where: {
+      OR: [
+        { name: { contains: "Leblon", mode: "insensitive" } },
+        { name: { contains: "Barra", mode: "insensitive" } },
+        { name: { contains: "Rio Sul", mode: "insensitive" } },
+      ],
+      sellsProducts: true,
+    },
+    select: { id: true, name: true },
+  });
+
+  const DIA_PRINT_INICIO = new Date("2026-11-10T00:00:00.000-03:00");
+  const DIA_PRINT_FIM = new Date("2026-11-10T23:59:59.999-03:00");
+
+  for (const u of usuarios) {
+    // Mesma regra de getTabelaPrecoRestrictionSemAtacado: tira "Tabela atacado" da lista crua.
+    const tabelasSemAtacado = u.allowedTabelasPreco.filter((t) => t !== "Tabela atacado");
+    // crossWithAllowed(chosen=[], allowed=<array cru>) => sempre devolve o array cru quando o
+    // usuário não escolheu nada no filtro (é sempre o caso aqui, testando o estado "sem filtro
+    // manual" — exatamente o que o print mostra, accordion de Filtros fechado/default).
+    const marcasFiltro = u.allowedMarcas; // já é array cru, nunca undefined
+    const tabelasFiltro = tabelasSemAtacado;
+
+    console.log(`\n--- Usuário ${u.email} (${u.role}) | allowedMarcas=${JSON.stringify(u.allowedMarcas)} | allowedTabelasPreco(sem atacado)=${JSON.stringify(tabelasSemAtacado)} ---`);
+
+    for (const loja of lojasFisicas) {
+      // Sale: aplica os mesmos filtros de marca/tabelaPreco do usuário (array vazio = zero linhas,
+      // igual "marca" = ANY(ARRAY[]::text[]) no SQL real). tabelaPreco = ANY(tabelasFiltro) OR
+      // tabelaPreco IS NULL — replica o "OR tabelaPreco IS NULL" do SQL real.
+      const saleAgg = await prisma.sale.aggregate({
+        where: {
+          storeId: loja.id,
+          status: { not: "Cancelada" },
+          saleDate: { gte: DIA_PRINT_INICIO, lte: DIA_PRINT_FIM },
+          marca: { in: marcasFiltro },
+          OR: [{ tabelaPreco: { in: tabelasFiltro } }, { tabelaPreco: null }],
+        },
+        _sum: { quantidade: true },
+      });
+      // Return: SEM nenhum filtro de marca/tabelaPreco, igual o código real.
+      const returnAgg = await prisma.return.aggregate({
+        where: { storeId: loja.id, status: { not: "Cancelada" }, returnDate: { gte: DIA_PRINT_INICIO, lte: DIA_PRINT_FIM } },
+        _sum: { quantidade: true },
+      });
+      const vendido = saleAgg._sum.quantidade ?? 0;
+      const devolvido = returnAgg._sum.quantidade ?? 0;
+      const liquido = vendido - devolvido;
+      console.log(`  ${loja.name} | vendido(com filtro)=${vendido} devolvido(sem filtro)=${devolvido} liquido=${liquido}${liquido < 0 ? "  <<< NEGATIVO" : ""}`);
     }
   }
 
