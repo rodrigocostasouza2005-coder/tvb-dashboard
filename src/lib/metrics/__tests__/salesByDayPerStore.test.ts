@@ -69,8 +69,8 @@ describe("getSalesByDayPerStore — marca=null não pode sumir do lado Sale quan
   it("regressão do caso real: 70 vendas (marca=null) e 6 devoluções na mesma loja/dia resultam em líquido positivo, não -6", async () => {
     const storeId = "store-barra";
     queryRaw
-      .mockResolvedValueOnce([{ day: new Date("2026-11-10"), storeId, units: 70n }])
-      .mockResolvedValueOnce([{ day: new Date("2026-11-10"), storeId, units: 6n }]);
+      .mockResolvedValueOnce([{ day: new Date("2026-11-10"), storeId, units: BigInt(70) }])
+      .mockResolvedValueOnce([{ day: new Date("2026-11-10"), storeId, units: BigInt(6) }]);
     storeFindMany.mockResolvedValueOnce([{ id: storeId, name: "TVB Barra", displayGroup: null }]);
 
     const { getSalesByDayPerStore } = await import("../vendas");
