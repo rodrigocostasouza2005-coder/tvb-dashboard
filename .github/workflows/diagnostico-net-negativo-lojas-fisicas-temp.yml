@@ -1,0 +1,26 @@
+name: Diagnóstico temporário somente-leitura de net negativo (lojas físicas)
+
+# Temporário — investiga por que Leblon/Barra/Rio Sul aparecem com unidades líquidas negativas
+# no comparativo entre lojas da Visão Geral, de 2026-11-10 até hoje. Execução exclusivamente
+# manual (workflow_dispatch), somente leitura, DATABASE_URL de produção via secret do GitHub.
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostico:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Rodar diagnóstico (somente leitura)
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: npx tsx scripts/diagnostico-net-negativo-lojas-fisicas-temp.ts
