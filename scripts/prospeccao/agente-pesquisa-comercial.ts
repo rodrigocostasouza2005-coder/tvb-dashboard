@@ -24,7 +24,7 @@
  */
 import { PrismaClient, Prisma } from "@prisma/client";
 import { isSafePublicHttpsUrl } from "../../src/lib/prospeccao/url-segura";
-import { calcularConfiancaPesquisa, extrairEvidenciasSite, extrairResultadosBusca, hostEhRedeSocial, tentarSiteViaDominioEmail, type ResultadoBusca } from "../../src/lib/prospeccao/pesquisa-web";
+import { calcularConfiancaPesquisa, derivarUrlsCandidatasPorEmail, extrairEvidenciasSite, extrairResultadosBusca, hostEhRedeSocial, tentarSiteViaDominioEmail, type ResultadoBusca } from "../../src/lib/prospeccao/pesquisa-web";
 import { aprenderPerfis, pontuarAderenciaPerfil } from "../../src/lib/prospeccao/aprendizado-comercial";
 import { qualificarProspect } from "../../src/lib/prospeccao/motor-qualificacao";
 import type { SituacaoCadastral } from "../../src/lib/prospeccao/motor-elegibilidade";
@@ -97,7 +97,20 @@ async function research(p:{id:string;nomeFantasia:string;cidade:string|null;esta
 async function main(){const args=process.argv.slice(2);const arg=(k:string,d:string)=>{const i=args.indexOf(k);return i>=0?args[i+1]??d:d;};const apply=args.includes("--apply");const uf=arg("--uf","RJ").toUpperCase();const limit=Math.max(1,Math.min(25,Number(arg("--limit","10"))||10));if(!/^[A-Z]{2}$/.test(uf))throw new Error("UF inválida.");const atividadesAprendizado=await prisma.atacadoProspectActivity.findMany({where:{tipo:"INTERACAO_BRUCE",resultado:{not:null}},orderBy:{createdAt:"desc"},take:5000,select:{prospectId:true,resultado:true,prospect:{select:{segmentoComercial:true,perfilLoja:true,faixaPreco:true,estado:true,status:true}}}});
 const perfisAprendidos=aprenderPerfis(atividadesAprendizado.map(a=>({prospectId:a.prospectId,resultado:a.resultado as "INTERESSADO"|"SEM_RESPOSTA"|"RECUSOU"|"PEDIU_CATALOGO"|"PEDIU_PRECO"|"NEGOCIANDO"|"PEDIDO_REALIZADO"|"RECOMPRA"|"SEM_ADERENCIA"|"DADOS_INVALIDOS"|"OUTRO"|null,segmentoComercial:a.prospect.segmentoComercial,perfilLoja:a.prospect.perfilLoja,faixaPreco:a.prospect.faixaPreco,estado:a.prospect.estado,status:a.prospect.status})));
 const candidatos=await prisma.atacadoProspect.findMany({where:{estado:uf,status:{in:["NOVO","EM_QUALIFICACAO"]},grupoComercial:"PENDENTE",origem:{in:["receita_federal_dados_abertos","manual","importacao","pesquisa_web"]},AND:[{OR:[{responsavel:null},{responsavel:"AGENTE_PESQUISA_COMERCIAL_WEB_V1"},{responsavel:"AGENTE_QUALIFICACAO_RECEITA_V1"},{responsavel:"AGENTE_PESQUISA_TVB"},{responsavel:"AGENTE_VALIDACAO_TVB"}]},{OR:[{pesquisadoEm:null},{confiancaPesquisa:"BAIXA"},{confiancaPesquisa:"CADASTRAL"}]}]},orderBy:[{pesquisadoEm:"asc"},{updatedAt:"asc"}],take:250,select:{id:true,nomeFantasia:true,cidade:true,estado:true,site:true,instagram:true,observacoes:true,segmentoComercial:true,perfilLoja:true,faixaPreco:true,situacaoCadastral:true,cnpj:true,telefone:true,email:true,confiancaPesquisa:true}});
-const prospects=candidatos.map(p=>({p,prioridade:pontuarAderenciaPerfil(p,perfisAprendidos)})).sort((a,b)=>b.prioridade.pontos-a.prioridade.pontos).slice(0,limit).map(x=>({...x.p,prioridadeAprendida:x.prioridade}));
+// Priorização aditiva (pedido do Rodrigo, 2026-11-14): candidato com evidência determinística
+// disponível (site já cadastrado, ou e-mail de domínio próprio via derivarUrlsCandidatasPorEmail
+// — mesma função usada em diagnostico-base.ts pro número "138 de 447") entra no lote ANTES de
+// quem depende só da busca DuckDuckGo (bloqueada por anti-bot, ver "Melhoria 2" acima) — produz
+// classificação real em vez de só avançar checkpoint sem evidência. Não muda o `where` acima
+// (elegibilidade intacta) nem qualificarProspect (critério comercial intacto), só a ORDEM de
+// quem entra no lote de `limit` prospects desta rodada.
+const temEvidenciaDeterministica=(p:typeof candidatos[number])=>Boolean(p.site)||derivarUrlsCandidatasPorEmail(p.email).length>0;
+const prospects=candidatos.map(p=>({p,prioridade:pontuarAderenciaPerfil(p,perfisAprendidos)})).sort((a,b)=>{
+  const detA=temEvidenciaDeterministica(a.p)?1:0;
+  const detB=temEvidenciaDeterministica(b.p)?1:0;
+  if(detA!==detB)return detB-detA;
+  return b.prioridade.pontos-a.prioridade.pontos;
+}).slice(0,limit).map(x=>({...x.p,prioridadeAprendida:x.prioridade}));
 console.log(`PESQUISA COMERCIAL | UF=${uf} | lojas=${prospects.length} | perfis aprendidos=${perfisAprendidos.length} | modo=${apply?"APLICAR":"PRÉVIA"}`);
 for (const p of prospects) {
   const r = await research(p);
