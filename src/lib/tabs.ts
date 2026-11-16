@@ -39,6 +39,7 @@ export type TabKey =
   | "estoque-retirada"
   | "mapa-compras"
   | "distribuicao-estoque"
+  | "planejamento-estoque"
   | "performance"
   | "analise-performance"
   | "analytics-site"
@@ -95,6 +96,10 @@ export const TABS: TabEntry[] = [
   // comerciais. Desde 2026-11-11 isso inclui o CD/Site nas 3 direções (loja↔loja, CD/Site→loja,
   // loja→CD/Site), não só varejo-com-varejo. Ver src/lib/metrics/distribuicao-estoque.ts.
   { key: "distribuicao-estoque", label: "Inteligência de Distribuição", href: "/dashboard/distribuicao-estoque", group: "estoque" },
+  // Fase 1 do Planejamento Inteligente de Estoque (2026-11-16) — colocado dentro do grupo
+  // "estoque" já existente de propósito (pedido do Rodrigo: não criar 11ª aba isolada sem
+  // resolver navegação primeiro). Mover/renomear/fundir com outra aba depois é trivial (1 linha).
+  { key: "planejamento-estoque", label: "Planejamento de Estoque", href: "/dashboard/planejamento-estoque", group: "estoque" },
 
   // atacado
   { key: "atacado", label: "Vendas", href: "/dashboard/atacado", group: "atacado" },
