@@ -85,7 +85,6 @@ export default async function PlanejamentoEstoquePage({
         <ProdutoDetalhe
           detalhe={detalhe}
           classificacao={linhaProdutoAberto?.classificacao ?? "NAO_CLASSIFICADO"}
-          grupo={linhaProdutoAberto?.grupo ?? detalhe.grupo}
           grade={grade}
           podeClassificar={podeClassificar}
           fecharHref={fecharHref}

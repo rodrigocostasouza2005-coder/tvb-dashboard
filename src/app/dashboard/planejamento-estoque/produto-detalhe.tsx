@@ -18,14 +18,12 @@ const STATUS_COMERCIAL_LABEL: Record<StatusComercialProduto, string> = {
 export function ProdutoDetalhe({
   detalhe,
   classificacao,
-  grupo,
   grade,
   podeClassificar,
   fecharHref,
 }: {
   detalhe: ProdutoPlanejamentoDetalhe;
   classificacao: ClassificacaoAgregada;
-  grupo: string;
   grade: RecomendacaoGradeProduto | null;
   podeClassificar: boolean;
   fecharHref: string;
@@ -93,12 +91,12 @@ export function ProdutoDetalhe({
           </h3>
           <p className="mb-2 text-[11px] text-[var(--text-muted)]">
             {classificacao === "MISTO"
-              ? "Os SKUs deste produto têm classificações diferentes hoje — escolher aqui aplica a MESMA classificação a todos."
-              : "Nenhum SKU deste produto está classificado ainda. A decisão continua manual — isto só evita repetir o clique por cor/tamanho."}
+              ? `Os ${detalhe.cods.length} SKU(s) deste produto têm classificações diferentes hoje — a decisão escolhida abaixo substitui TODAS elas pela mesma.`
+              : `Nenhum dos ${detalhe.cods.length} SKU(s) deste produto está classificado ainda. A decisão continua 100% manual — isto só evita repetir o clique por cor/tamanho.`}{" "}
+            O servidor confere cada SKU contra o cadastro real antes de gravar (nunca aceita um SKU de outro produto).
           </p>
           <form action={classificarProdutoEmLoteAction} className="flex flex-wrap items-end gap-2 text-xs">
             <input type="hidden" name="produto" value={detalhe.produto} />
-            <input type="hidden" name="grupo" value={grupo} />
             {detalhe.cods.map((cod) => (
               <input key={cod} type="hidden" name="cod" value={cod} />
             ))}
