@@ -38,6 +38,30 @@ async function main() {
     console.log(`${p.produto} (${p.classificacao}): total=${grade.quantidadeSugeridaTotal}, somaCores=${somaCores}, fechaComTotal=${somaCores === grade.quantidadeSugeridaTotal}, cadaCorFechaComSeusTamanhos=${somaTamanhosOk}, cores=${grade.porCor.map((c) => c.cor).join(",")}`);
   }
   console.log(`\nGrades testadas: ${testados}`);
+
+  // Simula "a página abre, detalhe carrega" (item 4 do pedido) chamando a mesma função que
+  // page.tsx chama quando ?produto=<nome>. Escolhe um produto real com estoque > 0 (não os
+  // classificados, que no momento todos têm quantidade 0/null) pra ter algo substancial pra
+  // reconciliar. Mesma checagem de fechamento de totais já coberta nos testes unitários, agora
+  // contra dado real de produção.
+  const { getProdutoPlanejamentoDetalhe } = await import("../src/lib/metrics/planejamento-estoque");
+  const candidato = produtos.find((p) => p.estoqueTotal > 0 && p.cods.length > 1) ?? produtos.find((p) => p.estoqueTotal > 0);
+  if (candidato) {
+    const detalhe = await getProdutoPlanejamentoDetalhe(candidato.produto);
+    console.log(`\n=== Detalhe de "${candidato.produto}" (estoqueTotal=${candidato.estoqueTotal}, ${candidato.cods.length} cod(s)) ===`);
+    if (!detalhe) {
+      console.log("ERRO: detalhe veio null para um produto que está na lista principal.");
+    } else {
+      const somaPorCorTamanho = detalhe.porCor.reduce((s, c) => s + c.porTamanho.reduce((s2, t) => s2 + t.estoqueTotal, 0), 0);
+      const somaPorLoja = detalhe.porLoja.reduce((s, l) => s + l.estoqueAtual, 0);
+      console.log(`estoqueTotal (lista) = ${candidato.estoqueTotal}`);
+      console.log(`soma porCor->porTamanho (detalhe) = ${somaPorCorTamanho} -> fecha? ${somaPorCorTamanho === candidato.estoqueTotal}`);
+      console.log(`soma porLoja (detalhe) = ${somaPorLoja} -> fecha? ${somaPorLoja === candidato.estoqueTotal}`);
+      console.log(`porLoja: ${JSON.stringify(detalhe.porLoja.map((l) => ({ posicaoNome: l.posicaoNome, estoqueAtual: l.estoqueAtual, vendasDias30: l.vendasDias30, diagnostico: l.diagnostico })))}`);
+    }
+  } else {
+    console.log("\nNenhum produto com estoqueTotal > 0 encontrado pra testar o detalhe.");
+  }
 }
 
 main()
