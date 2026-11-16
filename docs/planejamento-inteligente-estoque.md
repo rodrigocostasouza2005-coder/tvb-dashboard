@@ -1,7 +1,7 @@
 # Planejamento Inteligente de Estoque — TVB Radar
 
-**Status:** Fase 1 (primeira entrega funcional) mergeada e em produção (PR #100). Validada contra dado real de produção. Fase 0 (diagnóstico técnico) concluída.
-**Data:** 2026-11-16 (Fase 0) / 2026-11-16 (Fase 1)
+**Status:** Fase 2A (classificação em lote, tendência de demanda, grade por cor/tamanho) mergeada e em produção (PR #101, SHA `9b4c986`, deploy `dpl_hi5hnbsinp8nhXxiZeZ311NEwcX4`). Validada contra dado real de produção. Fase 1 (PR #100) e Fase 0 concluídas.
+**Data:** 2026-11-16 (Fase 0, Fase 1 e Fase 2A)
 **Como ler este documento:** é um documento vivo de continuidade — arquitetura, regras de negócio, decisões e pendências. Toda afirmação aqui é fato verificado em código/schema nesta data, salvo quando marcado "não verificado" ou "decisão pendente". O código muda rápido neste projeto — antes de implementar algo listado aqui, reverifique contra o código atual.
 
 ---
@@ -261,3 +261,18 @@ A worktree órfã (`tvb-dashboard-planejamento-estoque`) decompunha quantidade p
 - Gestão de excesso/distribuição: surfacing de `distribuicao-estoque`/`DecisaoMovimentacaoEstoque` no painel de detalhe (motor já maduro, só falta integrar visualmente).
 - Avaliação de decisões: reviver `getHistoricoDecisoesCompra` (hoje código morto, zero tela usa) + construir comparação on-demand (recomendado vs. realizado), sem schema novo.
 - Lead time urgente vs. normal — precisa de schema change (campo novo em `CoberturaMeta` ou modelo de fornecedor/modalidade), fica como PR separado com aprovação explícita do Rodrigo antes do merge, por tocar schema.
+
+### 10.7 Correção de segurança (revisão pontual antes do merge) e validação final em produção
+
+**Vulnerabilidade real encontrada e corrigida antes do merge** (pedido explícito do Rodrigo de revisão pontual): a primeira versão de `classificarProdutoEmLoteAction` confiava nos `cod` recebidos dos campos ocultos do formulário sem checar se pertenciam ao `produto`/`grupo` informados — um campo oculto adulterado no cliente classificaria um SKU de **outro produto** com a decisão errada. Corrigido: a action agora confere cada `cod` contra a fonte real (`Sale`/`StockSnapshot`), descarta silenciosamente qualquer `cod` que não pertença ao produto submetido, deduplica, e grava `grupo` sempre vindo da fonte real — nunca do formulário. Se nenhum `cod` for válido, nada é gravado. `requireGestao()` preservado. 8 testes novos (`src/app/dashboard/mapa-compras/__tests__/classificarProdutoEmLote.test.ts`) cobrindo especificamente: cod de outro produto, cod inexistente, dedup, grupo da fonte real, zero-grava quando tudo inválido, mesma decisão em todos os cods válidos, permissão, histórico preservado.
+
+**Merge:** PR #101 → `main` SHA `9b4c986` (2026-11-16T18:30Z aprox.). **Deploy de produção:** `dpl_hi5hnbsinp8nhXxiZeZ311NEwcX4`, status `Ready`, confirmado via `vercel inspect`.
+
+**Validação final contra produção real** (script temporário somente-leitura, removido em seguida — commit `f4acf25`):
+- 360 produtos retornados, sem erro.
+- Tendência: 122 crescimento, ~30 estável, 154 sem dado, ~54 desaceleração (pequena variação entre duas execuções minutos apart — dado real mudando ao vivo, não bug).
+- `demandaPossivelmenteMascarada=true` em 14 produtos — **100% deles em ruptura/cobertura_critica**, 0 inconsistência (nenhum produto em risco sem a flag).
+- 6 produtos classificados (Best Seller/Drop) hoje em produção — **todos com quantidade sugerida 0 ou nula** (nenhum gerou recomendação de grade com quantidade real ainda). Isso é esperado dado o estágio atual de adoção da classificação (Fase 0/2A resolveram o *mecanismo*, não substituem a decisão humana de classificar o catálogo) — **não foi possível validar a decomposição de grade contra uma quantidade real positiva em produção nesta rodada**; a cobertura de "fecha exatamente com o total" vem dos 4 testes unitários com dado sintético positivo (`recomendacaoGradeProduto.test.ts`). Revisitar quando houver mais produtos classificados com sugestão > 0.
+- **Detalhe por produto validado com dado real multi-SKU**: "Calça Confort Black" (10 cods, `estoqueTotal=23`) — soma por cor→tamanho fechou em 23, soma por loja fechou em 23. Confirma a correção da seção 10.3 (agregação por loja) funcionando com produto real do catálogo, não só cenário sintético.
+- **Limitação declarada**: a validação "a página abre" foi feita no nível de função (mesmas queries que `page.tsx` chama), não via browser com sessão de produção real — não há credencial de produção disponível nem foi solicitada/usada para isso. Como o build local (`npm run build`) já passou e as funções chamadas pela página rodaram sem erro contra produção com os mesmos dados que a página usaria, é uma prova equivalente para o que a página faz (ela só mapeia essas estruturas, já testado nos testes de componente/tipo) — mas não é literalmente um screenshot da página renderizada.
+- **Teste de classificação em lote em produção**: **não executado** deliberadamente. Submeter o formulário real gravaria uma classificação real em produção sem uma autorização específica para aquele SKU/produto — a cobertura de corretude e segurança da action vem dos 8 testes unitários (que simulam exatamente os cenários de adulteração/erro), não de uma escrita real de teste no banco de produção.
