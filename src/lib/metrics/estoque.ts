@@ -593,64 +593,125 @@ export async function getReplenishmentPorVendas(
   });
   const vendasByKey = new Map(saleAgg.map((s) => [`${s.storeId}::${s.cod}`, s._sum.quantidade ?? 0]));
 
-  return candidatos
-    .map((s) => {
-      const estoqueNaOrigem = cdStockByCod.get(s.cod) ?? 0;
-      const vendasNoPeriodo = vendasByKey.get(`${s.storeId}::${s.cod}`) ?? 0;
-      const mediaVendaSemanal = vendasNoPeriodo / JANELA_GIRO_SEMANAS;
-      // Só é "sem dado confiável pra medir demanda" quando também está zerado — item com 5
-      // unidades em estoque que não vendeu em 8 semanas não é falta de estoque pra vender, é
-      // falta de demanda mesmo, não deveria repor (bug introduzido na reescrita de 2026-09-16,
-      // achado pelo Rodrigo: "Boné Atlantico" na Barra tinha 5 em estoque, vendeu 0, e mesmo
-      // assim pedia repor 5 só porque o mínimo era maior).
-      const semGiroNoPeriodo = vendasNoPeriodo === 0 && s.quantidadeDisponivel === 0;
-      const precisaReporPelaVenda = mediaVendaSemanal > s.quantidadeDisponivel;
+  // Necessidade bruta por linha, SEM AINDA aplicar o teto do CD — o teto agora é compartilhado
+  // entre todas as lojas que pedem o mesmo cod na mesma rodada (ver pool mais abaixo), em vez de
+  // cada linha testar isoladamente contra o MESMO cdStockByCod. BUG REAL achado em auditoria
+  // (2026-11-16): antes, 3 lojas pedindo o mesmo SKU podiam somar mais do que o CD de fato tinha
+  // — ex. real do banco: CD com 7un. de "Ultra Light Marrocos" tam. 40 (teto sem zerar = 6), e a
+  // função recomendava Barra=4 + Leblon=4 + Rio Sul=4 = 12un., quase o dobro do que existia.
+  const linhas = candidatos.map((s) => {
+    const estoqueNaOrigem = cdStockByCod.get(s.cod) ?? 0;
+    const vendasNoPeriodo = vendasByKey.get(`${s.storeId}::${s.cod}`) ?? 0;
+    const mediaVendaSemanal = vendasNoPeriodo / JANELA_GIRO_SEMANAS;
+    // Só é "sem dado confiável pra medir demanda" quando também está zerado — item com 5
+    // unidades em estoque que não vendeu em 8 semanas não é falta de estoque pra vender, é
+    // falta de demanda mesmo, não deveria repor (bug introduzido na reescrita de 2026-09-16,
+    // achado pelo Rodrigo: "Boné Atlantico" na Barra tinha 5 em estoque, vendeu 0, e mesmo
+    // assim pedia repor 5 só porque o mínimo era maior).
+    const semGiroNoPeriodo = vendasNoPeriodo === 0 && s.quantidadeDisponivel === 0;
+    const precisaReporPelaVenda = mediaVendaSemanal > s.quantidadeDisponivel;
 
-      const estoqueMinimo = matchMinimumRule(minimumRules, s) ?? s.estoqueMinimo;
-      const necessidadeMinimo = estoqueMinimo != null ? estoqueMinimo - s.quantidadeDisponivel : null;
+    const estoqueMinimo = matchMinimumRule(minimumRules, s) ?? s.estoqueMinimo;
+    const necessidadeMinimo = estoqueMinimo != null ? estoqueMinimo - s.quantidadeDisponivel : null;
 
-      // Nunca zera o CD (pedido do Rodrigo em 2026-09-15) — o teto é o estoque do CD menos 1.
-      const tetoSemZerarCD = Math.max(estoqueNaOrigem - 1, 0);
-      // "CD tem de sobra" = dá pra cobrir o mínimo cadastrado inteiro sem chegar perto do teto.
-      const cdTemDeSobra = necessidadeMinimo != null && necessidadeMinimo > 0 && tetoSemZerarCD >= necessidadeMinimo;
+    // Nunca zera o CD (pedido do Rodrigo em 2026-09-15) — o teto é o estoque do CD menos 1.
+    const tetoSemZerarCD = Math.max(estoqueNaOrigem - 1, 0);
+    // "CD tem de sobra" = dá pra cobrir o mínimo cadastrado inteiro sem chegar perto do teto.
+    const cdTemDeSobra = necessidadeMinimo != null && necessidadeMinimo > 0 && tetoSemZerarCD >= necessidadeMinimo;
 
-      let precisaRepor: boolean;
-      let necessidade: number;
-      if (semGiroNoPeriodo) {
-        // Não vendeu NADA em 8 semanas — sem dado de venda confiável pra basear a conta. Só
-        // repõe se existir mínimo cadastrado e o CD aguentar cobrir ele inteiro.
-        precisaRepor = cdTemDeSobra;
-        necessidade = necessidadeMinimo ?? 0;
-      } else if (precisaReporPelaVenda) {
-        precisaRepor = true;
-        // CD com folga e mínimo pedindo mais que o ritmo médio de venda? Usa o mínimo (pedido do
-        // Rodrigo: "se tiver muito em estoque, vale a pena colocar o mínimo"). Senão, só a venda.
-        necessidade =
-          cdTemDeSobra && necessidadeMinimo !== null
-            ? Math.max(mediaVendaSemanal - s.quantidadeDisponivel, necessidadeMinimo)
-            : mediaVendaSemanal - s.quantidadeDisponivel;
-      } else {
-        precisaRepor = false;
-        necessidade = 0;
-      }
+    let precisaRepor: boolean;
+    let necessidade: number;
+    if (semGiroNoPeriodo) {
+      // Não vendeu NADA em 8 semanas — sem dado de venda confiável pra basear a conta. Só
+      // repõe se existir mínimo cadastrado e o CD aguentar cobrir ele inteiro.
+      precisaRepor = cdTemDeSobra;
+      necessidade = necessidadeMinimo ?? 0;
+    } else if (precisaReporPelaVenda) {
+      precisaRepor = true;
+      // CD com folga e mínimo pedindo mais que o ritmo médio de venda? Usa o mínimo (pedido do
+      // Rodrigo: "se tiver muito em estoque, vale a pena colocar o mínimo"). Senão, só a venda.
+      necessidade =
+        cdTemDeSobra && necessidadeMinimo !== null
+          ? Math.max(mediaVendaSemanal - s.quantidadeDisponivel, necessidadeMinimo)
+          : mediaVendaSemanal - s.quantidadeDisponivel;
+    } else {
+      precisaRepor = false;
+      necessidade = 0;
+    }
 
-      const falta = precisaRepor ? Math.min(Math.max(Math.ceil(necessidade), 1), tetoSemZerarCD) : 0;
+    const necessidadeBruta = precisaRepor ? Math.max(Math.ceil(necessidade), 1) : 0;
 
+    return {
+      storeId: s.storeId,
+      cod: s.cod,
+      storeName: storeName.get(s.storeId) ?? s.storeId,
+      produto: s.produto,
+      grupo: s.grupo,
+      colecao: s.colecao,
+      tamanho: s.tamanho,
+      quantidadeDisponivel: s.quantidadeDisponivel,
+      vendasNoPeriodo,
+      mediaVendaSemanal: Math.round(mediaVendaSemanal * 10) / 10,
+      semGiroNoPeriodo,
+      necessidadeBruta,
+      precisaRepor,
+      origemSugerida: cdStore?.name ?? "—",
+      estoqueNaOrigem,
+    };
+  });
+
+  // Pool compartilhado do CD por cod — mesmo teto de sempre (estoque do CD menos 1, nunca zera),
+  // mas agora DECREMENTADO conforme cada loja é servida, em vez de cada linha testar contra o
+  // mesmo total isoladamente (era exatamente isso que permitia a dupla alocação do bug acima).
+  // Dentro do mesmo cod, quem tem a maior necessidade bruta é atendido primeiro — prioriza a loja
+  // com o furo real maior em vez de ordem arbitrária; empate quebrado por nome da loja, pra
+  // resultado determinístico.
+  const poolRestantePorCod = new Map<string, number>();
+  for (const [cod, qtd] of cdStockByCod) poolRestantePorCod.set(cod, Math.max(qtd - 1, 0));
+
+  const porCod = new Map<string, typeof linhas>();
+  for (const l of linhas) {
+    if (!l.precisaRepor) continue;
+    const grupo = porCod.get(l.cod) ?? [];
+    grupo.push(l);
+    porCod.set(l.cod, grupo);
+  }
+
+  const faltaPorChave = new Map<string, number>(); // chave storeId::cod -> quantidade alocada
+  for (const [cod, grupoLinhas] of porCod) {
+    const ordenadas = [...grupoLinhas].sort(
+      (a, b) => b.necessidadeBruta - a.necessidadeBruta || a.storeName.localeCompare(b.storeName)
+    );
+    let restante = poolRestantePorCod.get(cod) ?? 0;
+    for (const l of ordenadas) {
+      const falta = Math.min(l.necessidadeBruta, restante);
+      faltaPorChave.set(`${l.storeId}::${cod}`, falta);
+      restante -= falta;
+    }
+  }
+
+  return linhas
+    .filter((l) => l.precisaRepor)
+    .map((l) => {
+      const falta = faltaPorChave.get(`${l.storeId}::${l.cod}`) ?? 0;
       return {
-        storeId: s.storeId,
-        storeName: storeName.get(s.storeId) ?? s.storeId,
-        produto: s.produto,
-        grupo: s.grupo,
-        colecao: s.colecao,
-        tamanho: s.tamanho,
-        quantidadeDisponivel: s.quantidadeDisponivel,
-        vendasNoPeriodo,
-        mediaVendaSemanal: Math.round(mediaVendaSemanal * 10) / 10,
-        semGiroNoPeriodo,
+        storeId: l.storeId,
+        storeName: l.storeName,
+        produto: l.produto,
+        grupo: l.grupo,
+        colecao: l.colecao,
+        tamanho: l.tamanho,
+        quantidadeDisponivel: l.quantidadeDisponivel,
+        vendasNoPeriodo: l.vendasNoPeriodo,
+        mediaVendaSemanal: l.mediaVendaSemanal,
+        semGiroNoPeriodo: l.semGiroNoPeriodo,
         falta,
-        precisaRepor,
-        origemSugerida: cdStore?.name ?? "—",
-        estoqueNaOrigem,
+        // Reavaliado contra a alocação real do pool: uma loja que entraria na conta isoladamente
+        // pode perder a vez pra outra com necessidade maior do mesmo SKU, se o CD não der pros
+        // dois — nesse caso falta=0 aqui e a linha não aparece (nunca promete o que não tem).
+        precisaRepor: falta > 0,
+        origemSugerida: l.origemSugerida,
+        estoqueNaOrigem: l.estoqueNaOrigem,
       };
     })
     .filter((r) => r.precisaRepor)
