@@ -28,9 +28,6 @@ vi.mock("../vendas", () => ({
   getDailySalesByProduto: (...a: unknown[]) => getDailySalesByProduto(...a),
 }));
 
-function variante(overrides: Partial<Parameters<typeof baseVariante>[0]> = {}) {
-  return baseVariante(overrides);
-}
 function baseVariante(overrides: Record<string, unknown> = {}) {
   return {
     cod: "COD-1",
@@ -206,5 +203,79 @@ describe("getProdutoPlanejamentoDetalhe", () => {
     const detalhe = await getProdutoPlanejamentoDetalhe("Produto Inexistente");
 
     expect(detalhe).toBeNull();
+  });
+});
+
+// Reconciliação de totais (pedido explícito do Rodrigo, 2026-11-16): cenário com 2 cores × 2
+// tamanhos × 2 posições (1 loja + 1 CD/Site) = 8 combinações. A soma de QUALQUER corte do
+// detalhe (por cor→tamanho, por loja) tem que bater exatamente com o total do produto que
+// getProdutosPlanejamento devolve na lista principal — nenhuma combinação pode sumir nem ser
+// contada 2x entre os dois níveis (lista vs. detalhe).
+describe("getProdutosPlanejamento × getProdutoPlanejamentoDetalhe — reconciliação de totais", () => {
+  const CENARIO_8_COMBINACOES = [
+    baseVariante({ cod: "AZ-P", cor: "Azul", tamanho: "P", porLoja: [
+      { storeId: "loja-a", storeCode: "A", storeName: "Loja A", tipoPosicao: "loja", estoqueAtual: 3, vendasDias30: 0, vendasDias60: 0, vendasDias90: 0, velocidadeDiaria: 0, coberturaDias: null, estoqueMinimo: null, diagnostico: "sem_dado" },
+      { storeId: "cd", storeCode: "CD", storeName: "CD/Site", tipoPosicao: "cd_site", estoqueAtual: 7, vendasDias30: 0, vendasDias60: 0, vendasDias90: 0, velocidadeDiaria: 0, coberturaDias: null, estoqueMinimo: null, diagnostico: "sem_dado" },
+    ] }),
+    baseVariante({ cod: "AZ-M", cor: "Azul", tamanho: "M", porLoja: [
+      { storeId: "loja-a", storeCode: "A", storeName: "Loja A", tipoPosicao: "loja", estoqueAtual: 5, vendasDias30: 0, vendasDias60: 0, vendasDias90: 0, velocidadeDiaria: 0, coberturaDias: null, estoqueMinimo: null, diagnostico: "sem_dado" },
+      { storeId: "cd", storeCode: "CD", storeName: "CD/Site", tipoPosicao: "cd_site", estoqueAtual: 11, vendasDias30: 0, vendasDias60: 0, vendasDias90: 0, velocidadeDiaria: 0, coberturaDias: null, estoqueMinimo: null, diagnostico: "sem_dado" },
+    ] }),
+    baseVariante({ cod: "VM-P", cor: "Vermelho", tamanho: "P", porLoja: [
+      { storeId: "loja-a", storeCode: "A", storeName: "Loja A", tipoPosicao: "loja", estoqueAtual: 2, vendasDias30: 0, vendasDias60: 0, vendasDias90: 0, velocidadeDiaria: 0, coberturaDias: null, estoqueMinimo: null, diagnostico: "sem_dado" },
+      { storeId: "cd", storeCode: "CD", storeName: "CD/Site", tipoPosicao: "cd_site", estoqueAtual: 4, vendasDias30: 0, vendasDias60: 0, vendasDias90: 0, velocidadeDiaria: 0, coberturaDias: null, estoqueMinimo: null, diagnostico: "sem_dado" },
+    ] }),
+    baseVariante({ cod: "VM-M", cor: "Vermelho", tamanho: "M", porLoja: [
+      { storeId: "loja-a", storeCode: "A", storeName: "Loja A", tipoPosicao: "loja", estoqueAtual: 6, vendasDias30: 0, vendasDias60: 0, vendasDias90: 0, velocidadeDiaria: 0, coberturaDias: null, estoqueMinimo: null, diagnostico: "sem_dado" },
+      { storeId: "cd", storeCode: "CD", storeName: "CD/Site", tipoPosicao: "cd_site", estoqueAtual: 8, vendasDias30: 0, vendasDias60: 0, vendasDias90: 0, velocidadeDiaria: 0, coberturaDias: null, estoqueMinimo: null, diagnostico: "sem_dado" },
+    ] }),
+  ];
+  // Soma manual das 8 combinações (4 cods × 2 posições): 3+7+5+11+2+4+6+8 = 46.
+  const TOTAL_ESPERADO = 46;
+
+  beforeEach(() => {
+    getComparacaoCompleta.mockResolvedValue({ variantes: CENARIO_8_COMBINACOES, posicoes: {}, colunas: [], gradePorProdutoPosicao: {} });
+    saleGroupBy.mockResolvedValue([]);
+  });
+
+  it("soma por cor→tamanho do detalhe bate com o estoqueTotal da lista principal", async () => {
+    const { getProdutosPlanejamento, getProdutoPlanejamentoDetalhe } = await import("../planejamento-estoque");
+    const [listaProduto] = await getProdutosPlanejamento();
+    const detalhe = await getProdutoPlanejamentoDetalhe("Camisa Polo");
+
+    expect(listaProduto.estoqueTotal).toBe(TOTAL_ESPERADO);
+
+    const somaDoDetalhePorCorTamanho = detalhe!.porCor.reduce(
+      (soma, c) => soma + c.porTamanho.reduce((s, t) => s + t.estoqueTotal, 0),
+      0
+    );
+    expect(somaDoDetalhePorCorTamanho).toBe(TOTAL_ESPERADO);
+  });
+
+  it("soma por loja/CD do detalhe bate com o estoqueTotal da lista principal, e CD+lojas bate com estoqueCD+estoqueLojas", async () => {
+    const { getProdutosPlanejamento, getProdutoPlanejamentoDetalhe } = await import("../planejamento-estoque");
+    const [listaProduto] = await getProdutosPlanejamento();
+    const detalhe = await getProdutoPlanejamentoDetalhe("Camisa Polo");
+
+    const somaPorLoja = detalhe!.porLoja.reduce((s, l) => s + l.estoqueAtual, 0);
+    expect(somaPorLoja).toBe(TOTAL_ESPERADO);
+
+    const cd = detalhe!.porLoja.find((l) => l.tipoPosicao === "cd_site")!;
+    const loja = detalhe!.porLoja.find((l) => l.tipoPosicao === "loja")!;
+    expect(cd.estoqueAtual).toBe(listaProduto.estoqueCD);
+    expect(loja.estoqueAtual).toBe(listaProduto.estoqueLojas);
+    expect(listaProduto.estoqueCD + listaProduto.estoqueLojas).toBe(TOTAL_ESPERADO);
+  });
+
+  it("cada cor individual soma certo (Azul = 3+7+5+11 = 26, Vermelho = 2+4+6+8 = 20) — nenhum SKU vaza pra cor errada", async () => {
+    const { getProdutoPlanejamentoDetalhe } = await import("../planejamento-estoque");
+    const detalhe = await getProdutoPlanejamentoDetalhe("Camisa Polo");
+
+    const totalPorCor = (cor: string) =>
+      detalhe!.porCor.find((c) => c.cor === cor)!.porTamanho.reduce((s, t) => s + t.estoqueTotal, 0);
+
+    expect(totalPorCor("Azul")).toBe(26);
+    expect(totalPorCor("Vermelho")).toBe(20);
+    expect(totalPorCor("Azul") + totalPorCor("Vermelho")).toBe(TOTAL_ESPERADO);
   });
 });

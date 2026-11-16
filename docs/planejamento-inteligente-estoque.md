@@ -1,8 +1,14 @@
 # Planejamento Inteligente de Estoque — TVB Radar
 
-**Status:** Fase 0 (diagnóstico técnico) concluída. Nenhuma implementação ainda.
-**Data:** 2026-11-16
+**Status:** Fase 1 (primeira entrega funcional) em PR, aguardando aprovação/merge do Rodrigo. Fase 0 (diagnóstico técnico) concluída.
+**Data:** 2026-11-16 (Fase 0) / 2026-11-16 (Fase 1)
 **Como ler este documento:** é um documento vivo de continuidade — arquitetura, regras de negócio, decisões e pendências. Toda afirmação aqui é fato verificado em código/schema nesta data, salvo quando marcado "não verificado" ou "decisão pendente". O código muda rápido neste projeto — antes de implementar algo listado aqui, reverifique contra o código atual.
+
+---
+
+## 0. Fase 1 — o que foi entregue (ver seção completa no final do documento, §9)
+
+Primeira versão funcional em `src/lib/metrics/planejamento-estoque.ts` + `src/app/dashboard/planejamento-estoque/`. **Achado importante da implementação, documentado em detalhe no §9.2**: o motor de distribuição (`VariantePorLoja`, `distribuicao-estoque.ts`) tem uma armadilha de dupla contagem pra quem reaproveitar `vendasDias30/60/90` por posição sem saber — a posição CD/Site já embute a demanda das lojas como proxy. **O motor antigo não foi alterado** (continua correto pro que ele mesmo faz); a camada nova contorna isso com uma query independente, documentada no código e abaixo.
 
 ---
 
@@ -161,3 +167,48 @@ Nenhuma dessas decisões bloqueia o início da Fase 1 (que não depende de nenhu
 ## 8. O que falta pra próxima fase
 
 Fase 1 pode começar assim que o Rodrigo confirmar o ponto de decisão #1 (onde a área vive na navegação) — todo o resto dessa fase usa dado e código já existentes, sem schema novo.
+
+---
+
+## 9. Fase 1 — entrega (2026-11-16)
+
+PR `feat-planejamento-estoque-fase1-20261116` (#100). Sem schema novo, sem migration.
+
+### 9.1 O que foi implementado
+
+- `src/lib/metrics/planejamento-estoque.ts`: `getProdutosPlanejamento(filtro)` (visão agregada por produto) e `getProdutoPlanejamentoDetalhe(produto, filtro)` (detalhe: por cor→tamanho, por loja/CD, evolução de vendas, recomendação do motor quando classificado).
+- `src/app/dashboard/planejamento-estoque/`: página, filtros (grupo/tamanho/busca), tabela principal, painel de detalhe. Segue o padrão `page.tsx`+componentes server já estabelecido no projeto.
+- Nova chave de aba `planejamento-estoque`, dentro do grupo `estoque` já existente (ponto de decisão #1 ainda **não resolvido** — só adiei pra poder entregar algo navegável; mover é 1 linha em `tabs.ts`).
+- 12 testes novos em `src/lib/metrics/__tests__/planejamentoEstoque.test.ts`.
+
+### 9.2 Achado crítico da implementação — dupla contagem no reaproveitamento de `VariantePorLoja`
+
+**Não é um bug no motor de distribuição** (`distribuicao-estoque.ts`) — é um detalhe de design que vira armadilha pra qualquer consumidor novo que não saiba disso.
+
+`VariantePorLoja.vendasDias30/60/90`, para a posição `cd_site`, já é `vendasEfetivasCdSite(vendaDiretaCdSite, demandaLojas)` = venda direta do site **mais** a demanda agregada das lojas que esse CD abastece (`distribuicao-estoque.ts:113-129`) — uma correção deliberada (pedido do Rodrigo, 2026-11-13) pra diagnóstico de giro do CD não ficar cego ao que sai dele via abastecimento interno.
+
+Se um consumidor novo somar `vendasDias30` de **todas** as posições de um produto (lojas + CD/Site) pra chegar numa "venda total da empresa", ele conta a demanda das lojas **duas vezes**: uma vez na própria linha da loja, outra vez embutida na linha do CD/Site. `estoqueAtual` por posição **não** tem esse problema (é soma direta, sem proxy) — só `vendasDias30/60/90`/`velocidadeDiaria`/`coberturaDias` carregam a correção.
+
+**Decisão tomada nesta entrega**: não mexi em `distribuicao-estoque.ts` (ele está certo pro que ele mesmo faz — diagnosticar a posição CD/Site isoladamente). Em vez disso, `getProdutosPlanejamento` **nunca** soma `porLoja[].vendasDias30/60/90` — vendas por produto vêm de uma query direta e independente (`prisma.sale.groupBy({by:["produto"], ...})`), bruta, sem a correção de proxy. `estoqueTotal/estoqueCD/estoqueLojas` continuam vindo da soma de `porLoja[].estoqueAtual` (seguro, sem proxy). Documentado no código (`planejamento-estoque.ts`, comentário acima do loop de agregação) e testado explicitamente (`"NUNCA soma porLoja[].vendasDias30..."`, `planejamentoEstoque.test.ts`).
+
+**Recomendação pra quem for mexer em `distribuicao-estoque.ts` ou criar outro consumidor de `VariantePorLoja` no futuro**: se precisar de "venda real da empresa" (não "giro aparente de uma posição"), não some `vendasDias30` entre posições — ou peça uma venda bruta independente (como fiz aqui), ou exponha a venda direta (pré-correção) como um campo separado em `VariantePorLoja` se isso virar uma necessidade recorrente (não fiz essa mudança estrutural nesta entrega — era mais risco que o Fase 1 pedia).
+
+### 9.3 Validação de reconciliação (pedido explícito do Rodrigo)
+
+3 testes dedicados em `planejamentoEstoque.test.ts` (cenário com 2 cores × 2 tamanhos × 2 posições = 8 combinações):
+- Soma do detalhe por cor→tamanho == `estoqueTotal` da lista principal.
+- Soma do detalhe por loja/CD == `estoqueTotal`, e `estoqueCD`+`estoqueLojas` reconcilia exatamente com o detalhe por posição.
+- Cada cor soma certo isoladamente (nenhum SKU vaza pra cor errada).
+
+Todos os 3 passam. Nenhuma inconsistência de reconciliação foi encontrada na lógica nova — o único risco real identificado foi o da seção 9.2 (já contornado e testado, não uma inconsistência não resolvida).
+
+### 9.4 Validação contra produção real
+
+Pendente de execução — aguardando merge do PR #100 (GitHub exige o workflow de verificação já estar em `main` pra poder ser disparado). Script temporário somente-leitura incluído no próprio PR (`scripts/verificar-planejamento-estoque-temp.ts`), a ser removido num commit de limpeza após a confirmação.
+
+### 9.5 Limitações que seguem existindo (não escondidas, expostas na UI)
+
+- Sem série histórica de estoque — "dias em estoque"/"idade" não é mostrado como fato.
+- `ProductionOrder` sem ETA confiável — trânsito sempre separado do disponível, `transitoConfiavel` sempre `false` hoje.
+- Histórico de venda curto — "dados insuficientes" explícito quando < 14 dias.
+- Classificação ainda por `cod`, não produto+cor (ponto de decisão #2, não resolvido nesta fase) — `getProdutosPlanejamento` expõe isso como `MISTO` quando cods do mesmo produto divergem, em vez de esconder a divergência.
