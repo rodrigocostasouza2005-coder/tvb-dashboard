@@ -100,6 +100,9 @@ export function Top20DescontoTable({
               <th className="px-4 py-2 font-medium">#</th>
               <th className="px-4 py-2 font-medium">{visao === "produto" ? "Produto" : "Grupo"}</th>
               <th className="px-4 py-2 font-medium text-right">Unidades</th>
+              <th className="px-4 py-2 font-medium text-right" title="Estoque atual total da TVB (todas as lojas/CD)">
+                Estoque TVB
+              </th>
               {showFinancials && <th className="px-4 py-2 font-medium text-right">Faturamento</th>}
               {showFinancials && (
                 <th className="px-4 py-2 font-medium text-right">{visao === "produto" ? "% desconto" : "% desconto médio"}</th>
@@ -116,6 +119,7 @@ export function Top20DescontoTable({
                       <div className="text-xs text-[var(--text-muted)]">{r.grupo}</div>
                     </td>
                     <td className="px-4 py-2 text-right tabular-nums">{formatNumber(r.unitsSold)}</td>
+                    <td className="px-4 py-2 text-right tabular-nums">{formatNumber(r.estoqueAtual)}</td>
                     {showFinancials && <td className="px-4 py-2 text-right tabular-nums">{formatBRL(r.revenue)}</td>}
                     {showFinancials && (
                       <td className="px-4 py-2 text-right tabular-nums">
@@ -137,6 +141,7 @@ export function Top20DescontoTable({
                     <td className="px-4 py-2 text-[var(--text-muted)]">{i + 1}</td>
                     <td className="px-4 py-2 font-medium text-[var(--text-primary)]">{r.grupo}</td>
                     <td className="px-4 py-2 text-right tabular-nums">{formatNumber(r.unitsSold)}</td>
+                    <td className="px-4 py-2 text-right tabular-nums">{formatNumber(r.estoqueAtual)}</td>
                     {showFinancials && <td className="px-4 py-2 text-right tabular-nums">{formatBRL(r.revenue)}</td>}
                     {showFinancials && (
                       <td className="px-4 py-2 text-right tabular-nums">
@@ -155,7 +160,7 @@ export function Top20DescontoTable({
                 ))}
             {vazio && (
               <tr>
-                <td colSpan={showFinancials ? 5 : 3} className="px-4 py-6 text-center text-[var(--text-muted)]">
+                <td colSpan={showFinancials ? 6 : 4} className="px-4 py-6 text-center text-[var(--text-muted)]">
                   Sem venda no período.
                 </td>
               </tr>

@@ -104,6 +104,9 @@ export function FaixaDescontoTable({ rows, showFinancials }: { rows: FaixaDescon
                 <th className="px-4 py-2 font-medium">Produto</th>
                 <th className="px-4 py-2 font-medium">Grupo</th>
                 <th className="px-4 py-2 font-medium text-right">Peças líquidas</th>
+                <th className="px-4 py-2 font-medium text-right" title="Estoque atual total da TVB (todas as lojas/CD)">
+                  Estoque TVB
+                </th>
                 {showFinancials && <th className="px-4 py-2 font-medium text-right">Receita líquida</th>}
               </tr>
             </thead>
@@ -113,12 +116,13 @@ export function FaixaDescontoTable({ rows, showFinancials }: { rows: FaixaDescon
                   <td className="px-4 py-2 font-medium text-[var(--text-primary)]">{p.produto}</td>
                   <td className="px-4 py-2 text-[var(--text-muted)]">{p.grupo}</td>
                   <td className="px-4 py-2 text-right tabular-nums">{formatNumber(p.unitsSold)}</td>
+                  <td className="px-4 py-2 text-right tabular-nums">{formatNumber(p.estoqueAtual)}</td>
                   {showFinancials && <td className="px-4 py-2 text-right tabular-nums">{formatBRL(p.revenue)}</td>}
                 </tr>
               ))}
               {produtos.length === 0 && (
                 <tr>
-                  <td colSpan={showFinancials ? 4 : 3} className="px-4 py-6 text-center text-[var(--text-muted)]">
+                  <td colSpan={showFinancials ? 5 : 4} className="px-4 py-6 text-center text-[var(--text-muted)]">
                     Nenhum produto vendido nesta faixa no período.
                   </td>
                 </tr>

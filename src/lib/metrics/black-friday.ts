@@ -13,6 +13,7 @@
 import { prisma } from "@/lib/prisma";
 import { saleWhere, returnWhere, netByReturns, type DashboardFilters } from "./core";
 import { getSalesByGrupoProduto, getReturnsByGrupoProduto, getSalesByDay } from "./vendas";
+import { getEstoqueTotalTvb } from "./estoque";
 import { getEcommerceStoreId, getNovosClientesDiarioEcommerce, getInvestimentoDiarioAquisicao } from "./cac";
 import { getInsightsPorConjunto } from "@/lib/connectors/meta-ads";
 import { todayBrasiliaStr } from "@/lib/filters";
@@ -363,6 +364,9 @@ export type FaixaDescontoProduto = {
   produto: string;
   unitsSold: number;
   revenue: number;
+  // Estoque atual TOTAL da TVB (todas as lojas/CD, sem filtro de loja/data) pra este produto —
+  // ver getEstoqueTotalTvb (estoque.ts). 0 quando não há nenhuma linha de estoque pra ele.
+  estoqueAtual: number;
 };
 
 export type FaixaDescontoRow = {
@@ -390,7 +394,8 @@ export type FaixaDescontoRow = {
 export function montarVendasPorFaixaDesconto(
   liquido: { grupo: string; key: string; unitsSold: number; revenue: number }[],
   precosPorProduto: Map<string, number>,
-  faixasReais: number[]
+  faixasReais: number[],
+  estoquePorProduto: Map<string, number> = new Map()
 ): FaixaDescontoRow[] {
   type Acc = { unitsSold: number; revenue: number; produtos: FaixaDescontoProduto[] };
   const buckets = new Map<number, Acc>();
@@ -413,7 +418,13 @@ export function montarVendasPorFaixaDesconto(
     const b = getBucket(desconto);
     b.unitsSold += v.unitsSold;
     b.revenue += v.revenue;
-    b.produtos.push({ grupo: v.grupo, produto: v.key, unitsSold: v.unitsSold, revenue: v.revenue });
+    b.produtos.push({
+      grupo: v.grupo,
+      produto: v.key,
+      unitsSold: v.unitsSold,
+      revenue: v.revenue,
+      estoqueAtual: estoquePorProduto.get(chaveProduto) ?? 0,
+    });
   }
 
   const rows: FaixaDescontoRow[] = [...buckets.entries()].map(([desconto, b]) => ({
@@ -449,15 +460,16 @@ async function getPrecosPorProduto(): Promise<Map<string, number>> {
 }
 
 export async function getVendasPorFaixaDesconto(filters: DashboardFilters): Promise<FaixaDescontoRow[]> {
-  const [vendas, devolucoes, faixasReais, precosPorProduto] = await Promise.all([
+  const [vendas, devolucoes, faixasReais, precosPorProduto, { porProduto: estoquePorProduto }] = await Promise.all([
     getSalesByGrupoProduto(filters),
     getReturnsByGrupoProduto(filters),
     getFaixasDescontoReais(),
     getPrecosPorProduto(),
+    getEstoqueTotalTvb(),
   ]);
   const liquido = netByReturns(vendas, devolucoes);
 
-  return montarVendasPorFaixaDesconto(liquido, precosPorProduto, faixasReais);
+  return montarVendasPorFaixaDesconto(liquido, precosPorProduto, faixasReais, estoquePorProduto);
 }
 
 // ===== Meta diária (MetaDiariaBlackFriday) =====
@@ -937,6 +949,9 @@ export type Top20ProdutoDesconto = {
   // top 20) — reaproveita o mesmo total que a Visão Geral já mostra (getResumoBlackFriday.
   // faturamento passado pelo chamador), pra nunca divergir do que o Rodrigo já vê no topo da tela.
   participacaoFaturamentoPct: number | null;
+  // Estoque atual TOTAL da TVB (todas as lojas/CD, sem filtro de loja/data) — ver
+  // getEstoqueTotalTvb (estoque.ts). 0 quando não há nenhuma linha de estoque pra ele.
+  estoqueAtual: number;
 };
 
 // Função PURA (sem Prisma) — recebe a venda líquida já agregada por grupo+produto (netByReturns)
@@ -947,7 +962,8 @@ export function montarTop20ProdutosComDesconto(
   descontosCadastrados: Map<string, number>,
   faturamentoTotalPeriodo: number,
   ordenarPor: "revenue" | "unidades" = "revenue",
-  limit = 20
+  limit = 20,
+  estoquePorProduto: Map<string, number> = new Map()
 ): Top20ProdutoDesconto[] {
   return liquido
     .map((v) => {
@@ -961,6 +977,7 @@ export function montarTop20ProdutosComDesconto(
         revenue: v.revenue,
         descontoPct: desconto != null ? desconto * 100 : null,
         participacaoFaturamentoPct,
+        estoqueAtual: estoquePorProduto.get(`${v.grupo}::${v.key}`) ?? 0,
       } satisfies Top20ProdutoDesconto;
     })
     .sort((a, b) => (ordenarPor === "unidades" ? b.unitsSold - a.unitsSold : b.revenue - a.revenue))
@@ -983,6 +1000,9 @@ export type Top20GrupoDesconto = {
   revenue: number;
   descontoMedioPct: number | null;
   participacaoFaturamentoPct: number | null;
+  // Estoque atual TOTAL da TVB (todas as lojas/CD, sem filtro de loja/data) pra este grupo (soma
+  // de TODOS os produtos do grupo, não só os que venderam no período) — ver getEstoqueTotalTvb.
+  estoqueAtual: number;
 };
 
 // Função PURA — mesma entrada de montarTop20ProdutosComDesconto (venda líquida por grupo+produto
@@ -992,7 +1012,8 @@ export function montarTop20GruposComDesconto(
   descontosCadastrados: Map<string, number>,
   faturamentoTotalPeriodo: number,
   ordenarPor: "revenue" | "unidades" = "revenue",
-  limit = 20
+  limit = 20,
+  estoquePorGrupo: Map<string, number> = new Map()
 ): Top20GrupoDesconto[] {
   const porGrupo = new Map<string, { unitsSold: number; revenue: number; revenueComDesconto: number; descontoPonderadoSoma: number }>();
   for (const v of liquido) {
@@ -1017,6 +1038,7 @@ export function montarTop20GruposComDesconto(
         revenue: acc.revenue,
         descontoMedioPct: acc.revenueComDesconto > 0 ? (acc.descontoPonderadoSoma / acc.revenueComDesconto) * 100 : null,
         participacaoFaturamentoPct,
+        estoqueAtual: estoquePorGrupo.get(grupo) ?? 0,
       } satisfies Top20GrupoDesconto;
     })
     .sort((a, b) => (ordenarPor === "unidades" ? b.unitsSold - a.unitsSold : b.revenue - a.revenue))
@@ -1028,10 +1050,11 @@ export async function getTop20GruposComDesconto(
   faturamentoTotalPeriodo: number,
   options?: { ordenarPor?: "revenue" | "unidades"; limit?: number }
 ): Promise<Top20GrupoDesconto[]> {
-  const [vendas, devolucoes, descontosCadastrados] = await Promise.all([
+  const [vendas, devolucoes, descontosCadastrados, { porGrupo: estoquePorGrupo }] = await Promise.all([
     getSalesByGrupoProduto(filters),
     getReturnsByGrupoProduto(filters),
     getPrecosPorProduto(),
+    getEstoqueTotalTvb(),
   ]);
   const liquido = netByReturns(vendas, devolucoes);
 
@@ -1040,7 +1063,8 @@ export async function getTop20GruposComDesconto(
     descontosCadastrados,
     faturamentoTotalPeriodo,
     options?.ordenarPor ?? "revenue",
-    options?.limit ?? 20
+    options?.limit ?? 20,
+    estoquePorGrupo
   );
 }
 
@@ -1052,10 +1076,11 @@ export async function getTop20ProdutosComDesconto(
   faturamentoTotalPeriodo: number,
   options?: { ordenarPor?: "revenue" | "unidades"; limit?: number }
 ): Promise<Top20ProdutoDesconto[]> {
-  const [vendas, devolucoes, descontosCadastrados] = await Promise.all([
+  const [vendas, devolucoes, descontosCadastrados, { porProduto: estoquePorProduto }] = await Promise.all([
     getSalesByGrupoProduto(filters),
     getReturnsByGrupoProduto(filters),
     getPrecosPorProduto(),
+    getEstoqueTotalTvb(),
   ]);
   const liquido = netByReturns(vendas, devolucoes);
 
@@ -1064,6 +1089,7 @@ export async function getTop20ProdutosComDesconto(
     descontosCadastrados,
     faturamentoTotalPeriodo,
     options?.ordenarPor ?? "revenue",
-    options?.limit ?? 20
+    options?.limit ?? 20,
+    estoquePorProduto
   );
 }

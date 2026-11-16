@@ -262,6 +262,20 @@ describe("montarVendasPorFaixaDesconto", () => {
     expect(faixaZero?.produtos).toHaveLength(2);
   });
 
+  it("cada produto da faixa traz o estoque atual total da TVB, 0 quando não cadastrado", () => {
+    const liquido = [
+      { grupo: "Camisa", key: "Camisa Classic", unitsSold: 10, revenue: 1000 },
+      { grupo: "Camisa", key: "Camisa Sem Estoque", unitsSold: 1, revenue: 100 },
+    ];
+    const precos = new Map<string, number>();
+    const estoquePorProduto = new Map([["Camisa::Camisa Classic", 77]]);
+    const rows = montarVendasPorFaixaDesconto(liquido, precos, [0], estoquePorProduto);
+
+    const faixaZero = rows.find((r) => r.desconto === 0);
+    expect(faixaZero?.produtos.find((p) => p.produto === "Camisa Classic")?.estoqueAtual).toBe(77);
+    expect(faixaZero?.produtos.find((p) => p.produto === "Camisa Sem Estoque")?.estoqueAtual).toBe(0);
+  });
+
   it("garante o bucket 0% mesmo que a planilha não tenha nenhuma linha com desconto=0 cadastrado", () => {
     const liquido = [{ grupo: "Camisa", key: "Camisa Sem Preço", unitsSold: 10, revenue: 1000 }];
     const precos = new Map<string, number>(); // nenhum preço cadastrado pra esse produto
@@ -890,6 +904,17 @@ describe("montarTop20ProdutosComDesconto", () => {
     expect(rows[0].descontoPct).toBeNull();
   });
 
+  it("traz o estoque atual total da TVB pra este produto (grupo+produto), 0 quando não cadastrado", () => {
+    const liquido = [
+      { grupo: "Camisa", key: "Camisa Classic", unitsSold: 10, revenue: 2000 },
+      { grupo: "Camisa", key: "Camisa Sem Estoque", unitsSold: 1, revenue: 100 },
+    ];
+    const estoque = new Map([["Camisa::Camisa Classic", 42]]);
+    const rows = montarTop20ProdutosComDesconto(liquido, new Map(), 2100, "revenue", 20, estoque);
+    expect(rows.find((r) => r.produto === "Camisa Classic")?.estoqueAtual).toBe(42);
+    expect(rows.find((r) => r.produto === "Camisa Sem Estoque")?.estoqueAtual).toBe(0);
+  });
+
   it("ordena por receita líquida decrescente por padrão", () => {
     const liquido = [
       { grupo: "G", key: "Baixa receita", unitsSold: 100, revenue: 100 },
@@ -987,6 +1012,17 @@ describe("montarTop20GruposComDesconto", () => {
     const liquido = [{ grupo: "Camisa", key: "Novo Produto", unitsSold: 5, revenue: 500 }];
     const rows = montarTop20GruposComDesconto(liquido, new Map(), 10000);
     expect(rows[0].descontoMedioPct).toBeNull();
+  });
+
+  it("traz o estoque atual total da TVB pra este grupo (soma de todos os produtos), 0 quando não cadastrado", () => {
+    const liquido = [
+      { grupo: "Camisa", key: "Classic", unitsSold: 10, revenue: 800 },
+      { grupo: "Shorts", key: "Liso", unitsSold: 3, revenue: 300 },
+    ];
+    const estoquePorGrupo = new Map([["Camisa", 99]]);
+    const rows = montarTop20GruposComDesconto(liquido, new Map(), 1100, "revenue", 20, estoquePorGrupo);
+    expect(rows.find((r) => r.grupo === "Camisa")?.estoqueAtual).toBe(99);
+    expect(rows.find((r) => r.grupo === "Shorts")?.estoqueAtual).toBe(0);
   });
 
   it("ordena por receita decrescente por padrão e corta no limite", () => {

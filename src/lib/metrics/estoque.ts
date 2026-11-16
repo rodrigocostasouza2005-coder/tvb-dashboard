@@ -140,6 +140,24 @@ export async function getTotalStock(filters: Pick<DashboardFilters, "storeIds" |
   return result._sum.quantidadeDisponivel ?? 0;
 }
 
+// Estoque atual TOTAL da TVB (todas as lojas/CD juntos, sem filtro de loja/data) por grupo+produto
+// e por grupo — pedido do Rodrigo (2026-11-16) pra mostrar "quanto tem em estoque" nas tabelas por
+// produto da Central Black Friday (Top 20 produtos/grupos, melhores produtos por faixa de
+// desconto). Deliberadamente não respeita o filtro de loja da tela: é sempre o total da empresa,
+// mesmo padrão de "sell-through é da empresa inteira" já usado em getStockVsSales/getStockAging
+// acima (storeIds indefinido = sem restrição).
+export async function getEstoqueTotalTvb(): Promise<{ porProduto: Map<string, number>; porGrupo: Map<string, number> }> {
+  const stock = await latestStockSnapshots({});
+  const porProduto = new Map<string, number>();
+  const porGrupo = new Map<string, number>();
+  for (const s of stock) {
+    const keyProduto = `${s.grupo}::${s.produto}`;
+    porProduto.set(keyProduto, (porProduto.get(keyProduto) ?? 0) + s.quantidadeDisponivel);
+    porGrupo.set(s.grupo, (porGrupo.get(s.grupo) ?? 0) + s.quantidadeDisponivel);
+  }
+  return { porProduto, porGrupo };
+}
+
 export type StockVsSalesCombinadoRow = {
   grupo: string;
   produto: string;
