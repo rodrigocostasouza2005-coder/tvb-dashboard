@@ -487,6 +487,11 @@ export async function getReplenishment(filters: Pick<DashboardFilters, "storeIds
     for (const s of cdStock) cdStockByCod.set(s.cod, s.quantidadeDisponivel);
   }
 
+  // Atacado não é uma loja de varejo com prateleira pra repor (pedido do Rodrigo, 2026-11-16) —
+  // opera por pedido negociado direto com o CD, não por reposição automática de estoque mínimo.
+  // Mesma exclusão de propósito já aplicada ao CD acima, não uma segunda forma de filtrar loja.
+  const atacadoStore = allStores.find((s) => s.code === "ATACADO") ?? null;
+
   return stock
     .map((s) => {
       // Regra manual do Rodrigo ganha do estoqueMinimo que vem do DAPIC.
@@ -498,6 +503,7 @@ export async function getReplenishment(filters: Pick<DashboardFilters, "storeIds
         s.estoqueMinimo != null &&
         s.quantidadeDisponivel < s.estoqueMinimo &&
         (!cdStore || s.storeId !== cdStore.id) &&
+        (!atacadoStore || s.storeId !== atacadoStore.id) &&
         // Menos de 4 unidades na origem = não compensa repor agora.
         (cdStockByCod.get(s.cod) ?? 0) > 3
     )
@@ -557,9 +563,18 @@ export async function getReplenishmentPorVendas(
     for (const s of cdStock) cdStockByCod.set(s.cod, s.quantidadeDisponivel);
   }
 
+  // Atacado excluído como destino de reposição — mesmo motivo do modo Estoque Mínimo acima
+  // (pedido do Rodrigo, 2026-11-16: opera por pedido negociado, não por reposição automática).
+  const atacadoStore = allStores.find((s) => s.code === "ATACADO") ?? null;
+
   // Mesmo piso de "não compensa repor agora" do modo Estoque Mínimo (menos de 4 unidades na
   // origem), aplicado antes de buscar vendas pra não gastar query com quem não vai aparecer.
-  const candidatos = stock.filter((s) => (!cdStore || s.storeId !== cdStore.id) && (cdStockByCod.get(s.cod) ?? 0) > 3);
+  const candidatos = stock.filter(
+    (s) =>
+      (!cdStore || s.storeId !== cdStore.id) &&
+      (!atacadoStore || s.storeId !== atacadoStore.id) &&
+      (cdStockByCod.get(s.cod) ?? 0) > 3
+  );
   if (candidatos.length === 0) return [];
 
   const storeIds = [...new Set(candidatos.map((s) => s.storeId))];
