@@ -1,0 +1,28 @@
+name: Validação temporária somente-leitura — Planejamento de Estoque Fase 2B (excesso/distribuição)
+
+# Temporário — valida getExcessosEDistribuicao/getProdutoExcessoDistribuicao/
+# getDecisoesMovimentacaoPorStatus (src/lib/metrics/planejamento-distribuicao.ts) contra o banco
+# real de produção. Execução exclusivamente manual (workflow_dispatch), 100% leitura, DATABASE_URL
+# de produção via secret do GitHub. Só pode ser disparado DEPOIS do merge do PR que introduziu
+# este arquivo (GitHub só lista workflows que já existem na branch default).
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  validar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Rodar validação (somente leitura)
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: npx tsx scripts/validar-planejamento-distribuicao-fase2b-temp.ts

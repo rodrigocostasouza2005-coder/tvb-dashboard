@@ -1,7 +1,7 @@
 # Planejamento Inteligente de Estoque — TVB Radar
 
-**Status:** Fase 2A (classificação em lote, tendência de demanda, grade por cor/tamanho) mergeada e em produção (PR #101, SHA `9b4c986`, deploy `dpl_hi5hnbsinp8nhXxiZeZ311NEwcX4`). Validada contra dado real de produção. Fase 1 (PR #100) e Fase 0 concluídas.
-**Data:** 2026-11-16 (Fase 0, Fase 1 e Fase 2A)
+**Status:** Fase 2A (classificação em lote, tendência de demanda, grade por cor/tamanho) mergeada e em produção (PR #101, SHA `9b4c986`, deploy `dpl_hi5hnbsinp8nhXxiZeZ311NEwcX4`). Validada contra dado real de produção. Fase 1 (PR #100) e Fase 0 concluídas. **Fase 2B (excesso e distribuição) entregue como PR aberto, aguardando revisão/merge do Rodrigo — ver §11.**
+**Data:** 2026-11-16 (Fase 0, Fase 1, Fase 2A e Fase 2B)
 **Como ler este documento:** é um documento vivo de continuidade — arquitetura, regras de negócio, decisões e pendências. Toda afirmação aqui é fato verificado em código/schema nesta data, salvo quando marcado "não verificado" ou "decisão pendente". O código muda rápido neste projeto — antes de implementar algo listado aqui, reverifique contra o código atual.
 
 ---
@@ -276,3 +276,36 @@ A worktree órfã (`tvb-dashboard-planejamento-estoque`) decompunha quantidade p
 - **Detalhe por produto validado com dado real multi-SKU**: "Calça Confort Black" (10 cods, `estoqueTotal=23`) — soma por cor→tamanho fechou em 23, soma por loja fechou em 23. Confirma a correção da seção 10.3 (agregação por loja) funcionando com produto real do catálogo, não só cenário sintético.
 - **Limitação declarada**: a validação "a página abre" foi feita no nível de função (mesmas queries que `page.tsx` chama), não via browser com sessão de produção real — não há credencial de produção disponível nem foi solicitada/usada para isso. Como o build local (`npm run build`) já passou e as funções chamadas pela página rodaram sem erro contra produção com os mesmos dados que a página usaria, é uma prova equivalente para o que a página faz (ela só mapeia essas estruturas, já testado nos testes de componente/tipo) — mas não é literalmente um screenshot da página renderizada.
 - **Teste de classificação em lote em produção**: **não executado** deliberadamente. Submeter o formulário real gravaria uma classificação real em produção sem uma autorização específica para aquele SKU/produto — a cobertura de corretude e segurança da action vem dos 8 testes unitários (que simulam exatamente os cenários de adulteração/erro), não de uma escrita real de teste no banco de produção.
+
+---
+
+## 11. Fase 2B — excesso e distribuição (2026-11-16, PR aberto, aguardando aprovação)
+
+Agente A da Fase 2B (ver §10.6 — pendente desta fase: "surfacing de distribuicao-estoque/DecisaoMovimentacaoEstoque no painel de detalhe, motor já maduro, só falta integrar visualmente"). Branch `feat-planejamento-estoque-fase2b-distribuicao-20261116`. **Sem schema novo, sem migration.** PR aberto — **não mergeado** por este agente (regra do projeto: agente não mergeia sozinho quando o escopo poderia tocar fluxo crítico; aqui não há schema/dado real tocado, mas o PR segue a mesma disciplina de todas as fases anteriores — aguarda revisão do Rodrigo).
+
+### 11.1 O que foi implementado
+
+- `src/lib/metrics/planejamento-distribuicao.ts` (novo): `getExcessosEDistribuicao(filtro)` — visão por produto com `excessoCD`, `estoqueCDPermanece`, `excessoLojas`, `rupturaLojas`, `rupturaComExcessoDisponivel` (sinal-chave: loja em risco de ruptura enquanto outra posição do mesmo produto tem excesso) e `oportunidades` (sugestões de transferência já calculadas pelo motor, reaproveitadas sem recálculo). `getProdutoExcessoDistribuicao(produto, filtro)` — atalho pra 1 produto (reaproveita o mesmo resultado cacheado). `getDecisoesMovimentacaoPorStatus(filtro)` — extensão mínima de `getHistoricoMovimentacoes` (já existente) pra buscar as 4 categorias de status de uma vez e, opcionalmente, filtrar por produto (pós-leitura, sem mudar a tabela).
+- Tela: nova seção "Excesso e distribuição entre unidades" dentro do painel de detalhe já existente do Planejamento de Estoque (`src/app/dashboard/planejamento-estoque/excesso-distribuicao.tsx`, renderizada por `produto-detalhe.tsx`) — **decisão de arquitetura**: não criou 11ª aba isolada nem duplicou o fluxo de Aprovar/Recusar (que já existe em `distribuicao-estoque/actions.ts`); a seção é só leitura, com um link que abre a aba Movimentações da Distribuição de Estoque já filtrada por este produto (`busca=<produto>`) pra quem for decidir/executar de fato.
+- Mostrada só quando o produto aberto tem classificação Best Seller/Drop **e** há algum sinal real (excesso/ruptura/oportunidade) — ver `page.tsx`/`produto-detalhe.tsx`. **Decisão que precisa de validação do Rodrigo**: essa restrição a Best Seller/Drop foi literal ao pedido desta fase, mas o motor de distribuição não depende de classificação pra funcionar — pode fazer sentido mostrar também pra produtos MISTO/NAO_CLASSIFICADO.
+- 16 testes novos em `src/lib/metrics/__tests__/planejamentoDistribuicao.test.ts` (ver §11.3).
+
+### 11.2 Único ponto tocado em `distribuicao-estoque.ts` (fora do arquivo novo)
+
+`construirOrigem` (função pura, calcula `disponivel`/`margemSeguranca` = a mesma fórmula que `prepararOrigens` usa pra decidir quem pode doar) **passou a ser exportada** — zero mudança de lógica, só adicionado `export`. Motivo: `planejamento-distribuicao.ts` precisa do número "quanto desta posição deve permanecer reservado (mínimo + margem)" pra responder "o que deve ficar no CD" (pedido do briefing), e essa é literalmente a mesma fórmula já madura do motor — reexpor em vez de duplicar a conta (StockMinimumRule + 7 dias × 0.5 de giro) em outro arquivo.
+
+### 11.3 Regras de negócio confirmadas/testadas nesta fase
+
+1. **Dupla contagem de demanda (CD/Site)**: `planejamento-distribuicao.ts` nunca soma `vendasDias30/60/90` entre posições — só usa `estoqueAtual` (soma direta, segura) e `velocidadeDiaria`/`diagnostico` de **cada posição isoladamente** via `construirOrigem`. Teste dedicado prova que dobrar a venda de uma loja não muda `excessoCD` nem `estoqueCDPermanece` (que dependem só da própria linha do CD).
+2. **Nunca gera ruptura na origem**: teste com origem `estoqueAtual=95, estoqueMinimo=90, velocidadeDiaria=2` (margem=7) — a conta ingênua diria 5 un. disponíveis, mas `construirOrigem` (reaproveitado, não reimplementado) reserva mínimo+margem (97 > 95) e zera: nada é oferecido. Segundo teste confirma que, quando sobra de verdade, só a sobra REAL (23, não a conta ingênua de 30) é exposta como excesso.
+3. **Disponível vs. trânsito**: `planejamento-distribuicao.ts` nunca chama `getPedidosEmAbertoPorCod`/toca `ProductionOrder` — teste prova isso diretamente (mock configurado pra lançar erro se chamado, nunca é). "Disponível" é sempre e só estoque atual já reservado pelo mínimo+margem, nunca produção em aberto (que já é sempre `confiavel: false`, documentado desde a Fase 0).
+4. **Reconciliação**: teste prova que a soma do que sai das origens (`quantidadeSugerida`) é exatamente igual à soma do que entra nos destinos (`estoqueDestinoDepois - estoqueDestinoAntes`), e que os objetos de oportunidade são passados sem mutação — esta camada só agrupa/filtra, nunca recalcula quantidade.
+5. **Regra nova desta fase — Drop em ciclo ativo nunca é tratado como excesso**: o motor já protegia Best Seller de recolhimento (regra existente), mas não tinha proteção equivalente pra Drop nas direções CD↔loja/loja↔loja. Esta fase adiciona um FILTRO (não uma mudança no motor) em `getExcessosEDistribuicao`: oportunidade cujo SKU de origem é Drop, ainda dentro do ciclo (`dataEncerramentoPrevista` no futuro ou nula, status comercial não encerrado/descontinuado) **e** com venda real nos últimos 90 dias (`vendasOrigem90 > 0` — ou seja, "excesso" por estoque alto relativo à própria venda, não estoque morto) é suprimida da lista exposta por esta tela, nunca da tabela de Distribuição de Estoque em si (`dropsCicloAtivoProtegidos` conta quantas, nunca esconde silenciosamente). Testado: suprime quando ativo+vendendo, não suprime quando ciclo já encerrado, não suprime quando `estoque_parado` (zero venda — verdadeiramente morto, não "ainda em ciclo"). **Decisão que precisa de validação do Rodrigo**: se a mesma régua deveria valer formalmente pra Best Seller nas 3 direções (hoje só protegido no recolhimento, pela regra já existente do motor).
+
+### 11.4 Validação contra produção — pendente do merge
+
+Script `scripts/validar-planejamento-distribuicao-fase2b-temp.ts` + workflow `validar-planejamento-distribuicao-fase2b-temp.yml` (workflow_dispatch, somente leitura) preparados e incluídos no PR, seguindo o mesmo padrão das fases anteriores — **não executados por este agente**: o workflow só pode ser disparado depois que o PR for mergeado em main (GitHub só lista workflows que já existem na branch default). Mergear primeiro, disparar manualmente depois.
+
+### 11.5 Resultado das verificações locais
+
+`npx tsc --noEmit`: sem erros. `npx eslint` nos arquivos tocados: 0 erros (1 warning cosmético, variável `_a` deliberadamente não usada num mock). `npx vitest run` (suíte completa): **690 testes passando** (674 anteriores + 16 novos), 0 regressão. `npm run build`: sucesso (rota `/dashboard/planejamento-estoque` compilada normalmente, sem rota nova — reaproveitou a existente).
