@@ -656,6 +656,50 @@ describe("calcularMovimentacoes — direção Loja → CD/Site (recolhimento)", 
     expect(manter).toHaveLength(1);
     expect(manter[0].diagnostico).toBe("estoque_parado");
   });
+
+  // Condição D (2026-11-16, pedido explícito do Rodrigo): SOMA às regras A/B/C já existentes —
+  // mesmo com demanda local baixa/grade quebrada e venda real no site, só recolhe se o site vendeu
+  // MAIS desse SKU do que a própria loja no mesmo período. Site vendendo "alguma coisa" não basta
+  // mais quando a loja de origem vende tanto ou mais que ele.
+  it("NÃO recolhe quando o site vendeu, mas não mais do que a própria loja (condição D)", () => {
+    const rioSul = variante({
+      storeId: "rio-sul",
+      storeName: "Rio Sul",
+      estoqueAtual: 20,
+      estoqueMinimo: 5,
+      vendasDias90: 1, // demanda local baixa (<= DEMANDA_LOCAL_BAIXA_90D) mas > 0
+      velocidadeDiaria: 1 / 90,
+      coberturaDias: 100, // > limiarExcessivo("loja") = 60 -> elegível como origem (cobertura_excessiva)
+    });
+    const cdSite = cd({ estoqueAtual: 30, vendasDias30: 10, vendasDias90: 30, velocidadeDiaria: 10 / 30, coberturaDias: 90 });
+    const { movimentacoes, manter } = calcularMovimentacoes(
+      [rioSul, cdSite],
+      // Site vendeu o mesmo (1) que a loja — tem potencial online (C) e sinal local (A), mas D falha.
+      contextoMov({ vendasSite90: 1, gradePorPosicao: { "rio-sul": grade(4, 4) } })
+    );
+    expect(movimentacoes.filter((m) => m.tipoMovimentacao === "loja_cd_site")).toHaveLength(0);
+    expect(manter.find((m) => m.posicaoNome === "Rio Sul")!.motivo.join(" ")).toContain("não mais do que a própria loja");
+  });
+
+  it("recolhe quando o site vendeu estritamente mais do que a própria loja (condição D satisfeita)", () => {
+    const rioSul = variante({
+      storeId: "rio-sul",
+      storeName: "Rio Sul",
+      estoqueAtual: 20,
+      estoqueMinimo: 5,
+      vendasDias90: 1,
+      velocidadeDiaria: 1 / 90,
+      coberturaDias: 100,
+    });
+    const cdSite = cd({ estoqueAtual: 30, vendasDias30: 10, vendasDias90: 30, velocidadeDiaria: 10 / 30, coberturaDias: 90 });
+    const { movimentacoes } = calcularMovimentacoes(
+      [rioSul, cdSite],
+      contextoMov({ vendasSite90: 2, gradePorPosicao: { "rio-sul": grade(4, 4) } })
+    );
+    const recolhimento = movimentacoes.find((m) => m.tipoMovimentacao === "loja_cd_site");
+    expect(recolhimento).toBeDefined();
+    expect(recolhimento!.justificativa.join(" ")).toContain("mais do que as 1 un.");
+  });
 });
 
 // ---------------------------------------------------------------------------
