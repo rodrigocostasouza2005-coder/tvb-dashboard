@@ -1,5 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
-import { getProdutosPlanejamento, getProdutoPlanejamentoDetalhe, getDistinctGrupos, getDistinctTamanhos } from "@/lib/metrics";
+import { getProdutosPlanejamento, getProdutoPlanejamentoDetalhe, getRecomendacaoGradeProduto, getDistinctGrupos, getDistinctTamanhos } from "@/lib/metrics";
 import { getGrupoRestriction, getStoreRestriction } from "@/lib/permissions";
 import { toArray, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
@@ -36,12 +36,19 @@ export default async function PlanejamentoEstoquePage({
     storeIdsPermitidas: allowedStores,
   };
 
-  const [grupos, tamanhos, produtos, detalhe] = await Promise.all([
+  const [grupos, tamanhos, produtos, detalhe, grade] = await Promise.all([
     getDistinctGrupos(),
     getDistinctTamanhos(),
     getProdutosPlanejamento(filtro),
     produtoAberto ? getProdutoPlanejamentoDetalhe(produtoAberto, filtro) : Promise.resolve(null),
+    produtoAberto ? getRecomendacaoGradeProduto(produtoAberto, { grupoIn, colecaoIn: undefined }) : Promise.resolve(null),
   ]);
+
+  // Mesma regra de permissão de classificarProdutoAction (mapa-compras/classificacao-actions.ts)
+  // — a UI só oferece o botão pra quem a server action aceitaria de qualquer forma (a action
+  // reverifica role no servidor de novo, isto é só pra não mostrar um botão que vai falhar).
+  const podeClassificar = user.role === "ADMIN" || user.role === "GESTAO";
+  const linhaProdutoAberto = produtoAberto ? produtos.find((p) => p.produto === produtoAberto) : undefined;
 
   const totalProdutos = produtos.length;
   const emRisco = produtos.filter((p) => p.situacao === "ruptura" || p.situacao === "cobertura_critica").length;
@@ -74,7 +81,15 @@ export default async function PlanejamentoEstoquePage({
 
       <PlanejamentoFiltros basePath={BASE_PATH} grupos={grupos} tamanhos={tamanhos} value={{ grupoIn: grupoFiltro, tamanhoIn: tamanhoFiltro, busca }} />
 
-      {detalhe && <ProdutoDetalhe detalhe={detalhe} fecharHref={fecharHref} />}
+      {detalhe && (
+        <ProdutoDetalhe
+          detalhe={detalhe}
+          classificacao={linhaProdutoAberto?.classificacao ?? "NAO_CLASSIFICADO"}
+          grade={grade}
+          podeClassificar={podeClassificar}
+          fecharHref={fecharHref}
+        />
+      )}
 
       <ProdutosTable rows={produtos} basePath={BASE_PATH} queryString={queryString} produtoAberto={produtoAberto} />
     </div>

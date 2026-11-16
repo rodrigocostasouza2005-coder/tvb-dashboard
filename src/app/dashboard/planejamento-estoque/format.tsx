@@ -1,4 +1,4 @@
-import type { ClassificacaoAgregada } from "@/lib/metrics";
+import type { ClassificacaoAgregada, Tendencia } from "@/lib/metrics";
 import type { Diagnostico } from "@/lib/metrics";
 
 export function formatNumber(value: number) {
@@ -30,4 +30,18 @@ export const CLASSIFICACAO_LABEL: Record<ClassificacaoAgregada, string> = {
   DROP: "Drop",
   MISTO: "Misto (tamanhos divergem)",
   NAO_CLASSIFICADO: "Não classificado",
+};
+
+export const TENDENCIA_LABEL: Record<Tendencia, string> = {
+  crescimento: "↑ Crescimento",
+  estavel: "→ Estável",
+  desaceleracao: "↓ Desaceleração",
+  sem_dado: "—",
+};
+
+export const TENDENCIA_COR: Record<Tendencia, string> = {
+  crescimento: "text-[var(--status-good)]",
+  estavel: "text-[var(--text-secondary)]",
+  desaceleracao: "text-[var(--status-warning)]",
+  sem_dado: "text-[var(--text-muted)]",
 };

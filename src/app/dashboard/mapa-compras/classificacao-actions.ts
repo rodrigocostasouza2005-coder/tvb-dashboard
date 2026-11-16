@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { getSessionUser } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
 import { PossibilidadeReposicao, StatusComercialProduto, TipoCompraProduto } from "@prisma/client";
 import {
   upsertClassificacaoProduto,
@@ -74,6 +75,77 @@ export async function classificarProdutoAction(formData: FormData) {
   );
 
   revalidatePath("/dashboard/mapa-compras");
+}
+
+// Fase 2 do Planejamento de Estoque (2026-11-16) — resolve o gargalo real encontrado na Fase 1
+// (354 de 360 produtos sem classificação): a fila de revisão é por COD (SKU individual, cor+
+// tamanho), então classificar 1 produto com várias cores/tamanhos exigia 1 submit por SKU. Essa
+// ação classifica TODOS os cods de um produto de uma vez, com a MESMA classificação escolhida —
+// continua 100% manual (quem decide tipoCompra/status é sempre uma pessoa), só deixa de exigir
+// repetir o clique por SKU. Não muda a chave do schema (ClassificacaoProduto continua por cod)
+// nem o critério de qualificação — só reduz o atrito operacional de aplicar a mesma decisão a
+// todas as variantes de um produto.
+export async function classificarProdutoEmLoteAction(formData: FormData) {
+  const user = await requireGestao();
+
+  // Dedup (o mesmo cod pode aparecer 2x se o form for reenviado) — nunca confia na lista crua
+  // de `cod` vinda dos campos ocultos como prova de que aquele SKU pertence ao produto
+  // informado: campo oculto pode ser adulterado no cliente (DevTools, requisição manual), e sem
+  // essa checagem um cod de OUTRO produto classificaria errado (sobrescreveria produto/grupo/
+  // tipoCompra daquele SKU com os valores deste formulário). A fonte de verdade de "a quem esse
+  // cod pertence" é Sale/StockSnapshot — nunca o formulário.
+  const codsBrutos = [...new Set(formData.getAll("cod").map((v) => String(v).trim()).filter(Boolean))];
+  const produto = String(formData.get("produto") ?? "").trim();
+  if (codsBrutos.length === 0 || !produto) return;
+
+  const tipoCompra = String(formData.get("tipoCompra") ?? "") as TipoCompraProduto;
+  const statusComercial = String(formData.get("statusComercial") ?? "") as StatusComercialProduto;
+  const possibilidadeReposicao = String(formData.get("possibilidadeReposicao") ?? "") as PossibilidadeReposicao;
+  if (
+    !Object.values(TipoCompraProduto).includes(tipoCompra) ||
+    !Object.values(StatusComercialProduto).includes(statusComercial) ||
+    !Object.values(PossibilidadeReposicao).includes(possibilidadeReposicao)
+  ) {
+    return;
+  }
+
+  // Confere cada cod contra a fonte real (Sale + StockSnapshot, mesmo universo de
+  // getFilaRevisaoClassificacao) — pega produto/grupo REAIS daquele cod, nunca os do formulário.
+  // cod inexistente (não vendeu nem tem estoque) não aparece aqui nenhum dos dois lados, então
+  // cai fora de `donoRealPorCod` e é rejeitado pela comparação abaixo igual a um cod de outro
+  // produto — mesmo tratamento, mesma razão (não há base real pra classificar).
+  const [vendas, estoque] = await Promise.all([
+    prisma.sale.findMany({ where: { cod: { in: codsBrutos } }, distinct: ["cod"], select: { cod: true, produto: true, grupo: true } }),
+    prisma.stockSnapshot.findMany({ where: { cod: { in: codsBrutos } }, distinct: ["cod"], select: { cod: true, produto: true, grupo: true } }),
+  ]);
+  const donoRealPorCod = new Map<string, { produto: string; grupo: string }>();
+  for (const r of [...vendas, ...estoque]) {
+    if (!donoRealPorCod.has(r.cod)) donoRealPorCod.set(r.cod, { produto: r.produto, grupo: r.grupo });
+  }
+
+  const codsValidos = codsBrutos.filter((cod) => donoRealPorCod.get(cod)?.produto === produto);
+  if (codsValidos.length === 0) return; // nenhum cod submetido realmente pertence a este produto — nada é gravado
+
+  const colecao = (formData.get("colecao") as string) || null;
+  const dataLancamento = parseDate(formData.get("dataLancamento"));
+  const dataEncerramentoPrevista = parseDate(formData.get("dataEncerramentoPrevista"));
+  const orcamentoDrop = parseFloatOrNull(formData.get("orcamentoDrop"));
+  const observacoes = (formData.get("observacoes") as string) || null;
+
+  // Sequencial, não Promise.all: cada chamada já faz leitura+escrita+histórico (ver
+  // upsertClassificacaoProduto) — paralelizar N upserts na mesma transação implícita de
+  // histórico arriscaria condição de corrida sem ganho real (N é sempre pequeno, cods de 1
+  // produto só).
+  for (const cod of codsValidos) {
+    const grupoReal = donoRealPorCod.get(cod)!.grupo; // grupo vem da fonte real, não do formulário
+    await upsertClassificacaoProduto(
+      { cod, produto, grupo: grupoReal, colecao, tipoCompra, statusComercial, possibilidadeReposicao, dataLancamento, dataEncerramentoPrevista, orcamentoDrop, observacoes },
+      user.email
+    );
+  }
+
+  revalidatePath("/dashboard/mapa-compras");
+  revalidatePath("/dashboard/planejamento-estoque");
 }
 
 export async function setParametrosBestSellerGrupoAction(formData: FormData) {

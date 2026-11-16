@@ -21,6 +21,13 @@ const MIN_DIAS_HISTORICO_CONFIAVEL = 14; // mesmo limiar de compras-inteligencia
 
 export type ClassificacaoAgregada = "BEST_SELLER" | "DROP" | "MISTO" | "NAO_CLASSIFICADO";
 
+// "crescimento"/"desaceleracao" comparam vendasDias30 contra a janela ANTERIOR de 30 dias
+// (vendasDias60 - vendasDias30) — nunca ano-contra-ano (Fase 0 confirmou: só ~14 meses de
+// histórico real, sem baseline confiável antes de set/2025). 20% de margem antes de marcar
+// tendência, pra não reagir a ruído normal de venda. "sem_dado" quando não confiável (<14 dias de
+// histórico) ou quando as duas janelas são zero (nenhum sinal em nenhum sentido).
+export type Tendencia = "crescimento" | "estavel" | "desaceleracao" | "sem_dado";
+
 export type ProdutoPlanejamento = {
   produto: string;
   grupo: string;
@@ -37,12 +44,29 @@ export type ProdutoPlanejamento = {
   diasHistoricoDisponivel: number;
   confiavel: boolean;
   situacao: Diagnostico;
+  tendencia: Tendencia;
+  // true quando situacao é ruptura/cobertura_critica — não é um número calculado de "quanto
+  // venderia sem a ruptura" (isso exigiria saber QUANDO o estoque zerou, dado que não existe:
+  // StockSnapshot não guarda série histórica, Fase 0 §2.1). É só um aviso honesto: a venda
+  // observada pode estar subestimando a demanda real porque faltou produto pra vender, não
+  // porque faltou interesse — nunca inventa o número que os dados não sustentam.
+  demandaPossivelmenteMascarada: boolean;
   quantidadeEmTransito: number;
   // Sempre false hoje: ProductionOrder não tem data de chegada confiável (ver RecebimentoPrevisto
   // em compras-inteligencia.ts) — exposto aqui pra UI nunca tratar trânsito como certeza.
   transitoConfiavel: boolean;
   necessidadeReposicao: boolean;
 };
+
+function calcularTendencia(vendasDias30: number, vendasDias60: number, confiavel: boolean): Tendencia {
+  if (!confiavel) return "sem_dado";
+  const anterior = vendasDias60 - vendasDias30;
+  if (anterior === 0 && vendasDias30 === 0) return "sem_dado";
+  if (anterior === 0) return "crescimento"; // tinha 0 antes, passou a vender — sinal real, não ruído
+  if (vendasDias30 > anterior * 1.2) return "crescimento";
+  if (vendasDias30 < anterior * 0.8) return "desaceleracao";
+  return "estavel";
+}
 
 function agora() {
   return new Date();
@@ -125,6 +149,8 @@ export async function getProdutosPlanejamento(filtro: ComparacaoFiltro = {}): Pr
     const recebimentos = cods.flatMap((c) => pedidosAberto.get(c) ?? []);
     const quantidadeEmTransito = recebimentos.reduce((s, r) => s + r.quantidade, 0);
     const transitoConfiavel = recebimentos.length > 0 && recebimentos.every((r) => r.confiavel);
+    const tendencia = calcularTendencia(vendasDias30, vendasDias60, confiavel);
+    const necessidadeReposicao = situacao === "ruptura" || situacao === "cobertura_critica";
 
     resultado.push({
       produto: acc.produto,
@@ -142,9 +168,11 @@ export async function getProdutosPlanejamento(filtro: ComparacaoFiltro = {}): Pr
       diasHistoricoDisponivel,
       confiavel,
       situacao,
+      tendencia,
+      demandaPossivelmenteMascarada: necessidadeReposicao,
       quantidadeEmTransito,
       transitoConfiavel,
-      necessidadeReposicao: situacao === "ruptura" || situacao === "cobertura_critica",
+      necessidadeReposicao,
     });
   }
 
@@ -168,6 +196,13 @@ export type LojaDetalhe = {
   posicaoNome: string;
   tipoPosicao: "loja" | "cd_site";
   estoqueAtual: number;
+  // Venda própria dessa posição (30d/90d) — pra CD/Site esse número já inclui a demanda das
+  // lojas que ele abastece (vendasEfetivasCdSite, distribuicao-estoque.ts), é o giro aparente
+  // DAQUELA posição, não "venda da empresa". Por isso nunca é somado entre posições em lugar
+  // nenhum deste módulo (ver comentário em getProdutosPlanejamento) — só exibido aqui pra
+  // comparar demanda relativa ENTRE lojas, seguro mesmo com a correção do CD embutida.
+  vendasDias30: number;
+  vendasDias90: number;
   coberturaDias: number | null;
   diagnostico: Diagnostico;
 };
@@ -222,25 +257,32 @@ export async function getProdutoPlanejamentoDetalhe(
 
   // Estoque por loja do produto inteiro (aqui pode somar entre cores/tamanhos sem problema — a
   // regra de "não misturar" é sobre a CURVA DE TAMANHO, não sobre o total por loja).
-  const porLojaMap = new Map<string, LojaDetalhe>();
+  // Inconsistência real encontrada e corrigida aqui (Fase 2, 2026-11-16): a primeira versão
+  // (Fase 1) mantinha coberturaDias/diagnostico do PRIMEIRO cod visto por loja e só somava
+  // estoqueAtual dos demais — pra produto com várias cores/tamanhos, a cobertura/diagnóstico
+  // exibidos vinham de 1 SKU arbitrário, não do agregado real daquela loja. Agora acumula
+  // estoqueAtual + vendasDias30/90 de TODOS os cods do produto por loja, e só então recalcula
+  // coberturaDias/diagnostico com diagnosticarVariante (mesma função pura usada no total do
+  // produto) — consistente com o resto do módulo, nunca um valor "sobrevivente" de 1 SKU só.
+  type AccLoja = { posicaoId: string; posicaoNome: string; tipoPosicao: "loja" | "cd_site"; estoqueAtual: number; vendasDias30: number; vendasDias90: number };
+  const porLojaMap = new Map<string, AccLoja>();
   for (const v of doProduto) {
     for (const l of v.porLoja) {
-      const atual = porLojaMap.get(l.storeId);
-      if (!atual) {
-        porLojaMap.set(l.storeId, {
-          posicaoId: l.storeId,
-          posicaoNome: l.storeName,
-          tipoPosicao: l.tipoPosicao,
-          estoqueAtual: l.estoqueAtual,
-          coberturaDias: l.coberturaDias,
-          diagnostico: l.diagnostico,
-        });
-      } else {
-        atual.estoqueAtual += l.estoqueAtual;
-      }
+      const atual = porLojaMap.get(l.storeId) ?? { posicaoId: l.storeId, posicaoNome: l.storeName, tipoPosicao: l.tipoPosicao, estoqueAtual: 0, vendasDias30: 0, vendasDias90: 0 };
+      atual.estoqueAtual += l.estoqueAtual;
+      atual.vendasDias30 += l.vendasDias30;
+      atual.vendasDias90 += l.vendasDias90;
+      porLojaMap.set(l.storeId, atual);
     }
   }
-  const porLoja = [...porLojaMap.values()].sort((a, b) => a.posicaoNome.localeCompare(b.posicaoNome, "pt-BR"));
+  const porLoja: LojaDetalhe[] = [...porLojaMap.values()]
+    .map((l) => {
+      const velocidadeDiaria = l.vendasDias90 > 0 ? l.vendasDias90 / 90 : 0;
+      const coberturaDias = velocidadeDiaria > 0 ? Math.round((l.estoqueAtual / velocidadeDiaria) * 10) / 10 : null;
+      const diagnostico = diagnosticarVariante({ estoqueAtual: l.estoqueAtual, vendasDias30: l.vendasDias30, vendasDias90: l.vendasDias90, velocidadeDiaria, coberturaDias }, l.tipoPosicao);
+      return { posicaoId: l.posicaoId, posicaoNome: l.posicaoNome, tipoPosicao: l.tipoPosicao, estoqueAtual: l.estoqueAtual, vendasDias30: l.vendasDias30, vendasDias90: l.vendasDias90, coberturaDias, diagnostico };
+    })
+    .sort((a, b) => a.posicaoNome.localeCompare(b.posicaoNome, "pt-BR"));
 
   const to = new Date();
   const from = new Date(to.getTime() - 90 * 86_400_000);

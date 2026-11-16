@@ -221,3 +221,43 @@ Nenhuma inconsistência encontrada contra dado real de produção.
 - `ProductionOrder` sem ETA confiável — trânsito sempre separado do disponível, `transitoConfiavel` sempre `false` hoje.
 - Histórico de venda curto — "dados insuficientes" explícito quando < 14 dias.
 - Classificação ainda por `cod`, não produto+cor (ponto de decisão #2, não resolvido nesta fase) — `getProdutosPlanejamento` expõe isso como `MISTO` quando cods do mesmo produto divergem, em vez de esconder a divergência.
+
+---
+
+## 10. Fase 2A — inteligência de demanda, grade e classificação em lote (2026-11-16)
+
+PR `feat-planejamento-estoque-fase2a-20261116`. Sem schema novo, sem migration. Entrega incremental — itens 5 (distribuição/excesso) e 6 (avaliação retrospectiva) do pedido de Fase 2 ficam para a próxima entrega (Fase 2B), conforme instrução explícita do Rodrigo de não tentar tudo de uma vez.
+
+### 10.1 Causa raiz real da baixa cobertura de classificação (354/360 não classificados)
+
+**Não é um problema de grão/schema** (zero `MISTO` detectado em produção antes desta entrega — nenhuma evidência de conflito entre cods do mesmo produto). A causa real, confirmada lendo `getFilaRevisaoClassificacao` e `ClassificarProdutoForm`: a fila e o formulário de classificação são **por `cod`** (SKU individual, cor+tamanho) — classificar 1 produto com várias cores/tamanhos exigia 1 submit por SKU. Fix: `classificarProdutoEmLoteAction` (nova, em `mapa-compras/classificacao-actions.ts`, reaproveitando `upsertClassificacaoProduto` já existente) classifica todos os cods de um produto de uma vez, com a mesma decisão — ainda 100% manual, só reduz o atrito. Exposta na UI do Planejamento de Estoque (painel de detalhe, só quando o produto não está classificado ou está `MISTO`).
+
+A pergunta de grão (produto+cor) continua em aberto (decisão pendente #2 da Fase 0) — não resolvida aqui porque não havia evidência de necessidade real, e seria uma migration de dado sem benefício demonstrado ainda.
+
+**Correção de segurança aplicada antes do merge** (revisão pontual pedida pelo Rodrigo): a primeira versão de `classificarProdutoEmLoteAction` confiava nos `cod` recebidos dos campos ocultos do formulário sem checar se de fato pertenciam ao `produto`/`grupo` informados — um campo oculto adulterado no cliente (DevTools, requisição manual) classificaria um SKU de **outro produto** com a decisão errada. Corrigido: a action agora confere cada `cod` contra a fonte real (`Sale`/`StockSnapshot`, mesmo universo de `getFilaRevisaoClassificacao`), descarta silenciosamente qualquer `cod` que não pertença ao produto submetido (nunca grava nada para ele), deduplica `cod` repetido, e sempre grava `grupo` vindo da fonte real — nunca do formulário. Se **nenhum** `cod` submetido for válido, a ação não grava nada (não deixa o produto com classificação parcial/errada). 8 testes novos cobrindo especificamente isso (`src/app/dashboard/mapa-compras/__tests__/classificarProdutoEmLote.test.ts`): cod de outro produto, cod inexistente, dedup, grupo da fonte real, zero-grava quando tudo é inválido, mesma decisão aplicada a todos os cods válidos, permissão ADMIN/GESTAO, e histórico preservado quando o cod já tinha classificação diferente.
+
+### 10.2 Inteligência de demanda
+
+- `Tendencia` (`crescimento`/`estavel`/`desaceleracao`/`sem_dado`): compara `vendasDias30` contra a janela anterior de 30 dias (`vendasDias60 - vendasDias30`), nunca ano-contra-ano (Fase 0 confirmou histórico curto demais pra isso). Margem de 20% antes de marcar tendência, pra não reagir a ruído.
+- `demandaPossivelmenteMascarada`: aviso booleano (não um número calculado) quando `situacao` é `ruptura`/`cobertura_critica`. Não existe série histórica de estoque (Fase 0 §2.1), então não dá pra saber QUANDO a ruptura começou — qualquer "demanda estimada sem a ruptura" seria fabricado. A honestidade aqui é o próprio aviso, não um número.
+- Venda por loja no detalhe (`vendasDias30`/`vendasDias90` em `LojaDetalhe`) — usa o valor já calculado por posição em `VariantePorLoja`, nunca somado entre posições (mesma cautela de dupla contagem do CD/Site documentada na Fase 1).
+
+### 10.3 Inconsistência real encontrada e corrigida na própria camada nova (Fase 1)
+
+Ao estender `LojaDetalhe`, encontrei que `getProdutoPlanejamentoDetalhe` (Fase 1) mantinha `coberturaDias`/`diagnostico` do **primeiro cod visto** por loja, só somando `estoqueAtual` dos demais cods do mesmo produto — pra produto com várias cores/tamanhos, a cobertura/diagnóstico exibidos no detalhe vinham de 1 SKU arbitrário, não do agregado real daquela loja. Corrigido: agora acumula `estoqueAtual`+`vendasDias30`+`vendasDias90` de todos os cods por loja e só então recalcula com `diagnosticarVariante` (mesma função pura do resto do módulo). Testado explicitamente (`"agrega vendasDias30/90 de TODOS os cods..."`, `planejamentoEstoque.test.ts`). Reportado aqui por instrução direta do Rodrigo de não esconder limitação encontrada.
+
+### 10.4 Planejamento de grade — divergência deliberada da worktree órfã
+
+A worktree órfã (`tvb-dashboard-planejamento-estoque`) decompunha quantidade por tamanho usando `getTamanhoBreakdown` (`estoque.ts`), que agrega por **nome do produto sem cor** — exatamente o risco de misturar cores já documentado na Fase 0 (§2.2) e que a Fase 1 deste módulo evitou de propósito. Não reaproveitei esse pedaço: `src/lib/metrics/planejamento-grade.ts` decompõe em **duas passadas** (produto→cor, depois cor→tamanho), cada uma pesada pela venda real daquela cor/tamanho especificamente, via query direta e independente (mesma cautela de dupla contagem do CD/Site). `getTamanhoBreakdown` continua como estava — não foi alterado, é usado em outro lugar do Radar (Mapa de Compras) e corrigi-lo silenciosamente estava fora do escopo desta entrega.
+
+`decomporProporcional` (função pura, `planejamento-grade.ts`) reaproveita o algoritmo de maior resto (largest remainder) da worktree, generalizado pra qualquer dimensão — testado isoladamente (5 testes) e via `getRecomendacaoGradeProduto` (4 testes, incluindo fechamento exato cor↔total e tamanho↔cor).
+
+### 10.5 Planejamento de compras (parcial)
+
+`getRecomendacaoGradeProduto` agrega `getRecomendacoesBestSeller`/`getRecomendacoesDrop` (motor já existente, por cod) pro nível de produto e decompõe em grade — reaproveita 100% o cálculo de "quanto comprar", só redistribui. Surfaced no painel de detalhe do Planejamento de Estoque. **Ainda não incluído nesta entrega**: aprovação/edição/rejeição da recomendação (isso já existe em `mapa-compras` via `confirmarDecisaoCompraAction` — decisão de não duplicar esse fluxo aqui, só mostrar a sugestão; ligar os dois fica pra Fase 2B), distinção formal lead time urgente (2 dias) vs. normal (60 dias) — ainda só existe `CoberturaMeta.leadTimeDias` único por grupo.
+
+### 10.6 Pendente para Fase 2B
+
+- Gestão de excesso/distribuição: surfacing de `distribuicao-estoque`/`DecisaoMovimentacaoEstoque` no painel de detalhe (motor já maduro, só falta integrar visualmente).
+- Avaliação de decisões: reviver `getHistoricoDecisoesCompra` (hoje código morto, zero tela usa) + construir comparação on-demand (recomendado vs. realizado), sem schema novo.
+- Lead time urgente vs. normal — precisa de schema change (campo novo em `CoberturaMeta` ou modelo de fornecedor/modalidade), fica como PR separado com aprovação explícita do Rodrigo antes do merge, por tocar schema.
