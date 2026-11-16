@@ -1,6 +1,6 @@
 # Planejamento Inteligente de Estoque — TVB Radar
 
-**Status:** Fase 1 (primeira entrega funcional) em PR, aguardando aprovação/merge do Rodrigo. Fase 0 (diagnóstico técnico) concluída.
+**Status:** Fase 1 (primeira entrega funcional) mergeada e em produção (PR #100). Validada contra dado real de produção. Fase 0 (diagnóstico técnico) concluída.
 **Data:** 2026-11-16 (Fase 0) / 2026-11-16 (Fase 1)
 **Como ler este documento:** é um documento vivo de continuidade — arquitetura, regras de negócio, decisões e pendências. Toda afirmação aqui é fato verificado em código/schema nesta data, salvo quando marcado "não verificado" ou "decisão pendente". O código muda rápido neste projeto — antes de implementar algo listado aqui, reverifique contra o código atual.
 
@@ -202,9 +202,18 @@ Se um consumidor novo somar `vendasDias30` de **todas** as posições de um prod
 
 Todos os 3 passam. Nenhuma inconsistência de reconciliação foi encontrada na lógica nova — o único risco real identificado foi o da seção 9.2 (já contornado e testado, não uma inconsistência não resolvida).
 
-### 9.4 Validação contra produção real
+### 9.4 Validação contra produção real — concluída
 
-Pendente de execução — aguardando merge do PR #100 (GitHub exige o workflow de verificação já estar em `main` pra poder ser disparado). Script temporário somente-leitura incluído no próprio PR (`scripts/verificar-planejamento-estoque-temp.ts`), a ser removido num commit de limpeza após a confirmação.
+Executada após o merge (script temporário somente-leitura, removido num commit de limpeza em seguida). Dado real, 2026-11-16:
+
+- 360 produtos retornados. Por situação: 134 cobertura excessiva, 76 equilibrado, 74 sem dado, 62 sem movimentação, 11 ruptura, 3 cobertura crítica.
+- Por classificação: 354 não classificados, 5 Drop, 1 Best Seller — bate com o achado da Fase 0 de que a classificação ainda cobre uma fração pequena do catálogo.
+- **0 produtos com estoque/venda negativo.**
+- 13 produtos com quantidade em trânsito > 0 — **todos** com `transitoConfiavel=false`, confirmando que a regra "nunca tratar trânsito como certeza" se sustenta com dado real, não só no teste sintético.
+- 14 produtos com `necessidadeReposicao=true` (11 ruptura + 3 cobertura crítica — soma exata).
+- Detalhe testado de ponta a ponta com um produto real em ruptura ("Boné 5 Panel Dry Black"): breakdown por loja mostrou ruptura real em 2 posições e "sem_dado" nas outras 2 (consistente — produto sem estoque E sem venda recente nelas), evolução de vendas trouxe histórico real de `Sale`.
+
+Nenhuma inconsistência encontrada contra dado real de produção.
 
 ### 9.5 Limitações que seguem existindo (não escondidas, expostas na UI)
 
