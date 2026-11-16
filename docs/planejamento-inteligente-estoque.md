@@ -1,6 +1,6 @@
 # Planejamento Inteligente de Estoque — TVB Radar
 
-**Status:** Fase 2A (classificação em lote, tendência de demanda, grade por cor/tamanho) mergeada e em produção (PR #101, SHA `9b4c986`, deploy `dpl_hi5hnbsinp8nhXxiZeZ311NEwcX4`). Validada contra dado real de produção. Fase 1 (PR #100) e Fase 0 concluídas. **Fase 2B (excesso e distribuição) entregue como PR aberto, aguardando revisão/merge do Rodrigo — ver §11.**
+**Status:** Fase 2A (classificação em lote, tendência de demanda, grade por cor/tamanho) mergeada e em produção (PR #101, SHA `9b4c986`, deploy `dpl_hi5hnbsinp8nhXxiZeZ311NEwcX4`). Validada contra dado real de produção. Fase 1 (PR #100) e Fase 0 concluídas. **Fase 2B entregue em 2 PRs abertos (excesso/distribuição #105 — §11; avaliação retrospectiva #106 — §12), aguardando revisão/merge do Rodrigo, mais uma proposta técnica de lead time só-leitura, zero código (§13).**
 **Data:** 2026-11-16 (Fase 0, Fase 1, Fase 2A e Fase 2B)
 **Como ler este documento:** é um documento vivo de continuidade — arquitetura, regras de negócio, decisões e pendências. Toda afirmação aqui é fato verificado em código/schema nesta data, salvo quando marcado "não verificado" ou "decisão pendente". O código muda rápido neste projeto — antes de implementar algo listado aqui, reverifique contra o código atual.
 
@@ -309,3 +309,59 @@ Script `scripts/validar-planejamento-distribuicao-fase2b-temp.ts` + workflow `va
 ### 11.5 Resultado das verificações locais
 
 `npx tsc --noEmit`: sem erros. `npx eslint` nos arquivos tocados: 0 erros (1 warning cosmético, variável `_a` deliberadamente não usada num mock). `npx vitest run` (suíte completa): **690 testes passando** (674 anteriores + 16 novos), 0 regressão. `npm run build`: sucesso (rota `/dashboard/planejamento-estoque` compilada normalmente, sem rota nova — reaproveitou a existente).
+
+---
+
+## 12. Fase 2B — avaliação retrospectiva de decisões de compra (2026-11-16, PR aberto, aguardando aprovação)
+
+Agente B da Fase 2B. Branch `feat-planejamento-estoque-fase2b-avaliacao-20261116`, PR #106 — **não mergeado**. Trabalhou em worktree isolada (`tvb-dashboard-avaliacao-compras`), sem tocar nos arquivos do Agente A. **Sem schema novo, sem migration, sem tabela/job nova** — cálculo 100% on-demand, exatamente a opção já recomendada no §4.2 desde a Fase 0.
+
+### 12.1 O que foi implementado
+
+- `src/lib/metrics/planejamento-avaliacao.ts` (novo): reaproveita `getHistoricoDecisoesCompra` (`compras-inteligencia.ts`, intocado) como **única leitura** de `DecisaoCompra` — nunca duplica esse acesso Prisma. Cruza por `cod` (quando a decisão tem) ou por `grupo` (fallback, quando a decisão foi registrada só agregada).
+- `avaliarDecisaoCompra(decisao, dadosCruzados, agora)` — **núcleo puro, sem Prisma**, testável com dado sintético (mesma convenção de `diagnosticarVariante`/`vendasEfetivasCdSite`). Classifica `avaliabilidade: "SEM_DADOS" | "PARCIAL" | "COMPLETA"` (critérios exatos abaixo, §12.2) e só preenche `diagnosticoPosDecisao`/`indicioRupturaPosDecisao`/`indicioExcessoRemanescente` quando `COMPLETA`, reaproveitando `diagnosticarVariante` (`distribuicao-estoque.ts`) sem reinventar régua.
+- `getAvaliacaoDecisaoCompra(decisaoId)` e `getAvaliacaoDecisoesPorProdutoGrupoPeriodo(filtro)` — camada de dado, registradas no barrel.
+- Tela: seção colapsável "Avaliação de decisões de compra" dentro de `/dashboard/mapa-compras/page.tsx` (mesmo padrão visual da seção "Fila de revisão & Alertas" já existente) — decisão de não criar rota/aba nova, já que `DecisaoCompra` já é lida/escrita nessa mesma página.
+- 10 testes novos em `src/lib/metrics/__tests__/planejamentoAvaliacao.test.ts`, incluindo um nomeado literalmente `"nunca inventa resultado histórico quando não há dados suficientes (PARCIAL preserva null em vez de estimar)"`.
+
+### 12.2 Critérios de avaliabilidade (exatos, do código)
+
+- **SEM_DADOS**: zero `StockSnapshot` E zero `Sale` cruzável no período pós-decisão (por `cod` ou por `grupo`, conforme disponível) — nenhum número é calculado, tudo fica `null`.
+- **PARCIAL**, dois casos: (a) decisão registrada **só por grupo** (sem `cod`) — **nunca** vira COMPLETA, por mais tempo que passe, porque a imprecisão do join por grupo (mistura outros produtos do mesmo grupo) não desaparece com o tempo; (b) decisão **com `cod`** mas a janela de 90 dias pós-`decididoEm` ainda não decorreu inteira — reporta só `vendasPosDecisaoAteAgora`/`estoqueAtual` (o que já pôde ser calculado honestamente), nunca preenche `vendasPosDecisao30/60/90` com soma parcial disfarçada de janela cheia.
+- **COMPLETA**: `cod` presente + janela de 90 dias cheia decorrida + dado real disponível — único caso em que `diagnosticoPosDecisao` é calculado, via `diagnosticarVariante` com `tipoPosicao="loja"` (limiar mais conservador, mesma escolha de `planejamento-estoque.ts`).
+
+### 12.3 Limitações reais declaradas (não escondidas)
+
+- **Sem FK entre `DecisaoCompra` e `Sale`/`StockSnapshot`/`ProductionOrder`** — o cruzamento é sempre um join implícito por `cod` ou `grupo`, nunca uma relação formal. Decisão só-grupo mistura dado de outros produtos do grupo — por isso nunca COMPLETA.
+- **Sem série histórica de estoque** (mesma limitação da Fase 0/1) — `estoqueAtual` é sempre o snapshot de HOJE, nunca "o estoque no fim exato da janela de avaliação".
+- **Honestidade sobre dado real em produção**: não há evidência no histórico de commits de que `DecisaoCompra` tenha sido exercitada em produção até agora (o formulário está conectado desde `7bbb596`, ~2026-10-27, mas nenhuma validação de fase anterior consultou essa tabela contra produção). É esperado que a tabela esteja vazia ou quase vazia — a maioria das avaliações reais pode cair em `SEM_DADOS` só por falta de decisão registrada, não por bug desta entrega.
+
+### 12.4 Validação contra produção — pendente do merge
+
+**Gap encontrado pelo coordenador**: diferente das demais fases, o Agente B não incluiu o script+workflow de verificação no PR original — por isso o CI de testes (`commercial-intelligence-tests.yml`, que só dispara em paths específicos como `.github/workflows/**`) nunca rodou no PR #106. Corrigido: script `scripts/validar-planejamento-avaliacao-fase2b-temp.ts` + workflow `validar-planejamento-avaliacao-fase2b-temp.yml` adicionados num commit extra (`ab2fb0b`) pelo coordenador, mesmo padrão das demais fases — conta `DecisaoCompra` real, reporta a distribuição SEM_DADOS/PARCIAL/COMPLETA contra produção, e confirma que nenhuma avaliação não-COMPLETA tem `diagnosticoPosDecisao` preenchido. Não executado ainda — depende do merge.
+
+### 12.5 Resultado das verificações locais (reportado pelo agente)
+
+`npx tsc --noEmit` limpo. `npm run build` com sucesso. `npx vitest run`: **684/684 passando** (674 + 10 novos, 0 regressão) — número reportado ANTES do commit de correção do coordenador (§12.4); a suíte completa do repo (que já inclui os 16 testes do Agente A) precisa ser revalidada no momento do merge final, não somada ingenuamente aos 690 da Fase A (os testes não são cumulativos entre PRs ainda não mergeados — ver §14 para o número real após merge de ambos).
+
+---
+
+## 13. Fase 2B — proposta técnica de lead time normal vs. urgente (2026-11-16, SOMENTE DIAGNÓSTICO — zero código)
+
+Agente C. Regime estritamente somente-leitura, conforme pedido — nenhum arquivo criado, nenhuma branch, nenhum PR. Esta seção é só proposta, **não pode ser implementada sem aprovação explícita do Rodrigo**.
+
+### 13.1 Estado atual confirmado (fresco)
+
+`model CoberturaMeta` (`prisma/schema.prisma:155-162`) tem hoje `grupo` (único), `mesesCobertura`, `estoqueSegurancaUnidades?`, `leadTimeDias?` — um único campo de lead time, por grupo, sem distinção normal/urgente. Único consumidor real: `calcularSugestaoBestSeller` (`compras-inteligencia.ts:74-120`), que soma `leadTimeDias` ao horizonte de cobertura. Confirmado (de novo, fresco): **zero menção** a "urgente"/"urgência" em qualquer schema/código relacionado a lead time; **zero conceito de fornecedor** modelado em qualquer lugar do schema (TVB é produção própria via `ProductionOrder`, não compra de terceiro). `ProductionOrder` continua sem campo de data prevista de finalização (só `dataEntradaCelula`/`dataFinalizacaoProducao`, essa última null enquanto aberta).
+
+### 13.2 Três opções (resumo — texto completo do agente arquivado na transcrição desta sessão, disponível sob pedido)
+
+- **Opção A — mínima (recomendada para começar)**: um segundo campo `leadTimeUrgenteDias Int?` em `CoberturaMeta`, mais um parâmetro `tipoReposicao?: "NORMAL" | "URGENTE"` na função pura `calcularSugestaoBestSeller` (fallback pro lead time normal quando o urgente não está cadastrado — zero quebra de teste existente). Migration de 1 linha, 100% aditiva (`ALTER TABLE ADD COLUMN`, nullable, sem default), mesmo padrão já usado pela migration que criou `leadTimeDias`. UI: um terceiro input inline em `ParametrosGrupoForm` (`mapa-compras/inteligencia/forms.tsx:123-166`), mesmo padrão de controle inline já aprovado pelo Rodrigo. Risco: praticamente nenhum.
+- **Opção B — intermediária**: tabela nova `LeadTimePorGrupo` (enum `TipoLeadTime: NORMAL | URGENTE`, `@@unique([grupo, tipo])`), coexistindo com `CoberturaMeta.leadTimeDias` (nunca remover campo em uso). Exige backfill revisado (não script de massa automático) e lógica de fallback. Só se justifica se surgir um 3º tipo de lead time real — hoje não há sinal disso.
+- **Opção C — completa**: modelar `Fornecedor`+`ModalidadePedido` com lead time por fornecedor+modalidade. Exigiria seed artificial de um "Fornecedor: Produção própria TVB" (hoje não existe fornecedor real nenhum pra ancorar a entidade) — risco de over-engineering pra um requisito (compra de terceiro) que não existe ainda na operação da TVB.
+
+### 13.3 Recomendação do agente
+
+**Começar pela Opção A.** Resolve 100% do problema declarado (60 dias vs. 2 dias, ambos configuráveis) com uma migration de uma linha, sem tabela nova, sem FK, sem seed, mantendo o padrão de UI inline já em uso. Opção B só se justifica com um 3º cenário real de lead time; Opção C só se justifica no dia em que a TVB de fato comprar de terceiro — modelar fornecedor agora seria estrutura sem necessidade comprovada.
+
+**Decisão pendente do Rodrigo**: qual opção seguir, e quando — nenhuma migration foi criada, nenhum código foi escrito, conforme exigido. Implementação só começa após aprovação explícita.
