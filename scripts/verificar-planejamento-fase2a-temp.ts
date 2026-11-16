@@ -26,7 +26,7 @@ async function main() {
   console.log(`\nProdutos classificados (Best Seller/Drop): ${classificados.length}`);
 
   let testados = 0;
-  for (const p of classificados.slice(0, 5)) {
+  for (const p of classificados) {
     const grade = await getRecomendacaoGradeProduto(p.produto);
     testados++;
     if (!grade) {
