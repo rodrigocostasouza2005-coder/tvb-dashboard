@@ -279,3 +279,119 @@ describe("getProdutosPlanejamento × getProdutoPlanejamentoDetalhe — reconcili
     expect(totalPorCor("Azul") + totalPorCor("Vermelho")).toBe(TOTAL_ESPERADO);
   });
 });
+
+// Fase 2 (2026-11-16): tendência, demanda possivelmente mascarada, e a correção de
+// coberturaDias/diagnostico por loja (antes vinha do primeiro cod visto, agora é o agregado real).
+describe("getProdutosPlanejamento — Fase 2 (tendência, demanda mascarada)", () => {
+  const hoje = new Date();
+  const confiavelDesde = new Date(hoje.getTime() - 30 * 86_400_000); // 30 dias de histórico, >= 14 (confiável)
+
+  function mockVendas(v30: number, v60: number, v90: number) {
+    saleGroupBy
+      .mockReset()
+      .mockResolvedValueOnce([{ produto: "Camisa Polo", _sum: { quantidade: v30 } }]) // janela 30d
+      .mockResolvedValueOnce([{ produto: "Camisa Polo", _sum: { quantidade: v60 } }]) // janela 60d
+      .mockResolvedValueOnce([{ produto: "Camisa Polo", _sum: { quantidade: v90 } }]) // janela 90d
+      .mockResolvedValueOnce([{ produto: "Camisa Polo", _min: { saleDate: confiavelDesde } }]); // histórico
+  }
+
+  it("tendência 'crescimento' quando vendasDias30 supera a janela anterior em mais de 20%", async () => {
+    getComparacaoCompleta.mockResolvedValue({ variantes: [baseVariante()], posicoes: {}, colunas: [], gradePorProdutoPosicao: {} });
+    mockVendas(30, 40, 50); // janela anterior (60-30) = 10; 30 > 10*1.2
+
+    const { getProdutosPlanejamento } = await import("../planejamento-estoque");
+    const [r] = await getProdutosPlanejamento();
+
+    expect(r.tendencia).toBe("crescimento");
+  });
+
+  it("tendência 'desaceleracao' quando vendasDias30 cai mais de 20% da janela anterior", async () => {
+    getComparacaoCompleta.mockResolvedValue({ variantes: [baseVariante()], posicoes: {}, colunas: [], gradePorProdutoPosicao: {} });
+    mockVendas(5, 55, 60); // janela anterior (60-30) = 50; 5 < 50*0.8
+
+    const { getProdutosPlanejamento } = await import("../planejamento-estoque");
+    const [r] = await getProdutosPlanejamento();
+
+    expect(r.tendencia).toBe("desaceleracao");
+  });
+
+  it("tendência 'estavel' quando a variação fica dentro de 20% pra cima ou pra baixo", async () => {
+    getComparacaoCompleta.mockResolvedValue({ variantes: [baseVariante()], posicoes: {}, colunas: [], gradePorProdutoPosicao: {} });
+    mockVendas(20, 40, 60); // janela anterior (60-20) = 20; 20 == 20 (dentro da faixa 0.8x-1.2x)
+
+    const { getProdutosPlanejamento } = await import("../planejamento-estoque");
+    const [r] = await getProdutosPlanejamento();
+
+    expect(r.tendencia).toBe("estavel");
+  });
+
+  it("tendência 'sem_dado' quando não confiável (menos de 14 dias de histórico), nunca força crescimento/desaceleração sem base", async () => {
+    getComparacaoCompleta.mockResolvedValue({ variantes: [baseVariante()], posicoes: {}, colunas: [], gradePorProdutoPosicao: {} });
+    const seteDiasAtras = new Date(hoje.getTime() - 7 * 86_400_000);
+    saleGroupBy
+      .mockReset()
+      .mockResolvedValueOnce([{ produto: "Camisa Polo", _sum: { quantidade: 100 } }])
+      .mockResolvedValueOnce([{ produto: "Camisa Polo", _sum: { quantidade: 10 } }])
+      .mockResolvedValueOnce([{ produto: "Camisa Polo", _sum: { quantidade: 10 } }])
+      .mockResolvedValueOnce([{ produto: "Camisa Polo", _min: { saleDate: seteDiasAtras } }]);
+
+    const { getProdutosPlanejamento } = await import("../planejamento-estoque");
+    const [r] = await getProdutosPlanejamento();
+
+    expect(r.tendencia).toBe("sem_dado");
+  });
+
+  it("demandaPossivelmenteMascarada é true em ruptura/cobertura_critica e NUNCA inventa um número de demanda — só o aviso booleano", async () => {
+    getComparacaoCompleta.mockResolvedValue({
+      variantes: [baseVariante({ porLoja: [{ storeId: "loja-a", storeCode: "A", storeName: "Loja A", tipoPosicao: "loja", estoqueAtual: 0, vendasDias30: 0, vendasDias60: 0, vendasDias90: 0, velocidadeDiaria: 0, coberturaDias: null, estoqueMinimo: null, diagnostico: "sem_dado" }] })],
+      posicoes: {}, colunas: [], gradePorProdutoPosicao: {},
+    });
+    mockVendas(0, 0, 10); // vendeu nos 90d, estoque zerado agora -> ruptura
+
+    const { getProdutosPlanejamento } = await import("../planejamento-estoque");
+    const [r] = await getProdutosPlanejamento();
+
+    expect(r.situacao).toBe("ruptura");
+    expect(r.demandaPossivelmenteMascarada).toBe(true);
+    expect(typeof r.demandaPossivelmenteMascarada).toBe("boolean"); // nunca um número fabricado
+  });
+
+  it("demandaPossivelmenteMascarada é false quando a situação é equilibrada/excesso (estoque não é o fator limitante)", async () => {
+    getComparacaoCompleta.mockResolvedValue({
+      variantes: [baseVariante({ porLoja: [{ storeId: "loja-a", storeCode: "A", storeName: "Loja A", tipoPosicao: "loja", estoqueAtual: 1000, vendasDias30: 0, vendasDias60: 0, vendasDias90: 0, velocidadeDiaria: 0, coberturaDias: null, estoqueMinimo: null, diagnostico: "sem_dado" }] })],
+      posicoes: {}, colunas: [], gradePorProdutoPosicao: {},
+    });
+    mockVendas(10, 20, 30);
+
+    const { getProdutosPlanejamento } = await import("../planejamento-estoque");
+    const [r] = await getProdutosPlanejamento();
+
+    expect(r.situacao).toBe("cobertura_excessiva");
+    expect(r.demandaPossivelmenteMascarada).toBe(false);
+  });
+});
+
+describe("getProdutoPlanejamentoDetalhe — Fase 2: correção da cobertura/diagnóstico por loja", () => {
+  it("agrega vendasDias30/90 de TODOS os cods do produto por loja antes de calcular cobertura/diagnóstico (não usa mais o valor do primeiro cod visto)", async () => {
+    // Produto com 2 cods na MESMA loja: o 1º tem vendasDias90=0 (pareceria ruptura isolado), o
+    // 2º tem vendasDias90 alto e bastante estoque. Se o bug antigo (pegar só o 1º cod) ainda
+    // existisse, o diagnóstico da loja sairia da leitura isolada do 1º cod; agregado correto, o
+    // estoque do 2º cod garante cobertura saudável.
+    getComparacaoCompleta.mockResolvedValue({
+      variantes: [
+        baseVariante({ cod: "COD-1", cor: "Azul", porLoja: [{ storeId: "loja-a", storeCode: "A", storeName: "Loja A", tipoPosicao: "loja", estoqueAtual: 0, vendasDias30: 0, vendasDias60: 0, vendasDias90: 0, velocidadeDiaria: 0, coberturaDias: null, estoqueMinimo: null, diagnostico: "sem_dado" }] }),
+        baseVariante({ cod: "COD-2", cor: "Vermelho", porLoja: [{ storeId: "loja-a", storeCode: "A", storeName: "Loja A", tipoPosicao: "loja", estoqueAtual: 900, vendasDias30: 3, vendasDias60: 6, vendasDias90: 9, velocidadeDiaria: 0.1, coberturaDias: 9000, estoqueMinimo: null, diagnostico: "cobertura_excessiva" }] }),
+      ],
+      posicoes: {}, colunas: [], gradePorProdutoPosicao: {},
+    });
+
+    const { getProdutoPlanejamentoDetalhe } = await import("../planejamento-estoque");
+    const detalhe = await getProdutoPlanejamentoDetalhe("Camisa Polo");
+
+    const loja = detalhe!.porLoja.find((l) => l.posicaoId === "loja-a")!;
+    expect(loja.estoqueAtual).toBe(900); // 0 + 900, agregado
+    expect(loja.vendasDias30).toBe(3); // 0 + 3, agregado
+    expect(loja.vendasDias90).toBe(9); // 0 + 9, agregado
+    expect(loja.diagnostico).toBe("cobertura_excessiva"); // reflete o AGREGADO, não o 1º cod (que seria "sem_dado")
+  });
+});

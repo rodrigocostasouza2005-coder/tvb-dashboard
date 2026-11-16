@@ -76,6 +76,54 @@ export async function classificarProdutoAction(formData: FormData) {
   revalidatePath("/dashboard/mapa-compras");
 }
 
+// Fase 2 do Planejamento de Estoque (2026-11-16) — resolve o gargalo real encontrado na Fase 1
+// (354 de 360 produtos sem classificação): a fila de revisão é por COD (SKU individual, cor+
+// tamanho), então classificar 1 produto com várias cores/tamanhos exigia 1 submit por SKU. Essa
+// ação classifica TODOS os cods de um produto de uma vez, com a MESMA classificação escolhida —
+// continua 100% manual (quem decide tipoCompra/status é sempre uma pessoa), só deixa de exigir
+// repetir o clique por SKU. Não muda a chave do schema (ClassificacaoProduto continua por cod)
+// nem o critério de qualificação — só reduz o atrito operacional de aplicar a mesma decisão a
+// todas as variantes de um produto.
+export async function classificarProdutoEmLoteAction(formData: FormData) {
+  const user = await requireGestao();
+
+  const cods = formData.getAll("cod").map((v) => String(v).trim()).filter(Boolean);
+  const produto = String(formData.get("produto") ?? "").trim();
+  const grupo = String(formData.get("grupo") ?? "").trim();
+  if (cods.length === 0 || !produto || !grupo) return;
+
+  const tipoCompra = String(formData.get("tipoCompra") ?? "") as TipoCompraProduto;
+  const statusComercial = String(formData.get("statusComercial") ?? "") as StatusComercialProduto;
+  const possibilidadeReposicao = String(formData.get("possibilidadeReposicao") ?? "") as PossibilidadeReposicao;
+  if (
+    !Object.values(TipoCompraProduto).includes(tipoCompra) ||
+    !Object.values(StatusComercialProduto).includes(statusComercial) ||
+    !Object.values(PossibilidadeReposicao).includes(possibilidadeReposicao)
+  ) {
+    return;
+  }
+
+  const colecao = (formData.get("colecao") as string) || null;
+  const dataLancamento = parseDate(formData.get("dataLancamento"));
+  const dataEncerramentoPrevista = parseDate(formData.get("dataEncerramentoPrevista"));
+  const orcamentoDrop = parseFloatOrNull(formData.get("orcamentoDrop"));
+  const observacoes = (formData.get("observacoes") as string) || null;
+
+  // Sequencial, não Promise.all: cada chamada já faz leitura+escrita+histórico (ver
+  // upsertClassificacaoProduto) — paralelizar N upserts na mesma transação implícita de
+  // histórico arriscaria condição de corrida sem ganho real (N é sempre pequeno, cods de 1
+  // produto só).
+  for (const cod of cods) {
+    await upsertClassificacaoProduto(
+      { cod, produto, grupo, colecao, tipoCompra, statusComercial, possibilidadeReposicao, dataLancamento, dataEncerramentoPrevista, orcamentoDrop, observacoes },
+      user.email
+    );
+  }
+
+  revalidatePath("/dashboard/mapa-compras");
+  revalidatePath("/dashboard/planejamento-estoque");
+}
+
 export async function setParametrosBestSellerGrupoAction(formData: FormData) {
   await requireGestao();
 

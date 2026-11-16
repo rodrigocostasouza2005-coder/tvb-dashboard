@@ -1,5 +1,5 @@
 import type { ProdutoPlanejamento } from "@/lib/metrics";
-import { formatNumber, SITUACAO_LABEL, SITUACAO_COR, CLASSIFICACAO_LABEL } from "./format";
+import { formatNumber, SITUACAO_LABEL, SITUACAO_COR, CLASSIFICACAO_LABEL, TENDENCIA_LABEL, TENDENCIA_COR } from "./format";
 
 // Server component — abrir um produto navega pra ?produto=<nome> (mesma página, preservando os
 // outros filtros via querystring), sem precisar de fetch client nem rota de API nova.
@@ -42,6 +42,7 @@ export function ProdutosTable({
             <th className="px-4 py-2 font-medium text-right">Vendas 30d</th>
             <th className="px-4 py-2 font-medium text-right">Vendas 60d</th>
             <th className="px-4 py-2 font-medium text-right">Vendas 90d</th>
+            <th className="px-4 py-2 font-medium">Tendência</th>
             <th className="px-4 py-2 font-medium text-right">Vel. diária</th>
             <th className="px-4 py-2 font-medium text-right">Cobertura</th>
             <th className="px-4 py-2 font-medium">Situação</th>
@@ -69,13 +70,24 @@ export function ProdutosTable({
                 <td className="px-4 py-2 tabular-nums text-right text-[var(--text-secondary)]">{formatNumber(r.vendasDias30)}</td>
                 <td className="px-4 py-2 tabular-nums text-right text-[var(--text-secondary)]">{formatNumber(r.vendasDias60)}</td>
                 <td className="px-4 py-2 tabular-nums text-right text-[var(--text-secondary)]">{formatNumber(r.vendasDias90)}</td>
+                <td className={`px-4 py-2 font-medium ${TENDENCIA_COR[r.tendencia]}`}>{TENDENCIA_LABEL[r.tendencia]}</td>
                 <td className="px-4 py-2 tabular-nums text-right text-[var(--text-secondary)]">
                   {r.confiavel ? r.velocidadeDiaria.toFixed(2) : "—"}
                 </td>
                 <td className="px-4 py-2 tabular-nums text-right text-[var(--text-secondary)]">
                   {r.coberturaDias != null ? `${r.coberturaDias.toFixed(0)}d` : "Dados insuficientes"}
                 </td>
-                <td className={`px-4 py-2 font-medium ${SITUACAO_COR[r.situacao]}`}>{SITUACAO_LABEL[r.situacao]}</td>
+                <td className={`px-4 py-2 font-medium ${SITUACAO_COR[r.situacao]}`}>
+                  {SITUACAO_LABEL[r.situacao]}
+                  {r.demandaPossivelmenteMascarada && (
+                    <span
+                      className="ml-1 text-[var(--text-muted)]"
+                      title="Estoque crítico/zerado — a venda observada pode estar subestimando a demanda real, não necessariamente falta de interesse."
+                    >
+                      ⚠
+                    </span>
+                  )}
+                </td>
                 <td className="px-4 py-2 tabular-nums text-right text-[var(--text-secondary)]">
                   {r.quantidadeEmTransito > 0 ? (
                     <span title="Sem data de chegada confiável — ver detalhe do produto">

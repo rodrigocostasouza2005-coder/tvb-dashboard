@@ -13,3 +13,4 @@ export * from "./distribuicao-estoque";
 export * from "./cac";
 export * from "./black-friday";
 export * from "./planejamento-estoque";
+export * from "./planejamento-grade";
