@@ -673,6 +673,12 @@ export function calcularMovimentacoes(
   //   C) potencial online comprovado (o SKU vendeu no site nos últimos 90 dias) — agora OBRIGATÓRIO.
   // Recolhe SOMENTE se C E (A OU B). C sozinho (sem sinal local) também não recolhe: a loja ainda
   // precisa da peça, só porque o site vende não significa que aqui sobra.
+  //
+  // Condição D adicionada em 2026-11-16 (pedido explícito do Rodrigo, SOMA às A/B/C acima, não
+  // substitui nenhuma): o site precisa ter vendido MAIS unidades desse SKU (mesmo grupo+produto+
+  // tamanho) do que a própria loja nos mesmos 90 dias — não basta o site ter vendido alguma coisa
+  // (C), a demanda ali precisa ser comprovadamente maior que na loja de origem. Recolhe SOMENTE se
+  // C E D E (A OU B).
   // Lojas cuja candidatura a recolhimento já foi avaliada neste loop — independente de qual
   // posicaoId o registrarManter resultante usou (o caso de CD/Site zerado registra por cdSite.
   // storeId, não pela loja, pra não duplicar a mesma necessidade uma vez por loja candidata — ver
@@ -689,6 +695,9 @@ export function calcularMovimentacoes(
       const demandaLocalBaixa = v.vendasDias90 <= DEMANDA_LOCAL_BAIXA_90D;
       const gradeQuebrada = grade ? grade.tamanhosComEstoque < grade.tamanhosComVenda : false;
       const potencialOnline = contexto.vendasSite90 > 0;
+      // Condição D (2026-11-16): site precisa vender MAIS desse SKU do que a própria loja, não só
+      // "alguma coisa" — ver comentário da regra no topo do bloco Passo 3.
+      const saiuMaisNoSiteQueNaLoja = contexto.vendasSite90 > v.vendasDias90;
 
       // Best Seller em reposição recorrente não é excesso só por ter estoque alto / reposição
       // recente — reaproveita a classificação que JÁ existe (ClassificacaoProduto), em vez de uma
@@ -737,7 +746,7 @@ export function calcularMovimentacoes(
       }
 
       const sinalLocal = demandaLocalBaixa || gradeQuebrada;
-      if (!potencialOnline || !sinalLocal) {
+      if (!potencialOnline || !sinalLocal || !saiuMaisNoSiteQueNaLoja) {
         const motivo: string[] = [];
         if (!demandaLocalBaixa) {
           motivo.push(
@@ -749,6 +758,11 @@ export function calcularMovimentacoes(
             `Sinal local presente (${
               [demandaLocalBaixa && "demanda baixa", gradeQuebrada && "grade quebrada"].filter(Boolean).join(" + ")
             }) em ${v.storeName}, mas sem venda no site nos últimos 90 dias — vender bem ou mal na loja física não basta: só recolhe com demanda real comprovada no ecommerce.`
+          );
+        }
+        if (potencialOnline && sinalLocal && !saiuMaisNoSiteQueNaLoja) {
+          motivo.push(
+            `Sinal local presente em ${v.storeName}, e o site até vendeu o SKU (${contexto.vendasSite90} un. em 90 dias), mas não mais do que a própria loja (${v.vendasDias90} un. em 90 dias) — recolher só se o site comprovadamente vende mais que a loja de origem.`
           );
         }
         if (motivo.length === 0) {
@@ -837,7 +851,7 @@ export function calcularMovimentacoes(
       }
       if (potencialOnline) {
         justificativa.push(
-          `Potencial online comprovado: ${contexto.vendasSite90} un. desse SKU vendidas pelo site nos últimos 90 dias (venda real, não estimativa) — no CD/Site a peça fica exposta à demanda nacional em vez de uma vitrine só.`
+          `Potencial online comprovado: ${contexto.vendasSite90} un. desse SKU vendidas pelo site nos últimos 90 dias (venda real, não estimativa), mais do que as ${v.vendasDias90} un. vendidas em ${v.storeName} no mesmo período — no CD/Site a peça fica exposta à demanda nacional em vez de uma vitrine onde vende menos.`
         );
       }
       justificativa.push(
