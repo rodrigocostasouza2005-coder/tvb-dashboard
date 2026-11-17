@@ -4,7 +4,12 @@
  * (src/app/dashboard/planejamento-estoque/page.tsx) chama, contra o banco real, pra confirmar
  * que a camada nova não quebra com dado de produção e que as regras de negócio desta fase
  * (nunca esvaziar origem abaixo de mínimo+margem, nunca contar produção/trânsito como disponível,
- * proteção de Drop em ciclo ativo) se comportam como esperado também fora do teste sintético.
+ * proteção de Drop em ciclo ativo, reserva de continuidade de Best Seller, visibilidade de
+ * produto não classificado) se comportam como esperado também fora do teste sintético.
+ *
+ * Atualizado (Rodrigo, 2026-11-17) pra também validar o AJUSTE de regra desta revisão: Drop ativo
+ * bloqueando excesso (não só oportunidades), reserva de continuidade de Best Seller com leadTime
+ * real, e produto NAO_CLASSIFICADO/MISTO aparecendo normalmente com `classificacao` exposta.
  *
  * NÃO escreve nada — getExcessosEDistribuicao/getProdutoExcessoDistribuicao/
  * getDecisoesMovimentacaoPorStatus são 100% leitura (ver planejamento-distribuicao.ts).
@@ -28,6 +33,8 @@ async function main() {
   const comRupturaEExcesso = resultado.filter((r) => r.rupturaComExcessoDisponivel).length;
   const comOportunidades = resultado.filter((r) => r.oportunidades.length > 0).length;
   const comDropProtegido = resultado.filter((r) => r.dropsCicloAtivoProtegidos > 0).length;
+  const comExcessoDropProtegido = resultado.filter((r) => r.excessoDropProtegido > 0).length;
+  const comReservaBestSeller = resultado.filter((r) => r.reservaContinuidadeBestSeller > 0).length;
 
   console.log(`  com excesso no CD/Site: ${comExcessoCD}`);
   console.log(`  com excesso em loja: ${comExcessoLojas}`);
@@ -35,6 +42,43 @@ async function main() {
   console.log(`  ruptura + excesso disponível no mesmo produto (sinal-chave): ${comRupturaEExcesso}`);
   console.log(`  com oportunidade de transferência: ${comOportunidades}`);
   console.log(`  com oportunidade suprimida por Drop em ciclo ativo: ${comDropProtegido}`);
+  console.log(`  com excesso retido por Drop em ciclo ativo (ajuste desta revisão): ${comExcessoDropProtegido}`);
+  console.log(`  com reserva de continuidade de Best Seller (ajuste desta revisão): ${comReservaBestSeller}`);
+
+  const porClassificacao = new Map<string, number>();
+  for (const r of resultado) porClassificacao.set(r.classificacao, (porClassificacao.get(r.classificacao) ?? 0) + 1);
+  console.log(`  por classificação: ${JSON.stringify(Object.fromEntries(porClassificacao))}`);
+
+  // Checagem de honestidade desta revisão: produto NAO_CLASSIFICADO/MISTO nunca deveria ter
+  // excessoDropProtegido/reservaContinuidadeBestSeller > 0 — essas réguas são indexadas por
+  // tipoCompra === DROP/BEST_SELLER, nunca deveriam "vazar" pra quem não tem essa classificação.
+  const vazamento = resultado.filter(
+    (r) => (r.classificacao === "NAO_CLASSIFICADO" || r.classificacao === "MISTO") && (r.excessoDropProtegido > 0 || r.reservaContinuidadeBestSeller > 0)
+  );
+  console.log(`Produtos NAO_CLASSIFICADO/MISTO com retenção indevida de Drop/Best Seller: ${vazamento.length} (esperado: 0)`);
+  for (const v of vazamento) console.log(`  ALERTA: ${v.produto} (${v.classificacao}) excessoDropProtegido=${v.excessoDropProtegido} reservaContinuidadeBestSeller=${v.reservaContinuidadeBestSeller}`);
+
+  const naoClassificado = resultado.find((r) => r.classificacao === "NAO_CLASSIFICADO");
+  if (naoClassificado) {
+    console.log("\nExemplo de produto NAO_CLASSIFICADO (prova de que continua visível, não escondido):");
+    console.log(JSON.stringify({ produto: naoClassificado.produto, excessoCD: naoClassificado.excessoCD, excessoLojas: naoClassificado.excessoLojas, rupturaLojas: naoClassificado.rupturaLojas }, null, 2));
+  } else {
+    console.log("\nNenhum produto NAO_CLASSIFICADO com sinal nesta passada (não é erro, só não havia exemplo pra mostrar).");
+  }
+
+  const bestSellerComReserva = resultado.find((r) => r.classificacao === "BEST_SELLER" && r.reservaContinuidadeBestSeller > 0);
+  if (bestSellerComReserva) {
+    console.log("\nExemplo de Best Seller com reserva de continuidade aplicada (prova de que NÃO é imunidade: excesso real pode ficar > 0 mesmo com reserva):");
+    console.log(
+      JSON.stringify(
+        { produto: bestSellerComReserva.produto, excessoCD: bestSellerComReserva.excessoCD, excessoLojas: bestSellerComReserva.excessoLojas, reservaContinuidadeBestSeller: bestSellerComReserva.reservaContinuidadeBestSeller },
+        null,
+        2
+      )
+    );
+  } else {
+    console.log("\nNenhum Best Seller com reserva de continuidade aplicada nesta passada (provável: nenhum grupo Best Seller tem leadTimeDias configurado em CoberturaMeta ainda — reserva fica 0, comportamento idêntico ao de antes).");
+  }
 
   // Checagem de regra: nenhuma oportunidade deveria deixar a origem com estoqueOrigemDepois
   // negativo (o motor já garante isso — aqui é só uma prova adicional contra dado real, nunca
@@ -71,6 +115,7 @@ async function main() {
         {
           produto: exemplo.produto,
           grupo: exemplo.grupo,
+          classificacao: exemplo.classificacao,
           excessoCD: exemplo.excessoCD,
           estoqueCDPermanece: exemplo.estoqueCDPermanece,
           excessoLojas: exemplo.excessoLojas,
@@ -78,6 +123,8 @@ async function main() {
           rupturaComExcessoDisponivel: exemplo.rupturaComExcessoDisponivel,
           oportunidades: exemplo.oportunidades.length,
           dropsCicloAtivoProtegidos: exemplo.dropsCicloAtivoProtegidos,
+          excessoDropProtegido: exemplo.excessoDropProtegido,
+          reservaContinuidadeBestSeller: exemplo.reservaContinuidadeBestSeller,
         },
         null,
         2
