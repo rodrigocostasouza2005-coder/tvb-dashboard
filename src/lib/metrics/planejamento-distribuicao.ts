@@ -43,16 +43,22 @@ import { classificarAgregado, type ClassificacaoAgregada } from "./planejamento-
 //
 // Em vez de alterar distribuicao-estoque.ts (fora do regime de escrita desta entrega, e o motor
 // seria usado por mais consumidores que não pedem essa régua), a proteção é aplicada AQUI, como um
-// FILTRO sobre a saída já calculada: uma oportunidade de transferência cujo SKU de origem é DROP,
+// FILTRO sobre a saída já calculada: uma oportunidade de transferência cujo SKU de origem é DROP
 // ainda dentro do ciclo (dataEncerramentoPrevista no futuro ou não preenchida, status comercial não
-// encerrado/descontinuado) E que teve venda real nos últimos 90 dias (vendasOrigem90 > 0 — ou seja,
-// "cobertura_excessiva" por estoque alto relativo à própria venda, não "estoque_parado" morto) é
-// suprimida da lista de oportunidades exposta por este módulo (nunca da tabela de Distribuição de
-// Estoque, que continua mostrando tudo — essa supressão é só desta visão por produto). Documentado
-// explicitamente como decisão de produto desta fase — precisa de validação do Rodrigo se a régua
-// deveria valer também pra Best Seller em excesso (hoje Best Seller nunca aparece como origem de
-// excesso vindo do motor porque reposição recorrente mantém a cobertura normal na prática, mas não
-// há garantia formal disso).
+// encerrado/descontinuado) é suprimida da lista de oportunidades exposta por este módulo (nunca da
+// tabela de Distribuição de Estoque, que continua mostrando tudo — essa supressão é só desta visão
+// por produto).
+//
+// CORREÇÃO (Rodrigo, 2026-11-17, segunda revisão): a régua original desta fase só protegia o Drop
+// ativo quando havia venda real nos últimos 90 dias (vendasOrigem90 > 0) — a lógica era "excesso
+// aparente por ainda não ter girado o suficiente, não é sobra real". Mas a regra de negócio
+// aprovada pelo Rodrigo é mais simples e mais ampla: Drop ativo NUNCA é classificado como excesso
+// nem gera recomendação de retirada/transferência que prejudique sua exposição, INDEPENDENTE de
+// ter vendido ou não nos últimos 90 dias — mesmo um Drop ativo sem venda recente ainda está em
+// vitrine/exposição, e esvaziá-lo prejudicaria essa exposição. A condição de venda foi removida
+// (ver `isDropAtivo` abaixo e o bloqueio de oportunidades mais adiante) — só o CICLO (ativo vs.
+// encerrado) decide a proteção agora. Drop encerrado continua sem nenhuma proteção especial,
+// avaliado normalmente por estoque/venda/ciclo, como sempre.
 function dropEmCicloAtivo(meta: { statusComercial: StatusComercialProduto; dataEncerramentoPrevista: Date | null }): boolean {
   if (meta.statusComercial === "DESCONTINUADO" || meta.statusComercial === "EM_ENCERRAMENTO") return false;
   if (meta.dataEncerramentoPrevista && meta.dataEncerramentoPrevista.getTime() < Date.now()) return false;
@@ -65,10 +71,11 @@ function dropEmCicloAtivo(meta: { statusComercial: StatusComercialProduto; dataE
 // ---------------------------------------------------------------------------
 // 1) Drop: a proteção de ciclo ativo (dropEmCicloAtivo acima) até agora só bloqueava a lista de
 //    OPORTUNIDADES de transferência (Passo 2), mas não o próprio CONTADOR de excesso (Passo 1) —
-//    inconsistência corrigida aqui: um Drop em ciclo ativo com venda real (mesma condição
-//    l.vendasDias90 > 0 / m.vendasOrigem90 > 0, mesmo significado por posição) agora também não
-//    conta pra excessoCD/excessoLojas. Drop encerrado (dropEmCicloAtivo === false) continua sem
-//    nenhuma proteção especial — avaliado normalmente, como pedido.
+//    inconsistência corrigida aqui: um Drop em ciclo ativo agora também não conta pra
+//    excessoCD/excessoLojas. Drop encerrado (dropEmCicloAtivo === false) continua sem nenhuma
+//    proteção especial — avaliado normalmente, como pedido. (Ver correção adicional de
+//    2026-11-17 acima do dropEmCicloAtivo: a condição de venda real foi removida — todo Drop
+//    ativo é protegido, com ou sem venda nos últimos 90 dias.)
 // 2) Best Seller: não é mais imunidade absoluta, é uma RESERVA DE CONTINUIDADE. Usa o leadTimeDias
 //    REAL configurado por grupo (CoberturaMeta via getParametrosBestSellerPorGrupo, já em produção
 //    — nunca um valor inventado) × a velocidade de venda da própria posição (sem risco de dupla
@@ -88,9 +95,11 @@ function dropEmCicloAtivo(meta: { statusComercial: StatusComercialProduto; dataE
 type RetencaoPorRegra = { disponivelParaExcesso: number; retidoDrop: number; retidoBestSeller: number };
 function aplicarRetencoes(
   disponivel: number,
-  opts: { isDropAtivoComVenda: boolean; leadTimeDiasGrupo: number | null; velocidadeDiaria: number }
+  opts: { isDropAtivo: boolean; leadTimeDiasGrupo: number | null; velocidadeDiaria: number }
 ): RetencaoPorRegra {
-  if (opts.isDropAtivoComVenda) {
+  // Drop ativo: retém 100% do disponível, independente de venda nos últimos 90 dias (ver
+  // correção de 2026-11-17 no cabeçalho do arquivo).
+  if (opts.isDropAtivo) {
     return { disponivelParaExcesso: 0, retidoDrop: disponivel, retidoBestSeller: 0 };
   }
   if (opts.leadTimeDiasGrupo != null) {
@@ -137,7 +146,7 @@ export type ProdutoExcessoDistribuicao = {
   // acima — exposto pra nunca esconder silenciosamente que algo foi filtrado.
   dropsCicloAtivoProtegidos: number;
   // Transparência (Passo 1): quanto de disponível (que contaria como excessoCD/excessoLojas) foi
-  // retido por ser Drop em ciclo ativo com venda real.
+  // retido por ser Drop em ciclo ativo — com ou sem venda nos últimos 90 dias.
   excessoDropProtegido: number;
   // Transparência (Passo 1): quanto de disponível foi retido como reserva de continuidade de
   // Best Seller (lead time real × velocidade de venda) — 0 quando o grupo não tem leadTimeDias
@@ -217,7 +226,7 @@ export async function getExcessosEDistribuicao(filtro: ComparacaoFiltro = {}): P
       const origem = construirOrigem(l);
       const permanece = l.estoqueAtual - origem.disponivel;
       const { disponivelParaExcesso, retidoDrop, retidoBestSeller } = aplicarRetencoes(origem.disponivel, {
-        isDropAtivoComVenda: isDropAtivo && l.vendasDias90 > 0,
+        isDropAtivo,
         leadTimeDiasGrupo,
         velocidadeDiaria: l.velocidadeDiaria,
       });
@@ -240,10 +249,12 @@ export async function getExcessosEDistribuicao(filtro: ComparacaoFiltro = {}): P
   }
 
   // Passo 2: oportunidades de transferência — do motor já calculado (getMovimentacoesRecomendadas),
-  // só agrupadas por produto e com a régua de Drop em ciclo ativo aplicada (ver cabeçalho).
+  // só agrupadas por produto e com a régua de Drop em ciclo ativo aplicada (ver cabeçalho). Sem
+  // condição de venda (correção de 2026-11-17) — todo Drop ativo é protegido, com ou sem venda
+  // recente, pra não prejudicar sua exposição.
   for (const m of mov.movimentacoes) {
     const a = acc(m.produto, m.grupo);
-    const bloqueiaPorDropAtivo = dropAtivoPorCod.get(m.cod) === true && m.vendasOrigem90 > 0;
+    const bloqueiaPorDropAtivo = dropAtivoPorCod.get(m.cod) === true;
     if (bloqueiaPorDropAtivo) {
       a.dropsProtegidos += 1;
       continue;
