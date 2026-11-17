@@ -315,12 +315,16 @@ export async function getLojaPrincipalGlobalPorCliente(clientesNomes: string[]):
       clienteNome: { in: clientesNomes },
       AND: [await canalWhere("b2c")],
     },
-    select: { clienteNome: true, quantidade: true, saleDate: true, store: { select: { name: true, displayGroup: true } } },
+    select: { clienteNome: true, quantidade: true, saleDate: true, store: { select: { name: true, code: true, displayGroup: true } } },
   });
   const porCliente = new Map<string, { porLoja: Map<string, number>; ultimaDataPorLoja: Map<string, Date> }>();
   for (const r of rows) {
     const norm = (r.clienteNome as string).trim().toUpperCase();
-    const loja = r.store.displayGroup ?? r.store.name;
+    // Até 2026-11-17 somava CD+Atacado numa "loja" só via displayGroup — revertido a pedido do
+    // Rodrigo (mesma convenção de groupStoresForFilter/core.ts). Precisa bater com o mesmo rótulo
+    // usado em lojaAtualDisplay (getSugestoesDeContato/getFollowUpPosCompra), que compara com o
+    // resultado desta função.
+    const loja = r.store.code === "CD" ? "TVB Site" : r.store.name;
     const cur = porCliente.get(norm) ?? { porLoja: new Map(), ultimaDataPorLoja: new Map() };
     cur.porLoja.set(loja, (cur.porLoja.get(loja) ?? 0) + r.quantidade);
     const last = cur.ultimaDataPorLoja.get(loja);
@@ -523,7 +527,9 @@ export async function getSugestoesDeContato(filters: DashboardFilters, vendedor?
   // pra vendedores das duas ao mesmo tempo (pedido do Rodrigo em 2026-10-15). Sem sinal nenhum de
   // venda em loja física (ex: aniversariante achado só pelo cadastro) mantém, não derruba à toa.
   const nomeLojaAtual = (await getRawStores()).find((st) => st.id === storeIdUnico);
-  const lojaAtualDisplay = nomeLojaAtual ? nomeLojaAtual.displayGroup ?? nomeLojaAtual.name : null;
+  // Mesma convenção de getLojaPrincipalGlobalPorCliente acima (código "CD" vira "TVB Site",
+  // nunca displayGroup) — as duas comparam o mesmo rótulo, precisam estar sempre em sincronia.
+  const lojaAtualDisplay = nomeLojaAtual ? (nomeLojaAtual.code === "CD" ? "TVB Site" : nomeLojaAtual.name) : null;
   const lojaGlobalPorCliente = lojaAtualDisplay
     ? await getLojaPrincipalGlobalPorCliente(comTamanho.map((s) => s.cliente))
     : new Map<string, string>();
@@ -587,7 +593,7 @@ export async function getFollowUpPosCompra(filters: DashboardFilters, vendedor?:
       storeId: true,
       dapicVendaId: true,
       codigo: true,
-      store: { select: { name: true, displayGroup: true } },
+      store: { select: { name: true, code: true, displayGroup: true } },
     },
   });
   if (rows.length === 0) return [];
@@ -599,7 +605,9 @@ export async function getFollowUpPosCompra(filters: DashboardFilters, vendedor?:
   for (const r of rows) {
     const nome = r.clienteNome as string;
     const norm = nome.trim().toUpperCase();
-    const loja = r.store.displayGroup ?? r.store.name;
+    // Até 2026-11-17 somava CD+Atacado numa "loja" só via displayGroup — revertido a pedido do
+    // Rodrigo, mesma convenção usada no resto deste arquivo.
+    const loja = r.store.code === "CD" ? "TVB Site" : r.store.name;
     const cur =
       porCliente.get(norm) ??
       { nome, produtos: new Set<string>(), data: r.saleDate, loja, storeId: r.storeId, dapicVendaId: r.dapicVendaId, codigo: r.codigo };
@@ -654,7 +662,9 @@ export async function getFollowUpPosCompra(filters: DashboardFilters, vendedor?:
   // diferente — pedido explícito do Rodrigo em 2026-10-15 ("mesmo tendo venda registrada" ali
   // não conta, só a loja principal manda follow-up).
   const nomeLojaAtual = (await getRawStores()).find((st) => st.id === storeIdUnico);
-  const lojaAtualDisplay = nomeLojaAtual ? nomeLojaAtual.displayGroup ?? nomeLojaAtual.name : null;
+  // Mesma convenção de getLojaPrincipalGlobalPorCliente acima (código "CD" vira "TVB Site",
+  // nunca displayGroup) — as duas comparam o mesmo rótulo, precisam estar sempre em sincronia.
+  const lojaAtualDisplay = nomeLojaAtual ? (nomeLojaAtual.code === "CD" ? "TVB Site" : nomeLojaAtual.name) : null;
   const lojaGlobalPorCliente = lojaAtualDisplay
     ? await getLojaPrincipalGlobalPorCliente(base.map((f) => f.cliente))
     : new Map<string, string>();

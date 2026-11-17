@@ -553,7 +553,7 @@ async function computeClienteSegmentacao(
     where,
     select: {
       clienteNome: true, saleDate: true, dapicVendaId: true, storeId: true, valorTotalLiquido: true, quantidade: true, grupo: true,
-      store: { select: { name: true, displayGroup: true } },
+      store: { select: { name: true, code: true, displayGroup: true } },
     },
   });
 
@@ -566,7 +566,9 @@ async function computeClienteSegmentacao(
     cur.pedidos.add(`${r.storeId}::${r.dapicVendaId}`);
     cur.receita += r.valorTotalLiquido;
     cur.porGrupo.set(r.grupo, (cur.porGrupo.get(r.grupo) ?? 0) + r.quantidade);
-    const loja = r.store.displayGroup ?? r.store.name;
+    // Até 2026-11-17 somava CD+Atacado numa linha só via displayGroup — revertido a pedido do
+    // Rodrigo (mesma mudança de groupStoresForFilter/core.ts), Site e Atacado agora separados.
+    const loja = r.store.code === "CD" ? "TVB Site" : r.store.name;
     cur.porLoja.set(loja, (cur.porLoja.get(loja) ?? 0) + r.quantidade);
     byCliente.set(norm, cur);
   }
@@ -739,12 +741,15 @@ export async function getTamanhoEstoqueParaClientes(
     tamanhoPorClienteProduto.set(key, m);
   }
 
-  // Resolve "loja principal" (nome de exibição, pode agrupar mais de 1 loja física) de volta
-  // pros storeIds reais — StockSnapshot guarda por loja física, não por displayGroup.
+  // Resolve "loja principal" (nome de exibição) de volta pro storeId real — StockSnapshot guarda
+  // por loja física. Até 2026-11-17 CD+Atacado podiam cair no mesmo nome de exibição
+  // (displayGroup) e por isso resolviam pros 2 storeIds juntos; revertido a pedido do Rodrigo —
+  // precisa usar a MESMA convenção do lado que produz esse nome (porLoja acima, "TVB Site" só
+  // pro CD), senão a busca por nome não bate mais com o que foi gravado como "loja principal".
   const stores = await prisma.store.findMany();
   const storeIdsPorNomeExibicao = new Map<string, string[]>();
   for (const s of stores) {
-    const nome = s.displayGroup ?? s.name;
+    const nome = s.code === "CD" ? "TVB Site" : s.name;
     const arr = storeIdsPorNomeExibicao.get(nome) ?? [];
     arr.push(s.id);
     storeIdsPorNomeExibicao.set(nome, arr);
@@ -1373,7 +1378,9 @@ export async function getClienteFicha(
     const tamanho = s.tamanho && s.tamanho.trim() ? s.tamanho : "—";
     porTamanho.set(tamanho, (porTamanho.get(tamanho) ?? 0) + s.quantidade);
 
-    const loja = s.store.displayGroup ?? s.store.name;
+    // Até 2026-11-17 somava CD+Atacado numa "loja" só via displayGroup — revertido a pedido do
+    // Rodrigo, Site e Atacado agora separados (mesma convenção de groupStoresForFilter/core.ts).
+    const loja = s.store.code === "CD" ? "TVB Site" : s.store.name;
     porLoja.set(loja, (porLoja.get(loja) ?? 0) + s.quantidade);
     storeIdToLoja.set(s.storeId, loja);
     pedidoKeyToLoja.set(pedidoKey, loja);
