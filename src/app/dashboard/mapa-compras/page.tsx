@@ -9,6 +9,7 @@ import {
   getRecomendacoesDrop,
   getFilaRevisaoClassificacao,
   getTamanhoBreakdown,
+  getAvaliacaoDecisoesPorProdutoGrupoPeriodo,
 } from "@/lib/metrics";
 import { StatusComercialProduto } from "@prisma/client";
 import { getGrupoRestriction } from "@/lib/permissions";
@@ -19,6 +20,7 @@ import { updateCrescimentoAction } from "./actions";
 import { InteligenciaFiltros } from "./inteligencia/filtros";
 import { ConsolidadoView } from "./inteligencia/consolidado-view";
 import { AlertasView } from "./inteligencia/alertas-view";
+import { AvaliacaoDecisoesView } from "./avaliacao/avaliacao-view";
 import { particionarMatrizCompras } from "./matriz-helpers";
 
 export default async function MapaComprasPage({ searchParams }: { searchParams: Promise<RawSearchParams> }) {
@@ -46,7 +48,7 @@ export default async function MapaComprasPage({ searchParams }: { searchParams: 
   // edita (actions.ts já trava isso no servidor; aqui só escondemos o controle de quem não pode).
   const canEdit = user.role === "ADMIN" || user.role === "GESTAO";
 
-  const [grupos, crescimentoPct, classificacaoPorProduto, bsRows, dropRows, filaRevisao, filtroOpcoes, visao] = await Promise.all([
+  const [grupos, crescimentoPct, classificacaoPorProduto, bsRows, dropRows, filaRevisao, filtroOpcoes, visao, avaliacoesDecisoes] = await Promise.all([
     getMapaDeComprasDetalhado({ grupoIn }),
     getCrescimentoEsperado(),
     getClassificacaoPorProduto(),
@@ -55,6 +57,7 @@ export default async function MapaComprasPage({ searchParams }: { searchParams: 
     getFilaRevisaoClassificacao(),
     getClassificacaoFilterOptions(),
     getVisaoConsolidadaCompras(comprasFiltro),
+    getAvaliacaoDecisoesPorProdutoGrupoPeriodo(),
   ]);
 
   const todosProdutos = [...new Set(grupos.flatMap((g) => g.produtos.map((p) => p.produto)))];
@@ -144,6 +147,20 @@ export default async function MapaComprasPage({ searchParams }: { searchParams: 
         </summary>
         <div className="border-t border-[var(--border)] p-4">
           <AlertasView bsRows={bsRows} dropRows={dropRows} filaRevisao={filaRevisao} />
+        </div>
+      </details>
+
+      <details className="mb-4 rounded-lg border border-[var(--border)] bg-[var(--surface-1)]">
+        <summary className="cursor-pointer px-4 py-2.5 text-sm font-medium text-[var(--text-secondary)]">
+          Avaliação de decisões de compra (recomendado vs. realizado)
+          {avaliacoesDecisoes.length > 0 && (
+            <span className="ml-2 rounded-full bg-[var(--border)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--text-secondary)]">
+              {avaliacoesDecisoes.length}
+            </span>
+          )}
+        </summary>
+        <div className="border-t border-[var(--border)] p-4">
+          <AvaliacaoDecisoesView avaliacoes={avaliacoesDecisoes} />
         </div>
       </details>
 
