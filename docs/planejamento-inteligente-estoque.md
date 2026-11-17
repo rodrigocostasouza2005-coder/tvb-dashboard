@@ -1,6 +1,6 @@
 # Planejamento Inteligente de Estoque — TVB Radar
 
-**Status:** Fase 2A (classificação em lote, tendência de demanda, grade por cor/tamanho) mergeada e em produção (PR #101, SHA `9b4c986`, deploy `dpl_hi5hnbsinp8nhXxiZeZ311NEwcX4`). Validada contra dado real de produção. Fase 1 (PR #100) e Fase 0 concluídas. **Fase 2B concluída e em produção**: excesso/distribuição (PR #105, §11) e avaliação retrospectiva (PR #106, §12) mergeados, com ajuste de regra de negócio (Drop/Best Seller/produto não classificado, pedido do Rodrigo em 2026-11-17) implementado antes do merge — ver §14 pra resultado final, validação em produção e limitações. Proposta técnica de lead time normal/urgente permanece só diagnóstico, zero código, decisão pendente do Rodrigo (§13).
+**Status:** Fase 2A (classificação em lote, tendência de demanda, grade por cor/tamanho) mergeada e em produção (PR #101, SHA `9b4c986`, deploy `dpl_hi5hnbsinp8nhXxiZeZ311NEwcX4`). Validada contra dado real de produção. Fase 1 (PR #100) e Fase 0 concluídas. **Fase 2B concluída e em produção**: excesso/distribuição (PR #105, §11) e avaliação retrospectiva (PR #106, §12) mergeados, com ajuste de regra de negócio (Drop/Best Seller/produto não classificado, pedido do Rodrigo em 2026-11-17) implementado antes do merge — ver §14 pra resultado final, validação em produção e limitações. Correção pontual pós-entrega (PR #108, §15): proteção de Drop ativo deixou de depender de venda recente, mergeada e validada. Proposta técnica de lead time normal/urgente permanece só diagnóstico, zero código, decisão pendente do Rodrigo (§13).
 **Data:** 2026-11-16 (Fase 0, Fase 1, Fase 2A e Fase 2B)
 **Como ler este documento:** é um documento vivo de continuidade — arquitetura, regras de negócio, decisões e pendências. Toda afirmação aqui é fato verificado em código/schema nesta data, salvo quando marcado "não verificado" ou "decisão pendente". O código muda rápido neste projeto — antes de implementar algo listado aqui, reverifique contra o código atual.
 
@@ -436,3 +436,42 @@ Script/workflow temporários removidos depois (commit `5e42abc`).
 | `5e42abc` | Remove script/workflow temp de #106 (pós-validação) | `main`, deploy produção confirmado |
 
 **As duas frentes da Fase 2B estão concluídas, integradas e validadas contra produção.** Próxima etapa (lead time urgente, ou outro item do roadmap em §6) aguarda decisão explícita do Rodrigo, conforme pedido.
+
+---
+
+## 15. Correção pontual — proteção de Drop ativo não deve depender de venda recente (2026-11-17)
+
+Depois de revisar o relatório final da Fase 2B (§14), o Rodrigo encontrou uma divergência: a proteção de Drop ativo implementada em §14.2 ainda estava condicionada a `vendasDias90`/`vendasOrigem90 > 0` (herdada da régua original de §11.3.5) — mas a regra de negócio aprovada por ele é mais simples e mais ampla: **Drop ativo nunca é excesso, independente de ter vendido ou não nos últimos 90 dias.** Pedido tratado como correção pontual, sem reabrir o resto da Fase 2B.
+
+### 15.1 O que mudou
+
+`src/lib/metrics/planejamento-distribuicao.ts`: removida a condição de venda tanto no contador de excesso (Passo 1: `isDropAtivo && l.vendasDias90 > 0` → só `isDropAtivo`) quanto na lista de oportunidades de transferência (Passo 2: `dropAtivoPorCod.get(m.cod) === true && m.vendasOrigem90 > 0` → só `dropAtivoPorCod.get(m.cod) === true`). Só o CICLO (`dropEmCicloAtivo` — ativo vs. encerrado) decide a proteção agora; Drop encerrado continua sem nenhuma proteção especial, avaliado normalmente, como já era. Textos de UI em `excesso-distribuicao.tsx` atualizados pra não mencionar mais "venda real" como condição da proteção.
+
+### 15.2 Testes
+
+8 testes dedicados (as 4 combinações pedidas × Passo 1/Passo 2): Drop ativo com vendas recentes, Drop ativo sem vendas recentes, Drop encerrado com vendas, Drop encerrado sem vendas. O teste antigo que esperava "NÃO suprime Drop ativo com estoque_parado/vendasOrigem90=0" foi invertido (a regra mudou propositalmente) e expandido pros dois passos. `npx vitest run` (suíte completa): **712 testes passando** (709 + 3 novos líquidos), 0 regressão — confirma que Best Seller, produto não classificado e MISTO continuam intocados (nenhum desses testes mudou de resultado). `npx tsc --noEmit` e `npx eslint` sem erros. `npm run build` com sucesso.
+
+### 15.3 Merge, deploy e validação contra produção
+
+PR #108, branch `fix/drop-ativo-protecao-independente-de-venda-20261117`. CI (`test`/`Vercel`) só disparou depois de incluir o script+workflow de validação no próprio PR (mesmo gap de path-filter já visto em §12.4 — PRs que só tocam `src/lib/metrics/*.ts`/`src/app/dashboard/*` sem tocar `.github/workflows/**` não disparam o job `test`). Merge squash em `fe9c20847a413cf7376245b1d78bd2664c9e91d9`. Deploy de produção confirmado.
+
+Script `scripts/validar-fix-drop-ativo-sem-venda-temp.ts` (somente leitura) contra produção:
+
+- **6 cods classificados como DROP em produção hoje, todos em ciclo ativo (0 encerrados)** — não há exemplo real de Drop encerrado em produção neste momento, só os 4 cenários sintéticos dos testes cobrem esse caso.
+- **2 produtos com excesso efetivamente retido pela proteção** (`excessoDropProtegido > 0`): Ultra Light Treko Reverso e Classic Marinho.
+- **Achado real, não um bug**: 5 produtos rotulados `classificacao: "DROP"` ainda aparecem com `excessoCD`/`excessoLojas` > 0. Drill-down cod a cod confirmou a causa: cada um desses produtos tem só 1-2 cods de fato classificados como DROP e **8-9 cods irmãos (mesmo nome de produto, outra cor/tamanho) sem nenhuma classificação**. `classificarAgregado` (Fase 1) só considera cods COM `tipoCompra` pra decidir o rótulo agregado — por isso o produto aparece como "DROP" mesmo com a maioria dos SKUs não classificados. A proteção desta fase é aplicada POR COD (`isDropAtivo` é calculado por `v.cod`, nunca por produto), então os cods sem classificação corretamente NÃO herdam a proteção e continuam mostrando o excesso real deles — exatamente o que a regra #3 do pedido original (§14.1) exige ("não inventar comportamento de Drop" pra quem não é Drop). **Não é uma pendência a corrigir** — é a granularidade correta (por SKU, não por nome de produto) já documentada desde a Fase 1 (MISTO/NAO_CLASSIFICADO também são conceitos por produto que escondem mistura de cods por baixo).
+- **0 produtos não-DROP com `excessoDropProtegido > 0`** — zero vazamento da régua pra Best Seller/não classificado/MISTO, confirmado contra dado real.
+
+Script/workflow temporários removidos depois (commit `ba8f69b`), mesmo padrão das fases anteriores.
+
+### 15.4 Commits desta correção
+
+| Commit | O quê | Branch/alvo |
+|---|---|---|
+| `2380f1f` | Remove condição de venda da proteção de Drop ativo + testes | `fix/drop-ativo-protecao-independente-de-venda-20261117` (PR #108) |
+| `78d7064` | Adiciona script/workflow temp de validação | mesma branch |
+| `fe9c2084` | **Merge PR #108** (squash) | `main`, deploy produção confirmado |
+| `eb6cc8e` | Drill-down cod-a-cod no script temp (investigação do achado) | `main` |
+| `ba8f69b` | Remove script/workflow temp (pós-validação) | `main`, deploy produção confirmado |
+
+**Fechada a divergência de regra apontada pelo Rodrigo.** Resto da Fase 2B (§11-§14) permanece como estava — nenhum outro comportamento foi alterado.
