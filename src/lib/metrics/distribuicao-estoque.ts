@@ -154,7 +154,13 @@ export function prepararOrigens(variantes: VariantePorLoja[]): OrigemAlocavel[] 
     .sort((a, b) => b.disponivel - a.disponivel);
 }
 
-function construirOrigem(v: VariantePorLoja): OrigemAlocavel {
+// Exportada na Fase 2B (Planejamento Inteligente de Estoque, 2026-11-16) — só adicionado `export`
+// aqui, ZERO mudança de lógica. Motivo: planejamento-distribuicao.ts precisa do número "quanto
+// desta posição deve permanecer reservado (mínimo + margem de segurança)" pra responder "o que
+// deve ficar no CD", e essa é a MESMA fórmula que já decide quem é origem elegível pra transferir
+// (prepararOrigens). Reexpor a função pura em vez de duplicar a fórmula (StockMinimumRule + 7
+// dias × MARGEM_SEMANAS de giro) em outro arquivo — ver uso em planejamento-distribuicao.ts.
+export function construirOrigem(v: VariantePorLoja): OrigemAlocavel {
   const margemSeguranca = Math.round(v.velocidadeDiaria * 7 * MARGEM_SEMANAS);
   const disponivel = Math.max(0, v.estoqueAtual - (v.estoqueMinimo ?? 0) - margemSeguranca);
   return { v, disponivel, margemSeguranca };

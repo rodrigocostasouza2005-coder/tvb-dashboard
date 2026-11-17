@@ -1,5 +1,13 @@
 import { getSessionUser } from "@/lib/auth";
-import { getProdutosPlanejamento, getProdutoPlanejamentoDetalhe, getRecomendacaoGradeProduto, getDistinctGrupos, getDistinctTamanhos } from "@/lib/metrics";
+import {
+  getProdutosPlanejamento,
+  getProdutoPlanejamentoDetalhe,
+  getRecomendacaoGradeProduto,
+  getDistinctGrupos,
+  getDistinctTamanhos,
+  getProdutoExcessoDistribuicao,
+  getDecisoesMovimentacaoPorStatus,
+} from "@/lib/metrics";
 import { getGrupoRestriction, getStoreRestriction } from "@/lib/permissions";
 import { toArray, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
@@ -50,6 +58,19 @@ export default async function PlanejamentoEstoquePage({
   const podeClassificar = user.role === "ADMIN" || user.role === "GESTAO";
   const linhaProdutoAberto = produtoAberto ? produtos.find((p) => p.produto === produtoAberto) : undefined;
 
+  // Fase 2B (ajuste de regra Rodrigo 2026-11-17): busca excesso/distribuição (e as decisões já
+  // registradas) pra QUALQUER produto aberto, não só Best Seller/Drop — produto não classificado/
+  // MISTO também precisa aparecer nessa visão (ver excesso-distribuicao.tsx, "classificação
+  // pendente"), nunca ser escondido. getProdutoExcessoDistribuicao reaproveita a mesma passada
+  // cacheada de getComparacaoCompleta/getMovimentacoesRecomendadas que distribuicao-estoque já
+  // usa — não é uma query nova pesada.
+  const classificacaoAberta = linhaProdutoAberto?.classificacao ?? "NAO_CLASSIFICADO";
+  const buscarExcessoDistribuicao = Boolean(produtoAberto);
+  const [excessoDistribuicao, decisoesMovimentacao] = await Promise.all([
+    buscarExcessoDistribuicao ? getProdutoExcessoDistribuicao(produtoAberto!, filtro) : Promise.resolve(null),
+    buscarExcessoDistribuicao ? getDecisoesMovimentacaoPorStatus({ produto: produtoAberto }) : Promise.resolve(null),
+  ]);
+
   const totalProdutos = produtos.length;
   const emRisco = produtos.filter((p) => p.situacao === "ruptura" || p.situacao === "cobertura_critica").length;
   const possivelExcesso = produtos.filter((p) => p.situacao === "cobertura_excessiva").length;
@@ -61,6 +82,13 @@ export default async function PlanejamentoEstoquePage({
   if (busca.trim()) queryParams.set("busca", busca.trim());
   const queryString = queryParams.toString();
   const fecharHref = queryString ? `${BASE_PATH}?${queryString}` : BASE_PATH;
+
+  // Deep link pra Distribuição de Estoque já filtrado por este produto (busca é por nome/cod, ver
+  // distribuicao-estoque/page.tsx) — é o "abrir lado a lado" decidido pra decisão/execução real,
+  // em vez de duplicar o fluxo de Aprovar/Recusar aqui.
+  const distribuicaoHref = produtoAberto
+    ? `/dashboard/distribuicao-estoque?aba=movimentacoes&busca=${encodeURIComponent(produtoAberto)}`
+    : "/dashboard/distribuicao-estoque";
 
   return (
     <div>
@@ -84,10 +112,13 @@ export default async function PlanejamentoEstoquePage({
       {detalhe && (
         <ProdutoDetalhe
           detalhe={detalhe}
-          classificacao={linhaProdutoAberto?.classificacao ?? "NAO_CLASSIFICADO"}
+          classificacao={classificacaoAberta}
           grade={grade}
           podeClassificar={podeClassificar}
           fecharHref={fecharHref}
+          excessoDistribuicao={excessoDistribuicao}
+          decisoesMovimentacao={decisoesMovimentacao}
+          distribuicaoHref={distribuicaoHref}
         />
       )}
 

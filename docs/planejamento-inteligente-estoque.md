@@ -1,7 +1,7 @@
 # Planejamento Inteligente de Estoque — TVB Radar
 
-**Status:** Fase 2A (classificação em lote, tendência de demanda, grade por cor/tamanho) mergeada e em produção (PR #101, SHA `9b4c986`, deploy `dpl_hi5hnbsinp8nhXxiZeZ311NEwcX4`). Validada contra dado real de produção. Fase 1 (PR #100) e Fase 0 concluídas.
-**Data:** 2026-11-16 (Fase 0, Fase 1 e Fase 2A)
+**Status:** Fase 2A (classificação em lote, tendência de demanda, grade por cor/tamanho) mergeada e em produção (PR #101, SHA `9b4c986`, deploy `dpl_hi5hnbsinp8nhXxiZeZ311NEwcX4`). Validada contra dado real de produção. Fase 1 (PR #100) e Fase 0 concluídas. **Fase 2B entregue em 2 PRs abertos (excesso/distribuição #105 — §11; avaliação retrospectiva #106 — §12), aguardando revisão/merge do Rodrigo, mais uma proposta técnica de lead time só-leitura, zero código (§13).**
+**Data:** 2026-11-16 (Fase 0, Fase 1, Fase 2A e Fase 2B)
 **Como ler este documento:** é um documento vivo de continuidade — arquitetura, regras de negócio, decisões e pendências. Toda afirmação aqui é fato verificado em código/schema nesta data, salvo quando marcado "não verificado" ou "decisão pendente". O código muda rápido neste projeto — antes de implementar algo listado aqui, reverifique contra o código atual.
 
 ---
@@ -276,3 +276,92 @@ A worktree órfã (`tvb-dashboard-planejamento-estoque`) decompunha quantidade p
 - **Detalhe por produto validado com dado real multi-SKU**: "Calça Confort Black" (10 cods, `estoqueTotal=23`) — soma por cor→tamanho fechou em 23, soma por loja fechou em 23. Confirma a correção da seção 10.3 (agregação por loja) funcionando com produto real do catálogo, não só cenário sintético.
 - **Limitação declarada**: a validação "a página abre" foi feita no nível de função (mesmas queries que `page.tsx` chama), não via browser com sessão de produção real — não há credencial de produção disponível nem foi solicitada/usada para isso. Como o build local (`npm run build`) já passou e as funções chamadas pela página rodaram sem erro contra produção com os mesmos dados que a página usaria, é uma prova equivalente para o que a página faz (ela só mapeia essas estruturas, já testado nos testes de componente/tipo) — mas não é literalmente um screenshot da página renderizada.
 - **Teste de classificação em lote em produção**: **não executado** deliberadamente. Submeter o formulário real gravaria uma classificação real em produção sem uma autorização específica para aquele SKU/produto — a cobertura de corretude e segurança da action vem dos 8 testes unitários (que simulam exatamente os cenários de adulteração/erro), não de uma escrita real de teste no banco de produção.
+
+---
+
+## 11. Fase 2B — excesso e distribuição (2026-11-16, PR aberto, aguardando aprovação)
+
+Agente A da Fase 2B (ver §10.6 — pendente desta fase: "surfacing de distribuicao-estoque/DecisaoMovimentacaoEstoque no painel de detalhe, motor já maduro, só falta integrar visualmente"). Branch `feat-planejamento-estoque-fase2b-distribuicao-20261116`. **Sem schema novo, sem migration.** PR aberto — **não mergeado** por este agente (regra do projeto: agente não mergeia sozinho quando o escopo poderia tocar fluxo crítico; aqui não há schema/dado real tocado, mas o PR segue a mesma disciplina de todas as fases anteriores — aguarda revisão do Rodrigo).
+
+### 11.1 O que foi implementado
+
+- `src/lib/metrics/planejamento-distribuicao.ts` (novo): `getExcessosEDistribuicao(filtro)` — visão por produto com `excessoCD`, `estoqueCDPermanece`, `excessoLojas`, `rupturaLojas`, `rupturaComExcessoDisponivel` (sinal-chave: loja em risco de ruptura enquanto outra posição do mesmo produto tem excesso) e `oportunidades` (sugestões de transferência já calculadas pelo motor, reaproveitadas sem recálculo). `getProdutoExcessoDistribuicao(produto, filtro)` — atalho pra 1 produto (reaproveita o mesmo resultado cacheado). `getDecisoesMovimentacaoPorStatus(filtro)` — extensão mínima de `getHistoricoMovimentacoes` (já existente) pra buscar as 4 categorias de status de uma vez e, opcionalmente, filtrar por produto (pós-leitura, sem mudar a tabela).
+- Tela: nova seção "Excesso e distribuição entre unidades" dentro do painel de detalhe já existente do Planejamento de Estoque (`src/app/dashboard/planejamento-estoque/excesso-distribuicao.tsx`, renderizada por `produto-detalhe.tsx`) — **decisão de arquitetura**: não criou 11ª aba isolada nem duplicou o fluxo de Aprovar/Recusar (que já existe em `distribuicao-estoque/actions.ts`); a seção é só leitura, com um link que abre a aba Movimentações da Distribuição de Estoque já filtrada por este produto (`busca=<produto>`) pra quem for decidir/executar de fato.
+- Mostrada só quando o produto aberto tem classificação Best Seller/Drop **e** há algum sinal real (excesso/ruptura/oportunidade) — ver `page.tsx`/`produto-detalhe.tsx`. **Decisão que precisa de validação do Rodrigo**: essa restrição a Best Seller/Drop foi literal ao pedido desta fase, mas o motor de distribuição não depende de classificação pra funcionar — pode fazer sentido mostrar também pra produtos MISTO/NAO_CLASSIFICADO.
+- 16 testes novos em `src/lib/metrics/__tests__/planejamentoDistribuicao.test.ts` (ver §11.3).
+
+### 11.2 Único ponto tocado em `distribuicao-estoque.ts` (fora do arquivo novo)
+
+`construirOrigem` (função pura, calcula `disponivel`/`margemSeguranca` = a mesma fórmula que `prepararOrigens` usa pra decidir quem pode doar) **passou a ser exportada** — zero mudança de lógica, só adicionado `export`. Motivo: `planejamento-distribuicao.ts` precisa do número "quanto desta posição deve permanecer reservado (mínimo + margem)" pra responder "o que deve ficar no CD" (pedido do briefing), e essa é literalmente a mesma fórmula já madura do motor — reexpor em vez de duplicar a conta (StockMinimumRule + 7 dias × 0.5 de giro) em outro arquivo.
+
+### 11.3 Regras de negócio confirmadas/testadas nesta fase
+
+1. **Dupla contagem de demanda (CD/Site)**: `planejamento-distribuicao.ts` nunca soma `vendasDias30/60/90` entre posições — só usa `estoqueAtual` (soma direta, segura) e `velocidadeDiaria`/`diagnostico` de **cada posição isoladamente** via `construirOrigem`. Teste dedicado prova que dobrar a venda de uma loja não muda `excessoCD` nem `estoqueCDPermanece` (que dependem só da própria linha do CD).
+2. **Nunca gera ruptura na origem**: teste com origem `estoqueAtual=95, estoqueMinimo=90, velocidadeDiaria=2` (margem=7) — a conta ingênua diria 5 un. disponíveis, mas `construirOrigem` (reaproveitado, não reimplementado) reserva mínimo+margem (97 > 95) e zera: nada é oferecido. Segundo teste confirma que, quando sobra de verdade, só a sobra REAL (23, não a conta ingênua de 30) é exposta como excesso.
+3. **Disponível vs. trânsito**: `planejamento-distribuicao.ts` nunca chama `getPedidosEmAbertoPorCod`/toca `ProductionOrder` — teste prova isso diretamente (mock configurado pra lançar erro se chamado, nunca é). "Disponível" é sempre e só estoque atual já reservado pelo mínimo+margem, nunca produção em aberto (que já é sempre `confiavel: false`, documentado desde a Fase 0).
+4. **Reconciliação**: teste prova que a soma do que sai das origens (`quantidadeSugerida`) é exatamente igual à soma do que entra nos destinos (`estoqueDestinoDepois - estoqueDestinoAntes`), e que os objetos de oportunidade são passados sem mutação — esta camada só agrupa/filtra, nunca recalcula quantidade.
+5. **Regra nova desta fase — Drop em ciclo ativo nunca é tratado como excesso**: o motor já protegia Best Seller de recolhimento (regra existente), mas não tinha proteção equivalente pra Drop nas direções CD↔loja/loja↔loja. Esta fase adiciona um FILTRO (não uma mudança no motor) em `getExcessosEDistribuicao`: oportunidade cujo SKU de origem é Drop, ainda dentro do ciclo (`dataEncerramentoPrevista` no futuro ou nula, status comercial não encerrado/descontinuado) **e** com venda real nos últimos 90 dias (`vendasOrigem90 > 0` — ou seja, "excesso" por estoque alto relativo à própria venda, não estoque morto) é suprimida da lista exposta por esta tela, nunca da tabela de Distribuição de Estoque em si (`dropsCicloAtivoProtegidos` conta quantas, nunca esconde silenciosamente). Testado: suprime quando ativo+vendendo, não suprime quando ciclo já encerrado, não suprime quando `estoque_parado` (zero venda — verdadeiramente morto, não "ainda em ciclo"). **Decisão que precisa de validação do Rodrigo**: se a mesma régua deveria valer formalmente pra Best Seller nas 3 direções (hoje só protegido no recolhimento, pela regra já existente do motor).
+
+### 11.4 Validação contra produção — pendente do merge
+
+Script `scripts/validar-planejamento-distribuicao-fase2b-temp.ts` + workflow `validar-planejamento-distribuicao-fase2b-temp.yml` (workflow_dispatch, somente leitura) preparados e incluídos no PR, seguindo o mesmo padrão das fases anteriores — **não executados por este agente**: o workflow só pode ser disparado depois que o PR for mergeado em main (GitHub só lista workflows que já existem na branch default). Mergear primeiro, disparar manualmente depois.
+
+### 11.5 Resultado das verificações locais
+
+`npx tsc --noEmit`: sem erros. `npx eslint` nos arquivos tocados: 0 erros (1 warning cosmético, variável `_a` deliberadamente não usada num mock). `npx vitest run` (suíte completa): **690 testes passando** (674 anteriores + 16 novos), 0 regressão. `npm run build`: sucesso (rota `/dashboard/planejamento-estoque` compilada normalmente, sem rota nova — reaproveitou a existente).
+
+---
+
+## 12. Fase 2B — avaliação retrospectiva de decisões de compra (2026-11-16, PR aberto, aguardando aprovação)
+
+Agente B da Fase 2B. Branch `feat-planejamento-estoque-fase2b-avaliacao-20261116`, PR #106 — **não mergeado**. Trabalhou em worktree isolada (`tvb-dashboard-avaliacao-compras`), sem tocar nos arquivos do Agente A. **Sem schema novo, sem migration, sem tabela/job nova** — cálculo 100% on-demand, exatamente a opção já recomendada no §4.2 desde a Fase 0.
+
+### 12.1 O que foi implementado
+
+- `src/lib/metrics/planejamento-avaliacao.ts` (novo): reaproveita `getHistoricoDecisoesCompra` (`compras-inteligencia.ts`, intocado) como **única leitura** de `DecisaoCompra` — nunca duplica esse acesso Prisma. Cruza por `cod` (quando a decisão tem) ou por `grupo` (fallback, quando a decisão foi registrada só agregada).
+- `avaliarDecisaoCompra(decisao, dadosCruzados, agora)` — **núcleo puro, sem Prisma**, testável com dado sintético (mesma convenção de `diagnosticarVariante`/`vendasEfetivasCdSite`). Classifica `avaliabilidade: "SEM_DADOS" | "PARCIAL" | "COMPLETA"` (critérios exatos abaixo, §12.2) e só preenche `diagnosticoPosDecisao`/`indicioRupturaPosDecisao`/`indicioExcessoRemanescente` quando `COMPLETA`, reaproveitando `diagnosticarVariante` (`distribuicao-estoque.ts`) sem reinventar régua.
+- `getAvaliacaoDecisaoCompra(decisaoId)` e `getAvaliacaoDecisoesPorProdutoGrupoPeriodo(filtro)` — camada de dado, registradas no barrel.
+- Tela: seção colapsável "Avaliação de decisões de compra" dentro de `/dashboard/mapa-compras/page.tsx` (mesmo padrão visual da seção "Fila de revisão & Alertas" já existente) — decisão de não criar rota/aba nova, já que `DecisaoCompra` já é lida/escrita nessa mesma página.
+- 10 testes novos em `src/lib/metrics/__tests__/planejamentoAvaliacao.test.ts`, incluindo um nomeado literalmente `"nunca inventa resultado histórico quando não há dados suficientes (PARCIAL preserva null em vez de estimar)"`.
+
+### 12.2 Critérios de avaliabilidade (exatos, do código)
+
+- **SEM_DADOS**: zero `StockSnapshot` E zero `Sale` cruzável no período pós-decisão (por `cod` ou por `grupo`, conforme disponível) — nenhum número é calculado, tudo fica `null`.
+- **PARCIAL**, dois casos: (a) decisão registrada **só por grupo** (sem `cod`) — **nunca** vira COMPLETA, por mais tempo que passe, porque a imprecisão do join por grupo (mistura outros produtos do mesmo grupo) não desaparece com o tempo; (b) decisão **com `cod`** mas a janela de 90 dias pós-`decididoEm` ainda não decorreu inteira — reporta só `vendasPosDecisaoAteAgora`/`estoqueAtual` (o que já pôde ser calculado honestamente), nunca preenche `vendasPosDecisao30/60/90` com soma parcial disfarçada de janela cheia.
+- **COMPLETA**: `cod` presente + janela de 90 dias cheia decorrida + dado real disponível — único caso em que `diagnosticoPosDecisao` é calculado, via `diagnosticarVariante` com `tipoPosicao="loja"` (limiar mais conservador, mesma escolha de `planejamento-estoque.ts`).
+
+### 12.3 Limitações reais declaradas (não escondidas)
+
+- **Sem FK entre `DecisaoCompra` e `Sale`/`StockSnapshot`/`ProductionOrder`** — o cruzamento é sempre um join implícito por `cod` ou `grupo`, nunca uma relação formal. Decisão só-grupo mistura dado de outros produtos do grupo — por isso nunca COMPLETA.
+- **Sem série histórica de estoque** (mesma limitação da Fase 0/1) — `estoqueAtual` é sempre o snapshot de HOJE, nunca "o estoque no fim exato da janela de avaliação".
+- **Honestidade sobre dado real em produção**: não há evidência no histórico de commits de que `DecisaoCompra` tenha sido exercitada em produção até agora (o formulário está conectado desde `7bbb596`, ~2026-10-27, mas nenhuma validação de fase anterior consultou essa tabela contra produção). É esperado que a tabela esteja vazia ou quase vazia — a maioria das avaliações reais pode cair em `SEM_DADOS` só por falta de decisão registrada, não por bug desta entrega.
+
+### 12.4 Validação contra produção — pendente do merge
+
+**Gap encontrado pelo coordenador**: diferente das demais fases, o Agente B não incluiu o script+workflow de verificação no PR original — por isso o CI de testes (`commercial-intelligence-tests.yml`, que só dispara em paths específicos como `.github/workflows/**`) nunca rodou no PR #106. Corrigido: script `scripts/validar-planejamento-avaliacao-fase2b-temp.ts` + workflow `validar-planejamento-avaliacao-fase2b-temp.yml` adicionados num commit extra (`ab2fb0b`) pelo coordenador, mesmo padrão das demais fases — conta `DecisaoCompra` real, reporta a distribuição SEM_DADOS/PARCIAL/COMPLETA contra produção, e confirma que nenhuma avaliação não-COMPLETA tem `diagnosticoPosDecisao` preenchido. Não executado ainda — depende do merge.
+
+### 12.5 Resultado das verificações locais (reportado pelo agente)
+
+`npx tsc --noEmit` limpo. `npm run build` com sucesso. `npx vitest run`: **684/684 passando** (674 + 10 novos, 0 regressão) — número reportado ANTES do commit de correção do coordenador (§12.4); a suíte completa do repo (que já inclui os 16 testes do Agente A) precisa ser revalidada no momento do merge final, não somada ingenuamente aos 690 da Fase A (os testes não são cumulativos entre PRs ainda não mergeados — ver §14 para o número real após merge de ambos).
+
+---
+
+## 13. Fase 2B — proposta técnica de lead time normal vs. urgente (2026-11-16, SOMENTE DIAGNÓSTICO — zero código)
+
+Agente C. Regime estritamente somente-leitura, conforme pedido — nenhum arquivo criado, nenhuma branch, nenhum PR. Esta seção é só proposta, **não pode ser implementada sem aprovação explícita do Rodrigo**.
+
+### 13.1 Estado atual confirmado (fresco)
+
+`model CoberturaMeta` (`prisma/schema.prisma:155-162`) tem hoje `grupo` (único), `mesesCobertura`, `estoqueSegurancaUnidades?`, `leadTimeDias?` — um único campo de lead time, por grupo, sem distinção normal/urgente. Único consumidor real: `calcularSugestaoBestSeller` (`compras-inteligencia.ts:74-120`), que soma `leadTimeDias` ao horizonte de cobertura. Confirmado (de novo, fresco): **zero menção** a "urgente"/"urgência" em qualquer schema/código relacionado a lead time; **zero conceito de fornecedor** modelado em qualquer lugar do schema (TVB é produção própria via `ProductionOrder`, não compra de terceiro). `ProductionOrder` continua sem campo de data prevista de finalização (só `dataEntradaCelula`/`dataFinalizacaoProducao`, essa última null enquanto aberta).
+
+### 13.2 Três opções (resumo — texto completo do agente arquivado na transcrição desta sessão, disponível sob pedido)
+
+- **Opção A — mínima (recomendada para começar)**: um segundo campo `leadTimeUrgenteDias Int?` em `CoberturaMeta`, mais um parâmetro `tipoReposicao?: "NORMAL" | "URGENTE"` na função pura `calcularSugestaoBestSeller` (fallback pro lead time normal quando o urgente não está cadastrado — zero quebra de teste existente). Migration de 1 linha, 100% aditiva (`ALTER TABLE ADD COLUMN`, nullable, sem default), mesmo padrão já usado pela migration que criou `leadTimeDias`. UI: um terceiro input inline em `ParametrosGrupoForm` (`mapa-compras/inteligencia/forms.tsx:123-166`), mesmo padrão de controle inline já aprovado pelo Rodrigo. Risco: praticamente nenhum.
+- **Opção B — intermediária**: tabela nova `LeadTimePorGrupo` (enum `TipoLeadTime: NORMAL | URGENTE`, `@@unique([grupo, tipo])`), coexistindo com `CoberturaMeta.leadTimeDias` (nunca remover campo em uso). Exige backfill revisado (não script de massa automático) e lógica de fallback. Só se justifica se surgir um 3º tipo de lead time real — hoje não há sinal disso.
+- **Opção C — completa**: modelar `Fornecedor`+`ModalidadePedido` com lead time por fornecedor+modalidade. Exigiria seed artificial de um "Fornecedor: Produção própria TVB" (hoje não existe fornecedor real nenhum pra ancorar a entidade) — risco de over-engineering pra um requisito (compra de terceiro) que não existe ainda na operação da TVB.
+
+### 13.3 Recomendação do agente
+
+**Começar pela Opção A.** Resolve 100% do problema declarado (60 dias vs. 2 dias, ambos configuráveis) com uma migration de uma linha, sem tabela nova, sem FK, sem seed, mantendo o padrão de UI inline já em uso. Opção B só se justifica com um 3º cenário real de lead time; Opção C só se justifica no dia em que a TVB de fato comprar de terceiro — modelar fornecedor agora seria estrutura sem necessidade comprovada.
+
+**Decisão pendente do Rodrigo**: qual opção seguir, e quando — nenhuma migration foi criada, nenhum código foi escrito, conforme exigido. Implementação só começa após aprovação explícita.
