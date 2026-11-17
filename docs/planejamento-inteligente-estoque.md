@@ -1,6 +1,6 @@
 # Planejamento Inteligente de Estoque — TVB Radar
 
-**Status:** Fase 2A (classificação em lote, tendência de demanda, grade por cor/tamanho) mergeada e em produção (PR #101, SHA `9b4c986`, deploy `dpl_hi5hnbsinp8nhXxiZeZ311NEwcX4`). Validada contra dado real de produção. Fase 1 (PR #100) e Fase 0 concluídas. **Fase 2B concluída e em produção**: excesso/distribuição (PR #105, §11) e avaliação retrospectiva (PR #106, §12) mergeados, com ajuste de regra de negócio (Drop/Best Seller/produto não classificado, pedido do Rodrigo em 2026-11-17) implementado antes do merge — ver §14 pra resultado final, validação em produção e limitações. Correção pontual pós-entrega (PR #108, §15): proteção de Drop ativo deixou de depender de venda recente, mergeada e validada. Proposta técnica de lead time normal/urgente permanece só diagnóstico, zero código, decisão pendente do Rodrigo (§13).
+**Status:** Fase 2A (classificação em lote, tendência de demanda, grade por cor/tamanho) mergeada e em produção (PR #101, SHA `9b4c986`, deploy `dpl_hi5hnbsinp8nhXxiZeZ311NEwcX4`). Validada contra dado real de produção. Fase 1 (PR #100) e Fase 0 concluídas. **Fase 2B concluída e em produção**: excesso/distribuição (PR #105, §11) e avaliação retrospectiva (PR #106, §12) mergeados, com ajuste de regra de negócio (Drop/Best Seller/produto não classificado, pedido do Rodrigo em 2026-11-17) implementado antes do merge — ver §14 pra resultado final, validação em produção e limitações. Correção pontual pós-entrega (PR #108, §15): proteção de Drop ativo deixou de depender de venda recente, mergeada e validada. **Validação operacional integrada (2026-11-18, §16)**: 3 frentes de investigação (Mapa de Compras, Distribuição, Integração entre os dois) + validação contra produção — 2 achados estruturais reais sem exposição hoje (dormentes), 1 achado novo mensurado mas sem causa raiz confirmada (26/280 produtos com excesso+ruptura sem oportunidade de transferência), zero código alterado nesta rodada. Proposta técnica de lead time normal/urgente permanece só diagnóstico, zero código, decisão pendente do Rodrigo (§13).
 **Data:** 2026-11-16 (Fase 0, Fase 1, Fase 2A e Fase 2B)
 **Como ler este documento:** é um documento vivo de continuidade — arquitetura, regras de negócio, decisões e pendências. Toda afirmação aqui é fato verificado em código/schema nesta data, salvo quando marcado "não verificado" ou "decisão pendente". O código muda rápido neste projeto — antes de implementar algo listado aqui, reverifique contra o código atual.
 
@@ -475,3 +475,51 @@ Script/workflow temporários removidos depois (commit `ba8f69b`), mesmo padrão 
 | `ba8f69b` | Remove script/workflow temp (pós-validação) | `main`, deploy produção confirmado |
 
 **Fechada a divergência de regra apontada pelo Rodrigo.** Resto da Fase 2B (§11-§14) permanece como estava — nenhum outro comportamento foi alterado.
+
+---
+
+## 16. Validação operacional integrada — Mapa de Compras, Distribuição e Integração (2026-11-18)
+
+Pedido do Rodrigo: ganhar confiança no Planejamento Inteligente de Estoque com dado real da TVB, sem abrir outra auditoria arquitetural nem reabrir fases já concluídas sem evidência concreta. Método: 3 agentes paralelos (código, somente leitura) + 1 script consolidado contra produção (somente leitura, removido depois — mesmo padrão das rodadas anteriores). Relatório completo entregue ao Rodrigo no chat desta sessão; aqui vai o resumo pra continuidade.
+
+### 16.1 O que funciona corretamente (confirmado por código + dado real)
+
+- Grade por cor/tamanho nunca mistura cor (`planejamento-grade.ts`), confirmado por código e por teste.
+- Fórmulas de `compras-inteligencia.ts` (unidades, uso de `leadTimeDias`/`estoqueSegurancaUnidades`/`mesesCobertura`) fazem sentido comercial; zero risco de dupla contagem (motor de compra nunca toca `VariantePorLoja`/`porLoja`).
+- `dropEmCicloAtivo` usada de forma consistente dentro de `planejamento-distribuicao.ts` (Passo 1 e Passo 2) — a inconsistência que existia foi corrigida no PR #108 (§15) e continua corrigida.
+- Proteção de Drop ativo (sem condição de venda), reserva de continuidade de Best Seller (não é imunidade) e visibilidade de NAO_CLASSIFICADO/MISTO (§14/§15) — tudo reconfirmado por leitura de código, sem regressão.
+- Nenhum vazamento de regra Drop/Best Seller para produto não classificado, reconfirmado contra produção (0 casos).
+
+### 16.2 Achados estruturais reais, mas sem exposição hoje (dormentes)
+
+1. **`getRecomendacoesDrop` não usa `dropEmCicloAtivo`** (`compras-inteligencia.ts:800-858`) — só olha `dataEncerramentoPrevista`, nunca `statusComercial`. Um Drop marcado `DESCONTINUADO`/`EM_ENCERRAMENTO` mas sem `dataEncerramentoPrevista` no passado continuaria recebendo sugestão de compra positiva. **Confirmado contra produção: 0 cods nessa situação hoje** (nenhum Drop está `DESCONTINUADO`/`EM_ENCERRAMENTO`). Correção mínima sugerida (não implementada): reaproveitar `dropEmCicloAtivo` dentro de `getRecomendacoesDrop`.
+2. **Grade (`decomporGradeProduto`) usa `Sale` filtrado só por nome de produto**, sem filtrar por cod classificado — um cod irmão não classificado (padrão comum, confirmado em §15.3: a maioria dos produtos Drop tem só 1-2 de ~10 cods classificados) contamina o peso usado pra repartir a quantidade comprada por cor/tamanho. **Confirmado contra produção: 0 recomendações (Best Seller + Drop) têm `quantidadeSugerida > 0` hoje** — o mesmo fato já registrado em §10.7 — então `decomporGradeProduto` nunca chega a executar com dado contaminado na prática. Correção mínima sugerida: filtrar `Sale` por `cod: { in: codsClassificados }` em vez de só `produto`.
+3. **Zero integração entre motor de compra e motor de distribuição**: `compras-inteligencia.ts` calcula `estoqueDisponivel`/necessidade agregando TODAS as posições (empresa toda, sem `storeId`) — não existe o conceito de "esta loja está em ruptura" nesse motor, então ele não pode (nem tenta) checar excesso disponível em outra posição antes de sugerir compra. A única integração real existente é informacional e na direção oposta (`distribuicao-estoque.ts` anexa `producaoEmAndamento` de `ProductionOrder`, nunca ajusta a necessidade). **Confirmado contra produção: 0 cods hoje com sugestão de compra E oportunidade de transferência simultâneas** — mesma causa (achado #2: nenhuma sugestão de compra tem quantidade > 0 ainda). Correção mínima sugerida (ideia, não implementada): Mapa de Compras consultar `getExcessosEDistribuicao` pelo mesmo cod/produto antes de exibir a sugestão, e avisar quando há excesso disponível em outra posição — sem alterar o cálculo de nenhum dos dois motores.
+
+**Nota importante sobre os 3 achados acima**: todos têm **exposição real = 0 hoje**, pela mesma razão de fundo — nenhuma recomendação de compra em produção tem `quantidadeSugerida > 0` neste momento (fato já registrado em §10.7, não é novidade desta rodada). São riscos estruturais reais e documentados, não bugs ativos — o momento de corrigi-los é antes do volume de classificação/sugestão de compra crescer em produção, não necessariamente agora.
+
+### 16.3 Achado novo, confirmado mas sem causa raiz fechada — precisa de investigação pontual
+
+**26 de 280 produtos (~9%) com algum sinal têm excesso disponível (`excessoCD`/`excessoLojas` > 0) E loja em ruptura/cobertura crítica (`rupturaLojas` > 0) ao mesmo tempo, mas ZERO oportunidades de transferência sugeridas** pelo motor real (`calcularMovimentacoes`). Exemplos reais: Classic Black (Best Seller, excessoCD=873, rupturaLojas=3), High Five Jungle, High Five Black, Veranico Manga Longa Preto, T-shirt Damas Verde (todos NAO_CLASSIFICADO).
+
+Hipótese testada (drill-down por cod de "Classic Black", somando estoque/venda de todas as posições por cod): **não confirmada nem refutada** — os 11 cods do produto têm estoque e venda proporcionais entre si (sem um cod isolado concentrando todo o excesso enquanto outro fica zerado), então a explicação não é simplesmente "o excesso e a ruptura são de cods diferentes". A causa real provavelmente está na granularidade de LOJA (não de cod) — precisaria de um drill-down por posição (`storeId`) pra cada cod, que não foi feito nesta rodada pra não virar uma investigação aberta.
+
+**Isto é um padrão real e mensurado, não uma hipótese — mas a causa raiz não está confirmada.** Pode ser: (a) comportamento correto do motor por algum filtro legítimo não investigado (lote mínimo, grade quebrada, confiança baixa), ou (b) uma lacuna real no matching de `calcularMovimentacoes` entre `prepararOrigens`/`prepararDestinos`. **Não tratar como bug até investigar.**
+
+### 16.4 Problemas reais encontrados nesta rodada
+
+Nenhum confirmado com causa raiz fechada. O item de §16.3 é o mais próximo de um "problema real", mas fica registrado como achado mensurado pendente de investigação, não como bug confirmado — conforme pedido explícito do Rodrigo de não transformar hipótese em problema confirmado.
+
+### 16.5 Correções aplicadas nesta rodada
+
+**Nenhuma.** Rodada de validação/relatório, sem alteração de código, schema ou dado — conforme pedido explícito ("não implemente funcionalidades novas nesta etapa").
+
+### 16.6 Scripts temporários usados (removidos depois, mesmo padrão das rodadas anteriores)
+
+`scripts/validar-operacional-planejamento-estoque-temp.ts` + workflow homônimo — commits `f276c76` (criação), `0290828` (drill-down do achado §16.3), `5df135a` (remoção pós-validação). Todos no branch `main`, deploy de produção confirmado em cada etapa.
+
+### 16.7 Próxima etapa recomendada
+
+1. **Investigar a causa raiz de §16.3** (drill-down por `storeId`+`cod`, não só por `cod`) — é o único item desta rodada que pode virar uma correção real. Pedido explícito do Rodrigo antes de agir: apresentar evidência, não implementar direto.
+2. Os 3 achados estruturais de §16.2 podem esperar — ficam documentados e só precisam de ação quando o volume de classificação/sugestão de compra em produção crescer (hoje é 0).
+3. Lead time normal/urgente (§13) continua pendente de decisão do Rodrigo, fora desta rodada.
