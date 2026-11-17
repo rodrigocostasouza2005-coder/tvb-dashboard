@@ -132,6 +132,42 @@ async function main() {
   const vazamento = excessos.filter((e) => (e.classificacao === "NAO_CLASSIFICADO" || e.classificacao === "MISTO") && (e.excessoDropProtegido > 0 || e.reservaContinuidadeBestSeller > 0));
   console.log(`\nVazamento de regra Drop/Best Seller pra NAO_CLASSIFICADO/MISTO: ${vazamento.length} (esperado: 0)`);
 
+  // -------------------------------------------------------------------
+  // ETAPA 2b — achado da amostra: "Classic Black" (BEST_SELLER) apareceu com excessoCD=873 e
+  // rupturaLojas=3 ao mesmo tempo que oportunidades=0. Hipótese: mesma classe de distorção já
+  // confirmada pra Drop (§15.3) — o resumo é por PRODUTO (soma todos os cods/cores/tamanhos), mas
+  // o motor real de transferência (calcularMovimentacoes) decide por COD — o excesso e a ruptura
+  // podem estar em cods/posições diferentes do mesmo produto, sem "match" real pro motor sugerir.
+  // Mede quantos produtos têm esse padrão (excesso E ruptura sem nenhuma oportunidade) e, pro
+  // primeiro caso, quebra por cod pra confirmar a hipótese (ou refutar, se não for isso).
+  // -------------------------------------------------------------------
+  console.log("\n--- Etapa 2b: produtos com excesso E ruptura simultâneos mas ZERO oportunidades de transferência ---");
+  const excessoERupturaSemOportunidade = excessos.filter((e) => (e.excessoCD > 0 || e.excessoLojas > 0) && e.rupturaLojas > 0 && e.oportunidades.length === 0);
+  console.log(`Produtos nessa situação: ${excessoERupturaSemOportunidade.length} de ${excessos.length} produtos com sinal`);
+  for (const e of excessoERupturaSemOportunidade.slice(0, 5)) {
+    console.log(`  ${e.produto} [${e.classificacao}] excessoCD=${e.excessoCD} excessoLojas=${e.excessoLojas} rupturaLojas=${e.rupturaLojas}`);
+  }
+  if (excessoERupturaSemOportunidade.length > 0) {
+    const alvo = excessoERupturaSemOportunidade[0];
+    console.log(`\nDrill-down por cod/posição de "${alvo.produto}" (primeiro caso da lista):`);
+    const variantesDetalhe = await prisma.stockSnapshot.findMany({
+      where: { cod: { in: alvo.cods } },
+      select: { cod: true, storeId: true, quantidadeDisponivel: true },
+    });
+    const vendasPorCod = await prisma.sale.groupBy({
+      by: ["cod"],
+      where: { cod: { in: alvo.cods }, status: { not: "Cancelada" } },
+      _sum: { quantidade: true },
+    });
+    const estoquePorCod = new Map<string, number>();
+    for (const v of variantesDetalhe) estoquePorCod.set(v.cod, (estoquePorCod.get(v.cod) ?? 0) + v.quantidadeDisponivel);
+    const vendaPorCodMap = new Map(vendasPorCod.map((v) => [v.cod, v._sum.quantidade ?? 0]));
+    for (const cod of alvo.cods) {
+      console.log(`  cod=${cod} estoqueTotal(todas posições)=${estoquePorCod.get(cod) ?? 0} vendaTotal(todo período, todas posições)=${vendaPorCodMap.get(cod) ?? 0}`);
+    }
+    console.log("  (se o estoque alto e a venda estiverem concentrados em cods DIFERENTES, confirma a hipótese: excesso e ruptura são de cods/posições diferentes do mesmo produto, o motor real não erra)");
+  }
+
   console.log("\n=== Fim da validação ===");
 }
 
