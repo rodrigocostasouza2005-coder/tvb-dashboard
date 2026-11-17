@@ -284,8 +284,10 @@ export async function getSalesByDayPerStore(filters: DashboardFilters) {
     `,
   ]);
 
+  // Até 2026-11-17 somava CD+Atacado numa série só via displayGroup — revertido a pedido do
+  // Rodrigo (2026-11-17), mesma convenção de groupStoresForFilter/core.ts.
   const stores = await prisma.store.findMany({ where: { sellsProducts: true } });
-  const seriesNameByStoreId = new Map(stores.map((s) => [s.id, s.displayGroup ?? s.name]));
+  const seriesNameByStoreId = new Map(stores.map((s) => [s.id, s.code === "CD" ? "TVB Site" : s.name]));
 
   const byDay = new Map<string, Record<string, number>>();
   const seriesNames = new Set<string>();
@@ -340,8 +342,10 @@ export async function getSalesByHourPerStore(filters: DashboardFilters) {
     ORDER BY hora ASC
   `;
 
+  // Até 2026-11-17 somava CD+Atacado numa série só via displayGroup — revertido a pedido do
+  // Rodrigo (2026-11-17), mesma convenção de groupStoresForFilter/core.ts.
   const stores = await prisma.store.findMany({ where: { sellsProducts: true } });
-  const seriesNameByStoreId = new Map(stores.map((s) => [s.id, s.displayGroup ?? s.name]));
+  const seriesNameByStoreId = new Map(stores.map((s) => [s.id, s.code === "CD" ? "TVB Site" : s.name]));
 
   const byHora = new Map<number, Record<string, number>>();
   const seriesNames = new Set<string>();
@@ -479,7 +483,9 @@ export async function getSalesByStore(filters: DashboardFilters, canal: Canal = 
     prisma.store.findMany({ where: { sellsProducts: true } }),
     prisma.sale.groupBy({ by: ["storeId", "dapicVendaId"], where }),
   ]);
-  const nameById = new Map(stores.map((s) => [s.id, s.displayGroup ?? s.name]));
+  // Até 2026-11-17 somava CD+Atacado numa "loja" só via displayGroup — revertido a pedido do
+  // Rodrigo (2026-11-17), mesma convenção de groupStoresForFilter/core.ts.
+  const nameById = new Map(stores.map((s) => [s.id, s.code === "CD" ? "TVB Site" : s.name]));
 
   const pedidosByNome = new Map<string, Set<string>>();
   for (const p of pedidosRows) {
@@ -953,10 +959,12 @@ export async function getMonthlySalesByStore(filters: DashboardFilters, canal: C
     ORDER BY month ASC
   `;
 
+  // Até 2026-11-17 somava CD+Atacado numa série só via displayGroup — revertido a pedido do
+  // Rodrigo (2026-11-17), mesma convenção de groupStoresForFilter/core.ts.
   const stores = await prisma.store.findMany({ where: { sellsProducts: true } });
-  const seriesNameByStoreId = new Map(stores.map((s) => [s.id, s.displayGroup ?? s.name]));
+  const seriesNameByStoreId = new Map(stores.map((s) => [s.id, s.code === "CD" ? "TVB Site" : s.name]));
 
-  // Agrupa por mês e loja (juntando lojas com mesmo displayGroup)
+  // Agrupa por mês e loja (Site e Atacado agora separados, não somados)
   const byMonth = new Map<string, Record<string, number>>();
   const seriesNames = new Set<string>();
 
@@ -1223,8 +1231,12 @@ export async function getDailySalesByProdutoPorLoja(
     `,
   ]);
 
+  // Até 2026-11-16 usava displayGroup (CD+ATACADO numa série só, "TVB Site e Atacado") —
+  // revertido a pedido do Rodrigo (2026-11-17): quer Site e Atacado como séries separadas aqui,
+  // não somadas. Store.name do CD é literalmente "TVB Site e Atacado" (confuso sozinho); rótulo
+  // vira "TVB Site" só pra essa posição (code "CD"), mesmo padrão de groupStoresForFilter.
   const stores = await prisma.store.findMany({ where: { sellsProducts: true } });
-  const seriesNameByStoreId = new Map(stores.map((s) => [s.id, s.displayGroup ?? s.name]));
+  const seriesNameByStoreId = new Map(stores.map((s) => [s.id, s.code === "CD" ? "TVB Site" : s.name]));
 
   const byDay = new Map<string, Record<string, number>>();
   const seriesNames = new Set<string>();
@@ -1304,21 +1316,22 @@ export async function getGiftsByCliente(filters: DashboardFilters, limit = 30) {
 export async function getGiftsByDayByStore(filters: DashboardFilters) {
   const rows = await prisma.gift.findMany({
     where: giftWhere(filters),
-    select: { giftDate: true, quantidade: true, storeId: true, store: { select: { name: true, displayGroup: true } } },
+    select: { giftDate: true, quantidade: true, storeId: true, store: { select: { name: true, code: true, displayGroup: true } } },
   });
 
-  // Agrupa por dia + store (usa displayGroup se existir, senão name)
+  // Até 2026-11-17 usava displayGroup (CD+ATACADO numa série só) — revertido a pedido do Rodrigo
+  // (2026-11-17), mesma convenção de groupStoresForFilter/core.ts.
   const map = new Map<string, Map<string, number>>();
   for (const r of rows) {
     const day = r.giftDate.toISOString().slice(0, 10);
-    const storeName = r.store.displayGroup ?? r.store.name;
+    const storeName = r.store.code === "CD" ? "TVB Site" : r.store.name;
     if (!map.has(day)) map.set(day, new Map());
     const dayMap = map.get(day)!;
     dayMap.set(storeName, (dayMap.get(storeName) ?? 0) + r.quantidade);
   }
 
   // Conjunto de todas as lojas
-  const storeNames = [...new Set(rows.map((r) => r.store.displayGroup ?? r.store.name))].sort();
+  const storeNames = [...new Set(rows.map((r) => (r.store.code === "CD" ? "TVB Site" : r.store.name)))].sort();
 
   // Converte para array de objetos { day, [storeName]: units }
   const result = [...map.entries()]
@@ -1667,8 +1680,10 @@ export async function getTicketPorFaixaMensal(
     LEFT JOIN devolucoes d ON d."storeId" = v."storeId" AND d."dapicVendaId" = v."dapicVendaId"
   `;
 
+  // Até 2026-11-17 somava CD+Atacado numa "loja" só via displayGroup — revertido a pedido do
+  // Rodrigo (2026-11-17), mesma convenção de groupStoresForFilter/core.ts.
   const stores = await prisma.store.findMany();
-  const storeName = new Map(stores.map((s) => [s.id, s.displayGroup ?? s.name]));
+  const storeName = new Map(stores.map((s) => [s.id, s.code === "CD" ? "TVB Site" : s.name]));
 
   const monthsSet = new Set<string>();
   // loja -> faixa -> mês -> contagem de pedidos

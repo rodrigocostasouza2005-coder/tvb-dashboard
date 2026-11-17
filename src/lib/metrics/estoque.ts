@@ -397,11 +397,13 @@ export async function searchStockVsSalesComTamanhos(filters: DashboardFilters, q
   const produtoNames = rows.map((r) => r.key);
 
   // Só lojas de venda de verdade (não armazéns tipo Defeito/Lixeira/Marketing) — "quanto tem
-  // nas lojas" quer dizer ponto de venda, não todo armazenador. Junta por displayGroup igual
-  // o filtro de loja já faz (TVB Site e Atacado vira uma linha só), senão contaria a mesma
-  // operação duas vezes.
+  // nas lojas" quer dizer ponto de venda, não todo armazenador. Até 2026-11-16 juntava por
+  // displayGroup (CD+ATACADO numa linha só, "TVB Site e Atacado") — revertido a pedido do Rodrigo
+  // (2026-11-17): ele quer ver Site e Atacado como linhas separadas aqui, não somadas. Store.name
+  // do CD é literalmente "TVB Site e Atacado" (confuso sozinho); rótulo vira "TVB Site" só pra
+  // essa posição (code "CD"), mesmo padrão já usado em groupStoresForFilter (core.ts).
   const sellingStores = await prisma.store.findMany({ where: { sellsProducts: true } });
-  const lojaNameByStoreId = new Map(sellingStores.map((s) => [s.id, s.displayGroup ?? s.name]));
+  const lojaNameByStoreId = new Map(sellingStores.map((s) => [s.id, s.code === "CD" ? "TVB Site" : s.name]));
 
   const [stockRows, stockPorLojaRows] = await Promise.all([
     prisma.stockSnapshot.groupBy({
