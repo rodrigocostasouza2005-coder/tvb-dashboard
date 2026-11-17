@@ -285,9 +285,12 @@ describe("getExcessosEDistribuicao", () => {
   });
 
   // ---------------------------------------------------------------------
-  // Regra de negócio nova desta fase: Drop em ciclo ativo protegido de "excesso"
+  // Regra de negócio: Drop em ciclo ativo protegido de "excesso" — INDEPENDENTE de venda
+  // (correção Rodrigo, 2026-11-17, segunda revisão: a condição de venda real foi removida; só o
+  // CICLO — ativo vs. encerrado — decide a proteção agora. 4 combinações cobertas abaixo, pra
+  // oportunidades (Passo 2) e pro contador de excesso (Passo 1)).
   // ---------------------------------------------------------------------
-  it("suprime oportunidade de transferência cuja origem é um Drop ainda em ciclo ativo (dataEncerramentoPrevista no futuro) e teve venda real nos 90d", async () => {
+  it("[oportunidades] Drop ativo COM vendas recentes: suprime a oportunidade de transferência", async () => {
     getComparacaoCompleta.mockResolvedValue({ variantes: [variante({ tipoCompra: "DROP" })] });
     const futura = new Date(Date.now() + 10 * 86_400_000);
     classificacaoProdutoFindMany.mockResolvedValue([{ cod: "COD-1", statusComercial: "ATIVO", dataEncerramentoPrevista: futura }]);
@@ -306,7 +309,25 @@ describe("getExcessosEDistribuicao", () => {
     expect(r.dropsCicloAtivoProtegidos).toBe(1);
   });
 
-  it("NÃO suprime oportunidade de Drop já encerrado (dataEncerramentoPrevista no passado) — ciclo acabou, excesso é real", async () => {
+  it("[oportunidades] Drop ativo SEM vendas recentes (vendasOrigem90=0): também suprime — proteção não depende de venda", async () => {
+    getComparacaoCompleta.mockResolvedValue({ variantes: [variante({ tipoCompra: "DROP" })] });
+    classificacaoProdutoFindMany.mockResolvedValue([{ cod: "COD-1", statusComercial: "ATIVO", dataEncerramentoPrevista: null }]);
+    getMovimentacoesRecomendadas.mockResolvedValue({
+      movimentacoes: [movimentacao({ cod: "COD-1", vendasOrigem90: 0 })],
+      manter: [],
+      necessidadesNaoAtendidas: [],
+      colunas: [],
+      totalAntesDoFiltro: 1,
+    });
+
+    const { getExcessosEDistribuicao } = await import("../planejamento-distribuicao");
+    const [r] = await getExcessosEDistribuicao();
+
+    expect(r.oportunidades).toHaveLength(0);
+    expect(r.dropsCicloAtivoProtegidos).toBe(1);
+  });
+
+  it("[oportunidades] Drop encerrado COM vendas: NÃO suprime — ciclo acabou, excesso é real", async () => {
     getComparacaoCompleta.mockResolvedValue({ variantes: [variante({ tipoCompra: "DROP" })] });
     const passada = new Date(Date.now() - 10 * 86_400_000);
     classificacaoProdutoFindMany.mockResolvedValue([{ cod: "COD-1", statusComercial: "ATIVO", dataEncerramentoPrevista: passada }]);
@@ -325,9 +346,10 @@ describe("getExcessosEDistribuicao", () => {
     expect(r.dropsCicloAtivoProtegidos).toBe(0);
   });
 
-  it("NÃO suprime oportunidade de Drop ativo com estoque_parado (vendasOrigem90 = 0, verdadeiramente morto)", async () => {
+  it("[oportunidades] Drop encerrado SEM vendas: NÃO suprime — ciclo acabou, mesmo sem venda recente", async () => {
     getComparacaoCompleta.mockResolvedValue({ variantes: [variante({ tipoCompra: "DROP" })] });
-    classificacaoProdutoFindMany.mockResolvedValue([{ cod: "COD-1", statusComercial: "ATIVO", dataEncerramentoPrevista: null }]);
+    const passada = new Date(Date.now() - 10 * 86_400_000);
+    classificacaoProdutoFindMany.mockResolvedValue([{ cod: "COD-1", statusComercial: "ATIVO", dataEncerramentoPrevista: passada }]);
     getMovimentacoesRecomendadas.mockResolvedValue({
       movimentacoes: [movimentacao({ cod: "COD-1", vendasOrigem90: 0 })],
       manter: [],
@@ -340,13 +362,14 @@ describe("getExcessosEDistribuicao", () => {
     const [r] = await getExcessosEDistribuicao();
 
     expect(r.oportunidades).toHaveLength(1);
+    expect(r.dropsCicloAtivoProtegidos).toBe(0);
   });
 
   // ---------------------------------------------------------------------
-  // Ajuste de regra (Rodrigo, 2026-11-17): Drop ativo também não conta no CONTADOR de excesso
-  // (Passo 1), não só na lista de oportunidades (Passo 2) — consistência entre as duas visões.
+  // Mesma régua (Drop ativo independente de venda) aplicada ao CONTADOR de excesso (Passo 1) —
+  // consistência entre as duas visões, mesmas 4 combinações.
   // ---------------------------------------------------------------------
-  it("Drop em ciclo ativo com venda real também fica de fora de excessoCD/excessoLojas (não só das oportunidades) e entra como 'deve permanecer'", async () => {
+  it("[excesso] Drop ativo COM vendas recentes: fica de fora de excessoCD e entra como 'deve permanecer'", async () => {
     // Mesmo fixture do teste de agregação básica: CD 200/mínimo 50/velocidade 1 -> disponível 146.
     const cdFixo = cd({ estoqueAtual: 200, estoqueMinimo: 50, velocidadeDiaria: 1, vendasDias90: 90, diagnostico: "cobertura_excessiva" });
     getComparacaoCompleta.mockResolvedValue({ variantes: [variante({ tipoCompra: "DROP", porLoja: [cdFixo] })] });
@@ -362,7 +385,22 @@ describe("getExcessosEDistribuicao", () => {
     expect(r.classificacao).toBe("DROP");
   });
 
-  it("Drop já encerrado (ciclo não ativo) não tem nenhuma retenção especial — excesso conta normal", async () => {
+  it("[excesso] Drop ativo SEM vendas recentes (vendasDias90=0, diagnóstico estoque_parado): também fica de fora do excesso — proteção não depende de venda", async () => {
+    const cdFixo = cd({ estoqueAtual: 200, estoqueMinimo: 50, velocidadeDiaria: 0, vendasDias90: 0, diagnostico: "estoque_parado" });
+    getComparacaoCompleta.mockResolvedValue({ variantes: [variante({ tipoCompra: "DROP", porLoja: [cdFixo] })] });
+    const futura = new Date(Date.now() + 10 * 86_400_000);
+    classificacaoProdutoFindMany.mockResolvedValue([{ cod: "COD-1", statusComercial: "ATIVO", dataEncerramentoPrevista: futura }]);
+
+    const { getExcessosEDistribuicao } = await import("../planejamento-distribuicao");
+    const [r] = await getExcessosEDistribuicao();
+
+    // velocidade 0 -> margem 0 -> disponível = 200 - 50 - 0 = 150, inteiro retido.
+    expect(r.excessoCD).toBe(0);
+    expect(r.excessoDropProtegido).toBe(150);
+    expect(r.estoqueCDPermanece).toBe(200);
+  });
+
+  it("[excesso] Drop encerrado COM vendas: não tem nenhuma retenção especial — excesso conta normal", async () => {
     const cdFixo = cd({ estoqueAtual: 200, estoqueMinimo: 50, velocidadeDiaria: 1, vendasDias90: 90, diagnostico: "cobertura_excessiva" });
     getComparacaoCompleta.mockResolvedValue({ variantes: [variante({ tipoCompra: "DROP", porLoja: [cdFixo] })] });
     const passada = new Date(Date.now() - 10 * 86_400_000);
@@ -372,6 +410,19 @@ describe("getExcessosEDistribuicao", () => {
     const [r] = await getExcessosEDistribuicao();
 
     expect(r.excessoCD).toBe(146);
+    expect(r.excessoDropProtegido).toBe(0);
+  });
+
+  it("[excesso] Drop encerrado SEM vendas: continua sem retenção especial — avaliado normal mesmo sem venda recente", async () => {
+    const cdFixo = cd({ estoqueAtual: 200, estoqueMinimo: 50, velocidadeDiaria: 0, vendasDias90: 0, diagnostico: "estoque_parado" });
+    getComparacaoCompleta.mockResolvedValue({ variantes: [variante({ tipoCompra: "DROP", porLoja: [cdFixo] })] });
+    const passada = new Date(Date.now() - 10 * 86_400_000);
+    classificacaoProdutoFindMany.mockResolvedValue([{ cod: "COD-1", statusComercial: "ATIVO", dataEncerramentoPrevista: passada }]);
+
+    const { getExcessosEDistribuicao } = await import("../planejamento-distribuicao");
+    const [r] = await getExcessosEDistribuicao();
+
+    expect(r.excessoCD).toBe(150); // 200 - 50 - 0 de margem, sem nenhuma retenção
     expect(r.excessoDropProtegido).toBe(0);
   });
 

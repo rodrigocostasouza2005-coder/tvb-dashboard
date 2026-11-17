@@ -64,17 +64,15 @@ export function ExcessoDistribuicaoSection({
       {dados.dropsCicloAtivoProtegidos > 0 && (
         <p className="mb-3 text-[11px] text-[var(--text-muted)]">
           {dados.dropsCicloAtivoProtegidos} oportunidade(s) de transferência ocultada(s) nesta visão porque o SKU é
-          Drop ainda em ciclo ativo com venda real nos últimos 90 dias — esvaziar um Drop vendendo normalmente não é
-          excesso real, é só ainda não ter girado o suficiente. Consulte a aba Distribuição de Estoque pra ver a lista
-          completa sem este filtro.
+          Drop ainda em ciclo ativo — esvaziar um Drop ativo prejudicaria sua exposição, com ou sem venda recente.
+          Consulte a aba Distribuição de Estoque pra ver a lista completa sem este filtro.
         </p>
       )}
 
       {dados.excessoDropProtegido > 0 && (
         <p className="mb-3 text-[11px] text-[var(--text-muted)]">
           {formatNumero(dados.excessoDropProtegido)} unidade(s) que apareceriam como excesso ficaram de fora do total
-          acima por serem de um Drop em ciclo ativo com venda real — contam como &quot;deve permanecer&quot;, não
-          como sobra.
+          acima por serem de um Drop em ciclo ativo — contam como &quot;deve permanecer&quot;, não como sobra.
         </p>
       )}
 
