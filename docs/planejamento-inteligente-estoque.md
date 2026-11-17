@@ -1,6 +1,6 @@
 # Planejamento Inteligente de Estoque — TVB Radar
 
-**Status:** Fase 2A (classificação em lote, tendência de demanda, grade por cor/tamanho) mergeada e em produção (PR #101, SHA `9b4c986`, deploy `dpl_hi5hnbsinp8nhXxiZeZ311NEwcX4`). Validada contra dado real de produção. Fase 1 (PR #100) e Fase 0 concluídas. **Fase 2B entregue em 2 PRs abertos (excesso/distribuição #105 — §11; avaliação retrospectiva #106 — §12), aguardando revisão/merge do Rodrigo, mais uma proposta técnica de lead time só-leitura, zero código (§13).**
+**Status:** Fase 2A (classificação em lote, tendência de demanda, grade por cor/tamanho) mergeada e em produção (PR #101, SHA `9b4c986`, deploy `dpl_hi5hnbsinp8nhXxiZeZ311NEwcX4`). Validada contra dado real de produção. Fase 1 (PR #100) e Fase 0 concluídas. **Fase 2B concluída e em produção**: excesso/distribuição (PR #105, §11) e avaliação retrospectiva (PR #106, §12) mergeados, com ajuste de regra de negócio (Drop/Best Seller/produto não classificado, pedido do Rodrigo em 2026-11-17) implementado antes do merge — ver §14 pra resultado final, validação em produção e limitações. Proposta técnica de lead time normal/urgente permanece só diagnóstico, zero código, decisão pendente do Rodrigo (§13).
 **Data:** 2026-11-16 (Fase 0, Fase 1, Fase 2A e Fase 2B)
 **Como ler este documento:** é um documento vivo de continuidade — arquitetura, regras de negócio, decisões e pendências. Toda afirmação aqui é fato verificado em código/schema nesta data, salvo quando marcado "não verificado" ou "decisão pendente". O código muda rápido neste projeto — antes de implementar algo listado aqui, reverifique contra o código atual.
 
@@ -279,9 +279,9 @@ A worktree órfã (`tvb-dashboard-planejamento-estoque`) decompunha quantidade p
 
 ---
 
-## 11. Fase 2B — excesso e distribuição (2026-11-16, PR aberto, aguardando aprovação)
+## 11. Fase 2B — excesso e distribuição (2026-11-16, PR #105 — **mergeado e em produção**, ver §14)
 
-Agente A da Fase 2B (ver §10.6 — pendente desta fase: "surfacing de distribuicao-estoque/DecisaoMovimentacaoEstoque no painel de detalhe, motor já maduro, só falta integrar visualmente"). Branch `feat-planejamento-estoque-fase2b-distribuicao-20261116`. **Sem schema novo, sem migration.** PR aberto — **não mergeado** por este agente (regra do projeto: agente não mergeia sozinho quando o escopo poderia tocar fluxo crítico; aqui não há schema/dado real tocado, mas o PR segue a mesma disciplina de todas as fases anteriores — aguarda revisão do Rodrigo).
+Agente A da Fase 2B (ver §10.6 — pendente desta fase: "surfacing de distribuicao-estoque/DecisaoMovimentacaoEstoque no painel de detalhe, motor já maduro, só falta integrar visualmente"). Branch `feat-planejamento-estoque-fase2b-distribuicao-20261116`. **Sem schema novo, sem migration.** Conteúdo original do PR (antes dos ajustes de regra pedidos pelo Rodrigo — ver §14) preservado abaixo; status final e resultado da validação em produção estão em §14.
 
 ### 11.1 O que foi implementado
 
@@ -312,9 +312,9 @@ Script `scripts/validar-planejamento-distribuicao-fase2b-temp.ts` + workflow `va
 
 ---
 
-## 12. Fase 2B — avaliação retrospectiva de decisões de compra (2026-11-16, PR aberto, aguardando aprovação)
+## 12. Fase 2B — avaliação retrospectiva de decisões de compra (2026-11-16, PR #106 — **mergeado e em produção**, ver §14)
 
-Agente B da Fase 2B. Branch `feat-planejamento-estoque-fase2b-avaliacao-20261116`, PR #106 — **não mergeado**. Trabalhou em worktree isolada (`tvb-dashboard-avaliacao-compras`), sem tocar nos arquivos do Agente A. **Sem schema novo, sem migration, sem tabela/job nova** — cálculo 100% on-demand, exatamente a opção já recomendada no §4.2 desde a Fase 0.
+Agente B da Fase 2B. Branch `feat-planejamento-estoque-fase2b-avaliacao-20261116`, PR #106. Trabalhou em worktree isolada (`tvb-dashboard-avaliacao-compras`), sem tocar nos arquivos do Agente A. **Sem schema novo, sem migration, sem tabela/job nova** — cálculo 100% on-demand, exatamente a opção já recomendada no §4.2 desde a Fase 0. Status final e resultado da validação em produção estão em §14.
 
 ### 12.1 O que foi implementado
 
@@ -365,3 +365,74 @@ Agente C. Regime estritamente somente-leitura, conforme pedido — nenhum arquiv
 **Começar pela Opção A.** Resolve 100% do problema declarado (60 dias vs. 2 dias, ambos configuráveis) com uma migration de uma linha, sem tabela nova, sem FK, sem seed, mantendo o padrão de UI inline já em uso. Opção B só se justifica com um 3º cenário real de lead time; Opção C só se justifica no dia em que a TVB de fato comprar de terceiro — modelar fornecedor agora seria estrutura sem necessidade comprovada.
 
 **Decisão pendente do Rodrigo**: qual opção seguir, e quando — nenhuma migration foi criada, nenhum código foi escrito, conforme exigido. Implementação só começa após aprovação explícita.
+
+---
+
+## 14. Fase 2B — fechamento: ajuste de regra de negócio, merge dos dois PRs e validação final em produção (2026-11-17)
+
+Depois de revisar as entregas de §11/§12/§13, o Rodrigo pediu ajustes de regra em #105 antes do merge (Drop, Best Seller e produto não classificado — pedido verbatim abaixo) e autorizou seguir com #105 → validar → #106 → validar, nessa ordem, concluindo as duas frentes antes de iniciar a próxima etapa. **Sem migration, sem lead time urgente, sem escrita real em produção, sem tocar coletores/regras de venda/classificação fora deste escopo, sem nova auditoria geral** — todas as restrições explícitas respeitadas.
+
+### 14.1 Pedido do Rodrigo (regra de negócio, decide as 3 pendências abertas em §11.1/§11.3)
+
+1. **Drop**: ativo nunca é excesso nem gera recomendação de retirada/transferência que prejudique a exposição. Encerrado é avaliado normalmente (estoque/venda/ciclo), sem proteção especial.
+2. **Best Seller**: proteção contra decisão precipitada, mas **não imunidade absoluta** — preserva o estoque necessário pra continuidade de venda/reposição, mas ainda identifica excesso real quando há evidência de estoque acima da necessidade; transferências continuam permitidas quando não arriscam ruptura na origem.
+3. **Produto não classificado**: aparece na visão de excesso/distribuição, com "classificação pendente" explícita — nunca escondido, nunca com comportamento de Best Seller/Drop inventado. Quando a falta de classificação impede uma recomendação confiável, mostra o diagnóstico, não gera recomendação automática baseada em premissa desconhecida.
+
+### 14.2 O que foi implementado em `planejamento-distribuicao.ts` (PR #105, commit `2113acb` antes do merge)
+
+- **Consistência Drop**: a proteção de ciclo ativo (já existente, §11.3.5) só bloqueava a lista de oportunidades (Passo 2). Passou a bloquear também o CONTADOR de excesso (Passo 1, `excessoCD`/`excessoLojas`) — mesma condição (`vendasDias90 > 0`/`vendasOrigem90 > 0`, mesmo significado por posição). Drop encerrado continua sem nenhuma proteção especial, como pedido.
+- **Reserva de continuidade de Best Seller** (não imunidade): nova função pura `aplicarRetencoes` usa `leadTimeDias` REAL por grupo (`getParametrosBestSellerPorGrupo`, `CoberturaMeta`, já em produção — nunca um valor inventado) × `velocidadeDiaria` da própria posição (sem risco de dupla contagem) pra reservar o necessário até a próxima reposição. O que sobra ALÉM da reserva continua contando como excesso real. Quando o grupo não tem `leadTimeDias` cadastrado, a reserva é 0 — comportamento idêntico ao de antes desta mudança, nunca assume um prazo não configurado. Afeta só o contador de excesso (Passo 1); as oportunidades de transferência (Passo 2) nunca são bloqueadas para Best Seller — `construirOrigem` já protege a origem contra ruptura por construção.
+- **Campo `classificacao`** (novo, em `ProdutoExcessoDistribuicao`): `BEST_SELLER | DROP | MISTO | NAO_CLASSIFICADO`, mesma convenção de `planejamento-estoque.ts` — lógica extraída pra uma função pura exportada (`classificarAgregado`, em `planejamento-estoque.ts`) e reaproveitada aqui, nunca duplicada.
+- **Contadores de transparência novos**: `excessoDropProtegido` (unidades retidas do contador de excesso por Drop ativo) e `reservaContinuidadeBestSeller` (unidades retidas como reserva de Best Seller) — nunca escondem silenciosamente o que foi filtrado, mesmo princípio de `dropsCicloAtivoProtegidos` já existente.
+- **UI**: removidos os dois gates que restringiam a seção "Excesso e distribuição entre unidades" a produtos Best Seller/Drop (`page.tsx` linha ~67, `produto-detalhe.tsx` linha ~50) — a seção agora é buscada/mostrada pra qualquer produto com sinal real, com aviso explícito de "classificação pendente" quando `classificacao` é `NAO_CLASSIFICADO`/`MISTO` (`excesso-distribuicao.tsx`), e novos textos informativos pros dois contadores de transparência.
+- **Produto NAO_CLASSIFICADO/MISTO verificado estruturalmente imune** a ambas as réguas: tanto o filtro de Drop quanto a reserva de Best Seller são indexados por mapas que só contêm cods com `tipoCompra` DROP/BEST_SELLER respectivamente — nenhum código extra foi necessário pra "proteger" o produto não classificado, é uma consequência direta da estrutura existente (confirmado também contra produção, ver §14.4).
+
+### 14.3 Testes novos (`planejamentoDistribuicao.test.ts`, 16 → 23 testes no arquivo)
+
+Drop ativo agora também exclui do contador de excesso (não só das oportunidades) e soma em "deve permanecer"; Drop encerrado continua sem retenção; Best Seller com `leadTimeDias` configurado tem reserva parcial que reduz o excesso sem zerá-lo (prova de não-imunidade); Best Seller sem `leadTimeDias` configurado tem reserva 0 (comportamento idêntico ao anterior, sem regressão); reserva de Best Seller nunca suprime oportunidades de transferência; produto NAO_CLASSIFICADO mostra excesso real completo, sem nenhuma retenção; `classificacao` agregada corretamente como MISTO quando os cods do mesmo produto divergem. `npx vitest run` completo (todo o repo): **697 testes passando** (690 + 7 novos), 0 regressão. `npx tsc --noEmit` e `npx eslint` (arquivos tocados) sem erros. `npm run build` com sucesso.
+
+### 14.4 Merge, deploy e validação contra produção — PR #105
+
+Merge squash em `4bacadb1a21e8162848d55215008bea5d3641597` (2026-11-17). Deploy de produção confirmado (status do commit via Vercel: `success`). Script temporário `scripts/validar-planejamento-distribuicao-fase2b-temp.ts` atualizado (commit `4e9a9c4`, pra reportar os campos novos — `classificacao`, `excessoDropProtegido`, `reservaContinuidadeBestSeller` — e checar vazamento de regra) e disparado via `workflow_dispatch` contra o banco de produção, **somente leitura**:
+
+- 282 produtos com algum sinal de excesso/ruptura/oportunidade/retenção.
+- Classificação real na base: **276 NAO_CLASSIFICADO, 5 DROP, 1 BEST_SELLER** — prova concreta de que a maioria dos produtos (que antes ficavam fora da seção por causa do gate removido) agora aparece corretamente.
+- **1 produto** com excesso retido pela proteção de Drop ativo (prova real do fix de consistência Passo 1/Passo 2, não só sintética).
+- **0 produtos** com reserva de continuidade de Best Seller aplicada — esperado: nenhum grupo tem `leadTimeDias` cadastrado em `CoberturaMeta` hoje, então a reserva fica em 0 pra todos, comportamento idêntico ao de antes desta mudança (nenhuma regressão, nenhuma premissa inventada).
+- **0 produtos** NAO_CLASSIFICADO/MISTO com retenção indevida de Drop/Best Seller (checagem de honestidade/vazamento, prova contra dado real).
+- **0 oportunidades** com `estoqueOrigemDepois` negativo, **0 divergências** saída≠entrada (mesmas checagens de integridade das fases anteriores, continuam verdes).
+
+Script/workflow temporários removidos depois (commit `3e3d355`), mesmo padrão das fases anteriores.
+
+### 14.5 Merge, deploy e validação contra produção — PR #106
+
+PR #106 ficou com conflito trivial em `src/lib/metrics/index.ts` (ambos os PRs da Fase 2B adicionaram seu próprio `export *`) depois do merge de #105 em main — resolvido mantendo as duas linhas (commit `5ca2933` na worktree `tvb-dashboard-avaliacao-compras`), suíte completa revalidada pós-merge (**709 testes passando** — 697 + 12 do Agente B, 0 regressão), `tsc`/`build` limpos. Merge squash em `4eb31204b7563a4ad03e3a4e37edf985d8afdc08`. Deploy de produção confirmado.
+
+**Integração confirmada**: `AvaliacaoDecisoesView` está de fato renderizada em `mapa-compras/page.tsx` (não é componente órfão) e o build de produção compila a rota normalmente.
+
+Script `scripts/validar-planejamento-avaliacao-fase2b-temp.ts` (já incluído no PR, ver §12.4) disparado contra produção, somente leitura:
+
+- **`DecisaoCompra` tem 0 linhas em produção hoje** — a avaliação retrospectiva está integrada e funcionando (não quebra, não inventa dado), mas não há nenhuma decisão real pra avaliar ainda. Confirma a suspeita já registrada em §12.3 ("é esperado que a tabela esteja vazia"). **Isto é uma limitação de dado, não um bug da função** — `avaliabilidade` ficaria SEM_DADOS/PARCIAL/COMPLETA = 0/0/0 porque não há nenhuma linha-fonte, nunca porque dado existente foi escondido.
+
+Script/workflow temporários removidos depois (commit `5e42abc`).
+
+### 14.6 Limitações finais que seguem existindo (não escondidas)
+
+- **Nenhum grupo Best Seller tem `leadTimeDias` cadastrado em `CoberturaMeta` hoje** — a reserva de continuidade está implementada e testada, mas não tem efeito prático em produção até alguém cadastrar o lead time real por grupo (tela já existente de `ParametrosGrupoForm`, fora do escopo desta entrega).
+- **`DecisaoCompra` está vazia em produção** — a avaliação retrospectiva (PR #106) não tem nenhuma decisão real pra avaliar ainda; só passa a mostrar algo quando o formulário de registro de decisão de compra (já existente desde `7bbb596`) for usado de fato.
+- **Lead time urgente permanece só proposta técnica** (§13), não implementado nesta etapa, conforme pedido explícito.
+- Ambas as decisões de arquitetura que ficavam pendentes em §11.1/§11.3.5 (restrição Best Seller/Drop na UI, e se a régua de ciclo ativo valeria pra Best Seller) foram resolvidas pelo pedido do Rodrigo nesta seção — não há mais pendência de validação aberta nesta frente.
+
+### 14.7 Resumo de commits e deploys desta etapa
+
+| Commit | O quê | Branch/alvo |
+|---|---|---|
+| `2113acb` | Ajuste de regra Drop/Best Seller/classificação + testes | `feat-planejamento-estoque-fase2b-distribuicao-20261116` (PR #105) |
+| `4bacadb1a2` | **Merge PR #105** (squash) | `main`, deploy produção confirmado |
+| `4e9a9c4` | Atualiza script temp de validação pra cobrir os campos novos | `main` |
+| `3e3d355` | Remove script/workflow temp de #105 (pós-validação) | `main`, deploy produção confirmado |
+| `5ca2933` | Resolve conflito trivial em `metrics/index.ts` | `feat-planejamento-estoque-fase2b-avaliacao-20261116` (PR #106) |
+| `4eb31204b7` | **Merge PR #106** (squash) | `main`, deploy produção confirmado |
+| `5e42abc` | Remove script/workflow temp de #106 (pós-validação) | `main`, deploy produção confirmado |
+
+**As duas frentes da Fase 2B estão concluídas, integradas e validadas contra produção.** Próxima etapa (lead time urgente, ou outro item do roadmap em §6) aguarda decisão explícita do Rodrigo, conforme pedido.
