@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import type { TipoCompraProduto } from "@prisma/client";
 import {
   getComparacaoCompleta,
   diagnosticarVariante,
@@ -20,6 +21,12 @@ import { getDailySalesByProduto, type DailyProdutoPoint } from "./vendas";
 const MIN_DIAS_HISTORICO_CONFIAVEL = 14; // mesmo limiar de compras-inteligencia.ts
 
 export type ClassificacaoAgregada = "BEST_SELLER" | "DROP" | "MISTO" | "NAO_CLASSIFICADO";
+
+// Extraída pra reuso em planejamento-distribuicao.ts (Fase 2B, ajuste de regra Rodrigo
+// 2026-11-16) — mesma fórmula de agregação por produto, sem duplicar.
+export function classificarAgregado(tipos: Set<TipoCompraProduto>): ClassificacaoAgregada {
+  return tipos.size === 0 ? "NAO_CLASSIFICADO" : tipos.size > 1 ? "MISTO" : (tipos.values().next().value as ClassificacaoAgregada);
+}
 
 // "crescimento"/"desaceleracao" comparam vendasDias30 contra a janela ANTERIOR de 30 dias
 // (vendasDias60 - vendasDias30) — nunca ano-contra-ano (Fase 0 confirmou: só ~14 meses de
@@ -92,7 +99,7 @@ export async function getProdutosPlanejamento(filtro: ComparacaoFiltro = {}): Pr
     estoqueTotal: number;
     estoqueCD: number;
     estoqueLojas: number;
-    tipos: Set<string>;
+    tipos: Set<TipoCompraProduto>;
   };
   const porProduto = new Map<string, Acc>();
   for (const v of variantes) {
@@ -143,8 +150,7 @@ export async function getProdutosPlanejamento(filtro: ComparacaoFiltro = {}): Pr
       { estoqueAtual: acc.estoqueTotal, vendasDias30, vendasDias90, velocidadeDiaria, coberturaDias },
       "loja"
     );
-    const classificacao: ClassificacaoAgregada =
-      acc.tipos.size === 0 ? "NAO_CLASSIFICADO" : acc.tipos.size > 1 ? "MISTO" : (acc.tipos.values().next().value as ClassificacaoAgregada);
+    const classificacao: ClassificacaoAgregada = classificarAgregado(acc.tipos);
     const cods = [...acc.cods];
     const recebimentos = cods.flatMap((c) => pedidosAberto.get(c) ?? []);
     const quantidadeEmTransito = recebimentos.reduce((s, r) => s + r.quantidade, 0);

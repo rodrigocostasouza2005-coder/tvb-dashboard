@@ -8,6 +8,7 @@ const getPedidosEmAbertoPorCod = vi.fn((..._a: unknown[]) => {
   throw new Error("getPedidosEmAbertoPorCod NUNCA deveria ser chamado por planejamento-distribuicao.ts");
 });
 const classificacaoProdutoFindMany = vi.fn();
+const getParametrosBestSellerPorGrupo = vi.fn();
 
 // construirOrigem/diagnosticarVariante/etc. ficam REAIS (importActual) — são funções puras, a
 // mesma régua de mínimo+margem que o motor usa pra decidir quem pode doar. Só as funções de DADO
@@ -26,6 +27,7 @@ vi.mock("../distribuicao-estoque", async (importActual) => {
 // ProductionOrder/trânsito — se algum código novo passar a chamar isso, o teste quebra alto.
 vi.mock("../compras-inteligencia", () => ({
   getPedidosEmAbertoPorCod: (...a: unknown[]) => getPedidosEmAbertoPorCod(...a),
+  getParametrosBestSellerPorGrupo: (...a: unknown[]) => getParametrosBestSellerPorGrupo(...a),
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -113,6 +115,7 @@ beforeEach(() => {
   getHistoricoMovimentacoes.mockReset();
   getPedidosEmAbertoPorCod.mockClear();
   classificacaoProdutoFindMany.mockReset().mockResolvedValue([]);
+  getParametrosBestSellerPorGrupo.mockReset().mockResolvedValue([]);
 });
 
 describe("getExcessosEDistribuicao", () => {
@@ -337,6 +340,131 @@ describe("getExcessosEDistribuicao", () => {
     const [r] = await getExcessosEDistribuicao();
 
     expect(r.oportunidades).toHaveLength(1);
+  });
+
+  // ---------------------------------------------------------------------
+  // Ajuste de regra (Rodrigo, 2026-11-17): Drop ativo também não conta no CONTADOR de excesso
+  // (Passo 1), não só na lista de oportunidades (Passo 2) — consistência entre as duas visões.
+  // ---------------------------------------------------------------------
+  it("Drop em ciclo ativo com venda real também fica de fora de excessoCD/excessoLojas (não só das oportunidades) e entra como 'deve permanecer'", async () => {
+    // Mesmo fixture do teste de agregação básica: CD 200/mínimo 50/velocidade 1 -> disponível 146.
+    const cdFixo = cd({ estoqueAtual: 200, estoqueMinimo: 50, velocidadeDiaria: 1, vendasDias90: 90, diagnostico: "cobertura_excessiva" });
+    getComparacaoCompleta.mockResolvedValue({ variantes: [variante({ tipoCompra: "DROP", porLoja: [cdFixo] })] });
+    const futura = new Date(Date.now() + 10 * 86_400_000);
+    classificacaoProdutoFindMany.mockResolvedValue([{ cod: "COD-1", statusComercial: "ATIVO", dataEncerramentoPrevista: futura }]);
+
+    const { getExcessosEDistribuicao } = await import("../planejamento-distribuicao");
+    const [r] = await getExcessosEDistribuicao();
+
+    expect(r.excessoCD).toBe(0);
+    expect(r.excessoDropProtegido).toBe(146);
+    expect(r.estoqueCDPermanece).toBe(200); // 54 (mínimo+margem) + 146 (retido) = tudo permanece
+    expect(r.classificacao).toBe("DROP");
+  });
+
+  it("Drop já encerrado (ciclo não ativo) não tem nenhuma retenção especial — excesso conta normal", async () => {
+    const cdFixo = cd({ estoqueAtual: 200, estoqueMinimo: 50, velocidadeDiaria: 1, vendasDias90: 90, diagnostico: "cobertura_excessiva" });
+    getComparacaoCompleta.mockResolvedValue({ variantes: [variante({ tipoCompra: "DROP", porLoja: [cdFixo] })] });
+    const passada = new Date(Date.now() - 10 * 86_400_000);
+    classificacaoProdutoFindMany.mockResolvedValue([{ cod: "COD-1", statusComercial: "ATIVO", dataEncerramentoPrevista: passada }]);
+
+    const { getExcessosEDistribuicao } = await import("../planejamento-distribuicao");
+    const [r] = await getExcessosEDistribuicao();
+
+    expect(r.excessoCD).toBe(146);
+    expect(r.excessoDropProtegido).toBe(0);
+  });
+
+  // ---------------------------------------------------------------------
+  // Ajuste de regra: Best Seller passa a ter reserva de continuidade (lead time real × velocidade),
+  // não mais imunidade absoluta — ver aplicarRetencoes em planejamento-distribuicao.ts.
+  // ---------------------------------------------------------------------
+  it("Best Seller com leadTimeDias configurado no grupo: reserva parcial reduz o excesso, mas não zera (não é imunidade)", async () => {
+    // loja 120/mínimo 90/velocidade 2 -> disponível real 23 (mesma conta do teste de margem acima).
+    // leadTimeDias=10 -> reserva = round(2*10) = 20 -> disponivelParaExcesso = max(0, 23-20) = 3.
+    getComparacaoCompleta.mockResolvedValue({
+      variantes: [
+        variante({
+          tipoCompra: "BEST_SELLER",
+          porLoja: [loja({ estoqueAtual: 120, estoqueMinimo: 90, velocidadeDiaria: 2, vendasDias90: 180, diagnostico: "cobertura_excessiva" })],
+        }),
+      ],
+    });
+    getParametrosBestSellerPorGrupo.mockResolvedValue([{ grupo: "Polos", estoqueSegurancaUnidades: null, leadTimeDias: 10 }]);
+
+    const { getExcessosEDistribuicao } = await import("../planejamento-distribuicao");
+    const [r] = await getExcessosEDistribuicao();
+
+    expect(r.excessoLojas).toBe(3);
+    expect(r.excessoLojas).toBeGreaterThan(0); // não é imunidade: excesso real acima da reserva ainda conta
+    expect(r.reservaContinuidadeBestSeller).toBe(20);
+    expect(r.classificacao).toBe("BEST_SELLER");
+  });
+
+  it("Best Seller sem leadTimeDias configurado no grupo: reserva é 0, comportamento idêntico ao de antes desta mudança", async () => {
+    getComparacaoCompleta.mockResolvedValue({
+      variantes: [
+        variante({
+          tipoCompra: "BEST_SELLER",
+          porLoja: [loja({ estoqueAtual: 120, estoqueMinimo: 90, velocidadeDiaria: 2, vendasDias90: 180, diagnostico: "cobertura_excessiva" })],
+        }),
+      ],
+    });
+    getParametrosBestSellerPorGrupo.mockResolvedValue([]); // grupo não cadastrado em CoberturaMeta
+
+    const { getExcessosEDistribuicao } = await import("../planejamento-distribuicao");
+    const [r] = await getExcessosEDistribuicao();
+
+    expect(r.excessoLojas).toBe(23); // mesma conta "ingênua vs. real" de antes, sem reserva nova
+    expect(r.reservaContinuidadeBestSeller).toBe(0);
+  });
+
+  it("reserva de continuidade de Best Seller nunca suprime oportunidades de transferência (Passo 2 fica intocado)", async () => {
+    getComparacaoCompleta.mockResolvedValue({ variantes: [variante({ tipoCompra: "BEST_SELLER" })] });
+    getParametrosBestSellerPorGrupo.mockResolvedValue([{ grupo: "Polos", estoqueSegurancaUnidades: null, leadTimeDias: 30 }]);
+    getMovimentacoesRecomendadas.mockResolvedValue({
+      movimentacoes: [movimentacao({ cod: "COD-1", vendasOrigem90: 5 })],
+      manter: [],
+      necessidadesNaoAtendidas: [],
+      colunas: [],
+      totalAntesDoFiltro: 1,
+    });
+
+    const { getExcessosEDistribuicao } = await import("../planejamento-distribuicao");
+    const [r] = await getExcessosEDistribuicao();
+
+    expect(r.oportunidades).toHaveLength(1);
+  });
+
+  // ---------------------------------------------------------------------
+  // Produto sem classificação (ou MISTO): nunca herda a régua de Drop nem a de Best Seller, e
+  // nunca é escondido da visão de excesso/distribuição.
+  // ---------------------------------------------------------------------
+  it("produto NAO_CLASSIFICADO (tipoCompra null) mostra excesso real completo, sem nenhuma retenção especial", async () => {
+    const cdFixo = cd({ estoqueAtual: 200, estoqueMinimo: 50, velocidadeDiaria: 1, vendasDias90: 90, diagnostico: "cobertura_excessiva" });
+    getComparacaoCompleta.mockResolvedValue({ variantes: [variante({ tipoCompra: null, porLoja: [cdFixo] })] });
+
+    const { getExcessosEDistribuicao } = await import("../planejamento-distribuicao");
+    const [r] = await getExcessosEDistribuicao();
+
+    expect(r.excessoCD).toBe(146);
+    expect(r.excessoDropProtegido).toBe(0);
+    expect(r.reservaContinuidadeBestSeller).toBe(0);
+    expect(r.classificacao).toBe("NAO_CLASSIFICADO");
+  });
+
+  it("classificacao agregada por produto: MISTO quando os cods do mesmo produto têm tipoCompra diferente", async () => {
+    getComparacaoCompleta.mockResolvedValue({
+      variantes: [
+        variante({ cod: "COD-1", tipoCompra: "BEST_SELLER", porLoja: [loja({ estoqueAtual: 0, vendasDias90: 10, diagnostico: "ruptura" })] }),
+        variante({ cod: "COD-2", tipoCompra: "DROP", porLoja: [loja({ estoqueAtual: 0, vendasDias90: 10, diagnostico: "ruptura" })] }),
+      ],
+    });
+
+    const { getExcessosEDistribuicao } = await import("../planejamento-distribuicao");
+    const [r] = await getExcessosEDistribuicao();
+
+    expect(r.classificacao).toBe("MISTO");
   });
 });
 

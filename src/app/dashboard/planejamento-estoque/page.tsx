@@ -58,13 +58,14 @@ export default async function PlanejamentoEstoquePage({
   const podeClassificar = user.role === "ADMIN" || user.role === "GESTAO";
   const linhaProdutoAberto = produtoAberto ? produtos.find((p) => p.produto === produtoAberto) : undefined;
 
-  // Fase 2B: só busca excesso/distribuição (e as decisões já registradas) quando o produto aberto
-  // é Best Seller/Drop — mesma régua aplicada em ProdutoDetalhe (ver excesso-distribuicao.tsx pra
-  // decisão de design/pendência de validação). getProdutoExcessoDistribuicao reaproveita a mesma
-  // passada cacheada de getComparacaoCompleta/getMovimentacoesRecomendadas que distribuicao-estoque
-  // já usa — não é uma query nova pesada.
+  // Fase 2B (ajuste de regra Rodrigo 2026-11-17): busca excesso/distribuição (e as decisões já
+  // registradas) pra QUALQUER produto aberto, não só Best Seller/Drop — produto não classificado/
+  // MISTO também precisa aparecer nessa visão (ver excesso-distribuicao.tsx, "classificação
+  // pendente"), nunca ser escondido. getProdutoExcessoDistribuicao reaproveita a mesma passada
+  // cacheada de getComparacaoCompleta/getMovimentacoesRecomendadas que distribuicao-estoque já
+  // usa — não é uma query nova pesada.
   const classificacaoAberta = linhaProdutoAberto?.classificacao ?? "NAO_CLASSIFICADO";
-  const buscarExcessoDistribuicao = Boolean(produtoAberto) && (classificacaoAberta === "BEST_SELLER" || classificacaoAberta === "DROP");
+  const buscarExcessoDistribuicao = Boolean(produtoAberto);
   const [excessoDistribuicao, decisoesMovimentacao] = await Promise.all([
     buscarExcessoDistribuicao ? getProdutoExcessoDistribuicao(produtoAberto!, filtro) : Promise.resolve(null),
     buscarExcessoDistribuicao ? getDecisoesMovimentacaoPorStatus({ produto: produtoAberto }) : Promise.resolve(null),

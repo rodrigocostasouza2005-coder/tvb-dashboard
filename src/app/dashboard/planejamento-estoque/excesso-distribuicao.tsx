@@ -3,17 +3,14 @@ import { tipoMovimentacaoLabel } from "@/lib/metrics";
 import { prioridadeInfo, confiancaInfo, statusHistoricoInfo, formatNumero } from "../distribuicao-estoque/format";
 
 // Fase 2B — "gestão inteligente de excesso e distribuição" (docs/planejamento-inteligente-estoque.md
-// §10.6). Decisão de arquitetura tomada aqui (documentada, precisa de validação do Rodrigo): em vez
-// de criar uma 11ª aba isolada ou duplicar a tela de decisão (Aprovar/Recusar já existe e é
-// server action real em distribuicao-estoque/actions.ts), esta seção é SÓ LEITURA — mostra o que o
-// motor já maduro (distribuicao-estoque.ts) recomendou pra ESTE produto, com um link pra abrir a
-// aba Movimentações da Distribuição de Estoque (já filtrada por este produto) pra quem for decidir
-// de fato. Mostrada só quando o produto aberto tem classificação Best Seller/Drop E
-// getProdutoExcessoDistribuicao encontrou algum sinal (excesso/ruptura/oportunidade) — ver
-// page.tsx. Essa segunda condição (só Best Seller/Drop) é a parte que mais precisa de validação:
-// pode fazer sentido mostrar pra MISTO/NAO_CLASSIFICADO também, já que o motor de distribuição não
-// depende de classificação pra funcionar — ficou restrito por ser o que o briefing desta fase pediu
-// literalmente ("quando o produto aberto tiver tipoCompra Best Seller/Drop").
+// §10.6, ajuste de regra Rodrigo 2026-11-17 em §11). Decisão de arquitetura: em vez de criar uma
+// 11ª aba isolada ou duplicar a tela de decisão (Aprovar/Recusar já existe e é server action real
+// em distribuicao-estoque/actions.ts), esta seção é SÓ LEITURA — mostra o que o motor já maduro
+// (distribuicao-estoque.ts) recomendou pra ESTE produto, com um link pra abrir a aba Movimentações
+// da Distribuição de Estoque (já filtrada por este produto) pra quem for decidir de fato. Mostrada
+// pra QUALQUER produto com algum sinal real (excesso/ruptura/oportunidade/retenção) — não só
+// Best Seller/Drop (ver page.tsx/produto-detalhe.tsx) — porque NAO_CLASSIFICADO/MISTO também
+// precisa aparecer nesta visão, com "classificação pendente" explícita, nunca escondido.
 export function ExcessoDistribuicaoSection({
   dados,
   decisoes,
@@ -24,6 +21,7 @@ export function ExcessoDistribuicaoSection({
   distribuicaoHref: string;
 }) {
   const temOportunidades = dados.oportunidades.length > 0;
+  const classificacaoPendente = dados.classificacao === "NAO_CLASSIFICADO" || dados.classificacao === "MISTO";
   return (
     <div className="border-t border-[var(--gridline)] p-4">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -37,6 +35,17 @@ export function ExcessoDistribuicaoSection({
         permanecer no CD&quot; é o mínimo cadastrado (StockMinimumRule) + margem de segurança (meia semana de giro);
         só a sobra acima disso entra como excesso disponível pra transferir.
       </p>
+
+      {classificacaoPendente && (
+        <p
+          className="mb-3 rounded-md border px-3 py-2 text-[11px]"
+          style={{ borderColor: "var(--text-muted)", color: "var(--text-secondary)" }}
+        >
+          Classificação pendente ({dados.classificacao === "MISTO" ? "SKUs com classificações diferentes" : "sem Best Seller/Drop definido"}
+          ) — este diagnóstico é mostrado mesmo assim, mas nenhuma recomendação automática deste módulo assume
+          comportamento de Best Seller ou Drop pra este produto (sem premissa sobre lead time ou proteção de ciclo).
+        </p>
+      )}
 
       <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
         <MiniStat label="Excesso no CD/Site" value={dados.excessoCD} destaque={dados.excessoCD > 0} />
@@ -58,6 +67,22 @@ export function ExcessoDistribuicaoSection({
           Drop ainda em ciclo ativo com venda real nos últimos 90 dias — esvaziar um Drop vendendo normalmente não é
           excesso real, é só ainda não ter girado o suficiente. Consulte a aba Distribuição de Estoque pra ver a lista
           completa sem este filtro.
+        </p>
+      )}
+
+      {dados.excessoDropProtegido > 0 && (
+        <p className="mb-3 text-[11px] text-[var(--text-muted)]">
+          {formatNumero(dados.excessoDropProtegido)} unidade(s) que apareceriam como excesso ficaram de fora do total
+          acima por serem de um Drop em ciclo ativo com venda real — contam como &quot;deve permanecer&quot;, não
+          como sobra.
+        </p>
+      )}
+
+      {dados.reservaContinuidadeBestSeller > 0 && (
+        <p className="mb-3 text-[11px] text-[var(--text-muted)]">
+          {formatNumero(dados.reservaContinuidadeBestSeller)} unidade(s) ficaram reservadas pra continuidade de
+          venda/reposição deste Best Seller (lead time cadastrado do grupo × velocidade de venda) e por isso não
+          entraram no total de excesso acima — o que sobra além desta reserva continua contando normalmente.
         </p>
       )}
 

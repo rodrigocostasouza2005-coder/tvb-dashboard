@@ -44,10 +44,12 @@ export function ProdutoDetalhe({
   const evolucao = detalhe.evolucaoVendas.map((d) => ({ day: d.day, unitsSold: d.unitsLiquida, revenue: d.revenueLiquida }));
   const temRecomendacao = detalhe.recomendacoesBestSeller.length > 0 || detalhe.recomendacoesDrop.length > 0;
   const precisaClassificar = classificacao === "NAO_CLASSIFICADO" || classificacao === "MISTO";
-  // Fase 2B: só mostra a seção de excesso/distribuição quando o produto já tem classificação
-  // Best Seller/Drop E o motor encontrou algum sinal real (excesso/ruptura/oportunidade) — ver
-  // excesso-distribuicao.tsx (cabeçalho) pra decisão de design e pendência de validação.
-  const mostrarExcessoDistribuicao = (classificacao === "BEST_SELLER" || classificacao === "DROP") && excessoDistribuicao != null;
+  // Fase 2B (ajuste de regra Rodrigo 2026-11-17): mostra a seção de excesso/distribuição pra
+  // QUALQUER classificação — inclusive NAO_CLASSIFICADO/MISTO — sempre que o motor encontrou
+  // algum sinal real (excesso/ruptura/oportunidade/retenção). "Classificação pendente" é exibida
+  // explicitamente dentro da seção (ver excesso-distribuicao.tsx) em vez de esconder o produto ou
+  // aplicar a régua de Best Seller/Drop sem base.
+  const mostrarExcessoDistribuicao = excessoDistribuicao != null;
 
   return (
     <div className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
