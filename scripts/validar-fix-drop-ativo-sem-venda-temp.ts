@@ -55,6 +55,25 @@ async function main() {
   console.log(`\nProdutos não-DROP com excessoDropProtegido > 0 (esperado: 0): ${vazamento.length}`);
   for (const v of vazamento) console.log(`  ALERTA: ${v.produto} (${v.classificacao}) excessoDropProtegido=${v.excessoDropProtegido}`);
 
+  // Drill-down: classificacaoAgregada ("DROP") só exige que os cods COM tipoCompra sejam todos
+  // DROP — um cod SEM classificação (tipoCompra null) não entra nesse cálculo (ver
+  // classificarAgregado em planejamento-estoque.ts) e por isso não herda a proteção de Drop. Se um
+  // produto rotulado "DROP" ainda mostra excesso real, a hipótese é que ele tem cod(s) sem
+  // classificação misturado(s) com o(s) cod(s) DROP — comportamento correto (não esconder/não
+  // inventar Drop pra quem não é), não um vazamento da régua. Confirma isso cod a cod.
+  if (produtosDropComExcessoAindaContando.length > 0) {
+    console.log("\nDrill-down cod a cod dos produtos DROP que ainda mostram excesso (confirma hipótese de cod sem classificação misturado):");
+    for (const p of produtosDropComExcessoAindaContando) {
+      const cods = await prisma.classificacaoProduto.findMany({ where: { produto: p.produto }, select: { cod: true, tipoCompra: true } });
+      const todosCods = p.cods;
+      const codsClassificados = new Set(cods.map((c) => c.cod));
+      const codsSemClassificacao = todosCods.filter((c) => !codsClassificados.has(c));
+      console.log(
+        `  ${p.produto}: ${todosCods.length} cod(s) no total, ${cods.length} classificado(s) (${cods.map((c) => `${c.cod}=${c.tipoCompra}`).join(", ") || "nenhum"}), ${codsSemClassificacao.length} sem classificação (${codsSemClassificacao.join(", ") || "nenhum"})`
+      );
+    }
+  }
+
   console.log("\n=== Fim da validação ===");
 }
 
