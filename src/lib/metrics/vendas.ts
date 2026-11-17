@@ -1223,8 +1223,12 @@ export async function getDailySalesByProdutoPorLoja(
     `,
   ]);
 
+  // Até 2026-11-16 usava displayGroup (CD+ATACADO numa série só, "TVB Site e Atacado") —
+  // revertido a pedido do Rodrigo (2026-11-17): quer Site e Atacado como séries separadas aqui,
+  // não somadas. Store.name do CD é literalmente "TVB Site e Atacado" (confuso sozinho); rótulo
+  // vira "TVB Site" só pra essa posição (code "CD"), mesmo padrão de groupStoresForFilter.
   const stores = await prisma.store.findMany({ where: { sellsProducts: true } });
-  const seriesNameByStoreId = new Map(stores.map((s) => [s.id, s.displayGroup ?? s.name]));
+  const seriesNameByStoreId = new Map(stores.map((s) => [s.id, s.code === "CD" ? "TVB Site" : s.name]));
 
   const byDay = new Map<string, Record<string, number>>();
   const seriesNames = new Set<string>();

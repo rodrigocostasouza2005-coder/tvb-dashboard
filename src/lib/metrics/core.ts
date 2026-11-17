@@ -425,25 +425,21 @@ export function sortTamanhos(tamanhos: string[]) {
 
 export type StoreFilterOption = { id: string; name: string };
 
-// Junta lojas com o mesmo displayGroup (ex: CD + ATACADO) numa única opção de filtro —
-// o id vira "id1|id2", que parseFilters() expande de volta em vários storeId no where.
-// Os dados por baixo continuam separados (evita somar/sobrescrever quantidade errado).
-export function groupStoresForFilter(stores: { id: string; name: string; displayGroup: string | null }[]): StoreFilterOption[] {
-  const groups = new Map<string, string[]>();
-  const standalone: StoreFilterOption[] = [];
-
-  for (const s of stores) {
-    if (s.displayGroup) {
-      const ids = groups.get(s.displayGroup) ?? [];
-      ids.push(s.id);
-      groups.set(s.displayGroup, ids);
-    } else {
-      standalone.push({ id: s.id, name: s.name });
-    }
-  }
-
-  const grouped = [...groups.entries()].map(([name, ids]) => ({ id: ids.join("|"), name }));
-  return [...grouped, ...standalone].sort((a, b) => a.name.localeCompare(b.name));
+// Até 2026-11-16, juntava lojas com o mesmo displayGroup (CD + ATACADO) numa única opção de
+// filtro. Revertido a pedido explícito do Rodrigo (2026-11-17): ele quer escolher Site e Atacado
+// separadamente no filtro, pra sempre saber qual dos dois está vendo — cada Store vira sua
+// própria opção, sem agrupar por displayGroup nunca mais aqui. displayGroup continua existindo no
+// schema e sendo usado por `getPosicoesEstoque`/Distribuição de Estoque, que trata CD/Site como
+// 1 posição só por decisão de produto deliberada e SEPARADA desta mudança (não afetada aqui).
+// Store.name do CD é literalmente "TVB Site e Atacado" (mesmo texto do displayGroup) — confuso
+// agora que aparece como opção própria, soando como se cobrisse os dois; por isso o rótulo vira
+// "TVB Site" só pra essa opção (code "CD"), sem tocar no dado real no banco.
+export function groupStoresForFilter(
+  stores: { id: string; name: string; code: string; displayGroup: string | null }[]
+): StoreFilterOption[] {
+  return stores
+    .map((s) => ({ id: s.id, name: s.code === "CD" ? "TVB Site" : s.name }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 // Resolve um nome de loja/filial em texto livre (ex: "Rio Sul", "site e atacado") pro(s)
