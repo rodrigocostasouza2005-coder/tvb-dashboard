@@ -1,8 +1,15 @@
 import { TipoCompraProduto, StatusComercialProduto, PossibilidadeReposicao } from "@prisma/client";
-import type { ProdutoPlanejamentoDetalhe, ClassificacaoAgregada, RecomendacaoGradeProduto } from "@/lib/metrics";
+import type {
+  ProdutoPlanejamentoDetalhe,
+  ClassificacaoAgregada,
+  RecomendacaoGradeProduto,
+  ProdutoExcessoDistribuicao,
+  DecisoesMovimentacaoPorStatus,
+} from "@/lib/metrics";
 import { classificarProdutoEmLoteAction } from "../mapa-compras/classificacao-actions";
 import { SalesTrendChart } from "../sales-trend-chart";
 import { formatNumber } from "./format";
+import { ExcessoDistribuicaoSection } from "./excesso-distribuicao";
 
 const STATUS_COMERCIAL_LABEL: Record<StatusComercialProduto, string> = {
   ATIVO: "Ativo",
@@ -21,16 +28,28 @@ export function ProdutoDetalhe({
   grade,
   podeClassificar,
   fecharHref,
+  excessoDistribuicao,
+  decisoesMovimentacao,
+  distribuicaoHref,
 }: {
   detalhe: ProdutoPlanejamentoDetalhe;
   classificacao: ClassificacaoAgregada;
   grade: RecomendacaoGradeProduto | null;
   podeClassificar: boolean;
   fecharHref: string;
+  excessoDistribuicao: ProdutoExcessoDistribuicao | null;
+  decisoesMovimentacao: DecisoesMovimentacaoPorStatus | null;
+  distribuicaoHref: string;
 }) {
   const evolucao = detalhe.evolucaoVendas.map((d) => ({ day: d.day, unitsSold: d.unitsLiquida, revenue: d.revenueLiquida }));
   const temRecomendacao = detalhe.recomendacoesBestSeller.length > 0 || detalhe.recomendacoesDrop.length > 0;
   const precisaClassificar = classificacao === "NAO_CLASSIFICADO" || classificacao === "MISTO";
+  // Fase 2B (ajuste de regra Rodrigo 2026-11-17): mostra a seção de excesso/distribuição pra
+  // QUALQUER classificação — inclusive NAO_CLASSIFICADO/MISTO — sempre que o motor encontrou
+  // algum sinal real (excesso/ruptura/oportunidade/retenção). "Classificação pendente" é exibida
+  // explicitamente dentro da seção (ver excesso-distribuicao.tsx) em vez de esconder o produto ou
+  // aplicar a régua de Best Seller/Drop sem base.
+  const mostrarExcessoDistribuicao = excessoDistribuicao != null;
 
   return (
     <div className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
@@ -251,6 +270,14 @@ export function ProdutoDetalhe({
             ))}
           </div>
         </div>
+      )}
+
+      {mostrarExcessoDistribuicao && (
+        <ExcessoDistribuicaoSection
+          dados={excessoDistribuicao!}
+          decisoes={decisoesMovimentacao}
+          distribuicaoHref={distribuicaoHref}
+        />
       )}
     </div>
   );
