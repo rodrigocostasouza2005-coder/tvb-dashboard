@@ -1,4 +1,4 @@
-import type { RecomendacaoBestSellerPorProduto, RecomendacaoDropPorProduto } from "@/lib/metrics";
+import type { RecomendacaoBestSellerPorProduto, RecomendacaoDropPorProduto, OportunidadeTransferenciaPorCod } from "@/lib/metrics";
 import { formatMoeda, formatNumero } from "./format";
 import { ClassificarProdutoForm } from "./forms";
 
@@ -12,18 +12,64 @@ export function AlertasView({
   bsRows,
   dropRows,
   filaRevisao,
+  oportunidadesTransferencia,
 }: {
   bsRows: RecomendacaoBestSellerPorProduto[];
   dropRows: RecomendacaoDropPorProduto[];
   filaRevisao: FilaItem[];
+  // Sinal ADITIVO (docs/planejamento-inteligente-estoque.md §16.2 item 3 e §19.6): mapa de cod ->
+  // oportunidade de transferência já calculada pelo motor de distribuição (getExcessosEDistribuicao,
+  // via getCodsComOportunidadeTransferencia) — nunca recalculado aqui, nunca altera
+  // quantidadeSugerida de nenhuma recomendação de compra abaixo. Opcional pra não quebrar nenhum
+  // outro chamador existente do componente.
+  oportunidadesTransferencia?: Map<string, OportunidadeTransferenciaPorCod>;
 }) {
   const rupturaBS = bsRows.filter((r) => r.coberturaAtualDias != null && r.coberturaAtualDias < 7 && r.quantidadeSugerida > 0);
   const rupturaDrop = dropRows.filter((r) => r.riscoRuptura);
   const sobraDrop = dropRows.filter((r) => r.riscoSobra);
   const bloqueadosOuPendentes = dropRows.filter((r) => r.bloqueadoRecompra || r.precisaConfirmacaoHumana);
 
+  // Sinal "há excesso disponível antes de comprar": só olha os cods que JÁ aparecem nas seções de
+  // risco de ruptura acima (Best Seller e Drop) — é exatamente aí que a pergunta "comprar ou só
+  // transferir?" importa. Nunca toca quantidadeSugerida/valorEstimado de nenhuma linha.
+  const oportunidadesEmRisco = (oportunidadesTransferencia ?? new Map<string, OportunidadeTransferenciaPorCod>());
+  const riscoComOportunidade = [
+    ...rupturaBS.map((r) => ({ cod: r.cod, produto: r.produto, grupo: r.grupo })),
+    ...rupturaDrop.map((r) => ({ cod: r.cod, produto: r.produto, grupo: r.grupo })),
+  ]
+    .filter((r) => oportunidadesEmRisco.has(r.cod))
+    .map((r) => ({ ...r, oportunidade: oportunidadesEmRisco.get(r.cod)! }));
+
   return (
     <div className="space-y-5">
+      {riscoComOportunidade.length > 0 && (
+        <section>
+          <h3 className="mb-2 text-sm font-medium" style={{ color: "var(--status-warning)" }}>
+            Excesso disponível para transferência antes de comprar ({riscoComOportunidade.length})
+          </h3>
+          <p className="mb-2 text-[10px] text-[var(--text-muted)]">
+            Estes cods já aparecem em risco de ruptura acima, mas o motor de Distribuição de
+            Estoque (intocado, mesmo cálculo já validado) encontrou excesso disponível em outra
+            posição — considere transferir antes de aumentar a compra. Isto é só um aviso: a
+            sugestão de compra acima não muda.
+          </p>
+          <ul className="space-y-1">
+            {riscoComOportunidade.map((r) => (
+              <li key={r.cod} className="rounded-md border px-2 py-1.5 text-xs" style={{ borderColor: "var(--status-warning)" }}>
+                <strong>{r.produto}</strong> ({r.grupo}, {r.cod}) — há {formatNumero(r.oportunidade.quantidadeSugerida)} unidade(s)
+                disponível(is) em {r.oportunidade.origemNome} — considere transferir antes de comprar.{" "}
+                <a
+                  href={`/dashboard/distribuicao-estoque?aba=movimentacoes&busca=${encodeURIComponent(r.produto)}`}
+                  className="text-[var(--series-1)] hover:underline"
+                >
+                  Abrir na Distribuição de Estoque →
+                </a>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       <section>
         <h3 className="mb-2 text-sm font-medium" style={{ color: "var(--status-critical)" }}>
           Risco de ruptura — Best Seller ({rupturaBS.length})
