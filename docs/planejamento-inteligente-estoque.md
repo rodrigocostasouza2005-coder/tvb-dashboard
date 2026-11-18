@@ -1,6 +1,6 @@
 # Planejamento Inteligente de Estoque — TVB Radar
 
-**Status:** Fase 2A (classificação em lote, tendência de demanda, grade por cor/tamanho) mergeada e em produção (PR #101, SHA `9b4c986`, deploy `dpl_hi5hnbsinp8nhXxiZeZ311NEwcX4`). Validada contra dado real de produção. Fase 1 (PR #100) e Fase 0 concluídas. **Fase 2B concluída e em produção**: excesso/distribuição (PR #105, §11) e avaliação retrospectiva (PR #106, §12) mergeados, com ajuste de regra de negócio (Drop/Best Seller/produto não classificado, pedido do Rodrigo em 2026-11-17) implementado antes do merge — ver §14 pra resultado final, validação em produção e limitações. Correção pontual pós-entrega (PR #108, §15): proteção de Drop ativo deixou de depender de venda recente, mergeada e validada. **Validação operacional integrada (2026-11-18, §16-§17)**: 3 frentes de investigação + validação contra produção; 2 achados estruturais corrigidos (PR #109, §17.1 — ciclo ativo no Drop + grade sem contaminação de cod não classificado); causa raiz do achado "26/280 produtos com excesso+ruptura sem oportunidade" majoritariamente explicada (descasamento de grade/tamanho entre cods, §17.2); **achado novo pendente de decisão do Rodrigo** (§17.3): `diagnosticarVariante` não distingue produto recém-lançado sem venda ainda (ex. coleção Alto Verão) de estoque parado real. **Investigação e proposta de carência (2026-11-18, §18)**: nenhum dado confiável existe hoje pra implementar a distinção (StockSnapshot é upsert sem histórico, `dataLancamento` tem cobertura de 0,04% — 1 de 2.681 cods); recomendação é de PROCESSO (preencher `dataLancamento` sistematicamente), não de código; zero regra de negócio alterada, zero código de produto tocado. Proposta técnica de lead time normal/urgente permanece só diagnóstico, zero código, decisão pendente do Rodrigo (§13).
+**Status:** Fase 2A (classificação em lote, tendência de demanda, grade por cor/tamanho) mergeada e em produção (PR #101, SHA `9b4c986`, deploy `dpl_hi5hnbsinp8nhXxiZeZ311NEwcX4`). Validada contra dado real de produção. Fase 1 (PR #100) e Fase 0 concluídas. **Fase 2B concluída e em produção**: excesso/distribuição (PR #105, §11) e avaliação retrospectiva (PR #106, §12) mergeados, com ajuste de regra de negócio (Drop/Best Seller/produto não classificado, pedido do Rodrigo em 2026-11-17) implementado antes do merge — ver §14 pra resultado final, validação em produção e limitações. Correção pontual pós-entrega (PR #108, §15): proteção de Drop ativo deixou de depender de venda recente, mergeada e validada. **Validação operacional integrada (2026-11-18, §16-§17)**: 3 frentes de investigação + validação contra produção; 2 achados estruturais corrigidos (PR #109, §17.1 — ciclo ativo no Drop + grade sem contaminação de cod não classificado); causa raiz do achado "26/280 produtos com excesso+ruptura sem oportunidade" majoritariamente explicada (descasamento de grade/tamanho entre cods, §17.2); **achado novo pendente de decisão do Rodrigo** (§17.3): `diagnosticarVariante` não distingue produto recém-lançado sem venda ainda (ex. coleção Alto Verão) de estoque parado real. **Investigação e proposta de carência (2026-11-18, §18)**: nenhum dado confiável existe hoje pra implementar a distinção (StockSnapshot é upsert sem histórico, `dataLancamento` tem cobertura de 0,04% — 1 de 2.681 cods); recomendação é de PROCESSO (preencher `dataLancamento` sistematicamente), não de código; zero regra de negócio alterada, zero código de produto tocado. **Proposta — Estoque Mínimo Empresarial por Best Seller (2026-11-18, §19)**: mapeamento completo da estrutura atual (fragmentada — 12 abas, "estoque mínimo" significa 3 coisas diferentes, 3 motores paralelos de excesso), modelo de dados proposto (campo novo em `ClassificacaoProduto`, sem tabela nova), critérios de alerta fundamentados em dado real (venda consolidada + tempo médio de produção via `ProductionOrder`), integração aditiva (nunca distorcendo cálculos já validados) com Mapa de Compras/Distribuição, simulação real (apenas 2 cods Best Seller classificados hoje, desequilíbrio real confirmado entre tamanhos). Zero código implementado — aguarda aprovação do Rodrigo. Proposta técnica de lead time normal/urgente permanece só diagnóstico, zero código, decisão pendente do Rodrigo (§13).
 **Data:** 2026-11-16 (Fase 0, Fase 1, Fase 2A e Fase 2B)
 **Como ler este documento:** é um documento vivo de continuidade — arquitetura, regras de negócio, decisões e pendências. Toda afirmação aqui é fato verificado em código/schema nesta data, salvo quando marcado "não verificado" ou "decisão pendente". O código muda rápido neste projeto — antes de implementar algo listado aqui, reverifique contra o código atual.
 
@@ -645,3 +645,101 @@ Pedido do Rodrigo, aprofundando §17.3: investigar a disponibilidade de dados, p
    - Se/quando a cobertura de dado melhorar, qual critério e qual carência (30/60/90d) usar — fica pra uma próxima rodada, com dado real pra decidir, não opinião.
    - Vale considerar uma migration futura pra modelar "lote"/data de entrada de estoque, ou isso é over-engineering pra um problema que pode ser resolvido só com `dataLancamento` bem preenchida? (Recomendação do coordenador, não decisão: começar pelo processo, só considerar schema novo se o processo não for suficiente.)
    - `diagnosticarVariante` continua sem nenhuma alteração — nenhuma mudança de regra foi aprovada nem implementada nesta rodada.
+
+---
+
+## 19. Proposta — Estoque Mínimo Empresarial por Best Seller e organização da experiência (2026-11-18, SOMENTE DIAGNÓSTICO E PROPOSTA — zero código)
+
+Pedido do Rodrigo: entender a estrutura atual antes de propor qualquer tela nova, desenhar a funcionalidade de "estoque mínimo empresarial por Best Seller e tamanho" (SOMA de todas as lojas+CD, nunca por loja, nunca compensando tamanhos), propor critérios de alerta comercialmente coerentes, avaliar integração com Mapa de Compras/Distribuição sem distorcer o que já existe, e simular com dado real. **Nenhuma linha de código de produto foi alterada** — 1 script temporário somente-leitura (criado, rodado, removido — padrão já estabelecido e autorizado explicitamente pelo Rodrigo nesta e nas rodadas anteriores). 5 agentes paralelos (arquitetura, regras/classificação, modelo de dados do novo recurso, integração, experiência visual) + 1 simulação centralizada.
+
+### 19.1 O que já existe — estrutura atual (Pergunta 1-7 da Etapa de investigação)
+
+**Navegação**: um único grupo "Estoque" no menu, com **12 abas** numa lista plana, sem subagrupamento: Por família/produto/tamanho, Estoque × Vendas, Cobertura, Sell-through, Cohort, Envelhecimento, Reposição de lojas, **Estoque Mínimo** (por loja — ver abaixo), Sugestão de Retirada, **Mapa de Compras**, **Inteligência de Distribuição**, **Planejamento de Estoque**.
+
+**Já existe uma seção "Planejamento Inteligente de Estoque"**: sim — `src/app/dashboard/planejamento-estoque/` (Fases 1/2A/2B desta sessão). É a página mais nova e mais completa: visão por produto, classificação, grade, excesso/distribuição, link pra Distribuição.
+
+**Classificação Best Seller/Drop**: definida (gravada) em `mapa-compras/classificacao-actions.ts`, mas a ação de classificar em lote é **puxada e renderizada** dentro de `planejamento-estoque/produto-detalhe.tsx` — a escrita mora num módulo, o gatilho/UI mora em outro.
+
+**Excesso/ruptura/oportunidades de transferência**: aparecem em pelo menos 3 lugares com **definições parcialmente diferentes**: `cobertura` (limiares fixos de dias), `distribuicao-estoque` (`diagnosticarVariante`, estoque vs. mínimo+margem+velocidade — a fonte "oficial"), e `planejamento-estoque`/`planejamento-distribuicao` (reaproveita a segunda, com retenções adicionais de Drop/Best Seller). Um produto pode aparecer "Excesso" numa tela e "Equilibrado" em outra, sem nenhuma explicação visível ao usuário — só comentários de código.
+
+**Mecanismo de alertas já existente e reaproveitável**: sim, em 3 convenções visuais (badge numérica em `<summary>` no Mapa de Compras; `StatTile status="critical"/"warning"` no topo de página; badge colorida inline por linha) — mesma paleta de cor (`--status-critical`/`--status-warning`/`--status-good`) nas 3, mas sem um contador agregado único cross-página.
+
+**Avaliação honesta**: a experiência está **fragmentada, não só "desorganizada"**. Achados concretos: "estoque mínimo" significa 3 coisas diferentes em 3 telas com o mesmo nome e zero link entre elas (`StockMinimumRule`, por loja); "grade por tamanho" é calculada por 3 implementações independentes (uma delas com risco de bug já documentado desde a Fase 0); "estoque parado" tem 1 único ponto de ação real (botão Aprovar em `movimentacoes.tsx`) mas aparece como número passivo em pelo menos 3 outras telas sem indicar isso. **Adicionar uma 13ª peça de UI sem decidir qual sobreposição ela absorve aumentaria a fragmentação, não a reduziria** — ver §19.7 pra recomendação de organização.
+
+### 19.2 O que está funcionando corretamente
+
+- A base de dados e os motores já são sólidos e reaproveitados entre si: `getComparacaoCompleta` (fonte única de posição/estoque), `ClassificacaoProduto` (classificação por `cod`), `construirOrigem`/`diagnosticarVariante` (motor de distribuição), todos já testados (719 testes) e validados contra produção em 3 rodadas anteriores.
+- A proteção de Drop ativo (PR #108) e a reserva de continuidade de Best Seller (§14) continuam corretas e intocadas.
+- O padrão de UI pra "dois números de proteção coexistindo sem confusão" já existe e funciona (`excesso-distribuicao.tsx`, frases com a FONTE do número explícita) — reaproveitável diretamente pro novo recurso.
+
+### 19.3 O que está fragmentado ou duplicado
+
+Ver lista completa em §19.1 ("avaliação honesta"). Resumo pra referência rápida:
+1. "Estoque mínimo" = 3 conceitos diferentes, mesmo nome, 3 telas sem link (`StockMinimumRule` por loja ≠ mínimo empresarial novo ≠ nenhuma relação entre eles).
+2. Excesso/ruptura = 3 definições paralelas sem reconciliação visível ao usuário.
+3. Classificação gravada em `mapa-compras`, disparada também em `planejamento-estoque`.
+4. Grade por tamanho calculada 3 vezes, de forma independente (1 delas com bug documentado de risco de mistura de cor).
+5. `getRecomendacaoGradeProduto` (motor já pronto, testado) **não é consumida por nenhuma tela em produção hoje** — achado novo desta rodada, confirmado por grep.
+
+### 19.4 Estoque mínimo empresarial por Best Seller e tamanho — proposta técnica
+
+**Granularidade**: não precisa de chave nova — `cod` já É a combinação exata produto+cor+tamanho (confirmado: `cod` = "IdGradeProduto" do DAPIC, mesma chave usada em `Sale`/`StockSnapshot`/`ClassificacaoProduto`). 1 mínimo por `cod` = 1 mínimo por tamanho, automaticamente.
+
+**Modelo de dados proposto**: campo novo `estoqueMinimoEmpresarial Int?` em `ClassificacaoProduto` (não tabela nova — o grão certo já é `cod @unique`). Para auditoria de quem/quando mudou, basta incluir o campo em `CAMPOS_HISTORICO` (`compras-inteligencia.ts`) — o mesmo padrão já usado pelos outros 10 campos de `ClassificacaoProduto`, sem lógica nova.
+
+**Cálculo proposto**: nova função de leitura (`getComparacaoEstoqueMinimoEmpresarial`, nome ilustrativo) que reaproveita `getComparacaoCompleta` e soma `estoqueAtual` de TODAS as posições (lojas + CD/Site) por `cod` — seguro, porque `estoqueAtual` é saldo físico direto (nunca sofre o problema de dupla contagem que `vendasDias30/60/90` tem via `vendasEfetivasCdSite`). Saída por tamanho: mínimo definido, estoque consolidado, diferença, % cobertura, status — cada `cod` avaliado isoladamente, o que **por construção já impede compensação entre tamanhos** (pedido explícito do Rodrigo).
+
+**Valor inicial sugerido — viabilidade confirmada, com limitação**: existe dado-base real (venda histórica consolidada por `cod`, reaproveitando a mesma query seguro já usada em `getVendaMediaDiariaPorCod`, que soma venda de todas as lojas sem risco de dupla contagem). Fórmula proposta: `velocidadeDiariaConsolidada × horizonteDiasConfigurável`. **Não existe `leadTimeDias` confiável pra inferir o horizonte automaticamente** (mesma limitação já documentada em §14.6/§16.2/§18 — cobertura zero em produção) — o horizonte tem que ser um número que o próprio Rodrigo define na UI, nunca extraído de dado incompleto. A sugestão aparece só como ponto de partida editável, nunca grava automaticamente (mesmo padrão de `DecisaoCompra`: simulação não grava, só confirmação manual).
+
+**Separação de conceitos (confirmada, os 4 já existentes continuam intocados)**:
+- `StockMinimumRule` → "quanto esta loja específica precisa reter antes de doar" (por loja).
+- Reserva de continuidade de Best Seller (`aplicarRetencoes`/`CoberturaMeta`) → "quanto reter de excesso calculado, por grupo, baseado em giro×lead time" (calculado, dinâmico).
+- Diagnóstico de estoque parado (`diagnosticarVariante`) → "esta posição específica está girando?" (por posição).
+- Sugestão de compra (`calcularSugestaoBestSeller`) → "quanto comprar/produzir daqui pra frente" (prospectivo).
+- **Novo — mínimo empresarial** → "a soma de tudo que a empresa tem agora deste tamanho está abaixo do piso que a TVB decidiu manter?" (retrospectivo/atual, manual, consolidado). Nenhum dos 4 conceitos existentes é tocado — é uma camada 100% aditiva (nova função de leitura + 1 campo novo), sem alterar `construirOrigem`, `aplicarRetencoes`, `diagnosticarVariante` ou `calcularSugestaoBestSeller`/`getExcessosEDistribuicao`.
+
+### 19.5 Critérios de alerta (3 níveis) — proposta comercialmente fundamentada
+
+- **Crítico** (objetivo, não arbitrário): `estoqueConsolidado(tamanho) < mínimo(tamanho)` — a própria definição do mínimo sendo violada.
+- **Atenção** (a parte difícil — avaliadas 2 abordagens, recomendação combinada): `diasAteCruzarMinimo = (estoqueConsolidado - mínimo) / velocidadeDiariaConsolidada` comparado contra `tempoMédioDeProdução` medido via `ProductionOrder.dataEntradaCelula→dataFinalizacaoProducao` (confirmado: 100% de cobertura quando `status=Finalizado`, 2.888 ordens — dado real, não configurado, mesmo achado de §18.3). Critério: **Atenção quando o mínimo seria violado antes que uma nova produção, no tempo médio histórico, consiga chegar.** Ancorado em 2 fatos medidos (venda real + produção real), não num percentual escolhido a dedo. Quando não houver `ProductionOrder` suficiente pro produto/tamanho (produto novo), não inventar número — marcar explicitamente "sem dado suficiente para prever tempo de reposição" (mesmo princípio de honestidade já usado em `planejamento-avaliacao.ts`).
+- **Atenção pra `velocidadeDiariaConsolidada`**: nunca somar `porLoja[].velocidadeDiaria`/`vendasDias30` entre posições (a posição CD/Site já embute a demanda das lojas via `vendasEfetivasCdSite` — somar duplicaria). Usar uma query bruta e independente em `Sale` por produto+cor+tamanho, mesmo padrão já usado em `planejamento-estoque.ts` (Fase 1) pra evitar esse problema.
+- **Normal**: acima do limiar de Atenção.
+
+### 19.6 Integração com Mapa de Compras e Distribuição — sem distorcer o que já existe
+
+**Princípio geral, confirmado por 2 agentes independentes**: a integração deve ser **aditiva (alerta/sinal), nunca uma mudança de fórmula** nesta fase. Alterar `calcularSugestaoBestSeller`/`construirOrigem`/`getExcessosEDistribuicao` pra incorporar o mínimo empresarial arriscaria distorcer cálculos já testados (719 testes) e validados 3 vezes em produção — exatamente o que o Rodrigo pediu pra evitar.
+
+- **Mapa de Compras**: exibir como seção/aviso adicional (mesmo padrão já usado em `alertas-view.tsx`, que já lista riscos sem tocar `quantidadeSugerida`), nunca alterando a quantidade calculada. A grade por tamanho (`getRecomendacaoGradeProduto`) já tem a granularidade certa pra mostrar o mínimo ao lado — mas essa função **não está conectada a nenhuma tela hoje** (achado novo, §19.3), então essa integração dependeria de primeiro dar uma superfície visual a ela (decisão separada).
+- **Distribuição**: fase 1 = só alerta textual (ex: "esta transferência levaria o total do tamanho X abaixo do mínimo empresarial"), no mesmo padrão de avisos já renderizado em `movimentacoes.tsx`, sem bloquear nenhum botão. Bloqueio ativo (impedir a transferência de fato) seria uma fase 2, só se o Rodrigo aprovar explicitamente depois de ver o alerta funcionando — mudaria comportamento de alocação real e precisaria da disciplina de aprovação-antes-do-merge já em vigor no projeto.
+- **Risco de duplicidade na UI**: reserva de continuidade (calculada) e mínimo empresarial (manual) podem coexistir no mesmo produto/tamanho sem confundir, desde que cada número tenha a FONTE no próprio rótulo ("calculado por giro × lead time" vs. "definido pela empresa") — mesmo padrão já usado e aprovado em `excesso-distribuicao.tsx`.
+
+### 19.7 Proposta de organização visual e operacional
+
+**Layout** (não genérico, tabular): visão consolidada (lista de Best Sellers, 1 linha por produto, contagem de tamanhos Crítico/Atenção/Normal, ordenada críticos primeiro) → visão detalhada por produto (1 linha por tamanho: mínimo | estoque consolidado | diferença | % cobertura | dias até cruzar mínimo | status, ordenada crítico→atenção→normal) → seção de apoio "onde está esse tamanho hoje" (breakdown por loja/CD, só leitura, deixando claro que o mínimo NUNCA é avaliado por loja). Filtros: produto, tamanho, loja (só pra apoio visual, não pro cálculo), classificação (dropdown já com todas as opções do enum, pronto pra quando o escopo expandir além de Best Seller).
+
+**Onde colocar**: 3 opções avaliadas — (A) dentro do accordion de `produto-detalhe.tsx` (risco: acumula mais uma seção numa tela já carregada); (B) nova aba em Mapa de Compras (risco: mistura monitoramento com decisão de compra, tela já mais carregada do módulo); (C) página própria, nova aba no grupo "Estoque" (ferramenta operacional com filtro próprio, sem colidir com o propósito de nenhuma tela existente). **Recomendação: opção C**, com nome que deixe explícita a diferença do "Estoque Mínimo" já existente (por loja) — ex. "Mínimo Best Seller" ou "Cobertura Mínima — Best Sellers" — evitando a colisão de nome que já causa confusão hoje (§19.3, item 1).
+
+### 19.8 Limitações dos dados atuais
+
+- **Classificação Best Seller tem cobertura extremamente baixa hoje**: confirmado por simulação real (script temporário, removido — commits `e3c4ae5`/`98fe27e`) — **apenas 2 cods classificados como BEST_SELLER em toda a produção**, ambos do mesmo produto ("Classic Black", tamanhos 36 e 42). Qualquer funcionalidade nova com escopo "só Best Seller" hoje afetaria uma população mínima — não é argumento contra implementar, mas é o tamanho real do problema agora.
+- **Desequilíbrio real confirmado, sem precisar de nenhum mínimo cadastrado**: "Classic Black" tamanho 36 tem 34 unidades consolidadas; tamanho 42 tem 272 — o tamanho mais fraco é só 12,5% do mais forte. Exatamente o cenário que a funcionalidade pretende capturar (estoque total do produto parece confortável, mas um tamanho específico está muito abaixo).
+- **Nenhum mínimo real existe ainda** (a funcionalidade não foi implementada) — qualquer número de "abaixo do mínimo" simulado é necessariamente hipotético, apresentado como tal.
+- **`leadTimeDias` (CoberturaMeta) continua com cobertura zero** — reafirma que o critério de Atenção não pode depender dele; `ProductionOrder.dataFinalizacaoProducao` é o dado real mais confiável disponível pra aproximar tempo de reposição, com a limitação já conhecida de não ter granularidade de loja.
+
+### 19.9 Sequência de implementação recomendada (proposta, não autorizada ainda)
+
+1. Decisão do Rodrigo sobre onde a funcionalidade vive (§19.7) e sobre instituir preenchimento de `dataLancamento` (pendência de §18, não bloqueia esta funcionalidade mas é a mesma classe de decisão de processo).
+2. Migration mínima: campo `estoqueMinimoEmpresarial Int?` em `ClassificacaoProduto` + inclusão em `CAMPOS_HISTORICO` (fora de escopo desta rodada — só proposta).
+3. Função de leitura `getComparacaoEstoqueMinimoEmpresarial` (nova, aditiva) + testes (reaproveitando o padrão de `planejamentoDistribuicao.test.ts`).
+4. UI: página nova (opção C), visão consolidada + detalhada, formulário de definição/ajuste do mínimo (reaproveitando o padrão de `ClassificarProdutoForm`).
+5. Alertas de 3 níveis (§19.5), com o aviso explícito de "sem dado suficiente" quando `ProductionOrder` não cobrir o produto/tamanho.
+6. Integração aditiva com Mapa de Compras/Distribuição (§19.6) — só depois da fase 1 (alerta) validada; bloqueio ativo é uma decisão separada e posterior.
+
+### 19.10 Decisões que dependem exclusivamente do Rodrigo
+
+1. **Aprovar ou não o início da implementação** (nada foi codificado nesta rodada — é só proposta).
+2. Onde a funcionalidade deve viver na navegação (§19.7 — recomendação: página própria, nome que não colida com "Estoque Mínimo" existente).
+3. O horizonte de dias pra sugestão de valor inicial (§19.4) — não há dado pra calcular automaticamente, precisa ser um número que o Rodrigo define.
+4. Se/quando avançar pra bloqueio ativo em Distribuição (§19.6) — fase 2, não recomendada para agora.
+5. Se vale a pena, em paralelo, dar uma superfície visual à grade por tamanho (`getRecomendacaoGradeProduto`) já pronta mas não conectada a nenhuma tela — achado novo, decisão separada.
+6. Pendências já registradas em rodadas anteriores continuam abertas e não fazem parte desta proposta: lead time normal/urgente (§13), preenchimento sistemático de `dataLancamento` (§18), achado não resolvido de "High Five Jungle" (§17.2), integração geral compra×distribuição fora do escopo do mínimo empresarial (§16.2 item 3).
