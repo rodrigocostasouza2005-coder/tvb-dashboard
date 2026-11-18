@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { PossibilidadeReposicao, TipoCompraProduto } from "@prisma/client";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { PossibilidadeReposicao, StatusComercialProduto, TipoCompraProduto } from "@prisma/client";
 import {
   calcularSugestaoBestSeller,
   calcularSugestaoDrop,
@@ -9,6 +9,23 @@ import {
   type InputDrop,
   type ItemPriorizavel,
 } from "../compras-inteligencia";
+
+// Mock de Prisma só para o describe "getRecomendacoesDrop (ciclo ativo)" abaixo — as demais
+// describes deste arquivo testam só funções puras (sem Prisma). vi.mock é hoisted pelo Vitest,
+// então pode ficar aqui sem afetar a ordem de execução dos outros testes.
+const classificacaoFindMany = vi.fn();
+const saleGroupBy = vi.fn();
+const stockSnapshotGroupBy = vi.fn();
+const productionOrderGroupBy = vi.fn();
+
+vi.mock("@/lib/prisma", () => ({
+  prisma: {
+    classificacaoProduto: { findMany: (...a: unknown[]) => classificacaoFindMany(...a) },
+    sale: { groupBy: (...a: unknown[]) => saleGroupBy(...a) },
+    stockSnapshot: { groupBy: (...a: unknown[]) => stockSnapshotGroupBy(...a) },
+    productionOrder: { groupBy: (...a: unknown[]) => productionOrderGroupBy(...a) },
+  },
+}));
 
 const baseBestSeller: InputBestSeller = {
   cod: "COD-1",
@@ -177,6 +194,101 @@ describe("calcularSugestaoDrop", () => {
     });
     // faltante seria 40, mas teto de orçamento é 500/50 = 10
     expect(r.quantidadeSugerida).toBe(10);
+  });
+});
+
+// Correção (docs/planejamento-inteligente-estoque.md §16.2 item 1): getRecomendacoesDrop não
+// usava a mesma régua de "ciclo ativo" (dropEmCicloAtivo) que planejamento-distribuicao.ts já usa
+// — um Drop DESCONTINUADO/EM_ENCERRAMENTO continuava recebendo sugestão de compra positiva desde
+// que dataEncerramentoPrevista não estivesse no passado. Estes testes cobrem a função de DADO
+// (getRecomendacoesDrop), não só a função pura (calcularSugestaoDrop, já coberta acima).
+describe("getRecomendacoesDrop (ciclo ativo)", () => {
+  const COD = "DROP-CICLO-1";
+
+  beforeEach(() => {
+    classificacaoFindMany.mockReset();
+    saleGroupBy.mockReset();
+    stockSnapshotGroupBy.mockReset();
+    productionOrderGroupBy.mockReset();
+
+    // Venda consistente em todos os cenários: 10 un/dia (560 un em 56 dias, histórico desde 60
+    // dias atrás) — suficiente pra, combinado com estoque baixo e janela futura, gerar faltante
+    // (e portanto quantidadeSugerida > 0) ANTES da regra de ciclo ativo ser aplicada.
+    saleGroupBy.mockImplementation((args: { where?: { cod?: { in: string[] }; saleDate?: unknown }; _min?: unknown }) => {
+      const cods: string[] = args.where?.cod?.in ?? [];
+      if (args._min) {
+        return Promise.resolve(cods.map((cod) => ({ cod, _min: { saleDate: new Date(Date.now() - 60 * 86_400_000) } })));
+      }
+      if (args.where?.saleDate) {
+        return Promise.resolve(cods.map((cod) => ({ cod, _sum: { quantidade: 560 } })));
+      }
+      return Promise.resolve(cods.map((cod) => ({ cod, _sum: { quantidade: 0 } }))); // vendasAcumuladas
+    });
+    stockSnapshotGroupBy.mockImplementation((args: { where?: { cod?: { in: string[] } }; _avg?: unknown }) => {
+      const cods: string[] = args.where?.cod?.in ?? [];
+      if (args._avg) return Promise.resolve([]); // sem custo unitário cadastrado (irrelevante pro teste)
+      return Promise.resolve(cods.map((cod) => ({ cod, _sum: { quantidadeDisponivel: 5 } }))); // estoque baixo
+    });
+    productionOrderGroupBy.mockResolvedValue([]); // sem pedido em aberto, sem quantidade original produzida
+  });
+
+  function mockClassificado(over: { statusComercial: StatusComercialProduto; dataEncerramentoPrevista: Date | null }) {
+    classificacaoFindMany.mockResolvedValue([
+      {
+        cod: COD,
+        produto: "Jaqueta Drop Inverno",
+        colecao: "Inverno26",
+        grupo: "Jaquetas",
+        possibilidadeReposicao: PossibilidadeReposicao.SIM,
+        dataLancamento: new Date(Date.now() - 60 * 86_400_000),
+        orcamentoDrop: null,
+        ...over,
+      },
+    ]);
+  }
+
+  it("DESCONTINUADO com dataEncerramentoPrevista no futuro -> sem sugestão de compra (antes do fix seria positiva)", async () => {
+    mockClassificado({
+      statusComercial: StatusComercialProduto.DESCONTINUADO,
+      dataEncerramentoPrevista: new Date(Date.now() + 30 * 86_400_000),
+    });
+    const { getRecomendacoesDrop } = await import("../compras-inteligencia");
+    const [r] = await getRecomendacoesDrop({});
+    expect(r.quantidadeSugerida).toBeNull();
+    expect(r.valorEstimado).toBeNull();
+    expect(r.avisos.some((a) => a.includes("fora de ciclo ativo"))).toBe(true);
+  });
+
+  it("EM_ENCERRAMENTO com dataEncerramentoPrevista no futuro -> sem sugestão de compra", async () => {
+    mockClassificado({
+      statusComercial: StatusComercialProduto.EM_ENCERRAMENTO,
+      dataEncerramentoPrevista: new Date(Date.now() + 30 * 86_400_000),
+    });
+    const { getRecomendacoesDrop } = await import("../compras-inteligencia");
+    const [r] = await getRecomendacoesDrop({});
+    expect(r.quantidadeSugerida).toBeNull();
+    expect(r.avisos.some((a) => a.includes("fora de ciclo ativo"))).toBe(true);
+  });
+
+  it("ATIVO com dataEncerramentoPrevista no passado -> continua sem sugestão (não regressão)", async () => {
+    mockClassificado({
+      statusComercial: StatusComercialProduto.ATIVO,
+      dataEncerramentoPrevista: new Date(Date.now() - 5 * 86_400_000),
+    });
+    const { getRecomendacoesDrop } = await import("../compras-inteligencia");
+    const [r] = await getRecomendacoesDrop({});
+    expect(r.quantidadeSugerida).toBeFalsy(); // null ou 0 — nunca positivo
+  });
+
+  it("ATIVO dentro do ciclo (dataEncerramentoPrevista no futuro) -> continua com sugestão normal (não regressão)", async () => {
+    mockClassificado({
+      statusComercial: StatusComercialProduto.ATIVO,
+      dataEncerramentoPrevista: new Date(Date.now() + 30 * 86_400_000),
+    });
+    const { getRecomendacoesDrop } = await import("../compras-inteligencia");
+    const [r] = await getRecomendacoesDrop({});
+    expect(r.quantidadeSugerida).toBeGreaterThan(0);
+    expect(r.avisos.some((a) => a.includes("fora de ciclo ativo"))).toBe(false);
   });
 });
 

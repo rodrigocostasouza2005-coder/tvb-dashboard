@@ -59,7 +59,7 @@ import { classificarAgregado, type ClassificacaoAgregada } from "./planejamento-
 // (ver `isDropAtivo` abaixo e o bloqueio de oportunidades mais adiante) — só o CICLO (ativo vs.
 // encerrado) decide a proteção agora. Drop encerrado continua sem nenhuma proteção especial,
 // avaliado normalmente por estoque/venda/ciclo, como sempre.
-function dropEmCicloAtivo(meta: { statusComercial: StatusComercialProduto; dataEncerramentoPrevista: Date | null }): boolean {
+export function dropEmCicloAtivo(meta: { statusComercial: StatusComercialProduto; dataEncerramentoPrevista: Date | null }): boolean {
   if (meta.statusComercial === "DESCONTINUADO" || meta.statusComercial === "EM_ENCERRAMENTO") return false;
   if (meta.dataEncerramentoPrevista && meta.dataEncerramentoPrevista.getTime() < Date.now()) return false;
   return true;

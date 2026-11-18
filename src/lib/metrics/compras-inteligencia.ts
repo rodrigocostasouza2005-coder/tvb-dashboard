@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { Prisma, TipoCompraProduto, StatusComercialProduto, PossibilidadeReposicao } from "@prisma/client";
+import { dropEmCicloAtivo } from "./planejamento-distribuicao";
 
 // ---------------------------------------------------------------------------
 // MOTOR DE CÁLCULO — BEST SELLER vs DROP
@@ -852,6 +853,15 @@ export async function getRecomendacoesDrop(filters: ComprasFiltro = {}): Promise
     });
     if (!c.dataEncerramentoPrevista) {
       sugestao.avisos.unshift("Sem data prevista de encerramento cadastrada para este Drop — janela comercial restante assumida como 0 (tratar faltante/excedente abaixo como indicativo, não final).");
+    }
+    // Mesma régua de "ciclo ativo" já usada em planejamento-distribuicao.ts (dropEmCicloAtivo):
+    // um Drop DESCONTINUADO/EM_ENCERRAMENTO (ou com janela já fechada) nunca deve receber
+    // sugestão de compra positiva, mesmo que a conta de faltante/orçamento calculada por
+    // calcularSugestaoDrop (que não conhece statusComercial) tenha chegado a um número > 0.
+    if (!dropEmCicloAtivo({ statusComercial: c.statusComercial, dataEncerramentoPrevista: c.dataEncerramentoPrevista })) {
+      sugestao.quantidadeSugerida = null;
+      sugestao.valorEstimado = null;
+      sugestao.avisos.unshift("Drop fora de ciclo ativo (descontinuado/em encerramento) — sem sugestão de compra.");
     }
     return { ...sugestao, produto: c.produto, cod: c.cod, diasRestantesJanela };
   });
