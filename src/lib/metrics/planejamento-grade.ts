@@ -91,10 +91,16 @@ const JANELA_PESO_DIAS = 56; // mesma janela de velocidade usada em getRecomenda
 // embute demanda das lojas); pra um peso de PROPORÇÃO entre tamanhos/cores isso não zeraria a
 // conta, mas distorceria a proporção real (CD apareceria inflado) sem necessidade — mais simples
 // e seguro usar Sale bruta agregada direto.
-async function getPesosCorTamanho(produto: string, janela: { from: Date; to: Date }) {
+//
+// `cods` restringe a venda aos cods efetivamente CLASSIFICADOS (Best Seller/Drop) desse produto —
+// achado real (docs/planejamento-inteligente-estoque.md §16.2 item 2): a maioria dos produtos tem
+// só 1-2 de ~10 cods classificados; sem esse filtro, a venda de um cod irmão não classificado
+// contaminava o peso usado pra repartir quantidadeSugeridaTotal entre cor/tamanho, podendo alocar
+// parte da compra sugerida pra uma cor/tamanho que não é, de fato, Best Seller/Drop.
+async function getPesosCorTamanho(produto: string, cods: string[], janela: { from: Date; to: Date }) {
   const rows = await prisma.sale.groupBy({
     by: ["cor", "tamanho"],
-    where: { status: { not: "Cancelada" }, produto, saleDate: { gte: janela.from, lte: janela.to } },
+    where: { status: { not: "Cancelada" }, produto, cod: { in: cods }, saleDate: { gte: janela.from, lte: janela.to } },
     _sum: { quantidade: true },
   });
   return rows;
@@ -102,11 +108,12 @@ async function getPesosCorTamanho(produto: string, janela: { from: Date; to: Dat
 
 async function decomporGradeProduto(
   produto: string,
+  cods: string[],
   quantidadeSugeridaTotal: number,
   janela: { from: Date; to: Date }
 ): Promise<GradePorCor[]> {
   if (quantidadeSugeridaTotal <= 0) return [];
-  const pesos = await getPesosCorTamanho(produto, janela);
+  const pesos = await getPesosCorTamanho(produto, cods, janela);
 
   const porCorMap = new Map<string, { chave: string; vendido: number; porTamanho: PesoDecomposicao[] }>();
   for (const r of pesos) {
@@ -169,7 +176,7 @@ export async function getRecomendacaoGradeProduto(
       ? { from: new Date(0), to: new Date() }
       : { from: new Date(Date.now() - JANELA_PESO_DIAS * 86_400_000), to: new Date() };
 
-  const porCor = await decomporGradeProduto(produto, quantidadeSugeridaTotal, janela);
+  const porCor = await decomporGradeProduto(produto, cods, quantidadeSugeridaTotal, janela);
 
   return { produto, grupo, cods, quantidadeSugeridaTotal, valorEstimadoTotal, confiavel, porCor };
 }

@@ -85,6 +85,52 @@ describe("getRecomendacaoGradeProduto", () => {
     expect(azul.quantidadeSugerida + vermelho.quantidadeSugerida).toBe(30);
   });
 
+  // Correção (docs/planejamento-inteligente-estoque.md §16.2 item 2): getPesosCorTamanho
+  // consultava Sale filtrando só por `produto` (nome), sem filtrar por cod classificado — a venda
+  // de um cod irmão NÃO classificado (padrão comum: a maioria dos produtos Drop/Best Seller tem
+  // só 1-2 de ~10 cods classificados) contaminava o peso usado pra repartir a compra sugerida
+  // entre cor/tamanho. O mock abaixo simula o filtro real do banco: só devolve linhas cujo `cod`
+  // está em `where.cod.in` — se o código de produção não passar `cods` pra getPesosCorTamanho (ou
+  // não aplicar o filtro), o mock cai no fallback "sem filtro" (undefined) e devolve TODAS as
+  // linhas, inclusive a do cod não classificado — fazendo este teste falhar.
+  it("ignora venda de cod irmão NÃO classificado ao repartir a grade por cor (nunca contamina o peso)", async () => {
+    getRecomendacoesBestSeller.mockResolvedValue([
+      { produto: "Jaqueta Mista", grupo: "Jaquetas", cod: "AZ-P", quantidadeSugerida: 20, valorEstimado: null, confiavel: true, coberturaAtualDias: null, estoqueDisponivelUtilizavel: 0, demandaProjetadaHorizonte: 20, recebimentosUtilizaveis: 0, premissas: [], avisos: [] },
+    ]);
+
+    const RAW_SALES = [
+      { cod: "AZ-P", cor: "Azul", tamanho: "P", quantidade: 50 }, // cod classificado (Best Seller)
+      { cod: "VM-NAOCLASS", cor: "Vermelho", tamanho: "M", quantidade: 1000 }, // cod irmão NÃO classificado — venda bem maior, pra deixar óbvio se contaminar
+    ];
+    saleGroupBy.mockImplementation((args: { where?: { cod?: { in?: string[] } } }) => {
+      const codsFiltro = args.where?.cod?.in;
+      const linhas = codsFiltro ? RAW_SALES.filter((s) => codsFiltro.includes(s.cod)) : RAW_SALES;
+      const porChave = new Map<string, number>();
+      for (const s of linhas) {
+        const chave = `${s.cor}|${s.tamanho}`;
+        porChave.set(chave, (porChave.get(chave) ?? 0) + s.quantidade);
+      }
+      return Promise.resolve(
+        [...porChave.entries()].map(([chave, quantidade]) => {
+          const [cor, tamanho] = chave.split("|");
+          return { cor, tamanho, _sum: { quantidade } };
+        })
+      );
+    });
+
+    const { getRecomendacaoGradeProduto } = await import("../planejamento-grade");
+    const r = await getRecomendacaoGradeProduto("Jaqueta Mista");
+
+    expect(r).not.toBeNull();
+    expect(r!.cods).toEqual(["AZ-P"]); // só o cod classificado
+
+    // Só a cor Azul (do cod classificado) deve aparecer — a venda do cod Vermelho (não
+    // classificado) nunca deve entrar no peso, mesmo estando na mesma tabela de Sale.
+    expect(r!.porCor).toHaveLength(1);
+    expect(r!.porCor[0].cor).toBe("Azul");
+    expect(r!.porCor[0].quantidadeSugerida).toBe(20); // 100% do total — não repartido com Vermelho
+  });
+
   it("confiavel=false quando há recomendação de Drop junto (Drop não tem campo confiavel próprio, trata com cautela)", async () => {
     getRecomendacoesBestSeller.mockResolvedValue([]);
     getRecomendacoesDrop.mockResolvedValue([
