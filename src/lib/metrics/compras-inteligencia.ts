@@ -479,6 +479,9 @@ export type ClassificacaoInput = {
   dataLancamento?: Date | null;
   dataEncerramentoPrevista?: Date | null;
   orcamentoDrop?: number | null;
+  // Mínimo que a EMPRESA decidiu manter deste cod, somando todas as posições (lojas + CD/Site) —
+  // ver src/lib/metrics/estoque-minimo-empresarial.ts. Não confundir com StockMinimumRule (por loja).
+  estoqueMinimoEmpresarial?: number | null;
   observacoes?: string | null;
 };
 
@@ -492,6 +495,7 @@ const CAMPOS_HISTORICO: (keyof ClassificacaoInput)[] = [
   "dataLancamento",
   "dataEncerramentoPrevista",
   "orcamentoDrop",
+  "estoqueMinimoEmpresarial",
   "observacoes",
 ];
 
@@ -520,6 +524,7 @@ export async function upsertClassificacaoProduto(input: ClassificacaoInput, alte
       dataLancamento: input.dataLancamento ?? null,
       dataEncerramentoPrevista: input.dataEncerramentoPrevista ?? null,
       orcamentoDrop: input.orcamentoDrop ?? null,
+      estoqueMinimoEmpresarial: input.estoqueMinimoEmpresarial ?? null,
       observacoes: input.observacoes ?? null,
     },
     update: {
@@ -532,6 +537,7 @@ export async function upsertClassificacaoProduto(input: ClassificacaoInput, alte
       dataLancamento: input.dataLancamento ?? null,
       dataEncerramentoPrevista: input.dataEncerramentoPrevista ?? null,
       orcamentoDrop: input.orcamentoDrop ?? null,
+      estoqueMinimoEmpresarial: input.estoqueMinimoEmpresarial ?? null,
       observacoes: input.observacoes ?? null,
     },
   });
@@ -556,6 +562,33 @@ export async function upsertClassificacaoProduto(input: ClassificacaoInput, alte
     }
   }
 
+  return salvo;
+}
+
+// Ajuste leve e dedicado SÓ do mínimo empresarial (ver estoque-minimo-empresarial.ts) — pro caso
+// mais comum (editar o mínimo depois da classificação inicial, sem reclassificar o produto).
+// Evita o upsert completo de ClassificacaoProduto, que exigiria todos os campos obrigatórios e
+// arriscaria pisar em outros campos por engano. Mesmo padrão de histórico de upsertClassificacaoProduto.
+export async function atualizarEstoqueMinimoEmpresarial(cod: string, valor: number | null, alteradoPor?: string) {
+  const antes = await prisma.classificacaoProduto.findUnique({
+    where: { cod },
+    select: { estoqueMinimoEmpresarial: true },
+  });
+  const salvo = await prisma.classificacaoProduto.update({
+    where: { cod },
+    data: { estoqueMinimoEmpresarial: valor },
+  });
+  if (antes && antes.estoqueMinimoEmpresarial !== valor) {
+    await prisma.classificacaoProdutoHistorico.create({
+      data: {
+        classificacaoId: salvo.id,
+        campo: "estoqueMinimoEmpresarial",
+        valorAnterior: antes.estoqueMinimoEmpresarial?.toString() ?? null,
+        valorNovo: valor?.toString() ?? null,
+        alteradoPor: alteradoPor ?? null,
+      },
+    });
+  }
   return salvo;
 }
 
@@ -644,7 +677,10 @@ export async function getClassificacaoFilterOptions() {
   };
 }
 
-async function getVendaMediaDiariaPorCod(cods: string[]): Promise<Map<string, { mediaDiaria: number; diasComDado: number }>> {
+// Exportada (só visibilidade — zero mudança de lógica) pra ser reaproveitada por
+// src/lib/metrics/estoque-minimo-empresarial.ts: é a query segura de velocidade de venda por
+// cod (soma Sale de TODAS as lojas, sem risco de dupla contagem via vendasEfetivasCdSite).
+export async function getVendaMediaDiariaPorCod(cods: string[]): Promise<Map<string, { mediaDiaria: number; diasComDado: number }>> {
   if (cods.length === 0) return new Map();
   const to = new Date();
   const from = new Date(to.getTime() - JANELA_VELOCIDADE_VENDA_DIAS * 86_400_000);

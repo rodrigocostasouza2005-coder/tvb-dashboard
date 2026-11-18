@@ -216,6 +216,11 @@ model ClassificacaoProduto {
   // Verba destinada a ESSE drop especificamente (seção 5 do pedido) — só faz sentido pra
   // tipoCompra = DROP, nullable pros dois casos (Best Seller não usa, Drop pode não ter ainda).
   orcamentoDrop            Float?
+  // Mínimo que a EMPRESA decidiu manter deste cod (= produto+cor+tamanho), somando
+  // TODAS as posições (lojas + CD/Site) — definido manualmente, nunca calculado. Não
+  // confundir com StockMinimumRule (mínimo por LOJA individual, outra tabela, outro
+  // propósito) nem com a reserva de continuidade calculada (aplicarRetencoes).
+  estoqueMinimoEmpresarial Int?
   observacoes              String?
   createdAt                DateTime               @default(now())
   updatedAt                DateTime               @updatedAt
