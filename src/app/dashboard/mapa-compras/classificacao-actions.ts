@@ -9,6 +9,7 @@ import {
   setParametrosBestSellerGrupo,
   setOrcamentoTotalPlanejado,
   registrarDecisaoCompra,
+  atualizarEstoqueMinimoManual,
 } from "@/lib/metrics";
 
 // Mesma regra de permissão de updateCoberturaMetaAction/updateCrescimentoAction em actions.ts —
@@ -34,6 +35,12 @@ function parseFloatOrNull(v: FormDataEntryValue | null): number | null {
   if (v == null || String(v).trim() === "") return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
+}
+
+function parseIntOrNull(v: FormDataEntryValue | null): number | null {
+  if (v == null || String(v).trim() === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.round(n) : null;
 }
 
 // Classificar/reclassificar um produto como BEST_SELLER ou DROP (seção 2 e 3 do pedido) — nunca
@@ -202,4 +209,20 @@ export async function confirmarDecisaoCompraAction(formData: FormData) {
   });
 
   revalidatePath("/dashboard/mapa-compras");
+}
+
+// Ajuste leve do mínimo empresarial por cod (docs/planejamento-inteligente-estoque.md §19) — caso
+// mais comum: ajustar SÓ o mínimo depois da classificação inicial, sem reclassificar o produto.
+// Mesma régua de permissão das demais actions deste arquivo (gestão, não vendedor). Campo vazio
+// limpa o mínimo (volta a SEM_MINIMO_DEFINIDO), nunca grava 0 por omissão.
+export async function atualizarEstoqueMinimoManualAction(formData: FormData) {
+  const user = await requireGestao();
+
+  const cod = String(formData.get("cod") ?? "").trim();
+  if (!cod) return;
+
+  const valor = parseIntOrNull(formData.get("valor"));
+  await atualizarEstoqueMinimoManual(cod, valor, user.email ?? undefined);
+
+  revalidatePath("/dashboard/estoque-minimo-manual");
 }

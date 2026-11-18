@@ -245,6 +245,44 @@ model ClassificacaoProdutoHistorico {
   @@index([classificacaoId])
 }
 
+// Estoque mínimo MANUAL por SKU (pedido do Rodrigo, 2026-11-18) — a quantidade que a EMPRESA
+// decidiu manter de um `cod` (= produto+cor+tamanho), somando TODAS as posições (lojas+CD/Site).
+// Deliberadamente SEPARADA de ClassificacaoProduto: aplica a QUALQUER cod, classificado ou não
+// (Best Seller, Drop, MISTO ou sem classificação nenhuma) — nunca força um cod sem classificação
+// a ganhar uma linha em ClassificacaoProduto (que exigiria escolher um tipoCompra por suposição,
+// exatamente o que o Rodrigo proibiu). Valor é 100% manual — nunca calculado/estimado pelo sistema
+// (ver src/lib/metrics/estoque-minimo-manual.ts). Não confundir com StockMinimumRule (mínimo por
+// LOJA individual, outra tabela, outro propósito) nem com a reserva de continuidade calculada de
+// Best Seller (aplicarRetencoes, planejamento-distribuicao.ts).
+model EstoqueMinimoManual {
+  id          String   @id @default(cuid())
+  cod         String   @unique
+  // Nullable de propósito: "removido" vira valor=null numa linha que continua existindo, nunca
+  // apaga a linha (manter deletar quebraria a FK RESTRICT de EstoqueMinimoManualHistorico — e
+  // perderia o histórico de quem definiu/removeu o mínimo desse cod no passado).
+  valor       Int?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  atualizadoPor String?
+
+  historico EstoqueMinimoManualHistorico[]
+}
+
+// Histórico de alteração do mínimo manual — "identificando quando foram alterados e qual era o
+// valor anterior" (pedido explícito). Mesmo padrão de ClassificacaoProdutoHistorico.
+model EstoqueMinimoManualHistorico {
+  id                    String   @id @default(cuid())
+  estoqueMinimoManualId String
+  valorAnterior         Int?
+  valorNovo             Int?
+  alteradoEm            DateTime @default(now())
+  alteradoPor           String?
+
+  estoqueMinimoManual EstoqueMinimoManual @relation(fields: [estoqueMinimoManualId], references: [id])
+
+  @@index([estoqueMinimoManualId])
+}
+
 // Decisão humana sobre uma recomendação de compra (seção 9 do pedido: simulação não grava nada —
 // calcularSugestaoBestSeller/calcularSugestaoDrop em src/lib/metrics/compras-inteligencia.ts são
 // funções puras, sem efeito em banco — só grava quando o Rodrigo CONFIRMA uma decisão).

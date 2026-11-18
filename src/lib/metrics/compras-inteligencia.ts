@@ -644,7 +644,10 @@ export async function getClassificacaoFilterOptions() {
   };
 }
 
-async function getVendaMediaDiariaPorCod(cods: string[]): Promise<Map<string, { mediaDiaria: number; diasComDado: number }>> {
+// Exportada (só visibilidade — zero mudança de lógica) pra ser reaproveitada por
+// src/lib/metrics/estoque-minimo-empresarial.ts: é a query segura de velocidade de venda por
+// cod (soma Sale de TODAS as lojas, sem risco de dupla contagem via vendasEfetivasCdSite).
+export async function getVendaMediaDiariaPorCod(cods: string[]): Promise<Map<string, { mediaDiaria: number; diasComDado: number }>> {
   if (cods.length === 0) return new Map();
   const to = new Date();
   const from = new Date(to.getTime() - JANELA_VELOCIDADE_VENDA_DIAS * 86_400_000);
