@@ -10,6 +10,7 @@ import { classificarProdutoEmLoteAction } from "../mapa-compras/classificacao-ac
 import { SalesTrendChart } from "../sales-trend-chart";
 import { formatNumber } from "./format";
 import { ExcessoDistribuicaoSection } from "./excesso-distribuicao";
+import { GradeRecomendadaSection } from "./grade-recomendada";
 
 const STATUS_COMERCIAL_LABEL: Record<StatusComercialProduto, string> = {
   ATIVO: "Ativo",
@@ -197,48 +198,7 @@ export function ProdutoDetalhe({
         </div>
       )}
 
-      {grade && (
-        <div className="border-t border-[var(--gridline)] p-4">
-          <h3 className="mb-1 text-xs font-medium text-[var(--text-muted)]">
-            Grade sugerida de compra — {formatNumber(grade.quantidadeSugeridaTotal)} un. no total
-          </h3>
-          <p className="mb-2 text-[11px] text-[var(--text-muted)]">
-            Quantidade total vem do motor de compras já existente (por SKU, agregada aqui); a distribuição por cor e
-            tamanho abaixo é nova nesta fase — proporcional à venda real de cada cor/tamanho, nunca misturando cores
-            entre si. {!grade.confiavel && "Confiança baixa — revisar antes de aprovar."}
-          </p>
-          <div className="flex flex-col gap-3">
-            {grade.porCor.map((c) => (
-              <div key={c.cor ?? "sem-cor"} className="overflow-x-auto rounded-md border border-[var(--gridline)]">
-                <div className="flex items-center justify-between border-b border-[var(--gridline)] bg-[var(--page-plane)] px-3 py-1 text-xs font-medium text-[var(--text-secondary)]">
-                  <span>{c.cor ?? "Cor não informada"}</span>
-                  <span className="tabular-nums">{formatNumber(c.quantidadeSugerida)} un. ({c.participacaoPct.toFixed(0)}%)</span>
-                </div>
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
-                      <th className="px-3 py-1.5 font-medium">Tamanho</th>
-                      <th className="px-3 py-1.5 font-medium text-right">Quantidade sugerida</th>
-                      <th className="px-3 py-1.5 font-medium text-right">Participação</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {c.porTamanho.map((t) => (
-                      <tr key={t.chave} className="border-b border-[var(--gridline)] last:border-0">
-                        <td className="px-3 py-1.5 text-[var(--text-secondary)]">{t.chave}</td>
-                        <td className="px-3 py-1.5 tabular-nums text-right text-[var(--text-secondary)]">{formatNumber(t.quantidadeSugerida)}</td>
-                        <td className="px-3 py-1.5 tabular-nums text-right text-[var(--text-secondary)]">
-                          {t.participacaoPct.toFixed(0)}%{!t.baseadoEmHistoricoReal && " (sem venda — peso padrão)"}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      {grade && <GradeRecomendadaSection grade={grade} />}
 
       {temRecomendacao && (
         <div className="border-t border-[var(--gridline)] p-4">
