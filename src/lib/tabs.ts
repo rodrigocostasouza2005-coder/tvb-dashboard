@@ -40,7 +40,7 @@ export type TabKey =
   | "mapa-compras"
   | "distribuicao-estoque"
   | "planejamento-estoque"
-  | "minimo-best-seller"
+  | "estoque-minimo-manual"
   | "performance"
   | "analise-performance"
   | "analytics-site"
@@ -101,12 +101,13 @@ export const TABS: TabEntry[] = [
   // "estoque" já existente de propósito (pedido do Rodrigo: não criar 11ª aba isolada sem
   // resolver navegação primeiro). Mover/renomear/fundir com outra aba depois é trivial (1 linha).
   { key: "planejamento-estoque", label: "Planejamento de Estoque", href: "/dashboard/planejamento-estoque", group: "estoque" },
-  // Estoque mínimo EMPRESARIAL por Best Seller + tamanho (docs/planejamento-inteligente-estoque.md
-  // §19) — NÃO é a mesma coisa que "Estoque Mínimo" acima (StockMinimumRule, por LOJA individual).
-  // Este aqui é definido manualmente pela empresa, por cod (= produto+cor+tamanho), somando TODAS
-  // as posições (lojas + CD/Site) — nome diferente de propósito pra não repetir a confusão já
-  // documentada (§19.3 item 1: "estoque mínimo" significava 3 coisas diferentes, mesmo nome).
-  { key: "minimo-best-seller", label: "Mínimo Best Seller", href: "/dashboard/minimo-best-seller", group: "estoque" },
+  // Estoque mínimo MANUAL por SKU (pedido do Rodrigo, 2026-11-18 — generaliza §19, que começou só
+  // Best Seller) — NÃO é a mesma coisa que "Estoque Mínimo" acima (StockMinimumRule, por LOJA
+  // individual). Este aqui é definido manualmente pela empresa, por cod (= produto+cor+tamanho),
+  // somando TODAS as posições (lojas + CD/Site), pra QUALQUER SKU — nome diferente de propósito
+  // pra não repetir a confusão já documentada (§19.3 item 1: "estoque mínimo" significava 3 coisas
+  // diferentes, mesmo nome).
+  { key: "estoque-minimo-manual", label: "Estoque Mínimo Manual", href: "/dashboard/estoque-minimo-manual", group: "estoque" },
 
   // atacado
   { key: "atacado", label: "Vendas", href: "/dashboard/atacado", group: "atacado" },
@@ -157,7 +158,7 @@ export const GROUPS: { key: TabGroup; label: string; single?: boolean }[] = [
 ];
 
 const BLOCKED_BY_DEFAULT_FOR_VENDEDOR: TabKey[] = [
-  "clientes", "clientes-segmentacao", "clientes-ficha", "clientes-produto", "clientes-produtos-entrada", "vendedores", "estoque-minimo", "minimo-best-seller", "contatos-vendedores", "marketing-templates",
+  "clientes", "clientes-segmentacao", "clientes-ficha", "clientes-produto", "clientes-produtos-entrada", "vendedores", "estoque-minimo", "estoque-minimo-manual", "contatos-vendedores", "marketing-templates",
   "performance", "analise-performance",
   // Central Black Friday mistura CAC/investimento em mídia e dado por canal — mesma régua de
   // "informação financeira/estratégica" que já esconde Performance/Análise de Performance do

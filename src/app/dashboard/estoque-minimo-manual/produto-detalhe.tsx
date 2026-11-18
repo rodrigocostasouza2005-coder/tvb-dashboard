@@ -1,8 +1,8 @@
-import type { ItemMinimoEmpresarial } from "@/lib/metrics";
+import type { ItemMinimoManual } from "@/lib/metrics";
 import { formatNumero, NivelBadge } from "./format";
-import { MinimoEmpresarialForm } from "./forms";
+import { MinimoManualForm } from "./forms";
 
-// Visão detalhada — 1 linha por tamanho (cada ItemMinimoEmpresarial já É um cod = produto+cor+
+// Visão detalhada — 1 linha por tamanho (cada ItemMinimoManual já É um cod = produto+cor+
 // tamanho). O mínimo NUNCA é avaliado por loja: a seção "onde está esse tamanho hoje" abaixo é só
 // leitura (breakdown por posição), reaproveitando porLoja que já vem no item — nunca usado pra
 // recalcular nível de alerta.
@@ -13,7 +13,7 @@ export function ProdutoDetalhe({
   fecharHref,
 }: {
   produto: string;
-  itens: ItemMinimoEmpresarial[]; // já filtrados pro produto aberto, na ordem crítico→atenção→sem mínimo→normal
+  itens: ItemMinimoManual[]; // já filtrados pro produto aberto, na ordem crítico→atenção→sem mínimo→normal
   podeEditar: boolean;
   fecharHref: string;
 }) {
@@ -36,6 +36,11 @@ export function ProdutoDetalhe({
                 {item.cor ? `${item.cor} · ` : ""}
                 {item.tamanho ?? "—"}
                 <span className="ml-2 font-normal text-[var(--text-muted)]">({item.cod})</span>
+                {item.tipoCompra && (
+                  <span className="ml-2 rounded-full border border-[var(--border)] px-1.5 py-0.5 text-[10px] font-normal text-[var(--text-muted)]">
+                    {item.tipoCompra}
+                  </span>
+                )}
               </div>
               <NivelBadge nivel={item.nivelAlerta} />
             </div>
@@ -88,7 +93,7 @@ export function ProdutoDetalhe({
 
             {podeEditar && (
               <div className="mb-3">
-                <MinimoEmpresarialForm
+                <MinimoManualForm
                   cod={item.cod}
                   minimoDefinido={item.minimoDefinido}
                   velocidadeDiariaConsolidada={item.velocidadeDiariaConsolidada}

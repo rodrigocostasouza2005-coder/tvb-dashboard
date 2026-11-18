@@ -9,7 +9,7 @@ import {
   setParametrosBestSellerGrupo,
   setOrcamentoTotalPlanejado,
   registrarDecisaoCompra,
-  atualizarEstoqueMinimoEmpresarial,
+  atualizarEstoqueMinimoManual,
 } from "@/lib/metrics";
 
 // Mesma regra de permissão de updateCoberturaMetaAction/updateCrescimentoAction em actions.ts —
@@ -215,14 +215,14 @@ export async function confirmarDecisaoCompraAction(formData: FormData) {
 // mais comum: ajustar SÓ o mínimo depois da classificação inicial, sem reclassificar o produto.
 // Mesma régua de permissão das demais actions deste arquivo (gestão, não vendedor). Campo vazio
 // limpa o mínimo (volta a SEM_MINIMO_DEFINIDO), nunca grava 0 por omissão.
-export async function atualizarEstoqueMinimoEmpresarialAction(formData: FormData) {
+export async function atualizarEstoqueMinimoManualAction(formData: FormData) {
   const user = await requireGestao();
 
   const cod = String(formData.get("cod") ?? "").trim();
   if (!cod) return;
 
-  const valor = parseIntOrNull(formData.get("estoqueMinimoEmpresarial"));
-  await atualizarEstoqueMinimoEmpresarial(cod, valor, user.email ?? undefined);
+  const valor = parseIntOrNull(formData.get("valor"));
+  await atualizarEstoqueMinimoManual(cod, valor, user.email ?? undefined);
 
-  revalidatePath("/dashboard/minimo-best-seller");
+  revalidatePath("/dashboard/estoque-minimo-manual");
 }

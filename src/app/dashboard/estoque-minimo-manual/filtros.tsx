@@ -1,23 +1,23 @@
 import { GetForm } from "../get-form";
 import { FilterDropdown, CheckboxList } from "../filter-bar";
 
-export type MinimoBestSellerFiltrosValue = {
+export type EstoqueMinimoManualFiltrosValue = {
   tamanhoIn: string[];
   busca: string;
 };
 
 // Mesmo padrão de planejamento-estoque/filtros.tsx (GetForm + FilterDropdown/CheckboxList, sem
-// estado client). Loja de propósito NÃO entra aqui — o mínimo empresarial nunca é avaliado por
-// loja, só o consolidado (ver page.tsx); "onde está esse tamanho hoje" é só leitura dentro do
-// detalhe do produto, reaproveitando porLoja que já vem no item.
-export function MinimoBestSellerFiltros({
+// estado client). Loja de propósito NÃO entra aqui — o mínimo manual nunca é avaliado por loja,
+// só o consolidado (ver page.tsx); "onde está esse SKU hoje" é só leitura dentro do detalhe do
+// produto, reaproveitando porLoja que já vem no item.
+export function EstoqueMinimoManualFiltros({
   basePath,
   tamanhos,
   value,
 }: {
   basePath: string;
   tamanhos: string[];
-  value: MinimoBestSellerFiltrosValue;
+  value: EstoqueMinimoManualFiltrosValue;
 }) {
   const selectedTamanho = new Set(value.tamanhoIn);
 

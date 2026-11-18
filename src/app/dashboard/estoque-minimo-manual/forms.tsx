@@ -1,19 +1,21 @@
 "use client";
 
 import { useState } from "react";
-import { atualizarEstoqueMinimoEmpresarialAction } from "../mapa-compras/classificacao-actions";
+import { atualizarEstoqueMinimoManualAction } from "../mapa-compras/classificacao-actions";
 
 const inputClass =
   "rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-1.5 py-1 text-[11px] text-[var(--text-primary)]";
 const btnClass =
   "rounded-md border border-[var(--border)] px-1.5 py-1 text-[11px] text-[var(--text-muted)] hover:bg-[var(--page-plane)]";
 
-// Edição inline do mínimo empresarial (pedido do Rodrigo: ajustar direto no elemento, efeito
+// Edição inline do mínimo manual (pedido do Rodrigo: ajustar direto no elemento, efeito
 // imediato, não um formulário à parte — ver feedback_inline_controls). A sugestão ao lado é só
 // texto informativo (cálculo 100% client-side, nunca grava nada) — "N dias" é um input livre do
 // próprio usuário, default 30, pra ele simular antes de decidir o valor real a salvar no campo
 // editável de verdade. Mesmo padrão visual de ParametrosGrupoForm (mapa-compras/inteligencia/forms.tsx).
-export function MinimoEmpresarialForm({
+// Deixar o campo em branco e salvar REMOVE o mínimo (volta pra "sem mínimo definido") — nunca
+// inventa um valor quando o campo fica vazio.
+export function MinimoManualForm({
   cod,
   minimoDefinido,
   velocidadeDiariaConsolidada,
@@ -27,17 +29,17 @@ export function MinimoEmpresarialForm({
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <form action={atualizarEstoqueMinimoEmpresarialAction} className="flex items-center gap-1.5">
+      <form action={atualizarEstoqueMinimoManualAction} className="flex items-center gap-1.5">
         <input type="hidden" name="cod" value={cod} />
         <input
           type="number"
-          name="estoqueMinimoEmpresarial"
+          name="valor"
           defaultValue={minimoDefinido ?? ""}
           min={0}
           placeholder="sem mínimo"
           className={`${inputClass} w-20 text-right tabular-nums`}
         />
-        <button type="submit" className={btnClass} title="Salvar mínimo empresarial deste tamanho">
+        <button type="submit" className={btnClass} title="Salvar mínimo manual deste SKU">
           Salvar
         </button>
       </form>

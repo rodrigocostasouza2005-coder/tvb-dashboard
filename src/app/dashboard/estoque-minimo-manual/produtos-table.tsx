@@ -1,4 +1,4 @@
-import type { ItemMinimoEmpresarial } from "@/lib/metrics";
+import type { ItemMinimoManual } from "@/lib/metrics";
 import { formatNumero, NIVEL_COR } from "./format";
 
 type ProdutoAgregado = {
@@ -12,8 +12,8 @@ type ProdutoAgregado = {
 };
 
 // Agregação puramente de apresentação (1 linha por produto, contando tamanhos por nível) — não é
-// lógica de negócio nova, só agrupa o que getEstoqueMinimoEmpresarial já calculou por cod/tamanho.
-function agregarPorProduto(itens: ItemMinimoEmpresarial[]): ProdutoAgregado[] {
+// lógica de negócio nova, só agrupa o que getEstoqueMinimoManual já calculou por cod/tamanho.
+function agregarPorProduto(itens: ItemMinimoManual[]): ProdutoAgregado[] {
   const porProduto = new Map<string, ProdutoAgregado>();
   for (const item of itens) {
     let acc = porProduto.get(item.produto);
@@ -40,7 +40,7 @@ export function ProdutosConsolidadoTable({
   queryString,
   produtoAberto,
 }: {
-  itens: ItemMinimoEmpresarial[];
+  itens: ItemMinimoManual[];
   basePath: string;
   queryString: string;
   produtoAberto?: string;
