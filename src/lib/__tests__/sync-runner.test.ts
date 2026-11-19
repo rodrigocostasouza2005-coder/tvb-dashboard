@@ -1243,3 +1243,135 @@ describe("getSyncStatusDetalhado — Meta Ads/GA4 usam SyncLog de verdade (não 
     expect(detalhado.ga4.ultimaAtualizacaoCache).toBeNull(); // GA4 nunca teve cache de dado equivalente
   });
 });
+
+// Resgate da feature "status detalhado no header" (worktree órfão agent-af55e6056fe53e292,
+// auditoria 2026-11-14 — nunca chegou a abrir PR, base >60 commits atrás). statusVisual/
+// ultimaAtualizacaoReal/duracaoMs são o que faltava pra UI distinguir "estoque atualizado" de
+// "estoque com a última tentativa com sucesso há 3 dias" sem inventar nenhum dado novo — só
+// reclassifica o que o SyncLog já tinha.
+describe("getSyncStatusDetalhado — statusVisual/ultimaAtualizacaoReal/duracaoMs (resgate do worktree órfão)", () => {
+  function mockSyncLogPorFonte(
+    porFonte: Record<string, { ultimo?: { status: "SUCCESS" | "FAILED"; startedAt: Date; finishedAt: Date; recordsSynced?: number; message?: string | null }; ultimaSucesso?: { finishedAt: Date } }>
+  ) {
+    syncLogFindFirst.mockImplementation(({ where }: { where: { source: string; status?: string } }) => {
+      const entry = porFonte[where.source];
+      if (!entry) return Promise.resolve(null);
+      if (where.status === "SUCCESS") {
+        return Promise.resolve(entry.ultimaSucesso ? { finishedAt: entry.ultimaSucesso.finishedAt } : null);
+      }
+      return Promise.resolve(
+        entry.ultimo
+          ? {
+              status: entry.ultimo.status,
+              startedAt: entry.ultimo.startedAt,
+              finishedAt: entry.ultimo.finishedAt,
+              recordsSynced: entry.ultimo.recordsSynced ?? 0,
+              message: entry.ultimo.message ?? null,
+            }
+          : null
+      );
+    });
+  }
+
+  it("última tentativa FAILED mas havia um SUCCESS antes -> statusVisual 'erro', ultimaAtualizacaoReal é o SUCCESS antigo (nunca a tentativa falha)", async () => {
+    const sucessoAntigo = new Date(Date.now() - 25 * 60_000);
+    mockSyncLogPorFonte({
+      SALES: {
+        ultimo: { status: "FAILED", startedAt: new Date(Date.now() - 60_000), finishedAt: new Date(Date.now() - 55_000), message: "DAPIC 500" },
+        ultimaSucesso: { finishedAt: sucessoAntigo },
+      },
+    });
+
+    const { getSyncStatusDetalhado } = await import("../sync-runner");
+    const detalhado = await getSyncStatusDetalhado();
+    const sales = detalhado.dapic.find((d) => d.source === "SALES")!;
+
+    expect(sales.statusVisual).toBe("erro");
+    expect(sales.ultimaAtualizacaoReal).toBe(sucessoAntigo.toISOString());
+    expect(sales.message).toBe("DAPIC 500");
+  });
+
+  it("última tentativa SUCCESS há 25min (> 2x 10min) -> statusVisual 'atrasado'", async () => {
+    const finishedAt = new Date(Date.now() - 25 * 60_000);
+    const startedAt = new Date(finishedAt.getTime() - 5_000);
+    mockSyncLogPorFonte({
+      STOCK: { ultimo: { status: "SUCCESS", startedAt, finishedAt }, ultimaSucesso: { finishedAt } },
+    });
+
+    const { getSyncStatusDetalhado } = await import("../sync-runner");
+    const detalhado = await getSyncStatusDetalhado();
+    const stock = detalhado.dapic.find((d) => d.source === "STOCK")!;
+
+    expect(stock.statusVisual).toBe("atrasado");
+    expect(stock.duracaoMs).toBe(5_000);
+  });
+
+  it("última tentativa SUCCESS há 5min (dentro do limiar de 20min) -> statusVisual 'atualizado'", async () => {
+    const finishedAt = new Date(Date.now() - 5 * 60_000);
+    const startedAt = new Date(finishedAt.getTime() - 3_000);
+    mockSyncLogPorFonte({
+      RETURNS: { ultimo: { status: "SUCCESS", startedAt, finishedAt }, ultimaSucesso: { finishedAt } },
+    });
+
+    const { getSyncStatusDetalhado } = await import("../sync-runner");
+    const detalhado = await getSyncStatusDetalhado();
+    const returns = detalhado.dapic.find((d) => d.source === "RETURNS")!;
+
+    expect(returns.statusVisual).toBe("atualizado");
+    expect(returns.duracaoMs).toBe(3_000);
+  });
+
+  it("nunca teve um SyncLog SUCCESS -> statusVisual 'sem_dados', mesmo sem nenhuma tentativa registrada", async () => {
+    syncLogFindFirst.mockResolvedValue(null);
+
+    const { getSyncStatusDetalhado } = await import("../sync-runner");
+    const detalhado = await getSyncStatusDetalhado();
+
+    for (const fonte of detalhado.dapic) {
+      expect(fonte.statusVisual).toBe("sem_dados");
+      expect(fonte.ultimaAtualizacaoReal).toBeNull();
+      expect(fonte.duracaoMs).toBeNull();
+    }
+  });
+
+  it("SyncLock 'sync' ativo (não travado) -> statusVisual 'executando' pras 5 fontes DAPIC, mesmo uma com última tentativa FAILED (executando tem prioridade sobre erro)", async () => {
+    const finishedAt = new Date(Date.now() - 25 * 60_000);
+    mockSyncLogPorFonte({
+      SALES: { ultimo: { status: "FAILED", startedAt: finishedAt, finishedAt } },
+      STOCK: { ultimo: { status: "SUCCESS", startedAt: finishedAt, finishedAt }, ultimaSucesso: { finishedAt } },
+    });
+    syncLockFindUnique.mockImplementation(({ where }: { where: { id: string } }) =>
+      where.id === "sync" ? Promise.resolve({ startedAt: new Date(), finishedAt: null }) : Promise.resolve(null)
+    );
+
+    const { getSyncStatusDetalhado } = await import("../sync-runner");
+    const detalhado = await getSyncStatusDetalhado();
+
+    expect(detalhado.locks.sync).toBe(true);
+    for (const fonte of detalhado.dapic) {
+      expect(fonte.statusVisual).toBe("executando");
+    }
+  });
+
+  it("Meta Ads/GA4: FAILED -> 'erro', null -> 'sem_dados', SUCCESS -> 'atualizado' — nunca 'atrasado' nem 'executando' (sem cadência/lock conhecidos)", async () => {
+    const velhoDemaisPraDapic = new Date(Date.now() - 48 * 60 * 60_000); // 48h — seria "atrasado" se fosse DAPIC
+    syncLogFindFirst.mockImplementation(({ where }: { where: { source: string; status?: string } }) => {
+      if (where.source === "META_ADS" && where.status !== "SUCCESS") {
+        return Promise.resolve({ status: "FAILED", startedAt: velhoDemaisPraDapic, finishedAt: velhoDemaisPraDapic, recordsSynced: 0, message: "token expirado" });
+      }
+      if (where.source === "GA4" && where.status === "SUCCESS") {
+        return Promise.resolve({ finishedAt: velhoDemaisPraDapic });
+      }
+      if (where.source === "GA4") {
+        return Promise.resolve({ status: "SUCCESS", startedAt: velhoDemaisPraDapic, finishedAt: velhoDemaisPraDapic, recordsSynced: 10, message: null });
+      }
+      return Promise.resolve(null);
+    });
+
+    const { getSyncStatusDetalhado } = await import("../sync-runner");
+    const detalhado = await getSyncStatusDetalhado();
+
+    expect(detalhado.metaAds.statusVisual).toBe("erro");
+    expect(detalhado.ga4.statusVisual).toBe("atualizado"); // 48h de idade, mas sem limiar aplicável — não é "atrasado"
+  });
+});
