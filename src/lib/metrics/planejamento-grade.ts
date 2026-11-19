@@ -74,6 +74,17 @@ export type GradePorCor = {
   porTamanho: ItemDecomposto[];
 };
 
+// Proporção OBSERVADA de venda real, por cor→tamanho — nunca depende de haver quantidade a
+// repartir (`quantidadeSugeridaTotal > 0`). Pedido do Rodrigo: mesmo quando o motor de compras
+// ainda não sugeriu uma quantidade positiva (caso mais comum hoje, ver
+// docs/planejamento-inteligente-estoque.md §10.7/§14.4 — quase nenhum cod classificado tem
+// quantidadeSugerida > 0 em produção), ele quer saber "vende mais em X, menos em Y" como fato
+// descritivo. `participacaoPct` aqui é calculada só a partir do peso de venda real (nunca do
+// fallback de núcleo 38/40/42/44 — esse fallback só existe pra REPARTIR uma quantidade, não faz
+// sentido como "proporção observada" quando não há venda alguma).
+export type ProporcaoItem = { chave: string; vendido: number; participacaoPct: number };
+export type ProporcaoPorCor = { cor: string | null; vendido: number; participacaoPct: number; porTamanho: ProporcaoItem[] };
+
 export type RecomendacaoGradeProduto = {
   produto: string;
   grupo: string;
@@ -82,6 +93,10 @@ export type RecomendacaoGradeProduto = {
   valorEstimadoTotal: number | null;
   confiavel: boolean;
   porCor: GradePorCor[];
+  // Sempre preenchida quando há dado de venda real pros cods deste produto (independente de
+  // quantidadeSugeridaTotal) — [] só quando não há NENHUMA venda registrada pros cods
+  // classificados na janela considerada (honestidade: nunca inventa proporção sem dado).
+  proporcaoObservada: ProporcaoPorCor[];
 };
 
 const JANELA_PESO_DIAS = 56; // mesma janela de velocidade usada em getRecomendacoesBestSeller/Drop
@@ -106,13 +121,30 @@ async function getPesosCorTamanho(produto: string, cods: string[], janela: { fro
   return rows;
 }
 
+// Pura — participação só a partir do peso de venda real, SEM depender de haver quantidade a
+// repartir. Nunca usa pesoFallback (núcleo 38/40/42/44): esse fallback existe só pra decidir COMO
+// repartir uma compra quando não há venda nenhuma, não faz sentido como "fato observado". Sem
+// venda em nenhum item (`totalVendido === 0`), participacaoPct fica 0 pra todos — nunca inventa
+// um empate.
+function calcularProporcao(pesos: PesoDecomposicao[]): ProporcaoItem[] {
+  const validos = pesos.filter((p) => p.chave);
+  if (validos.length === 0) return [];
+  const totalVendido = validos.reduce((s, p) => s + Math.max(p.vendido, 0), 0);
+  return validos.map((p) => ({
+    chave: p.chave,
+    vendido: Math.max(p.vendido, 0),
+    participacaoPct: totalVendido > 0 ? (Math.max(p.vendido, 0) / totalVendido) * 100 : 0,
+  }));
+}
+
 async function decomporGradeProduto(
   produto: string,
   cods: string[],
   quantidadeSugeridaTotal: number,
   janela: { from: Date; to: Date }
-): Promise<GradePorCor[]> {
-  if (quantidadeSugeridaTotal <= 0) return [];
+): Promise<{ porCor: GradePorCor[]; proporcaoObservada: ProporcaoPorCor[] }> {
+  // A query de venda real é sempre feita (ajuste aditivo): mesmo sem quantidade a repartir, o
+  // Rodrigo quer ver a proporção observada (vende mais em X, menos em Y) como fato descritivo.
   const pesos = await getPesosCorTamanho(produto, cods, janela);
 
   const porCorMap = new Map<string, { chave: string; vendido: number; porTamanho: PesoDecomposicao[] }>();
@@ -124,14 +156,30 @@ async function decomporGradeProduto(
     entry.porTamanho.push({ chave: r.tamanho ?? "", vendido });
     porCorMap.set(corKey, entry);
   }
-  if (porCorMap.size === 0) return [];
+  if (porCorMap.size === 0) return { porCor: [], proporcaoObservada: [] };
+
+  const corInfos = [...porCorMap.values()];
+
+  const proporcaoCores = calcularProporcao(corInfos.map((c) => ({ chave: c.chave, vendido: c.vendido })));
+  const proporcaoObservada: ProporcaoPorCor[] = proporcaoCores.map((pc) => {
+    const corInfo = porCorMap.get(pc.chave)!;
+    return {
+      cor: pc.chave || null,
+      vendido: pc.vendido,
+      participacaoPct: pc.participacaoPct,
+      porTamanho: calcularProporcao(corInfo.porTamanho).map((t) => ({ ...t, chave: t.chave || "—" })),
+    };
+  });
+
+  // Comportamento original preservado EXATAMENTE: sem quantidade a repartir, porCor continua [].
+  if (quantidadeSugeridaTotal <= 0) return { porCor: [], proporcaoObservada };
 
   const decomposicaoCores = decomporProporcional(
     quantidadeSugeridaTotal,
-    [...porCorMap.values()].map((c) => ({ chave: c.chave, vendido: c.vendido }))
+    corInfos.map((c) => ({ chave: c.chave, vendido: c.vendido }))
   );
 
-  return decomposicaoCores.map((dc) => {
+  const porCor = decomposicaoCores.map((dc) => {
     const corInfo = porCorMap.get(dc.chave)!;
     return {
       cor: dc.chave || null,
@@ -143,6 +191,8 @@ async function decomporGradeProduto(
       })),
     };
   });
+
+  return { porCor, proporcaoObservada };
 }
 
 // Agrega getRecomendacoesBestSeller/Drop (por cod, já existentes) pro nível de PRODUTO e decompõe
@@ -176,9 +226,9 @@ export async function getRecomendacaoGradeProduto(
       ? { from: new Date(0), to: new Date() }
       : { from: new Date(Date.now() - JANELA_PESO_DIAS * 86_400_000), to: new Date() };
 
-  const porCor = await decomporGradeProduto(produto, cods, quantidadeSugeridaTotal, janela);
+  const { porCor, proporcaoObservada } = await decomporGradeProduto(produto, cods, quantidadeSugeridaTotal, janela);
 
-  return { produto, grupo, cods, quantidadeSugeridaTotal, valorEstimadoTotal, confiavel, porCor };
+  return { produto, grupo, cods, quantidadeSugeridaTotal, valorEstimadoTotal, confiavel, porCor, proporcaoObservada };
 }
 
 export { TAMANHOS_NUCLEO, ehTamanhoNucleo };

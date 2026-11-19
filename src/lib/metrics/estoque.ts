@@ -516,6 +516,10 @@ export async function getReplenishment(filters: Pick<DashboardFilters, "storeIds
       const tetoSemZerarCD = Math.max(estoqueNaOrigem - 1, 0);
       return {
         storeId: s.storeId,
+        // cod = SKU exato (produto+cor+tamanho), exposto pra permitir cruzar esta linha com outros
+        // sinais aditivos (mínimo manual por SKU, oportunidade de transferência do motor de
+        // Distribuição) sem recalcular nada aqui — ver reposicao-sinais.ts e reposicao/page.tsx.
+        cod: s.cod,
         storeName: storeName.get(s.storeId) ?? s.storeId,
         produto: s.produto,
         grupo: s.grupo,
@@ -698,6 +702,9 @@ export async function getReplenishmentPorVendas(
       const falta = faltaPorChave.get(`${l.storeId}::${l.cod}`) ?? 0;
       return {
         storeId: l.storeId,
+        // cod = SKU exato (produto+cor+tamanho) — mesmo motivo do modo Estoque Mínimo acima (ver
+        // comentário em getReplenishment): permite cruzar com sinais aditivos sem recalcular nada.
+        cod: l.cod,
         storeName: l.storeName,
         produto: l.produto,
         grupo: l.grupo,

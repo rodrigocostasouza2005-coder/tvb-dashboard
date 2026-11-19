@@ -131,6 +131,81 @@ describe("getRecomendacaoGradeProduto", () => {
     expect(r!.porCor[0].quantidadeSugerida).toBe(20); // 100% do total — não repartido com Vermelho
   });
 
+  // Ajuste aditivo (pedido do Rodrigo, docs/planejamento-inteligente-estoque.md Parte 1 da rodada
+  // de 2026-11-18): quantidadeSugeridaTotal<=0 é o caso mais comum em produção hoje (quase nenhum
+  // cod classificado tem quantidadeSugerida > 0 — ver §10.7/§14.4) — mesmo assim, o Rodrigo quer
+  // ver a proporção observada de venda real (vende mais em X, menos em Y) como fato descritivo,
+  // nunca uma recomendação de compra fabricada. porCor continua [] (comportamento original
+  // preservado), mas proporcaoObservada reflete o peso de venda real.
+  it("quantidadeSugeridaTotal=0: porCor continua [] (nunca inventa recomendação), mas proporcaoObservada reflete a venda real por cor/tamanho", async () => {
+    getRecomendacoesBestSeller.mockResolvedValue([
+      {
+        produto: "Bermuda Drop",
+        grupo: "Bermudas",
+        cod: "AZ-P",
+        quantidadeSugerida: 0,
+        valorEstimado: null,
+        confiavel: true,
+        coberturaAtualDias: 40,
+        estoqueDisponivelUtilizavel: 0,
+        demandaProjetadaHorizonte: 0,
+        recebimentosUtilizaveis: 0,
+        premissas: [],
+        avisos: [],
+      },
+    ]);
+    saleGroupBy.mockResolvedValue([
+      { cor: "Azul", tamanho: "P", _sum: { quantidade: 30 } },
+      { cor: "Azul", tamanho: "M", _sum: { quantidade: 10 } },
+    ]);
+
+    const { getRecomendacaoGradeProduto } = await import("../planejamento-grade");
+    const r = await getRecomendacaoGradeProduto("Bermuda Drop");
+
+    expect(r).not.toBeNull();
+    expect(r!.quantidadeSugeridaTotal).toBe(0);
+    expect(r!.porCor).toEqual([]); // nunca inventa quantidade a repartir
+
+    expect(r!.proporcaoObservada).toHaveLength(1);
+    const azul = r!.proporcaoObservada[0];
+    expect(azul.cor).toBe("Azul");
+    expect(azul.vendido).toBe(40);
+    expect(azul.participacaoPct).toBe(100); // única cor com venda
+
+    // Tamanho P vendeu o triplo de M (30 vs 10) — proporção fecha em 75%/25%, sem inventar peso
+    // de núcleo (38/40/42/44), que só existe pra REPARTIR quantidade, não pra descrever fato.
+    const tP = azul.porTamanho.find((t) => t.chave === "P")!;
+    const tM = azul.porTamanho.find((t) => t.chave === "M")!;
+    expect(tP.participacaoPct).toBe(75);
+    expect(tM.participacaoPct).toBe(25);
+  });
+
+  it("sem nenhuma venda registrada: proporcaoObservada é [] (nunca inventa proporção sem dado)", async () => {
+    getRecomendacoesBestSeller.mockResolvedValue([
+      {
+        produto: "Produto Sem Venda",
+        grupo: "Grupo",
+        cod: "PR-U",
+        quantidadeSugerida: 0,
+        valorEstimado: null,
+        confiavel: true,
+        coberturaAtualDias: null,
+        estoqueDisponivelUtilizavel: 0,
+        demandaProjetadaHorizonte: 0,
+        recebimentosUtilizaveis: 0,
+        premissas: [],
+        avisos: [],
+      },
+    ]);
+    saleGroupBy.mockResolvedValue([]);
+
+    const { getRecomendacaoGradeProduto } = await import("../planejamento-grade");
+    const r = await getRecomendacaoGradeProduto("Produto Sem Venda");
+
+    expect(r!.porCor).toEqual([]);
+    expect(r!.proporcaoObservada).toEqual([]);
+  });
+
   it("confiavel=false quando há recomendação de Drop junto (Drop não tem campo confiavel próprio, trata com cautela)", async () => {
     getRecomendacoesBestSeller.mockResolvedValue([]);
     getRecomendacoesDrop.mockResolvedValue([

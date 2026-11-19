@@ -542,6 +542,76 @@ describe("getProdutoExcessoDistribuicao", () => {
   });
 });
 
+describe("getCodsComOportunidadeTransferencia", () => {
+  it("devolve, pra cada cod com oportunidade, a origem e a quantidade sugerida já calculadas pelo motor (sem recalcular nada)", async () => {
+    getComparacaoCompleta.mockResolvedValue({ variantes: [variante({ cod: "COD-1" })] });
+    getMovimentacoesRecomendadas.mockResolvedValue({
+      movimentacoes: [movimentacao({ cod: "COD-1", origemNome: "CD/Site", quantidadeSugerida: 7 })],
+      manter: [],
+      necessidadesNaoAtendidas: [],
+      colunas: [],
+      totalAntesDoFiltro: 1,
+    });
+
+    const { getCodsComOportunidadeTransferencia } = await import("../planejamento-distribuicao");
+    const r = await getCodsComOportunidadeTransferencia();
+
+    expect(r.get("COD-1")).toEqual({ origemNome: "CD/Site", quantidadeSugerida: 7 });
+  });
+
+  it("soma a quantidade e junta as origens (deduplicadas) quando o mesmo cod aparece em mais de uma oportunidade", async () => {
+    getComparacaoCompleta.mockResolvedValue({ variantes: [variante({ cod: "COD-1" })] });
+    getMovimentacoesRecomendadas.mockResolvedValue({
+      movimentacoes: [
+        movimentacao({ cod: "COD-1", origemNome: "CD/Site", destinoNome: "Loja A", quantidadeSugerida: 7 }),
+        movimentacao({ cod: "COD-1", origemNome: "Loja B", destinoNome: "Loja C", quantidadeSugerida: 3 }),
+        movimentacao({ cod: "COD-1", origemNome: "CD/Site", destinoNome: "Loja D", quantidadeSugerida: 2 }),
+      ],
+      manter: [],
+      necessidadesNaoAtendidas: [],
+      colunas: [],
+      totalAntesDoFiltro: 3,
+    });
+
+    const { getCodsComOportunidadeTransferencia } = await import("../planejamento-distribuicao");
+    const r = await getCodsComOportunidadeTransferencia();
+
+    const entry = r.get("COD-1")!;
+    expect(entry.quantidadeSugerida).toBe(12); // 7 + 3 + 2
+    expect(entry.origemNome).toBe("CD/Site + Loja B"); // deduplicado, sem repetir "CD/Site"
+  });
+
+  it("cod sem nenhuma oportunidade de transferência não aparece no mapa", async () => {
+    getComparacaoCompleta.mockResolvedValue({
+      variantes: [variante({ cod: "COD-1", porLoja: [loja({ estoqueAtual: 0, vendasDias90: 10, diagnostico: "ruptura" })] })],
+    });
+    getMovimentacoesRecomendadas.mockResolvedValue({ movimentacoes: [], manter: [], necessidadesNaoAtendidas: [], colunas: [], totalAntesDoFiltro: 0 });
+
+    const { getCodsComOportunidadeTransferencia } = await import("../planejamento-distribuicao");
+    const r = await getCodsComOportunidadeTransferencia();
+
+    expect(r.size).toBe(0);
+  });
+
+  it("Drop em ciclo ativo suprimido de oportunidades (régua já existente de getExcessosEDistribuicao) também não aparece aqui, sem nenhuma regra nova", async () => {
+    getComparacaoCompleta.mockResolvedValue({ variantes: [variante({ cod: "COD-1", tipoCompra: "DROP" })] });
+    const futura = new Date(Date.now() + 10 * 86_400_000);
+    classificacaoProdutoFindMany.mockResolvedValue([{ cod: "COD-1", statusComercial: "ATIVO", dataEncerramentoPrevista: futura }]);
+    getMovimentacoesRecomendadas.mockResolvedValue({
+      movimentacoes: [movimentacao({ cod: "COD-1", vendasOrigem90: 5 })],
+      manter: [],
+      necessidadesNaoAtendidas: [],
+      colunas: [],
+      totalAntesDoFiltro: 1,
+    });
+
+    const { getCodsComOportunidadeTransferencia } = await import("../planejamento-distribuicao");
+    const r = await getCodsComOportunidadeTransferencia();
+
+    expect(r.size).toBe(0);
+  });
+});
+
 describe("getDecisoesMovimentacaoPorStatus", () => {
   function historico(itens: HistoricoMovimentacoesItem[] = []) {
     return { migrationPendente: false, itens };

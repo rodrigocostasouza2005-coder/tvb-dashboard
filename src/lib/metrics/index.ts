@@ -17,3 +17,4 @@ export * from "./planejamento-grade";
 export * from "./planejamento-avaliacao";
 export * from "./planejamento-distribuicao";
 export * from "./estoque-minimo-manual";
+export * from "./reposicao-sinais";

@@ -1,5 +1,15 @@
 import { getSessionUser } from "@/lib/auth";
-import { getReplenishment, getReplenishmentPorVendas, getStores, getMarcas, getDistinctColecoes } from "@/lib/metrics";
+import {
+  getReplenishment,
+  getReplenishmentPorVendas,
+  getStores,
+  getMarcas,
+  getDistinctColecoes,
+  getEstoqueMinimoManual,
+  getMovimentacoesRecomendadas,
+  construirMapaMinimoManualPorCod,
+  construirMapaTransferenciaPorCodELoja,
+} from "@/lib/metrics";
 import { getGrupoRestriction, getStoreRestriction } from "@/lib/permissions";
 import { parseFilters, toDateInputValue, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
@@ -7,6 +17,8 @@ import { FilterBar } from "../filter-bar";
 import { CollapsibleFilters } from "../collapsible-filters";
 import { MetricBarChart } from "../metric-bar-chart";
 import { ModoToggle, parseReplenishmentModo } from "./modo-toggle";
+import { MinimoManualInfo, TransferenciaInfo } from "./sinais";
+import type { ItemMinimoManual, SinalTransferencia } from "@/lib/metrics";
 
 export default async function ReposicaoPage({
   searchParams,
@@ -47,6 +59,27 @@ export default async function ReposicaoPage({
   exportParams.set("modo", modo);
 
   const rows = modo === "minimo" ? rowsMinimo : rowsVendas;
+
+  // Sinais ADITIVOS (pedido do Rodrigo, 2026-11-18) — nunca alteram falta/estoqueMinimo/
+  // origemSugerida calculados acima, só cruzam cada linha já mostrada com dois motores que já
+  // existem: (1) mínimo MANUAL por SKU (getEstoqueMinimoManual, vale pra qualquer cod, somando
+  // todas as posições da empresa) e (2) oportunidade de transferência já sugerida pelo motor de
+  // Distribuição (getMovimentacoesRecomendadas) pro MESMO cod + MESMA loja de destino. Só busca
+  // quando há linha pra mostrar (evita 2 passadas pesadas em cima de uma tabela vazia).
+  // storeIdsPermitidas usa a RESTRIÇÃO de permissão do usuário (allowedStores), nunca o filtro de
+  // loja selecionado na tela — o mínimo manual e as oportunidades de transferência precisam
+  // comparar a empresa toda (todas as posições que o usuário pode ver), não só a loja filtrada.
+  let minimoManualPorCod = new Map<string, ItemMinimoManual>();
+  let transferenciaPorCodELoja = new Map<string, SinalTransferencia>();
+  if (rows.length > 0) {
+    const sinaisFiltro = { grupoIn: filters.grupoIn, colecaoIn: filters.colecaoIn, storeIdsPermitidas: allowedStores };
+    const [itensMinimoManual, movimentacoesRecomendadas] = await Promise.all([
+      getEstoqueMinimoManual(sinaisFiltro),
+      getMovimentacoesRecomendadas(sinaisFiltro),
+    ]);
+    minimoManualPorCod = construirMapaMinimoManualPorCod(itensMinimoManual);
+    transferenciaPorCodELoja = construirMapaTransferenciaPorCodELoja(movimentacoesRecomendadas.movimentacoes);
+  }
 
   return (
     <div>
@@ -108,7 +141,7 @@ export default async function ReposicaoPage({
 
       {modo === "minimo" ? (
         <div className="overflow-x-auto overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-          <table className="w-full min-w-[900px] text-sm">
+          <table className="w-full min-w-[1150px] text-sm">
             <thead>
               <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
                 <th className="px-4 py-2 font-medium">Loja</th>
@@ -120,6 +153,8 @@ export default async function ReposicaoPage({
                 <th className="px-4 py-2 font-medium">Mínimo</th>
                 <th className="px-4 py-2 font-medium">Repor de</th>
                 <th className="px-4 py-2 font-medium">Disponível na origem</th>
+                <th className="px-4 py-2 font-medium">Mínimo manual (empresa)</th>
+                <th className="px-4 py-2 font-medium">Transferência disponível</th>
               </tr>
             </thead>
             <tbody>
@@ -136,11 +171,17 @@ export default async function ReposicaoPage({
                   <td className="px-4 py-2 tabular-nums">{r.estoqueMinimo}</td>
                   <td className="px-4 py-2 text-[var(--text-secondary)]">{r.origemSugerida}</td>
                   <td className="px-4 py-2 tabular-nums">{r.estoqueNaOrigem}</td>
+                  <td className="px-4 py-2">
+                    <MinimoManualInfo item={minimoManualPorCod.get(r.cod)} />
+                  </td>
+                  <td className="px-4 py-2">
+                    <TransferenciaInfo sinal={transferenciaPorCodELoja.get(`${r.storeId}::${r.cod}`)} />
+                  </td>
                 </tr>
               ))}
               {rowsMinimo.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="px-4 py-6 text-center text-[var(--text-muted)]">
+                  <td colSpan={11} className="px-4 py-6 text-center text-[var(--text-muted)]">
                     Nada abaixo do estoque mínimo no filtro atual.
                   </td>
                 </tr>
@@ -150,7 +191,7 @@ export default async function ReposicaoPage({
         </div>
       ) : (
         <div className="overflow-x-auto overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-          <table className="w-full min-w-[950px] text-sm">
+          <table className="w-full min-w-[1200px] text-sm">
             <thead>
               <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
                 <th className="px-4 py-2 font-medium">Loja</th>
@@ -162,6 +203,8 @@ export default async function ReposicaoPage({
                 <th className="px-4 py-2 font-medium">Repor</th>
                 <th className="px-4 py-2 font-medium">Repor de</th>
                 <th className="px-4 py-2 font-medium">Disponível na origem</th>
+                <th className="px-4 py-2 font-medium">Mínimo manual (empresa)</th>
+                <th className="px-4 py-2 font-medium">Transferência disponível</th>
               </tr>
             </thead>
             <tbody>
@@ -196,11 +239,17 @@ export default async function ReposicaoPage({
                   </td>
                   <td className="px-4 py-2 text-[var(--text-secondary)]">{r.origemSugerida}</td>
                   <td className="px-4 py-2 tabular-nums">{r.estoqueNaOrigem}</td>
+                  <td className="px-4 py-2">
+                    <MinimoManualInfo item={minimoManualPorCod.get(r.cod)} />
+                  </td>
+                  <td className="px-4 py-2">
+                    <TransferenciaInfo sinal={transferenciaPorCodELoja.get(`${r.storeId}::${r.cod}`)} />
+                  </td>
                 </tr>
               ))}
               {rowsVendas.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="px-4 py-6 text-center text-[var(--text-muted)]">
+                  <td colSpan={11} className="px-4 py-6 text-center text-[var(--text-muted)]">
                     Nada vende, no ritmo médio das últimas 8 semanas, mais do que tem disponível.
                   </td>
                 </tr>

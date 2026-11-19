@@ -310,6 +310,48 @@ export async function getProdutoExcessoDistribuicao(
 }
 
 // ---------------------------------------------------------------------------
+// SINAL ADITIVO — excesso disponível pra transferir, antes de sugerir compra
+// ---------------------------------------------------------------------------
+// docs/planejamento-inteligente-estoque.md §16.2 item 3 e §19.6: o motor de sugestão de compra
+// (compras-inteligencia.ts, calcularSugestaoBestSeller/calcularSugestaoDrop) agrega estoque e
+// demanda da EMPRESA TODA, sem conceito de posição/loja, e por isso nunca verifica se já existe
+// excesso disponível em outra posição antes de sugerir compra. A correção aprovada pelo Rodrigo é
+// estritamente ADITIVA (mesmo padrão já usado em excesso-distribuicao.tsx — alerta ao lado, nunca
+// mudança de fórmula): nunca tocar calcularSugestaoBestSeller/calcularSugestaoDrop/
+// construirOrigem/diagnosticarVariante/aplicarRetencoes/getExcessosEDistribuicao — só expor, pra
+// quem for decidir a compra, que aquele cod já tem oportunidade de transferência calculada pelo
+// motor de distribuição (zero recálculo, mesma lista de `oportunidades` de getExcessosEDistribuicao).
+export type OportunidadeTransferenciaPorCod = {
+  // Nome(s) da(s) posição(ões) de origem com disponível pra transferir este cod — deduplicado e
+  // concatenado quando o motor sugere mais de uma origem (ex.: CD abastecendo 2 lojas diferentes).
+  origemNome: string;
+  // Soma de quantidadeSugerida entre todas as oportunidades deste cod (já calculada pelo motor,
+  // nunca recalculada aqui) — "quanto já está disponível pra mover, sem comprar".
+  quantidadeSugerida: number;
+};
+
+export async function getCodsComOportunidadeTransferencia(
+  filtro: ComparacaoFiltro = {}
+): Promise<Map<string, OportunidadeTransferenciaPorCod>> {
+  const produtos = await getExcessosEDistribuicao(filtro);
+  const porCod = new Map<string, { origens: Set<string>; quantidadeSugerida: number }>();
+  for (const p of produtos) {
+    for (const m of p.oportunidades) {
+      let acc = porCod.get(m.cod);
+      if (!acc) {
+        acc = { origens: new Set(), quantidadeSugerida: 0 };
+        porCod.set(m.cod, acc);
+      }
+      acc.origens.add(m.origemNome);
+      acc.quantidadeSugerida += m.quantidadeSugerida;
+    }
+  }
+  return new Map(
+    [...porCod].map(([cod, v]) => [cod, { origemNome: [...v.origens].join(" + "), quantidadeSugerida: v.quantidadeSugerida }])
+  );
+}
+
+// ---------------------------------------------------------------------------
 // DECISÕES DE MOVIMENTAÇÃO POR STATUS — extensão mínima de getHistoricoMovimentacoes
 // ---------------------------------------------------------------------------
 // getHistoricoMovimentacoes (distribuicao-estoque.ts) já faz exatamente a leitura que esta fase

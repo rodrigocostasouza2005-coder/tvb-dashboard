@@ -10,6 +10,7 @@ import {
   getFilaRevisaoClassificacao,
   getTamanhoBreakdown,
   getAvaliacaoDecisoesPorProdutoGrupoPeriodo,
+  getCodsComOportunidadeTransferencia,
 } from "@/lib/metrics";
 import { StatusComercialProduto } from "@prisma/client";
 import { getGrupoRestriction } from "@/lib/permissions";
@@ -48,17 +49,22 @@ export default async function MapaComprasPage({ searchParams }: { searchParams: 
   // edita (actions.ts já trava isso no servidor; aqui só escondemos o controle de quem não pode).
   const canEdit = user.role === "ADMIN" || user.role === "GESTAO";
 
-  const [grupos, crescimentoPct, classificacaoPorProduto, bsRows, dropRows, filaRevisao, filtroOpcoes, visao, avaliacoesDecisoes] = await Promise.all([
-    getMapaDeComprasDetalhado({ grupoIn }),
-    getCrescimentoEsperado(),
-    getClassificacaoPorProduto(),
-    getRecomendacoesBestSeller(comprasFiltro),
-    getRecomendacoesDrop(comprasFiltro),
-    getFilaRevisaoClassificacao(),
-    getClassificacaoFilterOptions(),
-    getVisaoConsolidadaCompras(comprasFiltro),
-    getAvaliacaoDecisoesPorProdutoGrupoPeriodo(),
-  ]);
+  const [grupos, crescimentoPct, classificacaoPorProduto, bsRows, dropRows, filaRevisao, filtroOpcoes, visao, avaliacoesDecisoes, oportunidadesTransferencia] =
+    await Promise.all([
+      getMapaDeComprasDetalhado({ grupoIn }),
+      getCrescimentoEsperado(),
+      getClassificacaoPorProduto(),
+      getRecomendacoesBestSeller(comprasFiltro),
+      getRecomendacoesDrop(comprasFiltro),
+      getFilaRevisaoClassificacao(),
+      getClassificacaoFilterOptions(),
+      getVisaoConsolidadaCompras(comprasFiltro),
+      getAvaliacaoDecisoesPorProdutoGrupoPeriodo(),
+      // Sinal aditivo (docs/planejamento-inteligente-estoque.md §16.2 item 3, §19.6): oportunidades
+      // de transferência já calculadas pelo motor de Distribuição, reaproveitadas pra avisar antes
+      // de uma sugestão de compra — nunca recalculado, nunca altera nenhuma sugestão.
+      getCodsComOportunidadeTransferencia({ grupoIn, colecaoIn }),
+    ]);
 
   const todosProdutos = [...new Set(grupos.flatMap((g) => g.produtos.map((p) => p.produto)))];
   const tamanhoPorProduto =
@@ -146,7 +152,7 @@ export default async function MapaComprasPage({ searchParams }: { searchParams: 
           )}
         </summary>
         <div className="border-t border-[var(--border)] p-4">
-          <AlertasView bsRows={bsRows} dropRows={dropRows} filaRevisao={filaRevisao} />
+          <AlertasView bsRows={bsRows} dropRows={dropRows} filaRevisao={filaRevisao} oportunidadesTransferencia={oportunidadesTransferencia} />
         </div>
       </details>
 
