@@ -20,6 +20,14 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // dashboard dispara a sync sozinho — depois de responder a página, não trava a navegação.
   after(() => scheduleCatchupSyncIfStale());
 
+  // Resgate da feature "status detalhado no header" (worktree órfão agent-af55e6056fe53e292,
+  // auditoria 2026-11-14): decidido NÃO buscar getSyncStatusDetalhado() aqui também — esse layout
+  // roda em TODA navegação dentro de /dashboard (getSessionUser() já o torna dinâmico), então
+  // somar aqui as ~17 queries que getSyncStatusDetalhado() dispara (5 fontes DAPIC x 2 queries +
+  // locks + Meta Ads/GA4 + cache) custaria isso em CADA troca de aba só pra adiantar 1 dropdown
+  // que nasce fechado. O indicador já busca o detalhado sozinho, 1x, ao montar (ver
+  // sync-status-indicator.tsx) — mantém esse custo restrito a 1 fetch client-side por sessão de
+  // aba aberta, não multiplicado por navegação.
   const { at: lastSyncAt } = await getLastSyncAt();
 
   const allowed = user.allowedTabs.length > 0 ? user.allowedTabs : defaultAllowedTabs(user.role);

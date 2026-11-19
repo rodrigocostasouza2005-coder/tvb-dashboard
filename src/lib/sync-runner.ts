@@ -1743,12 +1743,34 @@ const DAPIC_SOURCES = ["SALES", "STOCK", "RETURNS", "PRODUCTION", "GIFTS"] as co
 // google-analytics.ts (owned por outro agente) — só lê o SyncLog que a página grava.
 const EXTERNAL_SOURCES = ["META_ADS", "GA4"] as const;
 
+// Resgate da feature "status detalhado no header" (worktree órfão agent-af55e6056fe53e292,
+// auditoria 2026-11-14 — nunca chegou a PR, base >60 commits atrás). Até aqui "status" por fonte
+// (acima) era só o resultado binário da ÚLTIMA TENTATIVA (SUCCESS/FAILED) e não existia nenhuma
+// noção de "atrasado" — uma fonte com a última tentativa SUCCESS às 03:00 de 3 dias atrás (ex:
+// cron externo caiu de verdade) aparecia exatamente igual a uma atualizada há 2min. Esta
+// classificação resume tudo isso num único status visual pro painel/indicador:
+// - "executando": há um SyncLock ativo (não travado — ver emAndamento) cobrindo essa fonte agora.
+// - "erro": a ÚLTIMA TENTATIVA (sucesso ou falha) terminou em FAILED.
+// - "atrasado": a ÚLTIMA ATUALIZAÇÃO REAL (último SyncLog com status SUCCESS, não a última
+//   tentativa) está mais velha que o limiar daquela fonte (ver DAPIC_ATRASADO_MIN abaixo).
+// - "sem_dados": nunca houve um SyncLog SUCCESS pra essa fonte.
+// - "atualizado": nenhum dos casos acima — última tentativa foi sucesso e está dentro do limiar.
+// Prioridade executando > erro > atrasado > atualizado > sem_dados (checada nessa ordem).
+export type StatusVisual = "atualizado" | "executando" | "atrasado" | "erro" | "sem_dados";
+
 export type StatusFonteDapic = {
   source: (typeof DAPIC_SOURCES)[number];
   status: "SUCCESS" | "FAILED" | null; // null = essa fonte nunca teve um SyncLog com finishedAt
-  finishedAt: string | null;
-  recordsSynced: number | null;
-  message: string | null;
+  finishedAt: string | null; // finishedAt da ÚLTIMA TENTATIVA (sucesso ou falha)
+  recordsSynced: number | null; // da ÚLTIMA TENTATIVA
+  message: string | null; // da ÚLTIMA TENTATIVA (populado quando FAILED)
+  // "Quando o dado realmente mudou", nunca "quando tentamos" — usado tanto pra calcular
+  // "atrasado" quanto pra exibir a idade real na UI (ver resgate acima).
+  ultimaAtualizacaoReal: string | null;
+  // Duração da última execução concluída (sucesso ou falha), em ms — finishedAt - startedAt da
+  // mesma linha usada em `status`/`finishedAt` acima. null se a fonte nunca terminou uma execução.
+  duracaoMs: number | null;
+  statusVisual: StatusVisual;
 };
 
 // Mesmo formato de StatusFonteDapic (status/finishedAt/recordsSynced/message vêm do SyncLog
@@ -1756,6 +1778,11 @@ export type StatusFonteDapic = {
 // (updatedAt do PriceCatalogCache de foto/status de criativo, TTL 12h — frescor de CACHE de
 // exibição, ortogonal ao sucesso/erro da busca de insight que o SyncLog agora rastreia). GA4 não
 // tem cache de dado equivalente, sempre null.
+//
+// statusVisual aqui NUNCA é "executando" nem "atrasado" — ver calcularStatusVisualExterna abaixo
+// pra justificativa (não existe cadência/cron fixa pra essas duas fontes, aplicar um limiar de
+// tempo seria inventar um número sem base real). Tipado como StatusVisual (não um subconjunto) só
+// pra UI poder tratar as 7 fontes de forma uniforme sem precisar de 2 tipos de status visual.
 export type StatusFonteExterna = {
   source: (typeof EXTERNAL_SOURCES)[number];
   status: "SUCCESS" | "FAILED" | null;
@@ -1763,6 +1790,13 @@ export type StatusFonteExterna = {
   recordsSynced: number | null;
   message: string | null;
   ultimaAtualizacaoCache: string | null;
+  ultimaAtualizacaoReal: string | null;
+  // Duração quase sempre ~0ms pra estas 2 fontes: analytics-site/page.tsx (fora do escopo desta
+  // tarefa) grava o SyncLog sem passar `startedAt` explícito — o default do schema
+  // (`@default(now())`) acaba quase igual ao `finishedAt` da mesma escrita. Limitação conhecida,
+  // documentada em vez de corrigida (exigiria tocar analytics-site/page.tsx).
+  duracaoMs: number | null;
+  statusVisual: StatusVisual;
 };
 
 export type SyncStatusDetalhado = {
@@ -1773,17 +1807,72 @@ export type SyncStatusDetalhado = {
 };
 
 async function buscarStatusFonte(source: (typeof DAPIC_SOURCES)[number] | (typeof EXTERNAL_SOURCES)[number]) {
-  const ultimo = await prisma.syncLog.findFirst({
-    where: { source, finishedAt: { not: null } },
-    orderBy: { finishedAt: "desc" },
-    select: { status: true, finishedAt: true, recordsSynced: true, message: true },
-  });
+  const [ultimo, ultimaSucesso] = await Promise.all([
+    prisma.syncLog.findFirst({
+      where: { source, finishedAt: { not: null } },
+      orderBy: { finishedAt: "desc" },
+      select: { status: true, startedAt: true, finishedAt: true, recordsSynced: true, message: true },
+    }),
+    // Separado da query acima de propósito: "última atualização real" é sempre o último SUCCESS,
+    // mesmo que uma tentativa mais recente (e portanto vencedora na query acima) tenha falhado —
+    // ver comentário de StatusFonteDapic.ultimaAtualizacaoReal.
+    prisma.syncLog.findFirst({
+      where: { source, status: "SUCCESS", finishedAt: { not: null } },
+      orderBy: { finishedAt: "desc" },
+      select: { finishedAt: true },
+    }),
+  ]);
+  const duracaoMs =
+    ultimo?.finishedAt && ultimo?.startedAt ? ultimo.finishedAt.getTime() - ultimo.startedAt.getTime() : null;
   return {
     status: ultimo?.status ?? null,
     finishedAt: ultimo?.finishedAt ? ultimo.finishedAt.toISOString() : null,
     recordsSynced: ultimo?.recordsSynced ?? null,
     message: ultimo?.message ?? null,
+    duracaoMs,
+    ultimaAtualizacaoReal: ultimaSucesso?.finishedAt ? ultimaSucesso.finishedAt.toISOString() : null,
   };
+}
+
+// Critério de "atrasado" pras 5 fontes DAPIC (documentar o número, não inventar). As 5
+// (SALES/STOCK/RETURNS/PRODUCTION/GIFTS) são gravadas JUNTAS em toda execução de doSync() — então
+// compartilham a mesma cadência esperada: o agendador externo de 10 em 10min (cron-job.org, ver
+// api/sync-frequent/route.ts) OU um dos 5 horários fixos da Vercel (vercel.json). Intervalo
+// esperado = 10min (o caminho comum, de longe mais frequente que os horários fixos). "Atrasado" =
+// última SUCCESS mais velha que 2x esse intervalo (20min): 1x tolera jitter normal (uma sync
+// completa leva algum tempo, perto do fim de um ciclo de 10min) e 1 falha pontual isolada sem
+// alarme falso; 2x só dispara quando pelo menos UM ciclo inteiro foi perdido de verdade (ex:
+// cron-job.org fora do ar, token DAPIC expirado).
+const DAPIC_INTERVALO_ESPERADO_MIN = 10;
+const DAPIC_ATRASADO_MULTIPLICADOR = 2;
+const DAPIC_ATRASADO_MIN = DAPIC_INTERVALO_ESPERADO_MIN * DAPIC_ATRASADO_MULTIPLICADOR; // 20min
+
+function calcularStatusVisualDapic(args: {
+  ultimoStatus: "SUCCESS" | "FAILED" | null;
+  ultimaAtualizacaoReal: Date | null;
+  executando: boolean;
+  agora: Date;
+}): StatusVisual {
+  if (args.executando) return "executando";
+  if (args.ultimoStatus === "FAILED") return "erro";
+  if (!args.ultimaAtualizacaoReal) return "sem_dados";
+  const idadeMs = args.agora.getTime() - args.ultimaAtualizacaoReal.getTime();
+  if (idadeMs > DAPIC_ATRASADO_MIN * 60_000) return "atrasado";
+  return "atualizado";
+}
+
+// Meta Ads/GA4 não entram no cálculo de "atrasado" acima: o SyncLog delas só é gravado quando um
+// humano abre a aba Analytics (ver analytics-site/page.tsx), não por um cron com cadência
+// conhecida — não existe "intervalo esperado" real pra comparar contra. Inventar um limiar aqui
+// (ex: "atrasado se > 24h") seria exatamente o tipo de número sem justificativa que esta
+// classificação pretende evitar: a aba pode legitimamente ficar dias sem ser aberta num período
+// de baixo movimento, sem que isso signifique nada quebrado. Por isso o status visual destas 2
+// fontes só distingue erro/sem_dados/atualizado — nunca "atrasado" nem "executando" (não há lock
+// dedicado).
+function calcularStatusVisualExterna(ultimoStatus: "SUCCESS" | "FAILED" | null): StatusVisual {
+  if (ultimoStatus === "FAILED") return "erro";
+  if (ultimoStatus === null) return "sem_dados";
+  return "atualizado";
 }
 
 // Etapa 3 do plano de atualização rápida (missão Black Friday, 2026-11): "Atualizado: HH:mm" no
@@ -1792,8 +1881,9 @@ async function buscarStatusFonte(source: (typeof DAPIC_SOURCES)[number] | (typeo
 // vendas/estoque/devoluções/produção/brindes + Meta Ads/GA4, agora com SyncLog de verdade),
 // reaproveitando só o que já existe (SyncLog, SyncLock) — nenhuma tabela nova.
 export async function getSyncStatusDetalhado(): Promise<SyncStatusDetalhado> {
-  const dapic = await Promise.all(
-    DAPIC_SOURCES.map(async (source): Promise<StatusFonteDapic> => ({ source, ...(await buscarStatusFonte(source)) }))
+  const agora = new Date();
+  const dapicBase = await Promise.all(
+    DAPIC_SOURCES.map(async (source) => ({ source, ...(await buscarStatusFonte(source)) }))
   );
 
   const [syncLock, cancelamentosLock, metaAdsStatus, ga4Status, metaAdsCache] = await Promise.all([
@@ -1813,21 +1903,39 @@ export async function getSyncStatusDetalhado(): Promise<SyncStatusDetalhado> {
   const emAndamento = (lock: { startedAt: Date; finishedAt: Date | null } | null, staleMin: number) =>
     !!lock && lock.finishedAt === null && lock.startedAt.getTime() > Date.now() - staleMin * 60_000;
 
+  // O lock "sync" (SYNC_LOCK_ID) cobre doSync() inteiro — as 5 fontes DAPIC são gravadas juntas
+  // dentro dele, então "executando" é o mesmo valor pras 5. Reconciliação de cancelamento (lock
+  // "cancelamentos") não grava SyncLog por fonte (só atualiza status em Sale/Return direto), então
+  // não entra nesse cálculo de "executando".
+  const sincronizando = emAndamento(syncLock, SYNC_LOCK_STALE_MIN);
+
+  const dapic: StatusFonteDapic[] = dapicBase.map((d) => ({
+    ...d,
+    statusVisual: calcularStatusVisualDapic({
+      ultimoStatus: d.status,
+      ultimaAtualizacaoReal: d.ultimaAtualizacaoReal ? new Date(d.ultimaAtualizacaoReal) : null,
+      executando: sincronizando,
+      agora,
+    }),
+  }));
+
   return {
     dapic,
     locks: {
-      sync: emAndamento(syncLock, SYNC_LOCK_STALE_MIN),
+      sync: sincronizando,
       cancelamentos: emAndamento(cancelamentosLock, CANCELAMENTOS_LOCK_STALE_MIN),
     },
     metaAds: {
       source: "META_ADS",
       ...metaAdsStatus,
       ultimaAtualizacaoCache: metaAdsCache?.updatedAt ? metaAdsCache.updatedAt.toISOString() : null,
+      statusVisual: calcularStatusVisualExterna(metaAdsStatus.status),
     },
     ga4: {
       source: "GA4",
       ...ga4Status,
       ultimaAtualizacaoCache: null,
+      statusVisual: calcularStatusVisualExterna(ga4Status.status),
     },
   };
 }
