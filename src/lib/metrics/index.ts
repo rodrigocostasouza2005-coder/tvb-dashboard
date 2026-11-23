@@ -18,3 +18,4 @@ export * from "./planejamento-avaliacao";
 export * from "./planejamento-distribuicao";
 export * from "./estoque-minimo-manual";
 export * from "./reposicao-sinais";
+export * from "./reposicao-bestseller-consolidada";
