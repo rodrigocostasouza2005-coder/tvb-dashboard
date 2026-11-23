@@ -60,15 +60,16 @@ model Store {
   // dados separados por baixo — evita somar/sobrescrever quantidade errado.
   displayGroup       String?
 
-  sales               Sale[]
-  stockSnapshots      StockSnapshot[]
-  returns             Return[]
-  gifts               Gift[]
-  syncLogs            SyncLog[]
-  stockMinimumRules   StockMinimumRule[]
-  contentPerformances ContentPerformance[]
-  vendedores          Vendedor[]
-  clienteAtribuicoes  ClienteVendedorAtribuicao[]
+  sales                 Sale[]
+  stockSnapshots        StockSnapshot[]
+  stockSnapshotsDiarios StockSnapshotDiario[]
+  returns               Return[]
+  gifts                 Gift[]
+  syncLogs              SyncLog[]
+  stockMinimumRules     StockMinimumRule[]
+  contentPerformances   ContentPerformance[]
+  vendedores            Vendedor[]
+  clienteAtribuicoes    ClienteVendedorAtribuicao[]
 }
 
 // Vendedor como entidade de verdade (2026-09-21) — até aqui "vendedor" só existia como texto
@@ -507,6 +508,47 @@ model StockSnapshot {
   // por rodada — sem isso a tabela crescia pra sempre (2 syncs/dia, sem limpeza), ficando lenta
   // e fazendo os totais de estoque somarem histórico em vez do valor atual.
   @@unique([storeId, cod])
+  @@index([grupo])
+}
+
+// Histórico diário real de estoque (pedido do Rodrigo, 2026-11-19) — StockSnapshot (acima) só
+// guarda o valor ATUAL por storeId+cod (1 linha, sobrescrita a cada sync, nenhuma série no
+// tempo). Esta tabela acrescenta 1 linha por DIA (storeId+cod+data), permitindo reconstruir
+// "quanto tinha em estoque no dia X" de verdade — hoje isso só existe como aproximação derivada
+// de Sale (estoque atual + vendas desde então), sem nenhum valor histórico real por trás.
+// Populada em syncEstoque (sync-runner.ts), reusando a MESMA busca no DAPIC que já alimenta
+// StockSnapshot — nenhuma chamada extra à API. Como o cron de sync roda várias vezes ao dia
+// (vercel.json), a linha do dia é upsert (ON CONFLICT em storeId+cod+data) em vez de inserção
+// pura: roda 2x (ou 5x) no mesmo dia e continua 1 linha só, com o valor da ÚLTIMA sync daquele
+// dia (nunca duplica). SEM BACKFILL: não existe dado histórico real de estoque anterior a esta
+// feature pra reconstruir — a série começa a existir a partir do dia em que isto for ao ar.
+model StockSnapshotDiario {
+  id                   String   @id @default(cuid())
+  storeId              String
+  cod                  String
+  produto              String
+  grupo                String
+  cor                  String?
+  tamanho              String?
+  colecao              String?
+  quantidadeDisponivel Int
+  valorCusto           Float?
+  // Dia do snapshot, truncado pra meia-noite de Brasília (brasiliaDayStart) — mesma convenção de
+  // MetaDiariaBlackFriday.data. Nunca hora exata: o que importa é "qual foi o estoque NESTE dia",
+  // não em que minuto o cron rodou (ver syncedAt pra isso).
+  data                 DateTime
+  syncedAt             DateTime @default(now())
+
+  store Store @relation(fields: [storeId], references: [id])
+
+  // 1 linha por produto+loja+dia — ver comentário do model pro porquê do upsert em vez de insert.
+  @@unique([storeId, cod, data])
+  // Consulta por período pra 1 produto específico (ex: série histórica de 1 cod ao longo do
+  // tempo) — índice composto porque essa é a consulta de leitura mais provável pra esta tabela.
+  @@index([cod, data])
+  // Consulta por período pra TODOS os produtos de uma vez (ex: "estoque total da empresa no dia
+  // X") sem filtrar por cod — data isolada, mesma razão do índice equivalente em Sale.
+  @@index([data])
   @@index([grupo])
 }
 
