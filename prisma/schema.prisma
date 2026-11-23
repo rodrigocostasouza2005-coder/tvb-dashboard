@@ -139,8 +139,8 @@ model StockMinimumRule {
 // — mesma lógica da linha "Crescimento do Ticket" da planilha dele. Uma linha só (id fixo
 // "global"), configuração da empresa toda, não por grupo — pedido do Rodrigo em 2026-09-03.
 model MapaComprasConfig {
-  id             String @id
-  crescimentoPct Float
+  id                      String @id
+  crescimentoPct          Float
   // Verba total planejada pra visão consolidada de compras (seção 7 do pedido do Rodrigo de
   // 2026-10-27: BEST SELLER vs DROP) — nullable porque é opcional configurar; sem valor, a
   // priorização de orçamento (priorizarOrcamentoCompras) não tem limite pra aplicar, só ordena.
@@ -153,12 +153,12 @@ model MapaComprasConfig {
 // são decisão por grupo, não por produto nem por loja. Ambos nullable — sem valor cadastrado, o
 // motor de cálculo assume 0 e sinaliza a premissa como não confirmada (não inventa um número).
 model CoberturaMeta {
-  id             String   @id @default(cuid())
-  grupo          String   @unique
-  mesesCobertura Float
+  id                       String   @id @default(cuid())
+  grupo                    String   @unique
+  mesesCobertura           Float
   estoqueSegurancaUnidades Int?
   leadTimeDias             Int?
-  updatedAt      DateTime @updatedAt
+  updatedAt                DateTime @updatedAt
 }
 
 // Matriz de desconto por Coleção × faixa de sell-through da Análises de Promoção — o "quadrinho"
@@ -202,10 +202,32 @@ enum PossibilidadeReposicao {
 // aqui = classificação desconhecida (cai na fila de revisão, ver getFilaRevisaoClassificacao) —
 // nunca herda BEST_SELLER só por vender muito, nem DROP só por ser coleção nova (pedido explícito
 // do Rodrigo, seção 2 do pedido original).
+// GRÃO ALTERADO em 2026-11-19 (pedido explícito do Rodrigo): de `cod` (produto+cor+tamanho, o
+// SKU/IdGradeProduto completo) pra produto+cor. Motivo: se um produto numa cor específica é
+// Best Seller, TODOS os tamanhos dessa cor devem seguir a mesma classificação — antes disso era
+// só uma convenção de UI (classificarProdutoEmLoteAction aplicava a mesma decisão a todos os cods
+// de um clique, mas nada no schema IMPEDIA tamanhos da mesma cor divergirem). Cores DIFERENTES do
+// MESMO produto continuam podendo ter classificações diferentes (ex: produto X cor azul = Best
+// Seller, produto X cor verde = Drop) — isso é esperado, não um bug.
+//
+// `cod` NUNCA existiu como campo estruturado (é o IdGradeProduto numérico do DAPIC, sem
+// produto/cor/tamanho embutidos) — cor vem de um campo PRÓPRIO, já existente e 100% confiável em
+// Sale/StockSnapshot/ProductionOrder (conferido contra os ~2681 cods reais do catálogo em
+// 2026-11-19: 0 casos de cor nula ou inconsistente entre as 3 fontes, 0 produtos que aparecem em
+// mais de um grupo). `cor` aqui é sempre resolvida a partir dessas tabelas, nunca digitada à mão.
+//
+// Abordagem de schema escolhida: removida a coluna `cod` (uma linha agora representa VÁRIOS cods
+// — todos os tamanhos de um produto+cor — então um `cod` "representante" seria arbitrário e
+// confundiria quem lê a tabela). Adicionada `cor` (sempre resolvida, nunca nula nos dados reais)
+// e `produtoCor` — chave derivada "<produto>::<cor>" (mesmo separador "::" já usado em
+// getClassificacaoPorProduto), única, pensada pra bater com o idioma já usado em todo o app
+// (`findMany({ where: { X: { in: [...] } } })`) sem precisar de OR composto. `produto`/`grupo`
+// continuam existindo (lidos/gravados a partir da fonte real, nunca do formulário).
 model ClassificacaoProduto {
   id                       String                 @id @default(cuid())
-  cod                      String                 @unique
   produto                  String
+  cor                      String
+  produtoCor               String                 @unique
   grupo                    String
   colecao                  String?
   tipoCompra               TipoCompraProduto
@@ -225,6 +247,7 @@ model ClassificacaoProduto {
   @@index([grupo])
   @@index([tipoCompra])
   @@index([colecao])
+  @@index([produto])
 }
 
 // Histórico de alteração de classificação (seção 2 do pedido: "histórico de alterações quando
@@ -255,14 +278,14 @@ model ClassificacaoProdutoHistorico {
 // LOJA individual, outra tabela, outro propósito) nem com a reserva de continuidade calculada de
 // Best Seller (aplicarRetencoes, planejamento-distribuicao.ts).
 model EstoqueMinimoManual {
-  id          String   @id @default(cuid())
-  cod         String   @unique
+  id            String   @id @default(cuid())
+  cod           String   @unique
   // Nullable de propósito: "removido" vira valor=null numa linha que continua existindo, nunca
   // apaga a linha (manter deletar quebraria a FK RESTRICT de EstoqueMinimoManualHistorico — e
   // perderia o histórico de quem definiu/removeu o mínimo desse cod no passado).
-  valor       Int?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  valor         Int?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
   atualizadoPor String?
 
   historico EstoqueMinimoManualHistorico[]
@@ -413,7 +436,7 @@ enum ClienteCadastroMatchConfianca {
 // Registros ficam denormalizados (grupo/cor/tamanho/coleção direto na linha) porque é assim
 // que o DAPIC/Power BI já exportam — evita um modelo de produto separado que a fonte não tem.
 model Sale {
-  id                String   @id @default(cuid())
+  id                String    @id @default(cuid())
   storeId           String
   cod               String
   produto           String
@@ -463,7 +486,7 @@ model Sale {
   // via IdCliente = ID; syncVendas via nome = NOME) e via scripts/clientes/backfill-clientecadastro-link.ts
   // pra histórico anterior a esta migration (só NOME disponível, API não guarda IdCliente
   // retroativamente sem reconsultar o DAPIC por venda, fora do escopo deste backfill).
-  clienteCadastroId           String?
+  clienteCadastroId             String?
   clienteCadastroMatchConfianca ClienteCadastroMatchConfianca?
 
   store           Store            @relation(fields: [storeId], references: [id])
@@ -519,7 +542,7 @@ model StockSnapshot {
 // chegar no clienteCadastroId da venda original via JOIN por (storeId, dapicVendaId) em vez de
 // duplicar a coluna aqui. Revisitar só se essa futura tarefa achar que o JOIN não é suficiente.
 model Return {
-  id           String   @id @default(cuid())
+  id           String    @id @default(cuid())
   storeId      String
   cod          String
   produto      String
@@ -919,7 +942,6 @@ model ArmazemConhecido {
   @@unique([clientLabel, dapicArmazenadorId])
 }
 
-
 // Rebuild do núcleo de qualificação B2B (Fase 1, 2026-11) — pedido do Rodrigo de trocar
 // "qualquer loja com CNAE de vestuário" por "revendedor multimarcas de moda masculina verificado,
 // com potencial comercial real pra TVB" (qualidade, não quantidade: 300 prospects excelentes >
@@ -976,21 +998,21 @@ enum NivelConfiancaProspect {
 // Prospectos comerciais B2B ainda não convertidos em clientes do DAPIC.
 // Mantido separado de ClienteCadastro, que representa exclusivamente clientes sincronizados.
 model AtacadoProspect {
-  id               String   @id @default(cuid())
-  razaoSocial      String?
-  nomeFantasia     String
-  cnpj             String?  @unique
-  cidade           String?
-  codigoMunicipio  String?
-  estado           String?
-  site             String?
-  instagram        String?
-  grupoComercial   String   @default("PENDENTE")
-  scoreComercial   Int?
-  justificativaGrupo String?
-  confiancaPesquisa String?
-  nomeComercialVerificado Boolean @default(false)
-  pesquisadoEm     DateTime?
+  id                      String    @id @default(cuid())
+  razaoSocial             String?
+  nomeFantasia            String
+  cnpj                    String?   @unique
+  cidade                  String?
+  codigoMunicipio         String?
+  estado                  String?
+  site                    String?
+  instagram               String?
+  grupoComercial          String    @default("PENDENTE")
+  scoreComercial          Int?
+  justificativaGrupo      String?
+  confiancaPesquisa       String?
+  nomeComercialVerificado Boolean   @default(false)
+  pesquisadoEm            DateTime?
   // Resultado estruturado da consulta oficial Receita Federal/Serpro.
   situacaoCadastral       String?
   situacaoCadastralCodigo String?
@@ -1003,53 +1025,53 @@ model AtacadoProspect {
   porteEmpresa            String?
   dataAbertura            DateTime?
   // Atributos comerciais observáveis usados para aprender quais perfis avançam no funil.
-  segmentoComercial String?
-  perfilLoja        String?
-  faixaPreco        String?
-  origemAgente      String?
-  telefone         String?
-  email            String?
-  origem           String   @default("manual")
-  evidenciaUrl     String?
-  evidenciaEm      DateTime?
-  status           String   @default("NOVO")
-  responsavel      String?
-  observacoes      String?
-  criadoPor        String?
-  convertidoEm     DateTime?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  segmentoComercial       String?
+  perfilLoja              String?
+  faixaPreco              String?
+  origemAgente            String?
+  telefone                String?
+  email                   String?
+  origem                  String    @default("manual")
+  evidenciaUrl            String?
+  evidenciaEm             DateTime?
+  status                  String    @default("NOVO")
+  responsavel             String?
+  observacoes             String?
+  criadoPor               String?
+  convertidoEm            DateTime?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
 
   // --- Núcleo do motor de qualificação (rebuild Fase 1, 2026-11) ---
   // Resultado estruturado do gate de elegibilidade e da pontuação (ver motor-qualificacao.ts).
   // scoreComercial acima continua sendo o total 0-100 (reaproveitado); scoreDetalhe guarda o
   // detalhamento por sub-critério + rationale (nunca só o número final, pra ficar auditável).
-  classificacaoProspect  ClassificacaoProspectComercial?
-  statusComercial        StatusComercialProspect @default(EM_INVESTIGACAO)
-  resultadoEliminacao    ResultadoGateEliminacao?
-  motivosEliminacao      String[] @default([])
-  scoreDetalhe           Json?
+  classificacaoProspect    ClassificacaoProspectComercial?
+  statusComercial          StatusComercialProspect         @default(EM_INVESTIGACAO)
+  resultadoEliminacao      ResultadoGateEliminacao?
+  motivosEliminacao        String[]                        @default([])
+  scoreDetalhe             Json?
   // Evidências estruturadas por critério (existência, atividade, varejo, moda masculina,
   // posicionamento TVB, sinais de potencial comercial) — ver tipo Evidencia em
   // motor-elegibilidade.ts. Marcas de terceiros NÃO ficam aqui: têm tabela própria
   // (AtacadoProspectBrand) porque são o requisito central e precisam ser auditáveis 1 a 1.
-  evidenciasQualificacao Json?
-  tipoEstabelecimento    TipoEstabelecimentoProspect?
+  evidenciasQualificacao   Json?
+  tipoEstabelecimento      TipoEstabelecimentoProspect?
   // 8 primeiros dígitos do CNPJ — agrupa matriz/filiais da mesma empresa sem duplicar cadastro;
   // ver enum TipoEstabelecimentoProspect acima.
-  cnpjRaiz               String?
-  capitalEstadual        Boolean @default(false)
+  cnpjRaiz                 String?
+  capitalEstadual          Boolean                         @default(false)
   // Campos normalizados (trim/lowercase/sem acento) só pra VARREDURA de possível duplicata —
   // nunca uma constraint UNIQUE: filiais de uma mesma rede legitimamente repetem nome fantasia
   // em municípios diferentes, e endereço sozinho não é identidade de empresa. Dedup de verdade
   // (bloqueante) continua sendo só o cnpj @unique abaixo; isto aqui alimenta
   // detectarPossivelDuplicata() pra fila de revisão humana, nunca bloqueia um insert.
-  nomeFantasiaNormalizado String?
-  enderecoNormalizado     String?
+  nomeFantasiaNormalizado  String?
+  enderecoNormalizado      String?
   // Data da última validação/reconfirmação de evidência (distinto de pesquisadoEm, que é a
   // pesquisa mais recente feita — ultimaValidacaoEm é especificamente "confirmamos que isso
   // ainda é verdade", usado por uma futura auditoria adversarial pra achar informação velha).
-  ultimaValidacaoEm       DateTime?
+  ultimaValidacaoEm        DateTime?
   // --- Ponto de extensão pra auditoria adversarial (fase futura, NÃO implementada aqui) ---
   // Um agente independente pode reabrir qualquer prospect (mesmo já APROVADO) pra caçar marca
   // inventada, loja inativa, informação desatualizada, fabricante sem revenda disfarçado etc.
@@ -1072,16 +1094,16 @@ model AtacadoProspect {
 }
 
 model AtacadoProspectActivity {
-  id          String   @id @default(cuid())
-  prospectId  String
-  tipo        String
-  descricao   String
+  id         String   @id @default(cuid())
+  prospectId String
+  tipo       String
+  descricao  String
   // Resultado estruturado da interação: INTERESSADO, SEM_RESPOSTA, RECUSOU, PEDIU_CATALOGO etc.
-  resultado   String?
-  canal       String?
-  etapa       String?
-  criadoPor   String?
-  createdAt   DateTime @default(now())
+  resultado  String?
+  canal      String?
+  etapa      String?
+  criadoPor  String?
+  createdAt  DateTime @default(now())
 
   prospect AtacadoProspect @relation(fields: [prospectId], references: [id], onDelete: Cascade)
 
@@ -1121,10 +1143,10 @@ model AtacadoProspectBrand {
 // ainda = também respeita a automática (mesmo default de "nunca configurado" que os outros
 // singletons).
 model BlackFridayBannerConfig {
-  id              String   @id
-  modoManual      String?
-  updatedAt       DateTime @updatedAt
-  updatedByEmail  String?
+  id             String   @id
+  modoManual     String?
+  updatedAt      DateTime @updatedAt
+  updatedByEmail String?
 }
 
 // Tabela de preço/desconto REAL da Black Friday (planilha "Preços Black Friday.xlsx" do Rodrigo,
@@ -1176,11 +1198,11 @@ model PrecoBlackFriday {
 // normalizar em colunas próprias (mesma lógica de "Json quando é só pra mostrar" já usada em
 // outros lugares do schema).
 model MetaDiariaBlackFriday {
-  id               String   @id @default(cuid())
-  data             DateTime @unique
-  metaReceita2026  Float
-  receitaReal2025  Float?
-  acao             String?
-  canais           Json?
-  updatedAt        DateTime @updatedAt
+  id              String   @id @default(cuid())
+  data            DateTime @unique
+  metaReceita2026 Float
+  receitaReal2025 Float?
+  acao            String?
+  canais          Json?
+  updatedAt       DateTime @updatedAt
 }

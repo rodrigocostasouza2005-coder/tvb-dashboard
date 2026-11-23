@@ -38,6 +38,10 @@ function formDataComCods(produto: string, cods: string[], extras: Record<string,
   return fd;
 }
 
+// Grão de ClassificacaoProduto mudou de `cod` pra produto+cor em 2026-11-19/23 (ver
+// prisma/schema.prisma) — classificarProdutoEmLoteAction passou a agrupar os cods válidos por
+// COR real (resolvida via Sale/StockSnapshot, nunca o formulário) e fazer 1 upsert por cor
+// distinta, não mais 1 upsert por cod.
 describe("classificarProdutoEmLoteAction — segurança e integridade", () => {
   beforeEach(() => {
     saleFindMany.mockReset().mockResolvedValue([]);
@@ -50,31 +54,31 @@ describe("classificarProdutoEmLoteAction — segurança e integridade", () => {
   it("nunca confia no `cod` do formulário: rejeita cod que pertence a OUTRO produto na fonte real, nunca grava classificação para ele", async () => {
     // Formulário diz que "COD-INTRUSO" é da "Camisa Polo", mas a fonte real (Sale) diz que
     // pertence a "Jaqueta Drop" — simula campo oculto adulterado no cliente.
-    saleFindMany.mockResolvedValue([{ cod: "COD-1", produto: "Camisa Polo", grupo: "Polos" }, { cod: "COD-INTRUSO", produto: "Jaqueta Drop", grupo: "Jaquetas" }]);
+    saleFindMany.mockResolvedValue([
+      { cod: "COD-1", produto: "Camisa Polo", grupo: "Polos", cor: "Azul" },
+      { cod: "COD-INTRUSO", produto: "Jaqueta Drop", grupo: "Jaquetas", cor: "Preta" },
+    ]);
 
     const { classificarProdutoEmLoteAction } = await import("../classificacao-actions");
     await classificarProdutoEmLoteAction(formDataComCods("Camisa Polo", ["COD-1", "COD-INTRUSO"]));
 
     expect(classificacaoProdutoUpsert).toHaveBeenCalledTimes(1);
-    const codsGravados = classificacaoProdutoUpsert.mock.calls.map((c) => (c[0] as { create: { cod: string } }).create.cod);
-    expect(codsGravados).toEqual(["COD-1"]);
-    expect(codsGravados).not.toContain("COD-INTRUSO");
+    const produtosCorGravados = classificacaoProdutoUpsert.mock.calls.map((c) => (c[0] as { create: { produtoCor: string } }).create.produtoCor);
+    expect(produtosCorGravados).toEqual(["Camisa Polo::Azul"]);
   });
 
   it("rejeita cod inexistente (não aparece em Sale nem StockSnapshot) — nenhum upsert fabricado", async () => {
-    saleFindMany.mockResolvedValue([{ cod: "COD-1", produto: "Camisa Polo", grupo: "Polos" }]);
+    saleFindMany.mockResolvedValue([{ cod: "COD-1", produto: "Camisa Polo", grupo: "Polos", cor: "Azul" }]);
     stockSnapshotFindMany.mockResolvedValue([]);
 
     const { classificarProdutoEmLoteAction } = await import("../classificacao-actions");
     await classificarProdutoEmLoteAction(formDataComCods("Camisa Polo", ["COD-1", "COD-FANTASMA"]));
 
     expect(classificacaoProdutoUpsert).toHaveBeenCalledTimes(1);
-    const codsGravados = classificacaoProdutoUpsert.mock.calls.map((c) => (c[0] as { create: { cod: string } }).create.cod);
-    expect(codsGravados).toEqual(["COD-1"]);
   });
 
   it("deduplica cod repetido no formulário (reenvio) — grava 1 vez só, não 2x", async () => {
-    saleFindMany.mockResolvedValue([{ cod: "COD-1", produto: "Camisa Polo", grupo: "Polos" }]);
+    saleFindMany.mockResolvedValue([{ cod: "COD-1", produto: "Camisa Polo", grupo: "Polos", cor: "Azul" }]);
 
     const { classificarProdutoEmLoteAction } = await import("../classificacao-actions");
     await classificarProdutoEmLoteAction(formDataComCods("Camisa Polo", ["COD-1", "COD-1"]));
@@ -83,7 +87,7 @@ describe("classificarProdutoEmLoteAction — segurança e integridade", () => {
   });
 
   it("grupo gravado vem SEMPRE da fonte real (Sale/StockSnapshot), nunca de um valor arbitrário do formulário", async () => {
-    saleFindMany.mockResolvedValue([{ cod: "COD-1", produto: "Camisa Polo", grupo: "Grupo Real Do Banco" }]);
+    saleFindMany.mockResolvedValue([{ cod: "COD-1", produto: "Camisa Polo", grupo: "Grupo Real Do Banco", cor: "Azul" }]);
 
     const { classificarProdutoEmLoteAction } = await import("../classificacao-actions");
     await classificarProdutoEmLoteAction(formDataComCods("Camisa Polo", ["COD-1"]));
@@ -93,7 +97,7 @@ describe("classificarProdutoEmLoteAction — segurança e integridade", () => {
   });
 
   it("não grava NADA quando nenhum cod submetido realmente pertence ao produto informado (não deixa produto sem classificação parcial/errada)", async () => {
-    saleFindMany.mockResolvedValue([{ cod: "COD-X", produto: "Outro Produto Qualquer", grupo: "Outro" }]);
+    saleFindMany.mockResolvedValue([{ cod: "COD-X", produto: "Outro Produto Qualquer", grupo: "Outro", cor: "Azul" }]);
 
     const { classificarProdutoEmLoteAction } = await import("../classificacao-actions");
     await classificarProdutoEmLoteAction(formDataComCods("Camisa Polo", ["COD-X"]));
@@ -101,17 +105,19 @@ describe("classificarProdutoEmLoteAction — segurança e integridade", () => {
     expect(classificacaoProdutoUpsert).not.toHaveBeenCalled();
   });
 
-  it("mesma decisão (tipoCompra/status/possibilidade) é aplicada a TODOS os cods válidos do produto — nenhum fica com valor diferente", async () => {
+  it("2 tamanhos da MESMA cor + 1 tamanho de OUTRA cor -> 1 upsert por cor distinta (2 upserts, não 3), mesma decisão nos dois", async () => {
     saleFindMany.mockResolvedValue([
-      { cod: "COD-AZUL-P", produto: "Camisa Polo", grupo: "Polos" },
-      { cod: "COD-AZUL-M", produto: "Camisa Polo", grupo: "Polos" },
-      { cod: "COD-VERMELHO-P", produto: "Camisa Polo", grupo: "Polos" },
+      { cod: "COD-AZUL-P", produto: "Camisa Polo", grupo: "Polos", cor: "Azul" },
+      { cod: "COD-AZUL-M", produto: "Camisa Polo", grupo: "Polos", cor: "Azul" },
+      { cod: "COD-VERMELHO-P", produto: "Camisa Polo", grupo: "Polos", cor: "Vermelho" },
     ]);
 
     const { classificarProdutoEmLoteAction } = await import("../classificacao-actions");
     await classificarProdutoEmLoteAction(formDataComCods("Camisa Polo", ["COD-AZUL-P", "COD-AZUL-M", "COD-VERMELHO-P"], { tipoCompra: "DROP" }));
 
-    expect(classificacaoProdutoUpsert).toHaveBeenCalledTimes(3);
+    expect(classificacaoProdutoUpsert).toHaveBeenCalledTimes(2);
+    const produtoCors = classificacaoProdutoUpsert.mock.calls.map((c) => (c[0] as { create: { produtoCor: string } }).create.produtoCor).sort();
+    expect(produtoCors).toEqual(["Camisa Polo::Azul", "Camisa Polo::Vermelho"]);
     for (const call of classificacaoProdutoUpsert.mock.calls) {
       const create = (call[0] as { create: { tipoCompra: string; produto: string } }).create;
       expect(create.tipoCompra).toBe("DROP");
@@ -134,15 +140,15 @@ describe("classificarProdutoEmLoteAction — segurança e integridade", () => {
     vi.doMock("@/lib/auth", () => ({ getSessionUser: vi.fn(async () => sessionUser) }));
   });
 
-  it("preserva histórico de classificação: quando o cod JÁ tinha classificação diferente, grava diff em classificacaoProdutoHistorico (não apaga o que havia antes)", async () => {
-    saleFindMany.mockResolvedValue([{ cod: "COD-1", produto: "Camisa Polo", grupo: "Polos" }]);
+  it("preserva histórico de classificação: quando o produto+cor JÁ tinha classificação diferente, grava diff em classificacaoProdutoHistorico (não apaga o que havia antes)", async () => {
+    saleFindMany.mockResolvedValue([{ cod: "COD-1", produto: "Camisa Polo", grupo: "Polos", cor: "Azul" }]);
     classificacaoProdutoFindUnique.mockResolvedValue({
-      cod: "COD-1", produto: "Camisa Polo", grupo: "Polos", colecao: null,
+      id: "classif-1", produto: "Camisa Polo", cor: "Azul", produtoCor: "Camisa Polo::Azul", grupo: "Polos", colecao: null,
       tipoCompra: "DROP", statusComercial: "ATIVO", possibilidadeReposicao: "SIM",
       dataLancamento: null, dataEncerramentoPrevista: null, orcamentoDrop: null, observacoes: null,
     });
     classificacaoProdutoUpsert.mockResolvedValue({
-      id: "classif-1", cod: "COD-1", produto: "Camisa Polo", grupo: "Polos", colecao: null,
+      id: "classif-1", produto: "Camisa Polo", cor: "Azul", produtoCor: "Camisa Polo::Azul", grupo: "Polos", colecao: null,
       tipoCompra: "BEST_SELLER", statusComercial: "ATIVO", possibilidadeReposicao: "SIM",
       dataLancamento: null, dataEncerramentoPrevista: null, orcamentoDrop: null, observacoes: null,
     });

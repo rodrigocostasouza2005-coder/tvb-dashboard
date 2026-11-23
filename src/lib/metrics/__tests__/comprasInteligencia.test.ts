@@ -15,14 +15,16 @@ import {
 // então pode ficar aqui sem afetar a ordem de execução dos outros testes.
 const classificacaoFindMany = vi.fn();
 const saleGroupBy = vi.fn();
+const saleFindMany = vi.fn();
 const stockSnapshotGroupBy = vi.fn();
+const stockSnapshotFindMany = vi.fn();
 const productionOrderGroupBy = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     classificacaoProduto: { findMany: (...a: unknown[]) => classificacaoFindMany(...a) },
-    sale: { groupBy: (...a: unknown[]) => saleGroupBy(...a) },
-    stockSnapshot: { groupBy: (...a: unknown[]) => stockSnapshotGroupBy(...a) },
+    sale: { groupBy: (...a: unknown[]) => saleGroupBy(...a), findMany: (...a: unknown[]) => saleFindMany(...a) },
+    stockSnapshot: { groupBy: (...a: unknown[]) => stockSnapshotGroupBy(...a), findMany: (...a: unknown[]) => stockSnapshotFindMany(...a) },
     productionOrder: { groupBy: (...a: unknown[]) => productionOrderGroupBy(...a) },
   },
 }));
@@ -205,11 +207,22 @@ describe("calcularSugestaoDrop", () => {
 describe("getRecomendacoesDrop (ciclo ativo)", () => {
   const COD = "DROP-CICLO-1";
 
+  const PRODUTO = "Jaqueta Drop Inverno";
+  const COR = "Preta";
+
   beforeEach(() => {
     classificacaoFindMany.mockReset();
     saleGroupBy.mockReset();
+    saleFindMany.mockReset();
     stockSnapshotGroupBy.mockReset();
+    stockSnapshotFindMany.mockReset();
     productionOrderGroupBy.mockReset();
+
+    // getRecomendacoesDrop expande cada linha de ClassificacaoProduto (produto+cor) pros cods
+    // reais via Sale/StockSnapshot (ver expandirClassificacoesParaCods/resolverCodsPorProdutoCor
+    // em compras-inteligencia.ts) — aqui só existe 1 cod real pra esse produto+cor.
+    saleFindMany.mockResolvedValue([{ cod: COD, produto: PRODUTO, cor: COR }]);
+    stockSnapshotFindMany.mockResolvedValue([{ cod: COD, produto: PRODUTO, cor: COR }]);
 
     // Venda consistente em todos os cenários: 10 un/dia (560 un em 56 dias, histórico desde 60
     // dias atrás) — suficiente pra, combinado com estoque baixo e janela futura, gerar faltante
@@ -235,8 +248,8 @@ describe("getRecomendacoesDrop (ciclo ativo)", () => {
   function mockClassificado(over: { statusComercial: StatusComercialProduto; dataEncerramentoPrevista: Date | null }) {
     classificacaoFindMany.mockResolvedValue([
       {
-        cod: COD,
-        produto: "Jaqueta Drop Inverno",
+        produto: PRODUTO,
+        cor: COR,
         colecao: "Inverno26",
         grupo: "Jaquetas",
         possibilidadeReposicao: PossibilidadeReposicao.SIM,

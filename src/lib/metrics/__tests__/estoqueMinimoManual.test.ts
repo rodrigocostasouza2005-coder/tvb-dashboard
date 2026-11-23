@@ -3,8 +3,11 @@ import type { VariantePorLoja } from "../distribuicao-estoque";
 
 const getComparacaoCompleta = vi.fn();
 const getVendaMediaDiariaPorCod = vi.fn();
+// ClassificacaoProduto é por produto+cor desde 2026-11-19/23 — estoque-minimo-manual.ts não lê
+// mais prisma.classificacaoProduto direto, usa getClassificacaoPorCods (compras-inteligencia.ts,
+// já mockado em bloco aqui), que devolve um Map<cod, linha>.
+const getClassificacaoPorCods = vi.fn();
 const estoqueMinimoManualFindMany = vi.fn();
-const classificacaoProdutoFindMany = vi.fn();
 const productionOrderFindMany = vi.fn();
 const estoqueMinimoManualFindUnique = vi.fn();
 const estoqueMinimoManualUpsert = vi.fn();
@@ -22,6 +25,7 @@ vi.mock("../distribuicao-estoque", async (importActual) => {
 
 vi.mock("../compras-inteligencia", () => ({
   getVendaMediaDiariaPorCod: (...a: unknown[]) => getVendaMediaDiariaPorCod(...a),
+  getClassificacaoPorCods: (...a: unknown[]) => getClassificacaoPorCods(...a),
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -32,7 +36,6 @@ vi.mock("@/lib/prisma", () => ({
       upsert: (...a: unknown[]) => estoqueMinimoManualUpsert(...a),
     },
     estoqueMinimoManualHistorico: { create: (...a: unknown[]) => estoqueMinimoManualHistoricoCreate(...a) },
-    classificacaoProduto: { findMany: (...a: unknown[]) => classificacaoProdutoFindMany(...a) },
     productionOrder: { findMany: (...a: unknown[]) => productionOrderFindMany(...a) },
   },
 }));
@@ -78,7 +81,7 @@ beforeEach(() => {
   getComparacaoCompleta.mockReset().mockResolvedValue({ variantes: [], posicoes: {}, colunas: [], gradePorProdutoPosicao: {} });
   getVendaMediaDiariaPorCod.mockReset().mockResolvedValue(new Map());
   estoqueMinimoManualFindMany.mockReset().mockResolvedValue([]);
-  classificacaoProdutoFindMany.mockReset().mockResolvedValue([]);
+  getClassificacaoPorCods.mockReset().mockResolvedValue(new Map());
   productionOrderFindMany.mockReset().mockResolvedValue([]);
   estoqueMinimoManualFindUnique.mockReset().mockResolvedValue(null);
   estoqueMinimoManualUpsert.mockReset();
@@ -240,7 +243,7 @@ describe("getEstoqueMinimoManual (camada de dado, tudo mockado)", () => {
 
   it("expõe tipoCompra do cod (Best Seller/Drop) só como contexto, sem afetar o cálculo do mínimo", async () => {
     estoqueMinimoManualFindMany.mockResolvedValue([{ cod: "DROP-1", valor: 10 }]);
-    classificacaoProdutoFindMany.mockResolvedValue([{ cod: "DROP-1", tipoCompra: "DROP" }]);
+    getClassificacaoPorCods.mockResolvedValue(new Map([["DROP-1", { tipoCompra: "DROP" }]]));
     getComparacaoCompleta.mockResolvedValue({
       variantes: [variante({ cod: "DROP-1", produto: "Produto Drop", tipoCompra: "DROP", porLoja: [loja({ estoqueAtual: 20 })] })],
       posicoes: {},

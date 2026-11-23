@@ -7,7 +7,10 @@ const getHistoricoMovimentacoes = vi.fn();
 const getPedidosEmAbertoPorCod = vi.fn((..._a: unknown[]) => {
   throw new Error("getPedidosEmAbertoPorCod NUNCA deveria ser chamado por planejamento-distribuicao.ts");
 });
-const classificacaoProdutoFindMany = vi.fn();
+// ClassificacaoProduto é por produto+cor desde 2026-11-19/23 — getExcessosEDistribuicao não lê
+// mais prisma.classificacaoProduto direto, usa getClassificacaoPorCods (compras-inteligencia.ts,
+// já mockado em bloco aqui) e filtra DROP em código. Devolve Map<cod, linha>.
+const getClassificacaoPorCods = vi.fn();
 const getParametrosBestSellerPorGrupo = vi.fn();
 
 // construirOrigem/diagnosticarVariante/etc. ficam REAIS (importActual) — são funções puras, a
@@ -28,10 +31,7 @@ vi.mock("../distribuicao-estoque", async (importActual) => {
 vi.mock("../compras-inteligencia", () => ({
   getPedidosEmAbertoPorCod: (...a: unknown[]) => getPedidosEmAbertoPorCod(...a),
   getParametrosBestSellerPorGrupo: (...a: unknown[]) => getParametrosBestSellerPorGrupo(...a),
-}));
-
-vi.mock("@/lib/prisma", () => ({
-  prisma: { classificacaoProduto: { findMany: (...a: unknown[]) => classificacaoProdutoFindMany(...a) } },
+  getClassificacaoPorCods: (...a: unknown[]) => getClassificacaoPorCods(...a),
 }));
 
 function loja(overrides: Partial<VariantePorLoja> = {}): VariantePorLoja {
@@ -114,7 +114,7 @@ beforeEach(() => {
   getMovimentacoesRecomendadas.mockReset().mockResolvedValue({ movimentacoes: [], manter: [], necessidadesNaoAtendidas: [], colunas: [], totalAntesDoFiltro: 0 });
   getHistoricoMovimentacoes.mockReset();
   getPedidosEmAbertoPorCod.mockClear();
-  classificacaoProdutoFindMany.mockReset().mockResolvedValue([]);
+  getClassificacaoPorCods.mockReset().mockResolvedValue(new Map());
   getParametrosBestSellerPorGrupo.mockReset().mockResolvedValue([]);
 });
 
@@ -293,7 +293,7 @@ describe("getExcessosEDistribuicao", () => {
   it("[oportunidades] Drop ativo COM vendas recentes: suprime a oportunidade de transferência", async () => {
     getComparacaoCompleta.mockResolvedValue({ variantes: [variante({ tipoCompra: "DROP" })] });
     const futura = new Date(Date.now() + 10 * 86_400_000);
-    classificacaoProdutoFindMany.mockResolvedValue([{ cod: "COD-1", statusComercial: "ATIVO", dataEncerramentoPrevista: futura }]);
+    getClassificacaoPorCods.mockResolvedValue(new Map([["COD-1", { tipoCompra: "DROP", statusComercial: "ATIVO", dataEncerramentoPrevista: futura }]]));
     getMovimentacoesRecomendadas.mockResolvedValue({
       movimentacoes: [movimentacao({ cod: "COD-1", vendasOrigem90: 5 })],
       manter: [],
@@ -311,7 +311,7 @@ describe("getExcessosEDistribuicao", () => {
 
   it("[oportunidades] Drop ativo SEM vendas recentes (vendasOrigem90=0): também suprime — proteção não depende de venda", async () => {
     getComparacaoCompleta.mockResolvedValue({ variantes: [variante({ tipoCompra: "DROP" })] });
-    classificacaoProdutoFindMany.mockResolvedValue([{ cod: "COD-1", statusComercial: "ATIVO", dataEncerramentoPrevista: null }]);
+    getClassificacaoPorCods.mockResolvedValue(new Map([["COD-1", { tipoCompra: "DROP", statusComercial: "ATIVO", dataEncerramentoPrevista: null }]]));
     getMovimentacoesRecomendadas.mockResolvedValue({
       movimentacoes: [movimentacao({ cod: "COD-1", vendasOrigem90: 0 })],
       manter: [],
@@ -330,7 +330,7 @@ describe("getExcessosEDistribuicao", () => {
   it("[oportunidades] Drop encerrado COM vendas: NÃO suprime — ciclo acabou, excesso é real", async () => {
     getComparacaoCompleta.mockResolvedValue({ variantes: [variante({ tipoCompra: "DROP" })] });
     const passada = new Date(Date.now() - 10 * 86_400_000);
-    classificacaoProdutoFindMany.mockResolvedValue([{ cod: "COD-1", statusComercial: "ATIVO", dataEncerramentoPrevista: passada }]);
+    getClassificacaoPorCods.mockResolvedValue(new Map([["COD-1", { tipoCompra: "DROP", statusComercial: "ATIVO", dataEncerramentoPrevista: passada }]]));
     getMovimentacoesRecomendadas.mockResolvedValue({
       movimentacoes: [movimentacao({ cod: "COD-1", vendasOrigem90: 5 })],
       manter: [],
@@ -349,7 +349,7 @@ describe("getExcessosEDistribuicao", () => {
   it("[oportunidades] Drop encerrado SEM vendas: NÃO suprime — ciclo acabou, mesmo sem venda recente", async () => {
     getComparacaoCompleta.mockResolvedValue({ variantes: [variante({ tipoCompra: "DROP" })] });
     const passada = new Date(Date.now() - 10 * 86_400_000);
-    classificacaoProdutoFindMany.mockResolvedValue([{ cod: "COD-1", statusComercial: "ATIVO", dataEncerramentoPrevista: passada }]);
+    getClassificacaoPorCods.mockResolvedValue(new Map([["COD-1", { tipoCompra: "DROP", statusComercial: "ATIVO", dataEncerramentoPrevista: passada }]]));
     getMovimentacoesRecomendadas.mockResolvedValue({
       movimentacoes: [movimentacao({ cod: "COD-1", vendasOrigem90: 0 })],
       manter: [],
@@ -374,7 +374,7 @@ describe("getExcessosEDistribuicao", () => {
     const cdFixo = cd({ estoqueAtual: 200, estoqueMinimo: 50, velocidadeDiaria: 1, vendasDias90: 90, diagnostico: "cobertura_excessiva" });
     getComparacaoCompleta.mockResolvedValue({ variantes: [variante({ tipoCompra: "DROP", porLoja: [cdFixo] })] });
     const futura = new Date(Date.now() + 10 * 86_400_000);
-    classificacaoProdutoFindMany.mockResolvedValue([{ cod: "COD-1", statusComercial: "ATIVO", dataEncerramentoPrevista: futura }]);
+    getClassificacaoPorCods.mockResolvedValue(new Map([["COD-1", { tipoCompra: "DROP", statusComercial: "ATIVO", dataEncerramentoPrevista: futura }]]));
 
     const { getExcessosEDistribuicao } = await import("../planejamento-distribuicao");
     const [r] = await getExcessosEDistribuicao();
@@ -389,7 +389,7 @@ describe("getExcessosEDistribuicao", () => {
     const cdFixo = cd({ estoqueAtual: 200, estoqueMinimo: 50, velocidadeDiaria: 0, vendasDias90: 0, diagnostico: "estoque_parado" });
     getComparacaoCompleta.mockResolvedValue({ variantes: [variante({ tipoCompra: "DROP", porLoja: [cdFixo] })] });
     const futura = new Date(Date.now() + 10 * 86_400_000);
-    classificacaoProdutoFindMany.mockResolvedValue([{ cod: "COD-1", statusComercial: "ATIVO", dataEncerramentoPrevista: futura }]);
+    getClassificacaoPorCods.mockResolvedValue(new Map([["COD-1", { tipoCompra: "DROP", statusComercial: "ATIVO", dataEncerramentoPrevista: futura }]]));
 
     const { getExcessosEDistribuicao } = await import("../planejamento-distribuicao");
     const [r] = await getExcessosEDistribuicao();
@@ -404,7 +404,7 @@ describe("getExcessosEDistribuicao", () => {
     const cdFixo = cd({ estoqueAtual: 200, estoqueMinimo: 50, velocidadeDiaria: 1, vendasDias90: 90, diagnostico: "cobertura_excessiva" });
     getComparacaoCompleta.mockResolvedValue({ variantes: [variante({ tipoCompra: "DROP", porLoja: [cdFixo] })] });
     const passada = new Date(Date.now() - 10 * 86_400_000);
-    classificacaoProdutoFindMany.mockResolvedValue([{ cod: "COD-1", statusComercial: "ATIVO", dataEncerramentoPrevista: passada }]);
+    getClassificacaoPorCods.mockResolvedValue(new Map([["COD-1", { tipoCompra: "DROP", statusComercial: "ATIVO", dataEncerramentoPrevista: passada }]]));
 
     const { getExcessosEDistribuicao } = await import("../planejamento-distribuicao");
     const [r] = await getExcessosEDistribuicao();
@@ -417,7 +417,7 @@ describe("getExcessosEDistribuicao", () => {
     const cdFixo = cd({ estoqueAtual: 200, estoqueMinimo: 50, velocidadeDiaria: 0, vendasDias90: 0, diagnostico: "estoque_parado" });
     getComparacaoCompleta.mockResolvedValue({ variantes: [variante({ tipoCompra: "DROP", porLoja: [cdFixo] })] });
     const passada = new Date(Date.now() - 10 * 86_400_000);
-    classificacaoProdutoFindMany.mockResolvedValue([{ cod: "COD-1", statusComercial: "ATIVO", dataEncerramentoPrevista: passada }]);
+    getClassificacaoPorCods.mockResolvedValue(new Map([["COD-1", { tipoCompra: "DROP", statusComercial: "ATIVO", dataEncerramentoPrevista: passada }]]));
 
     const { getExcessosEDistribuicao } = await import("../planejamento-distribuicao");
     const [r] = await getExcessosEDistribuicao();
@@ -596,7 +596,7 @@ describe("getCodsComOportunidadeTransferencia", () => {
   it("Drop em ciclo ativo suprimido de oportunidades (régua já existente de getExcessosEDistribuicao) também não aparece aqui, sem nenhuma regra nova", async () => {
     getComparacaoCompleta.mockResolvedValue({ variantes: [variante({ cod: "COD-1", tipoCompra: "DROP" })] });
     const futura = new Date(Date.now() + 10 * 86_400_000);
-    classificacaoProdutoFindMany.mockResolvedValue([{ cod: "COD-1", statusComercial: "ATIVO", dataEncerramentoPrevista: futura }]);
+    getClassificacaoPorCods.mockResolvedValue(new Map([["COD-1", { tipoCompra: "DROP", statusComercial: "ATIVO", dataEncerramentoPrevista: futura }]]));
     getMovimentacoesRecomendadas.mockResolvedValue({
       movimentacoes: [movimentacao({ cod: "COD-1", vendasOrigem90: 5 })],
       manter: [],

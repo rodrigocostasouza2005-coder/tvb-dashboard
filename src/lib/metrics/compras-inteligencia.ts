@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { Prisma, TipoCompraProduto, StatusComercialProduto, PossibilidadeReposicao } from "@prisma/client";
+import { Prisma, TipoCompraProduto, StatusComercialProduto, PossibilidadeReposicao, type ClassificacaoProduto } from "@prisma/client";
 import { dropEmCicloAtivo } from "./planejamento-distribuicao";
 
 // ---------------------------------------------------------------------------
@@ -380,13 +380,104 @@ export function priorizarOrcamentoCompras(
 }
 
 // ---------------------------------------------------------------------------
-// PONTE — classificação (por cod/SKU) → produto (grupo::produto, grão do Mapa de Compras)
+// NÚCLEO — resolução produto+cor <-> cod (grão de ClassificacaoProduto desde 2026-11-19)
 // ---------------------------------------------------------------------------
-// ClassificacaoProduto é por `cod` (SKU/grade completo — pode variar por tamanho/cor), mas a
-// matriz do Mapa de Compras é agregada por nome de produto (grupo::produto, mesmo grão de
-// getMapaDeComprasDetalhado). A esmagadora maioria dos produtos tem um único tipoCompra entre
-// seus cods, mas tamanhos diferentes PODEM ter sido classificados diferente (cada cod é
-// classificado individualmente) — esta ponte decide qual tipo representa o produto como um todo.
+// ClassificacaoProduto é por produto+cor (ver comentário no schema.prisma) — `cod` não é mais
+// coluna da tabela, porque uma linha agora representa VÁRIOS cods (todos os tamanhos daquela
+// cor). Toda leitura/escrita que pensa em termos de "cod" (a maioria do app, porque Sale/
+// StockSnapshot/ProductionOrder continuam por cod) passa por aqui: `cor` NUNCA é digitada à mão
+// ou vinda de fora — é sempre resolvida contra Sale/StockSnapshot, a mesma fonte de verdade já
+// usada em classificarProdutoEmLoteAction/getFilaRevisaoClassificacao antes desta mudança.
+
+export function chaveProdutoCor(produto: string, cor: string | null | undefined): string {
+  return `${produto}::${cor ?? ""}`;
+}
+
+// Resolve {grupo, produto, cor} REAIS de uma lista de cods — união de Sale + StockSnapshot (mesmo
+// universo de "a quem esse cod pertence" já usado no resto do app). cod sem nenhuma ocorrência em
+// nenhuma das duas não aparece no Map (não há base real pra classificá-lo).
+async function resolverProdutoCorPorCod(
+  cods: string[]
+): Promise<Map<string, { grupo: string; produto: string; cor: string }>> {
+  const mapa = new Map<string, { grupo: string; produto: string; cor: string }>();
+  if (cods.length === 0) return mapa;
+  const [vendas, estoque] = await Promise.all([
+    prisma.sale.findMany({ where: { cod: { in: cods } }, distinct: ["cod"], select: { cod: true, produto: true, grupo: true, cor: true } }),
+    prisma.stockSnapshot.findMany({ where: { cod: { in: cods } }, distinct: ["cod"], select: { cod: true, produto: true, grupo: true, cor: true } }),
+  ]);
+  for (const r of [...vendas, ...estoque]) {
+    if (!mapa.has(r.cod)) mapa.set(r.cod, { grupo: r.grupo, produto: r.produto, cor: r.cor ?? "" });
+  }
+  return mapa;
+}
+
+// Inverso: pra uma lista de nomes de produto, todos os cods reais agrupados por chave
+// produto+cor (chaveProdutoCor). Usado pra EXPANDIR uma linha de ClassificacaoProduto (1
+// produto+cor) nos cods reais que ela cobre — necessário porque o motor de recomendação
+// (getRecomendacoesBestSeller/Drop) calcula estoque/venda por SKU individual, não por cor.
+async function resolverCodsPorProdutoCor(produtos: string[]): Promise<Map<string, Set<string>>> {
+  const mapa = new Map<string, Set<string>>();
+  if (produtos.length === 0) return mapa;
+  const [vendas, estoque] = await Promise.all([
+    prisma.sale.findMany({ where: { produto: { in: produtos } }, distinct: ["cod"], select: { cod: true, produto: true, cor: true } }),
+    prisma.stockSnapshot.findMany({ where: { produto: { in: produtos } }, distinct: ["cod"], select: { cod: true, produto: true, cor: true } }),
+  ]);
+  for (const r of [...vendas, ...estoque]) {
+    const key = chaveProdutoCor(r.produto, r.cor);
+    const set = mapa.get(key) ?? new Set<string>();
+    set.add(r.cod);
+    mapa.set(key, set);
+  }
+  return mapa;
+}
+
+// Pra uma lista de cods, devolve a linha de ClassificacaoProduto aplicável a cada um (resolvendo
+// produto+cor por fora, nunca confiando em cor vinda de quem chama) — Map indexado pelo `cod`
+// ORIGINAL, pra manter os call sites que pensam em "qual a classificação deste cod"
+// (distribuicao-estoque.ts, estoque-minimo-manual.ts, planejamento-distribuicao.ts) sem precisar
+// saber de produtoCor. cod sem classificação (ou sem base real) simplesmente não aparece no Map.
+export async function getClassificacaoPorCods(cods: string[]): Promise<Map<string, ClassificacaoProduto>> {
+  const resultado = new Map<string, ClassificacaoProduto>();
+  const chaveReal = await resolverProdutoCorPorCod(cods);
+  if (chaveReal.size === 0) return resultado;
+
+  const produtoCors = [...new Set([...chaveReal.values()].map((v) => chaveProdutoCor(v.produto, v.cor)))];
+  const linhas = await prisma.classificacaoProduto.findMany({ where: { produtoCor: { in: produtoCors } } });
+  const porProdutoCor = new Map(linhas.map((l) => [l.produtoCor, l]));
+
+  for (const [cod, info] of chaveReal) {
+    const linha = porProdutoCor.get(chaveProdutoCor(info.produto, info.cor));
+    if (linha) resultado.set(cod, linha);
+  }
+  return resultado;
+}
+
+// Expande cada linha de ClassificacaoProduto (1 por produto+cor) nos cods REAIS que ela cobre —
+// ver comentário de resolverCodsPorProdutoCor. Usado por getRecomendacoesBestSeller/Drop, que
+// precisam de 1 item por cod (cada tamanho tem estoque/venda próprios).
+async function expandirClassificacoesParaCods<T extends { produto: string; cor: string }>(
+  classificacoes: T[]
+): Promise<{ classificacao: T; cod: string }[]> {
+  if (classificacoes.length === 0) return [];
+  const produtos = [...new Set(classificacoes.map((c) => c.produto))];
+  const codsPorProdutoCor = await resolverCodsPorProdutoCor(produtos);
+  const resultado: { classificacao: T; cod: string }[] = [];
+  for (const c of classificacoes) {
+    const cods = codsPorProdutoCor.get(chaveProdutoCor(c.produto, c.cor)) ?? new Set<string>();
+    for (const cod of cods) resultado.push({ classificacao: c, cod });
+  }
+  return resultado;
+}
+
+// ---------------------------------------------------------------------------
+// PONTE — classificação (por produto+cor) → produto (grupo::produto, grão do Mapa de Compras)
+// ---------------------------------------------------------------------------
+// ClassificacaoProduto é por produto+cor desde 2026-11-19 (antes era por `cod`, SKU/grade
+// completo), mas a matriz do Mapa de Compras é agregada por nome de produto (grupo::produto,
+// mesmo grão de getMapaDeComprasDetalhado). A esmagadora maioria dos produtos tem um único
+// tipoCompra entre suas cores, mas cores DIFERENTES do mesmo produto PODEM ter sido classificadas
+// diferente DE PROPÓSITO (pedido explícito do Rodrigo) — esta ponte decide qual tipo representa o
+// produto como um todo nessa visão mais agregada.
 
 export type ClassificacaoComReceita = { tipoCompra: TipoCompraProduto; receita: number };
 
@@ -418,48 +509,57 @@ export function resolverTipoCompraProduto(
 
 export type ClassificacaoPorProdutoEntry = {
   tipoCompra: TipoCompraProduto;
-  // true = os cods sob esse nome de produto têm tipoCompra diferente entre si (ex: um tamanho
-  // Best Seller, outro Drop) — a UI deve avisar isso em vez de esconder a divergência.
+  // true = as CORES sob esse nome de produto têm tipoCompra diferente entre si (ex: azul Best
+  // Seller, verde Drop) — desde 2026-11-19 isso é um cenário LEGÍTIMO (pedido do Rodrigo), não
+  // mais um sinal de inconsistência de dado. A UI continua avisando (é informação real útil pra
+  // quem está vendo o produto agregado), só a interpretação mudou — ver label em
+  // mapa-compras-grid.tsx.
   divergente: boolean;
   cods: string[];
 };
 
-// Monta o Map grupo::produto -> classificação resolvida. Produto cujos cods não têm NENHUMA
+// Monta o Map grupo::produto -> classificação resolvida. Produto cujas cores não têm NENHUMA
 // linha em ClassificacaoProduto não entra no Map (continua caindo na fila de revisão — ver
 // getFilaRevisaoClassificacao — comportamento já existente, sem mudança).
 export async function getClassificacaoPorProduto(): Promise<Map<string, ClassificacaoPorProdutoEntry>> {
   const classificados = await prisma.classificacaoProduto.findMany({
-    select: { cod: true, produto: true, grupo: true, tipoCompra: true },
+    select: { produto: true, cor: true, grupo: true, tipoCompra: true },
   });
   if (classificados.length === 0) return new Map();
 
-  const cods = classificados.map((c) => c.cod);
+  // Cods reais de cada produto+cor classificado — ClassificacaoProduto não guarda mais `cod`
+  // (ver comentário do schema), então os cods vêm sempre de Sale/StockSnapshot.
+  const produtosDistintos = [...new Set(classificados.map((c) => c.produto))];
+  const codsPorProdutoCor = await resolverCodsPorProdutoCor(produtosDistintos);
+
+  const todosCods = [...new Set([...codsPorProdutoCor.values()].flatMap((s) => [...s]))];
   const receitaRows = await prisma.sale.groupBy({
     by: ["cod"],
-    where: { status: { not: "Cancelada" }, cod: { in: cods } },
+    where: { status: { not: "Cancelada" }, cod: { in: todosCods } },
     _sum: { valorTotalLiquido: true },
   });
   const receitaPorCod = new Map(receitaRows.map((r) => [r.cod, r._sum.valorTotalLiquido ?? 0]));
 
   const porProduto = new Map<string, ClassificacaoComReceita[]>();
+  const codsPorProduto = new Map<string, Set<string>>();
   for (const c of classificados) {
     const key = `${c.grupo}::${c.produto}`;
+    const codsDaCor = [...(codsPorProdutoCor.get(chaveProdutoCor(c.produto, c.cor)) ?? [])];
+    const receita = codsDaCor.reduce((s, cod) => s + (receitaPorCod.get(cod) ?? 0), 0);
+
     const arr = porProduto.get(key) ?? [];
-    arr.push({ tipoCompra: c.tipoCompra, receita: receitaPorCod.get(c.cod) ?? 0 });
+    arr.push({ tipoCompra: c.tipoCompra, receita });
     porProduto.set(key, arr);
-  }
-  const codsPorProduto = new Map<string, string[]>();
-  for (const c of classificados) {
-    const key = `${c.grupo}::${c.produto}`;
-    const arr = codsPorProduto.get(key) ?? [];
-    arr.push(c.cod);
-    codsPorProduto.set(key, arr);
+
+    const setCods = codsPorProduto.get(key) ?? new Set<string>();
+    for (const cod of codsDaCor) setCods.add(cod);
+    codsPorProduto.set(key, setCods);
   }
 
   const resultado = new Map<string, ClassificacaoPorProdutoEntry>();
   for (const [key, entradas] of porProduto) {
     const { tipoCompra, divergente } = resolverTipoCompraProduto(entradas);
-    resultado.set(key, { tipoCompra, divergente, cods: codsPorProduto.get(key) ?? [] });
+    resultado.set(key, { tipoCompra, divergente, cods: [...(codsPorProduto.get(key) ?? [])] });
   }
   return resultado;
 }
@@ -469,8 +569,10 @@ export async function getClassificacaoPorProduto(): Promise<Map<string, Classifi
 // ---------------------------------------------------------------------------
 
 export type ClassificacaoInput = {
-  cod: string;
+  // `cor` é SEMPRE resolvida pelo chamador a partir de Sale/StockSnapshot (nunca digitada à mão
+  // nem vinda direto do formulário) — ver classificarProdutoAction/classificarProdutoEmLoteAction.
   produto: string;
+  cor: string;
   grupo: string;
   colecao?: string | null;
   tipoCompra: TipoCompraProduto;
@@ -501,17 +603,20 @@ function valorParaHistorico(v: unknown): string | null {
   return String(v);
 }
 
-// Cria ou atualiza a classificação de um produto, registrando em ClassificacaoProdutoHistorico
+// Cria ou atualiza a classificação de um produto+cor, registrando em ClassificacaoProdutoHistorico
 // só os campos que de fato mudaram (seção 2: "histórico de alterações quando viável") — inclui a
-// reclassificação Drop↔Best Seller, cenário de teste explícito (seção 11).
+// reclassificação Drop↔Best Seller, cenário de teste explícito (seção 11). A chave de upsert é
+// `produtoCor` (derivada de produto+cor, grão desde 2026-11-19) — nunca `cod`.
 export async function upsertClassificacaoProduto(input: ClassificacaoInput, alteradoPor?: string) {
-  const existente = await prisma.classificacaoProduto.findUnique({ where: { cod: input.cod } });
+  const produtoCor = chaveProdutoCor(input.produto, input.cor);
+  const existente = await prisma.classificacaoProduto.findUnique({ where: { produtoCor } });
 
   const salvo = await prisma.classificacaoProduto.upsert({
-    where: { cod: input.cod },
+    where: { produtoCor },
     create: {
-      cod: input.cod,
       produto: input.produto,
+      cor: input.cor,
+      produtoCor,
       grupo: input.grupo,
       colecao: input.colecao ?? null,
       tipoCompra: input.tipoCompra,
@@ -559,12 +664,16 @@ export async function upsertClassificacaoProduto(input: ClassificacaoInput, alte
   return salvo;
 }
 
+// Resolve a classificação aplicável a UM cod (resolve cor por fora, nunca confia em cor vinda de
+// quem chama). Sem base real (cod não existe em Sale/StockSnapshot) -> null, igual a "não há como
+// saber", nunca um palpite.
 export async function getClassificacaoProduto(cod: string) {
-  return prisma.classificacaoProduto.findUnique({ where: { cod } });
+  const mapa = await getClassificacaoPorCods([cod]);
+  return mapa.get(cod) ?? null;
 }
 
 export async function getHistoricoClassificacao(cod: string) {
-  const c = await prisma.classificacaoProduto.findUnique({ where: { cod } });
+  const c = await getClassificacaoProduto(cod);
   if (!c) return [];
   return prisma.classificacaoProdutoHistorico.findMany({
     where: { classificacaoId: c.id },
@@ -573,31 +682,34 @@ export async function getHistoricoClassificacao(cod: string) {
 }
 
 // Fila de revisão (seção 3: "Produtos com classificação desconhecida devem aparecer em uma fila
-// de revisão, sem serem automaticamente tratados como Best Seller ou Drop") — produtos que têm
-// venda ou estoque recente mas NENHUMA linha em ClassificacaoProduto ainda.
+// de revisão, sem serem automaticamente tratados como Best Seller ou Drop") — produtos cujo
+// produto+cor NÃO tem NENHUMA linha em ClassificacaoProduto ainda. Continua retornando 1 item por
+// COD (não por produto+cor): é a fila que alimenta o formulário individual
+// (ClassificarProdutoForm) — classificar UM cod aqui classifica automaticamente todos os outros
+// tamanhos da mesma cor (efeito do novo grão), que somem da fila na visita seguinte.
 export async function getFilaRevisaoClassificacao(limite = 200) {
   const [produtosComVenda, produtosComEstoque, classificados] = await Promise.all([
     prisma.sale.findMany({
       where: { status: { not: "Cancelada" } },
       distinct: ["cod"],
-      select: { cod: true, produto: true, grupo: true, colecao: true },
+      select: { cod: true, produto: true, grupo: true, colecao: true, cor: true },
       take: 5000,
       orderBy: { saleDate: "desc" },
     }),
     prisma.stockSnapshot.findMany({
       where: { quantidadeDisponivel: { gt: 0 } },
       distinct: ["cod"],
-      select: { cod: true, produto: true, grupo: true, colecao: true },
+      select: { cod: true, produto: true, grupo: true, colecao: true, cor: true },
       take: 5000,
     }),
-    prisma.classificacaoProduto.findMany({ select: { cod: true } }),
+    prisma.classificacaoProduto.findMany({ select: { produtoCor: true } }),
   ]);
 
-  const classificadosSet = new Set(classificados.map((c) => c.cod));
+  const classificadosSet = new Set(classificados.map((c) => c.produtoCor));
   const porCod = new Map<string, { cod: string; produto: string; grupo: string; colecao: string | null }>();
   for (const p of [...produtosComVenda, ...produtosComEstoque]) {
-    if (classificadosSet.has(p.cod) || porCod.has(p.cod)) continue;
-    porCod.set(p.cod, p);
+    if (classificadosSet.has(chaveProdutoCor(p.produto, p.cor)) || porCod.has(p.cod)) continue;
+    porCod.set(p.cod, { cod: p.cod, produto: p.produto, grupo: p.grupo, colecao: p.colecao });
   }
 
   return [...porCod.values()].slice(0, limite);
@@ -762,7 +874,13 @@ export async function getRecomendacoesBestSeller(filters: ComprasFiltro = {}): P
   });
   if (classificados.length === 0) return [];
 
-  const cods = classificados.map((c) => c.cod);
+  // O motor calcula estoque/venda por SKU individual (cada tamanho tem posição/velocidade
+  // próprias) — cada linha de ClassificacaoProduto (produto+cor) é expandida pros cods reais
+  // que ela cobre (ver expandirClassificacoesParaCods).
+  const expandido = await expandirClassificacoesParaCods(classificados);
+  if (expandido.length === 0) return [];
+
+  const cods = expandido.map((e) => e.cod);
   const [velocidade, pedidosAberto, estoqueRows, coberturaMetas, custoPorCod] = await Promise.all([
     getVendaMediaDiariaPorCod(cods),
     getPedidosEmAbertoPorCod(cods),
@@ -774,24 +892,24 @@ export async function getRecomendacoesBestSeller(filters: ComprasFiltro = {}): P
   const estoqueByCod = new Map(estoqueRows.map((e) => [e.cod, e._sum.quantidadeDisponivel ?? 0]));
   const metaByGrupo = new Map(coberturaMetas.map((m) => [m.grupo, m]));
 
-  return classificados.map((c) => {
+  return expandido.map(({ classificacao: c, cod }) => {
     const meta = metaByGrupo.get(c.grupo);
     const horizonteCoberturaDias =
       filters.horizonteDiasOverride ?? (meta ? Math.round(meta.mesesCobertura * 30) : HORIZONTE_PADRAO_DIAS);
-    const v = velocidade.get(c.cod) ?? { mediaDiaria: 0, diasComDado: 0 };
+    const v = velocidade.get(cod) ?? { mediaDiaria: 0, diasComDado: 0 };
     const sugestao = calcularSugestaoBestSeller({
-      cod: c.cod,
+      cod,
       grupo: c.grupo,
       horizonteCoberturaDias,
       vendaMediaDiaria: v.mediaDiaria,
       diasHistoricoDisponivel: v.diasComDado,
-      estoqueDisponivel: estoqueByCod.get(c.cod) ?? 0,
+      estoqueDisponivel: estoqueByCod.get(cod) ?? 0,
       estoqueSegurancaUnidades: meta?.estoqueSegurancaUnidades ?? null,
       leadTimeDias: meta?.leadTimeDias ?? null,
-      recebimentosPrevistos: pedidosAberto.get(c.cod) ?? [],
-      custoUnitario: custoPorCod.get(c.cod) ?? null,
+      recebimentosPrevistos: pedidosAberto.get(cod) ?? [],
+      custoUnitario: custoPorCod.get(cod) ?? null,
     });
-    return { ...sugestao, produto: c.produto, cod: c.cod };
+    return { ...sugestao, produto: c.produto, cod };
   });
 }
 
@@ -816,7 +934,11 @@ export async function getRecomendacoesDrop(filters: ComprasFiltro = {}): Promise
   });
   if (classificados.length === 0) return [];
 
-  const cods = classificados.map((c) => c.cod);
+  // Mesma expansão produto+cor -> cods reais de getRecomendacoesBestSeller (ver comentário lá).
+  const expandido = await expandirClassificacoesParaCods(classificados);
+  if (expandido.length === 0) return [];
+
+  const cods = expandido.map((e) => e.cod);
   const [velocidade, pedidosAberto, estoqueRows, vendasAcumuladasRows, custoPorCod, quantidadeOriginalPorCod] = await Promise.all([
     getVendaMediaDiariaPorCod(cods),
     getPedidosEmAbertoPorCod(cods),
@@ -830,8 +952,8 @@ export async function getRecomendacoesDrop(filters: ComprasFiltro = {}): Promise
   const vendasAcumuladasByCod = new Map(vendasAcumuladasRows.map((v) => [v.cod, v._sum.quantidade ?? 0]));
   const hoje = new Date();
 
-  return classificados.map((c) => {
-    const v = velocidade.get(c.cod) ?? { mediaDiaria: 0, diasComDado: 0 };
+  return expandido.map(({ classificacao: c, cod }) => {
+    const v = velocidade.get(cod) ?? { mediaDiaria: 0, diasComDado: 0 };
     const diasDesdeLancamento = c.dataLancamento
       ? Math.floor((hoje.getTime() - c.dataLancamento.getTime()) / 86_400_000)
       : null;
@@ -840,19 +962,19 @@ export async function getRecomendacoesDrop(filters: ComprasFiltro = {}): Promise
       : 0;
 
     const sugestao = calcularSugestaoDrop({
-      cod: c.cod,
+      cod,
       colecao: c.colecao ?? c.produto,
       grupo: c.grupo,
       possibilidadeReposicao: c.possibilidadeReposicao,
-      quantidadeCompradaOriginal: quantidadeOriginalPorCod.get(c.cod) ?? 0,
-      estoqueDisponivel: estoqueByCod.get(c.cod) ?? 0,
-      vendasAcumuladas: vendasAcumuladasByCod.get(c.cod) ?? 0,
+      quantidadeCompradaOriginal: quantidadeOriginalPorCod.get(cod) ?? 0,
+      estoqueDisponivel: estoqueByCod.get(cod) ?? 0,
+      vendasAcumuladas: vendasAcumuladasByCod.get(cod) ?? 0,
       velocidadeVendaDiaria: v.mediaDiaria,
-      custoUnitario: custoPorCod.get(c.cod) ?? null,
+      custoUnitario: custoPorCod.get(cod) ?? null,
       diasDesdeLancamento,
       diasRestantesJanela,
       orcamentoDisponivelDrop: c.orcamentoDrop,
-      pedidosEmAberto: pedidosAberto.get(c.cod) ?? [],
+      pedidosEmAberto: pedidosAberto.get(cod) ?? [],
     });
     if (!c.dataEncerramentoPrevista) {
       sugestao.avisos.unshift("Sem data prevista de encerramento cadastrada para este Drop — janela comercial restante assumida como 0 (tratar faltante/excedente abaixo como indicativo, não final).");
@@ -866,7 +988,7 @@ export async function getRecomendacoesDrop(filters: ComprasFiltro = {}): Promise
       sugestao.valorEstimado = null;
       sugestao.avisos.unshift("Drop fora de ciclo ativo (descontinuado/em encerramento) — sem sugestão de compra.");
     }
-    return { ...sugestao, produto: c.produto, cod: c.cod, diasRestantesJanela };
+    return { ...sugestao, produto: c.produto, cod, diasRestantesJanela };
   });
 }
 
