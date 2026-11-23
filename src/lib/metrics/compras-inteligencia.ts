@@ -1078,9 +1078,17 @@ export async function registrarDecisaoCompra(input: RegistrarDecisaoInput) {
   });
 }
 
-export async function getHistoricoDecisoesCompra(filters: { grupo?: string; cod?: string } = {}) {
+// `codIn` (2026-11-23, Reformulação do Planejamento de Estoque — Aba "Decisões e Ações"): extensão
+// aditiva pra listar decisões de TODOS os cods de um produto de uma vez (vários SKUs/cor/tamanho),
+// sem precisar de N chamadas. Nunca muda o comportamento de `grupo`/`cod` (continuam exatamente
+// como estavam) — `codIn` é só mais um filtro opcional, combinável com os demais via AND.
+export async function getHistoricoDecisoesCompra(filters: { grupo?: string; cod?: string; codIn?: string[] } = {}) {
   return prisma.decisaoCompra.findMany({
-    where: { ...(filters.grupo ? { grupo: filters.grupo } : {}), ...(filters.cod ? { cod: filters.cod } : {}) },
+    where: {
+      ...(filters.grupo ? { grupo: filters.grupo } : {}),
+      ...(filters.cod ? { cod: filters.cod } : {}),
+      ...(filters.codIn ? { cod: { in: filters.codIn } } : {}),
+    },
     orderBy: { decididoEm: "desc" },
   });
 }

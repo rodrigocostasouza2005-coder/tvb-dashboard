@@ -226,4 +226,8 @@ export async function atualizarEstoqueMinimoManualAction(formData: FormData) {
   await atualizarEstoqueMinimoManual(cod, valor, user.email ?? undefined);
 
   revalidatePath("/dashboard/estoque-minimo-manual");
+  // Reformulação do Planejamento de Estoque (2026-11-23, Aba "Reposição e Compras"): o mesmo
+  // formulário (MinimoManualForm) passou a ser embutido também ali — revalida essa rota também,
+  // nunca um action paralelo só pra esse novo ponto de uso.
+  revalidatePath("/dashboard/planejamento-estoque");
 }

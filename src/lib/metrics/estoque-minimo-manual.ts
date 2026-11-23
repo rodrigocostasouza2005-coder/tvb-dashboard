@@ -199,6 +199,17 @@ export async function atualizarEstoqueMinimoManual(cod: string, valor: number | 
   return salvo;
 }
 
+// Atalho pro painel de detalhe de UM produto (Reformulação do Planejamento de Estoque, 2026-11-23,
+// Aba "Reposição e Compras") — mesmo padrão de getProdutoExcessoDistribuicao em
+// planejamento-distribuicao.ts: reaproveita a mesma passada (getEstoqueMinimoManual já cacheia via
+// getComparacaoCompleta) e filtra pelos cods do produto, em vez de uma query dedicada.
+export async function getEstoqueMinimoManualDosCods(cods: string[], filtro: ComparacaoFiltro = {}): Promise<ItemMinimoManual[]> {
+  if (cods.length === 0) return [];
+  const todos = await getEstoqueMinimoManual(filtro);
+  const codsSet = new Set(cods);
+  return todos.filter((item) => codsSet.has(item.cod));
+}
+
 export async function getHistoricoEstoqueMinimoManual(cod: string) {
   const m = await prisma.estoqueMinimoManual.findUnique({ where: { cod } });
   if (!m) return [];

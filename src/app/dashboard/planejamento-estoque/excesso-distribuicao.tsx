@@ -13,17 +13,17 @@ import { prioridadeInfo, confiancaInfo, statusHistoricoInfo, formatNumero } from
 // precisa aparecer nesta visão, com "classificação pendente" explícita, nunca escondido.
 export function ExcessoDistribuicaoSection({
   dados,
-  decisoes,
   distribuicaoHref,
 }: {
   dados: ProdutoExcessoDistribuicao;
-  decisoes: DecisoesMovimentacaoPorStatus | null;
   distribuicaoHref: string;
 }) {
   const temOportunidades = dados.oportunidades.length > 0;
   const classificacaoPendente = dados.classificacao === "NAO_CLASSIFICADO" || dados.classificacao === "MISTO";
   return (
-    <div className="border-t border-[var(--gridline)] p-4">
+    // Sem borda superior/padding de "seção empilhada" — este componente agora é o conteúdo da
+    // própria aba Distribuição (Zona 3), não mais 1 de ~8 blocos empilhados verticalmente.
+    <div className="p-4">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-xs font-medium text-[var(--text-muted)]">Excesso e distribuição entre unidades</h3>
         <a href={distribuicaoHref} className="text-[11px] text-[var(--series-1)] hover:underline">
@@ -137,12 +137,27 @@ export function ExcessoDistribuicaoSection({
           Nenhuma oportunidade de transferência recomendada pra este produto no momento.
         </p>
       )}
+    </div>
+  );
+}
 
-      {decisoes && (decisoes.pendente.length > 0 || decisoes.aprovada.length > 0 || decisoes.executada.length > 0 || decisoes.recusada.length > 0) && (
-        <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-[var(--text-muted)]">
-          <span>Decisões já registradas pra este produto:</span>
+// Reformulação do Planejamento de Estoque (2026-11-23): este resumo de decisões já registradas
+// (DecisaoMovimentacaoEstoque) morava dentro de ExcessoDistribuicaoSection — extraído pra função
+// própria, exportada, e realocado pra aba "Decisões e Ações" (Zona 3, pedido explícito do Rodrigo:
+// decisões do produto ficam juntas, não espalhadas pela aba de Distribuição). Zero mudança de
+// lógica/leitura — só mudou ONDE é renderizado.
+export function DecisoesMovimentacaoResumo({ decisoes }: { decisoes: DecisoesMovimentacaoPorStatus | null }) {
+  const temAlguma = decisoes && (decisoes.pendente.length > 0 || decisoes.aprovada.length > 0 || decisoes.executada.length > 0 || decisoes.recusada.length > 0);
+  if (!temAlguma && !decisoes?.migrationPendente) {
+    return <p className="text-xs text-[var(--text-muted)]">Nenhuma decisão de movimentação/transferência registrada pra este produto ainda.</p>;
+  }
+  return (
+    <div>
+      {temAlguma && (
+        <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--text-muted)]">
+          <span>Decisões de movimentação/transferência já registradas pra este produto:</span>
           {(["pendente", "aprovada", "executada", "recusada"] as const).map((k) => {
-            const n = decisoes[k].length;
+            const n = decisoes![k].length;
             if (n === 0) return null;
             const info = statusHistoricoInfo(k.toUpperCase());
             return (
@@ -155,7 +170,7 @@ export function ExcessoDistribuicaoSection({
         </div>
       )}
       {decisoes?.migrationPendente && (
-        <p className="mt-2 text-[11px] text-[var(--text-muted)]">
+        <p className="mt-2 text-xs text-[var(--text-muted)]">
           Histórico de decisões indisponível neste ambiente (migration DecisaoMovimentacaoEstoque pendente).
         </p>
       )}
