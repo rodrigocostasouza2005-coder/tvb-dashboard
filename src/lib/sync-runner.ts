@@ -6,7 +6,7 @@ import { randomUUID } from "crypto";
 import { createDapicClients, stripReferenciaPrefix, parseDapicDateTime, stableItemIndexes, isGarrafaBrinde, waitMsFromDapicError, sleep, mapWithConcurrency, parseTabelaPrecosLabel, type DapicClient } from "@/lib/connectors/dapic";
 // (import type { Prisma } removido abaixo — já importado acima como valor+tipo)
 import { displayGroupFor, sellsProducts, PRIMARY_STORE_CODE_BY_CLIENT_LABEL, verificarArmazemNovo, carregarArmazensConhecidos } from "@/lib/connectors/armazenadores";
-import { upsertStockSnapshots, type StockSnapshotRow } from "@/lib/connectors/upsert-stock";
+import { upsertStockSnapshots, upsertStockSnapshotsDiario, type StockSnapshotRow } from "@/lib/connectors/upsert-stock";
 import { upsertProductionOrders, type ProductionOrderRow } from "@/lib/connectors/upsert-production-order";
 import { fetchPriceCatalogCached, inferTabelaPreco, type PriceCatalog } from "@/lib/connectors/tabela-preco";
 import { sendTelegramMessage } from "@/lib/telegram";
@@ -209,7 +209,15 @@ async function syncEstoque(client: DapicClient, storeByDapicId: Map<number, stri
       valorCusto: l.ValorCusto ?? null,
     });
   }
-  if (data.length) await upsertStockSnapshots(prisma, data);
+  if (data.length) {
+    await upsertStockSnapshots(prisma, data);
+    // Histórico diário (StockSnapshotDiario, 2026-11-19) — mesma linha buscada acima, sem chamada
+    // extra à API. "diaBrasilia" trunca pra meia-noite de Brasília: o cron roda várias vezes ao
+    // dia (vercel.json), então o upsert em storeId+cod+data garante 1 linha por dia só, com o
+    // valor da ÚLTIMA sync daquele dia — nunca duplica mesmo rodando de novo no mesmo dia.
+    const diaBrasilia = brasiliaDayStart(todayBrasiliaStr(new Date()));
+    await upsertStockSnapshotsDiario(prisma, data, diaBrasilia);
+  }
   return data.length;
 }
 

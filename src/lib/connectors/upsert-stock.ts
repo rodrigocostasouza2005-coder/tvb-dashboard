@@ -55,3 +55,46 @@ export async function upsertStockSnapshots(
 
   return total;
 }
+
+// Histórico diário real de estoque (StockSnapshotDiario, pedido do Rodrigo em 2026-11-19) — ver
+// comentário do model no schema.prisma pro porquê de existir ao lado de StockSnapshot (que só
+// guarda o valor ATUAL, sem série no tempo). Mesma técnica de upsert em lote da função acima
+// (reusa as MESMAS rows já buscadas no DAPIC por syncEstoque — nenhuma chamada extra à API), só
+// com storeId+cod+data como chave de conflito em vez de storeId+cod: isso é o que faz o cron
+// rodando várias vezes ao dia (vercel.json) gravar 1 linha por dia só, atualizada a cada rodada,
+// em vez de acumular uma linha nova por sync.
+export async function upsertStockSnapshotsDiario(
+  prisma: PrismaClient,
+  rows: StockSnapshotRow[],
+  data: Date,
+  batchSize = 1000
+): Promise<number> {
+  const syncedAt = new Date();
+  let total = 0;
+
+  for (let i = 0; i < rows.length; i += batchSize) {
+    const batch = rows.slice(i, i + batchSize);
+    const values = batch.map(
+      (r) =>
+        Prisma.sql`(${randomUUID()}, ${r.storeId}, ${r.cod}, ${r.produto}, ${r.grupo}, ${r.cor}, ${r.tamanho}, ${r.colecao}, ${r.quantidadeDisponivel}, ${r.valorCusto}, ${data}, ${syncedAt})`
+    );
+
+    await prisma.$executeRaw`
+      INSERT INTO "StockSnapshotDiario"
+        ("id", "storeId", "cod", "produto", "grupo", "cor", "tamanho", "colecao", "quantidadeDisponivel", "valorCusto", "data", "syncedAt")
+      VALUES ${Prisma.join(values)}
+      ON CONFLICT ("storeId", "cod", "data") DO UPDATE SET
+        "produto" = EXCLUDED."produto",
+        "grupo" = EXCLUDED."grupo",
+        "cor" = EXCLUDED."cor",
+        "tamanho" = EXCLUDED."tamanho",
+        "colecao" = COALESCE(EXCLUDED."colecao", "StockSnapshotDiario"."colecao"),
+        "quantidadeDisponivel" = EXCLUDED."quantidadeDisponivel",
+        "valorCusto" = EXCLUDED."valorCusto",
+        "syncedAt" = EXCLUDED."syncedAt"
+    `;
+    total += batch.length;
+  }
+
+  return total;
+}
