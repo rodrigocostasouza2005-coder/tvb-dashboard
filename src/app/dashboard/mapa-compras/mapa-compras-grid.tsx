@@ -93,8 +93,8 @@ function LinhaRecomendacao({ tipo, grupoNome, produto, mesesHeader, canEdit }: {
       <td className="sticky left-0 z-10 bg-[var(--page-plane)] px-3 py-1.5 pl-8" colSpan={1}>
         <div className="flex flex-wrap items-center gap-1.5">
           {produto.divergente && (
-            <Badge cor="var(--status-warning)" title="Os tamanhos deste produto têm classificações diferentes entre si (Best Seller/Drop) — mostrado no lado que teve mais receita.">
-              classificação divergente por tamanho
+            <Badge cor="var(--status-warning)" title="As cores deste produto têm classificações diferentes entre si (Best Seller/Drop) — mostrado no lado que teve mais receita.">
+              classificação divergente por cor
             </Badge>
           )}
           {r == null ? (

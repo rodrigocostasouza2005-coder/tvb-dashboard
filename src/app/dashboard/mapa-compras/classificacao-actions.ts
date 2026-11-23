@@ -43,8 +43,16 @@ function parseIntOrNull(v: FormDataEntryValue | null): number | null {
   return Number.isFinite(n) ? Math.round(n) : null;
 }
 
-// Classificar/reclassificar um produto como BEST_SELLER ou DROP (seção 2 e 3 do pedido) — nunca
-// automático, sempre uma ação explícita confirmada por quem tem permissão de gestão.
+// Classificar/reclassificar um produto+cor como BEST_SELLER ou DROP (seção 2 e 3 do pedido) —
+// nunca automático, sempre uma ação explícita confirmada por quem tem permissão de gestão.
+// Grão ALTERADO em 2026-11-19: o formulário continua submetendo UM cod (fila de revisão é por
+// SKU — ver ClassificarProdutoForm), mas a classificação é gravada por produto+cor
+// (ClassificacaoProduto não é mais por `cod`), então TODOS os outros tamanhos da mesma cor
+// recebem automaticamente a mesma classificação — efeito pretendido, não um bug. `cor` nunca vem
+// do formulário: é sempre resolvida contra Sale/StockSnapshot (mesma fonte real já usada em
+// classificarProdutoEmLoteAction), pra nunca confiar num campo oculto adulterável. Produto/grupo
+// também são confirmados contra essa fonte — se o cod não existir em Sale/StockSnapshot, ou se
+// produto/grupo do formulário não baterem com os reais, nada é gravado.
 export async function classificarProdutoAction(formData: FormData) {
   const user = await requireGestao();
 
@@ -64,10 +72,17 @@ export async function classificarProdutoAction(formData: FormData) {
     return;
   }
 
+  const [vendas, estoque] = await Promise.all([
+    prisma.sale.findMany({ where: { cod }, distinct: ["cod"], select: { produto: true, grupo: true, cor: true } }),
+    prisma.stockSnapshot.findMany({ where: { cod }, distinct: ["cod"], select: { produto: true, grupo: true, cor: true } }),
+  ]);
+  const real = vendas[0] ?? estoque[0];
+  if (!real || real.produto !== produto || real.grupo !== grupo) return; // cod inexistente ou produto/grupo do formulário não bate com a fonte real
+
   await upsertClassificacaoProduto(
     {
-      cod,
       produto,
+      cor: real.cor ?? "",
       grupo,
       colecao: (formData.get("colecao") as string) || null,
       tipoCompra,
@@ -82,6 +97,7 @@ export async function classificarProdutoAction(formData: FormData) {
   );
 
   revalidatePath("/dashboard/mapa-compras");
+  revalidatePath("/dashboard/planejamento-estoque");
 }
 
 // Fase 2 do Planejamento de Estoque (2026-11-16) — resolve o gargalo real encontrado na Fase 1
@@ -89,9 +105,15 @@ export async function classificarProdutoAction(formData: FormData) {
 // tamanho), então classificar 1 produto com várias cores/tamanhos exigia 1 submit por SKU. Essa
 // ação classifica TODOS os cods de um produto de uma vez, com a MESMA classificação escolhida —
 // continua 100% manual (quem decide tipoCompra/status é sempre uma pessoa), só deixa de exigir
-// repetir o clique por SKU. Não muda a chave do schema (ClassificacaoProduto continua por cod)
-// nem o critério de qualificação — só reduz o atrito operacional de aplicar a mesma decisão a
-// todas as variantes de um produto.
+// repetir o clique por SKU.
+//
+// Grão ALTERADO em 2026-11-19: ClassificacaoProduto passou a ser por produto+cor, não mais por
+// `cod` — então aqui, em vez de 1 upsert por cod (que gravaria N linhas idênticas pros tamanhos
+// de uma mesma cor), agrupamos os cods válidos por cor real e fazemos 1 upsert por cor distinta.
+// Se o produto submetido tiver 2 cores, isso grava 2 linhas (ambas com a MESMA decisão deste
+// formulário — é um override explícito e intencional de "classifique as duas cores assim",
+// continua permitindo que, depois, alguém reclassifique uma cor individualmente via
+// ClassificarProdutoForm sem afetar a outra).
 export async function classificarProdutoEmLoteAction(formData: FormData) {
   const user = await requireGestao();
 
@@ -117,17 +139,17 @@ export async function classificarProdutoEmLoteAction(formData: FormData) {
   }
 
   // Confere cada cod contra a fonte real (Sale + StockSnapshot, mesmo universo de
-  // getFilaRevisaoClassificacao) — pega produto/grupo REAIS daquele cod, nunca os do formulário.
-  // cod inexistente (não vendeu nem tem estoque) não aparece aqui nenhum dos dois lados, então
-  // cai fora de `donoRealPorCod` e é rejeitado pela comparação abaixo igual a um cod de outro
-  // produto — mesmo tratamento, mesma razão (não há base real pra classificar).
+  // getFilaRevisaoClassificacao) — pega produto/grupo/cor REAIS daquele cod, nunca os do
+  // formulário. cod inexistente (não vendeu nem tem estoque) não aparece aqui nenhum dos dois
+  // lados, então cai fora de `donoRealPorCod` e é rejeitado pela comparação abaixo igual a um
+  // cod de outro produto — mesmo tratamento, mesma razão (não há base real pra classificar).
   const [vendas, estoque] = await Promise.all([
-    prisma.sale.findMany({ where: { cod: { in: codsBrutos } }, distinct: ["cod"], select: { cod: true, produto: true, grupo: true } }),
-    prisma.stockSnapshot.findMany({ where: { cod: { in: codsBrutos } }, distinct: ["cod"], select: { cod: true, produto: true, grupo: true } }),
+    prisma.sale.findMany({ where: { cod: { in: codsBrutos } }, distinct: ["cod"], select: { cod: true, produto: true, grupo: true, cor: true } }),
+    prisma.stockSnapshot.findMany({ where: { cod: { in: codsBrutos } }, distinct: ["cod"], select: { cod: true, produto: true, grupo: true, cor: true } }),
   ]);
-  const donoRealPorCod = new Map<string, { produto: string; grupo: string }>();
+  const donoRealPorCod = new Map<string, { produto: string; grupo: string; cor: string }>();
   for (const r of [...vendas, ...estoque]) {
-    if (!donoRealPorCod.has(r.cod)) donoRealPorCod.set(r.cod, { produto: r.produto, grupo: r.grupo });
+    if (!donoRealPorCod.has(r.cod)) donoRealPorCod.set(r.cod, { produto: r.produto, grupo: r.grupo, cor: r.cor ?? "" });
   }
 
   const codsValidos = codsBrutos.filter((cod) => donoRealPorCod.get(cod)?.produto === produto);
@@ -139,14 +161,21 @@ export async function classificarProdutoEmLoteAction(formData: FormData) {
   const orcamentoDrop = parseFloatOrNull(formData.get("orcamentoDrop"));
   const observacoes = (formData.get("observacoes") as string) || null;
 
+  // Agrupa por cor real (produto já é fixo aqui) — 1 upsert por cor distinta entre os cods
+  // válidos, nunca 1 por cod (grão de ClassificacaoProduto é produto+cor desde 2026-11-19).
+  const coresPorGrupo = new Map<string, { grupo: string; cor: string }>();
+  for (const cod of codsValidos) {
+    const real = donoRealPorCod.get(cod)!;
+    coresPorGrupo.set(real.cor, { grupo: real.grupo, cor: real.cor });
+  }
+
   // Sequencial, não Promise.all: cada chamada já faz leitura+escrita+histórico (ver
   // upsertClassificacaoProduto) — paralelizar N upserts na mesma transação implícita de
-  // histórico arriscaria condição de corrida sem ganho real (N é sempre pequeno, cods de 1
+  // histórico arriscaria condição de corrida sem ganho real (N é sempre pequeno, cores de 1
   // produto só).
-  for (const cod of codsValidos) {
-    const grupoReal = donoRealPorCod.get(cod)!.grupo; // grupo vem da fonte real, não do formulário
+  for (const { grupo, cor } of coresPorGrupo.values()) {
     await upsertClassificacaoProduto(
-      { cod, produto, grupo: grupoReal, colecao, tipoCompra, statusComercial, possibilidadeReposicao, dataLancamento, dataEncerramentoPrevista, orcamentoDrop, observacoes },
+      { produto, cor, grupo, colecao, tipoCompra, statusComercial, possibilidadeReposicao, dataLancamento, dataEncerramentoPrevista, orcamentoDrop, observacoes },
       user.email
     );
   }

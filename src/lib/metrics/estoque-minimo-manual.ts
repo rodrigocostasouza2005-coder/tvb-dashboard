@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { getComparacaoCompleta, type ComparacaoFiltro, type ComparacaoVariante } from "./distribuicao-estoque";
-import { getVendaMediaDiariaPorCod } from "./compras-inteligencia";
+import { getVendaMediaDiariaPorCod, getClassificacaoPorCods } from "./compras-inteligencia";
 
 // Estoque mínimo MANUAL por SKU (pedido do Rodrigo, 2026-11-18, docs/planejamento-inteligente-
 // estoque.md §19 generalizado): "a soma de tudo que a empresa tem agora deste SKU está abaixo do
@@ -95,7 +95,9 @@ export async function getEstoqueMinimoManual(filtro: ComparacaoFiltro = {}): Pro
 
   const [minimos, classificacoes, velocidadePorCod, ordensProducao] = await Promise.all([
     prisma.estoqueMinimoManual.findMany({ where: { cod: { in: cods } }, select: { cod: true, valor: true } }),
-    prisma.classificacaoProduto.findMany({ where: { cod: { in: cods } }, select: { cod: true, tipoCompra: true } }),
+    // ClassificacaoProduto é por produto+cor desde 2026-11-19 — getClassificacaoPorCods resolve a
+    // cor real de cada cod por fora (nunca armazenada em EstoqueMinimoManual nem aqui).
+    getClassificacaoPorCods(cods),
     getVendaMediaDiariaPorCod(cods),
     prisma.productionOrder.findMany({
       where: {
@@ -109,7 +111,7 @@ export async function getEstoqueMinimoManual(filtro: ComparacaoFiltro = {}): Pro
   ]);
 
   const minimoPorCod = new Map(minimos.map((m) => [m.cod, m.valor]));
-  const tipoCompraPorCod = new Map(classificacoes.map((c) => [c.cod, c.tipoCompra as string]));
+  const tipoCompraPorCod = new Map([...classificacoes.entries()].map(([cod, c]) => [cod, c.tipoCompra as string]));
 
   const ordensPorCod = new Map<string, { dataEntradaCelula: Date; dataFinalizacaoProducao: Date }[]>();
   for (const o of ordensProducao) {

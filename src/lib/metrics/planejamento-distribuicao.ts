@@ -10,7 +10,7 @@ import {
   type HistoricoMovimentacoes,
   type StatusMovimentacaoRegistro,
 } from "./distribuicao-estoque";
-import { getParametrosBestSellerPorGrupo } from "./compras-inteligencia";
+import { getParametrosBestSellerPorGrupo, getClassificacaoPorCods } from "./compras-inteligencia";
 import { classificarAgregado, type ClassificacaoAgregada } from "./planejamento-estoque";
 
 // Fase 2B do Planejamento Inteligente de Estoque (pedido do Rodrigo, 2026-11-16) — "gestão
@@ -162,14 +162,17 @@ export async function getExcessosEDistribuicao(filtro: ComparacaoFiltro = {}): P
   // Só busca metadado de ciclo pros cods classificados como DROP — é o único caso em que a régua
   // desta fase se aplica (ver dropEmCicloAtivo). Params de Best Seller são por GRUPO (tabela
   // pequena, CoberturaMeta), sempre buscados — reaproveitados pela reserva de continuidade acima.
-  const [metaDrops, parametrosBestSeller] = await Promise.all([
-    prisma.classificacaoProduto.findMany({
-      where: { cod: { in: cods }, tipoCompra: TipoCompraProduto.DROP },
-      select: { cod: true, statusComercial: true, dataEncerramentoPrevista: true },
-    }),
+  const [classificacoesPorCod, parametrosBestSeller] = await Promise.all([
+    // ClassificacaoProduto é por produto+cor desde 2026-11-19 — getClassificacaoPorCods resolve
+    // a cor real de cada cod por fora. Filtra DROP aqui (depois de resolvido), não na query.
+    getClassificacaoPorCods(cods),
     getParametrosBestSellerPorGrupo(),
   ]);
-  const dropAtivoPorCod = new Map(metaDrops.map((d) => [d.cod, dropEmCicloAtivo(d)]));
+  const dropAtivoPorCod = new Map(
+    [...classificacoesPorCod.entries()]
+      .filter(([, c]) => c.tipoCompra === TipoCompraProduto.DROP)
+      .map(([cod, d]) => [cod, dropEmCicloAtivo(d)])
+  );
   const leadTimePorGrupo = new Map(
     parametrosBestSeller.filter((p) => p.leadTimeDias != null).map((p) => [p.grupo, p.leadTimeDias as number])
   );

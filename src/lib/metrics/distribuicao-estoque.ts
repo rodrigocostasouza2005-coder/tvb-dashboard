@@ -9,7 +9,7 @@ import {
   type PosicoesEstoque,
 } from "./core";
 import { matchMinimumRule } from "./estoque";
-import { getPedidosEmAbertoPorCod } from "./compras-inteligencia";
+import { getPedidosEmAbertoPorCod, getClassificacaoPorCods } from "./compras-inteligencia";
 
 // ---------------------------------------------------------------------------
 // AGENTE DE INTELIGÊNCIA DE DISTRIBUIÇÃO DE ESTOQUE
@@ -1284,11 +1284,13 @@ async function montarComparacaoSemCache(filters: ComparacaoFiltro): Promise<Comp
     }),
     prisma.stockMinimumRule.findMany(),
     // Só a classificação já cadastrada — nunca inferida aqui (ver ClassificacaoProduto no schema:
-    // produto sem linha fica "desconhecido", não herda BEST_SELLER por vender muito).
-    prisma.classificacaoProduto.findMany({ where: { cod: { in: cods } }, select: { cod: true, tipoCompra: true } }),
+    // produto+cor sem linha fica "desconhecido", não herda BEST_SELLER por vender muito).
+    // getClassificacaoPorCods resolve a cor real de cada cod por fora (grão de
+    // ClassificacaoProduto é produto+cor desde 2026-11-19, não mais `cod`).
+    getClassificacaoPorCods(cods),
   ]);
 
-  const tipoCompraPorCod = new Map(classificacoes.map((c) => [c.cod, c.tipoCompra]));
+  const tipoCompraPorCod = new Map([...classificacoes.entries()].map(([cod, c]) => [cod, c.tipoCompra]));
 
   // Agrega estoque/venda por POSIÇÃO (soma os storeIds de uma mesma posição — é assim que CD e
   // ATACADO viram uma posição única sem duplicar nem sobrescrever a quantidade).

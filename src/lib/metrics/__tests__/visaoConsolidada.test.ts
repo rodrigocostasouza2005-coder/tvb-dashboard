@@ -42,13 +42,20 @@ describe("getVisaoConsolidadaCompras", () => {
     saleFindMany.mockReset();
     stockSnapshotFindMany.mockReset();
 
+    // ClassificacaoProduto é por produto+cor desde 2026-11-19/23 (sem `cod`) — getRecomendacoesBestSeller/
+    // Drop expandem cada linha pros cods reais via Sale/StockSnapshot (ver saleFindMany/
+    // stockSnapshotFindMany abaixo), por isso cada linha aqui precisa de `cor` consistente com
+    // os fixtures de cod/produto usados nesses mocks.
     classificacaoFindMany.mockImplementation((args: { where?: { tipoCompra?: TipoCompraProduto }; select?: unknown }) => {
-      if (args.select) return Promise.resolve([]); // fila de revisão: nenhum produto classificado pendente neste teste
+      if (args.select) {
+        // fila de revisão: BS-1/DROP-1 já classificados (produto+cor), nenhum outro pendente.
+        return Promise.resolve([{ produtoCor: "Camiseta Azul::Azul" }, { produtoCor: "Bermuda Drop Verão::Verde" }]);
+      }
       if (args.where?.tipoCompra === TipoCompraProduto.BEST_SELLER) {
         return Promise.resolve([
           {
-            cod: "BS-1",
             produto: "Camiseta Azul",
+            cor: "Azul",
             grupo: "Camisetas",
             colecao: null,
             tipoCompra: TipoCompraProduto.BEST_SELLER,
@@ -63,8 +70,8 @@ describe("getVisaoConsolidadaCompras", () => {
       if (args.where?.tipoCompra === TipoCompraProduto.DROP) {
         return Promise.resolve([
           {
-            cod: "DROP-1",
             produto: "Bermuda Drop Verão",
+            cor: "Verde",
             grupo: "Bermudas",
             colecao: "Drop Verão 26",
             tipoCompra: TipoCompraProduto.DROP,
@@ -79,7 +86,12 @@ describe("getVisaoConsolidadaCompras", () => {
       return Promise.resolve([]);
     });
 
-    saleFindMany.mockResolvedValue([]);
+    // Fonte real de cod<->produto+cor pra expansão (expandirClassificacoesParaCods) E pra fila de
+    // revisão (getFilaRevisaoClassificacao) — mesma função mockada serve os dois usos.
+    saleFindMany.mockResolvedValue([
+      { cod: "BS-1", produto: "Camiseta Azul", grupo: "Camisetas", colecao: null, cor: "Azul" },
+      { cod: "DROP-1", produto: "Bermuda Drop Verão", grupo: "Bermudas", colecao: "Drop Verão 26", cor: "Verde" },
+    ]);
     stockSnapshotFindMany.mockResolvedValue([]);
 
     // sale.groupBy: 3 formatos diferentes usados pelo código (vendas recentes com _sum+saleDate
