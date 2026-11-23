@@ -7,6 +7,7 @@ import {
   getDistinctTamanhos,
   getProdutoExcessoDistribuicao,
   getDecisoesMovimentacaoPorStatus,
+  getReposicaoBestSellerConsolidada,
 } from "@/lib/metrics";
 import { getGrupoRestriction, getStoreRestriction } from "@/lib/permissions";
 import { toArray, type RawSearchParams } from "@/lib/filters";
@@ -15,6 +16,7 @@ import { StatTile } from "../stat-tile";
 import { PlanejamentoFiltros } from "./filtros";
 import { ProdutosTable } from "./produtos-table";
 import { ProdutoDetalhe } from "./produto-detalhe";
+import { ReposicaoBestSellerSection } from "./reposicao-bestseller";
 
 const BASE_PATH = "/dashboard/planejamento-estoque";
 
@@ -44,12 +46,16 @@ export default async function PlanejamentoEstoquePage({
     storeIdsPermitidas: allowedStores,
   };
 
-  const [grupos, tamanhos, produtos, detalhe, grade] = await Promise.all([
+  const [grupos, tamanhos, produtos, detalhe, grade, reposicaoBestSeller] = await Promise.all([
     getDistinctGrupos(),
     getDistinctTamanhos(),
     getProdutosPlanejamento(filtro),
     produtoAberto ? getProdutoPlanejamentoDetalhe(produtoAberto, filtro) : Promise.resolve(null),
     produtoAberto ? getRecomendacaoGradeProduto(produtoAberto, { grupoIn, colecaoIn: undefined }) : Promise.resolve(null),
+    // Painel consolidado (empresa toda) — restrito só por permissão de loja/grupo do usuário,
+    // nunca pelos filtros de query string (grupoFiltro/tamanhoFiltro/busca) que regem a tabela de
+    // produtos abaixo: este painel sempre mostra TODO o universo Best Seller permitido.
+    getReposicaoBestSellerConsolidada({ grupoIn: grupoRestricao, storeIdsPermitidas: allowedStores }),
   ]);
 
   // Mesma regra de permissão de classificarProdutoAction (mapa-compras/classificacao-actions.ts)
@@ -106,6 +112,8 @@ export default async function PlanejamentoEstoquePage({
         <StatTile label="Possível excesso" value={possivelExcesso.toLocaleString("pt-BR")} status={possivelExcesso > 0 ? "warning" : "good"} />
         <StatTile label="Sem movimentação" value={semMovimentacao.toLocaleString("pt-BR")} status={semMovimentacao > 0 ? "warning" : "good"} />
       </section>
+
+      <ReposicaoBestSellerSection itens={reposicaoBestSeller} />
 
       <PlanejamentoFiltros basePath={BASE_PATH} grupos={grupos} tamanhos={tamanhos} value={{ grupoIn: grupoFiltro, tamanhoIn: tamanhoFiltro, busca }} />
 
