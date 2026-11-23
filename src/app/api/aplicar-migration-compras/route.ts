@@ -30,6 +30,7 @@ const STATEMENTS: string[] = [
   `DO $$ BEGIN CREATE TYPE "PossibilidadeReposicao" AS ENUM ('SIM', 'NAO', 'A_CONFIRMAR'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
   `ALTER TABLE "CoberturaMeta" ADD COLUMN IF NOT EXISTS "estoqueSegurancaUnidades" INTEGER;`,
   `ALTER TABLE "CoberturaMeta" ADD COLUMN IF NOT EXISTS "leadTimeDias" INTEGER;`,
+  `ALTER TABLE "CoberturaMeta" ADD COLUMN IF NOT EXISTS "leadTimeUrgenteDias" INTEGER;`,
   `ALTER TABLE "MapaComprasConfig" ADD COLUMN IF NOT EXISTS "orcamentoTotalPlanejado" DOUBLE PRECISION;`,
   `CREATE TABLE IF NOT EXISTS "ClassificacaoProduto" (
     "id" TEXT NOT NULL,

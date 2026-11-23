@@ -164,6 +164,7 @@ export async function setParametrosBestSellerGrupoAction(formData: FormData) {
   await setParametrosBestSellerGrupo(grupo, {
     estoqueSegurancaUnidades: parseFloatOrNull(formData.get("estoqueSegurancaUnidades")),
     leadTimeDias: parseFloatOrNull(formData.get("leadTimeDias")),
+    leadTimeUrgenteDias: parseFloatOrNull(formData.get("leadTimeUrgenteDias")),
   });
 
   revalidatePath("/dashboard/mapa-compras");

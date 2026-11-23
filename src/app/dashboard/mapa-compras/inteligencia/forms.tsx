@@ -124,17 +124,19 @@ export function ParametrosGrupoForm({
   grupo,
   estoqueSegurancaUnidades,
   leadTimeDias,
+  leadTimeUrgenteDias,
   canEdit,
 }: {
   grupo: string;
   estoqueSegurancaUnidades: number | null;
   leadTimeDias: number | null;
+  leadTimeUrgenteDias: number | null;
   canEdit: boolean;
 }) {
   if (!canEdit) {
     return (
       <span className="text-[10px] whitespace-nowrap text-[var(--text-muted)]">
-        Segurança {estoqueSegurancaUnidades ?? "—"} un · Lead time {leadTimeDias ?? "—"}d
+        Segurança {estoqueSegurancaUnidades ?? "—"} un · Lead time {leadTimeDias ?? "—"}d · Lead time urgente {leadTimeUrgenteDias ?? "—"}d
       </span>
     );
   }
@@ -154,6 +156,14 @@ export function ParametrosGrupoForm({
         type="number"
         name="leadTimeDias"
         defaultValue={leadTimeDias ?? ""}
+        min={0}
+        className="w-12 rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-1 py-0.5 text-right text-[10px] tabular-nums text-[var(--text-primary)]"
+      />
+      <span className="text-[10px] text-[var(--text-muted)]">d · Lead time urgente</span>
+      <input
+        type="number"
+        name="leadTimeUrgenteDias"
+        defaultValue={leadTimeUrgenteDias ?? ""}
         min={0}
         className="w-12 rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-1 py-0.5 text-right text-[10px] tabular-nums text-[var(--text-primary)]"
       />

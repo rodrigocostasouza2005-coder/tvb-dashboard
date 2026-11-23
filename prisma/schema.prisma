@@ -150,14 +150,18 @@ model MapaComprasConfig {
 // Parâmetros de compra Best Seller por grupo (seção 4 do pedido do Rodrigo de 2026-10-27) —
 // reaproveita o modelo já existente de meta por grupo (CoberturaMeta já guarda mesesCobertura)
 // em vez de criar uma tabela nova: estoque de segurança e prazo de entrega do fornecedor também
-// são decisão por grupo, não por produto nem por loja. Ambos nullable — sem valor cadastrado, o
+// são decisão por grupo, não por produto nem por loja. Todos nullable — sem valor cadastrado, o
 // motor de cálculo assume 0 e sinaliza a premissa como não confirmada (não inventa um número).
+// leadTimeUrgenteDias (2026-11-19): prazo de entrega expresso, separado do leadTimeDias normal
+// (~60 dias). Ainda não consumido pelo motor de cálculo de compras — só cadastro por ora; a
+// decisão de produto de QUANDO/COMO usar compra expressa no cálculo ainda não foi tomada.
 model CoberturaMeta {
   id             String   @id @default(cuid())
   grupo          String   @unique
   mesesCobertura Float
   estoqueSegurancaUnidades Int?
   leadTimeDias             Int?
+  leadTimeUrgenteDias      Int?
   updatedAt      DateTime @updatedAt
 }
 
