@@ -34,7 +34,11 @@ export function VisaoGeralDistribuicaoView({ visao }: { visao: VisaoGeralDistrib
         <StatTile
           label="Alertas de estoque parado"
           value={formatNumero(visao.alertasEstoqueParado)}
-          subValue="variante×unidade sem venda em 90d"
+          subValue={
+            visao.alertasLancamentoRecente > 0
+              ? `variante×unidade sem venda em 90d · +${formatNumero(visao.alertasLancamentoRecente)} recém-lançado(s) (não contado aqui)`
+              : "variante×unidade sem venda em 90d"
+          }
           status={visao.alertasEstoqueParado > 0 ? "warning" : "good"}
         />
         <StatTile label="Recomendações MANTER" value={formatNumero(visao.manterCount)} subValue="aparente excesso com motivo pra não mover" />

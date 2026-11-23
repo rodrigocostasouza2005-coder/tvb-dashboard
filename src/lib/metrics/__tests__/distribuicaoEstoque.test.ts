@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { TipoCompraProduto } from "@prisma/client";
 import {
   diagnosticarVariante,
+  calcularRecemLancado,
   limiarExcessivo,
   ehTamanhoNucleo,
   calcularMovimentacoes,
@@ -12,6 +13,7 @@ import {
   resumirGrupoGrade,
   vendasEfetivasCdSite,
   anexarProducaoEmAndamento,
+  prepararOrigens,
   type VariantePorLoja,
   type MovimentacaoRecomendada,
   type ContextoMovimentacao,
@@ -139,6 +141,75 @@ describe("diagnosticarVariante", () => {
   it("limiarExcessivo expõe o parâmetro usado por cada tipo de posição", () => {
     expect(limiarExcessivo("loja")).toBe(60);
     expect(limiarExcessivo("cd_site")).toBe(90);
+  });
+
+  // CORREÇÃO (Reformulação do Planejamento de Estoque, 2026-11-23, achado §3.1 da auditoria):
+  // estoqueAtual>0 + vendasDias90=0 deixa de ser incondicionalmente "estoque_parado" quando o
+  // chamador sinaliza, com dado real (calcularRecemLancado), que o produto ainda não teve chance
+  // de vender. Sem o 3º parâmetro (todos os sites de chamada antigos, e qualquer teste que não
+  // passe `contexto`), o comportamento é EXATAMENTE o de antes — nenhuma mudança de default.
+  describe("3º parâmetro opcional `contexto.recemLancado` (correção estoque_parado vs. lancamento_recente)", () => {
+    const base = { estoqueAtual: 10, vendasDias30: 0, vendasDias90: 0, velocidadeDiaria: 0, coberturaDias: null };
+
+    it("sem contexto (omitido) -> comportamento antigo, sempre estoque_parado", () => {
+      expect(diagnosticarVariante(base)).toBe("estoque_parado");
+    });
+
+    it("contexto.recemLancado=false -> estoque_parado (idêntico a omitir)", () => {
+      expect(diagnosticarVariante(base, "loja", { recemLancado: false })).toBe("estoque_parado");
+    });
+
+    it("contexto.recemLancado=true -> lancamento_recente, NUNCA estoque_parado", () => {
+      expect(diagnosticarVariante(base, "loja", { recemLancado: true })).toBe("lancamento_recente");
+    });
+
+    it("recemLancado=true não afeta ruptura/sem_dado/equilibrado — só o ramo estoque>0+vendas90=0", () => {
+      expect(diagnosticarVariante({ ...base, estoqueAtual: 0, vendasDias90: 5 }, "loja", { recemLancado: true })).toBe("ruptura");
+      expect(diagnosticarVariante({ ...base, estoqueAtual: 0, vendasDias90: 0 }, "loja", { recemLancado: true })).toBe("sem_dado");
+    });
+
+    it("lancamento_recente nunca é elegível como origem de transferência (prepararOrigens) — só compara a string exata estoque_parado/cobertura_excessiva", () => {
+      const variantes: VariantePorLoja[] = [
+        {
+          storeId: "loja-a", storeCode: "A", storeName: "Loja A", tipoPosicao: "loja",
+          estoqueAtual: 100, vendasDias30: 0, vendasDias60: 0, vendasDias90: 0, velocidadeDiaria: 0,
+          coberturaDias: null, estoqueMinimo: null, diagnostico: "lancamento_recente",
+        },
+      ];
+      expect(prepararOrigens(variantes)).toHaveLength(0);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// calcularRecemLancado — função pura usada pela correção acima
+// ---------------------------------------------------------------------------
+describe("calcularRecemLancado", () => {
+  const agora = new Date("2026-11-23T12:00:00Z");
+  const diasAtras = (d: number) => new Date(agora.getTime() - d * 86_400_000);
+
+  it("já vendeu alguma vez (mesmo há muito tempo) -> sempre false, mesmo com produção recente", () => {
+    expect(
+      calcularRecemLancado({ primeiraVenda: diasAtras(400), primeiraProducaoFinalizada: diasAtras(1), agora })
+    ).toBe(false);
+  });
+
+  it("nunca vendeu e sem nenhum dado de produção -> false (preserva o default antigo, nunca assume por omissão)", () => {
+    expect(calcularRecemLancado({ primeiraVenda: null, primeiraProducaoFinalizada: null, agora })).toBe(false);
+  });
+
+  it("nunca vendeu e produção finalizada dentro da janela (90d por padrão) -> true", () => {
+    expect(calcularRecemLancado({ primeiraVenda: null, primeiraProducaoFinalizada: diasAtras(89), agora })).toBe(true);
+    expect(calcularRecemLancado({ primeiraVenda: null, primeiraProducaoFinalizada: diasAtras(90), agora })).toBe(true);
+  });
+
+  it("nunca vendeu mas produção finalizada fora da janela -> false (genuinamente parado, não só 'ainda novo')", () => {
+    expect(calcularRecemLancado({ primeiraVenda: null, primeiraProducaoFinalizada: diasAtras(91), agora })).toBe(false);
+  });
+
+  it("janela customizável via `janelaDias`", () => {
+    expect(calcularRecemLancado({ primeiraVenda: null, primeiraProducaoFinalizada: diasAtras(40), janelaDias: 30, agora })).toBe(false);
+    expect(calcularRecemLancado({ primeiraVenda: null, primeiraProducaoFinalizada: diasAtras(20), janelaDias: 30, agora })).toBe(true);
   });
 });
 

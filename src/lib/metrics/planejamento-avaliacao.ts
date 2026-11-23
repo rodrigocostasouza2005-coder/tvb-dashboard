@@ -235,6 +235,15 @@ export function avaliarDecisaoCompra(
   // produto — "loja" é o limiar mais conservador (60d vs. 90d do CD/Site), a escolha mais segura
   // pra não mascarar excesso real só porque o CD tolera mais profundidade (mesmo comentário de
   // planejamento-estoque.ts:139-141).
+  // Correção "estoque_parado" vs. "lancamento_recente" (distribuicao-estoque.ts, Reformulação do
+  // Planejamento de Estoque 2026-11-23): o 3º parâmetro de diagnosticarVariante é deliberadamente
+  // OMITIDO aqui (preserva o comportamento de antes, sem nenhuma mudança neste call site/nos
+  // testes de planejamentoAvaliacao.test.ts). Justificativa: "COMPLETA" só existe depois que
+  // JANELA_COMPLETA_DIAS (90 dias cheios) já passou desde a DECISÃO — nessa altura, se o produto
+  // realmente nunca vendeu nesses 90 dias pós-decisão, a ambiguidade "ainda não teve chance de
+  // vender" é muito mais fraca que no caso geral (achado do §3.1 da auditoria): houve decisão,
+  // então presumivelmente já havia expectativa de venda construída, e passaram-se 90 dias cheios
+  // — "estoque_parado" continua a leitura mais honesta aqui.
   const vendasPosDecisao90 = dados.vendasPosDecisao90!;
   const velocidadeDiaria = vendasPosDecisao90 > 0 ? vendasPosDecisao90 / JANELA_COMPLETA_DIAS : 0;
   const coberturaDias = velocidadeDiaria > 0 ? Math.round((dados.estoqueAtual / velocidadeDiaria) * 10) / 10 : null;
