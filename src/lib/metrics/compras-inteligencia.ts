@@ -1091,7 +1091,7 @@ export async function getHistoricoDecisoesCompra(filters: { grupo?: string; cod?
 
 export async function setParametrosBestSellerGrupo(
   grupo: string,
-  params: { estoqueSegurancaUnidades?: number | null; leadTimeDias?: number | null }
+  params: { estoqueSegurancaUnidades?: number | null; leadTimeDias?: number | null; leadTimeUrgenteDias?: number | null }
 ) {
   return prisma.coberturaMeta.upsert({
     where: { grupo },
@@ -1100,22 +1100,27 @@ export async function setParametrosBestSellerGrupo(
       mesesCobertura: 2,
       estoqueSegurancaUnidades: params.estoqueSegurancaUnidades ?? null,
       leadTimeDias: params.leadTimeDias ?? null,
+      leadTimeUrgenteDias: params.leadTimeUrgenteDias ?? null,
     },
     update: {
       estoqueSegurancaUnidades: params.estoqueSegurancaUnidades ?? null,
       leadTimeDias: params.leadTimeDias ?? null,
+      leadTimeUrgenteDias: params.leadTimeUrgenteDias ?? null,
     },
   });
 }
 
 // Pra tela montar o Map<grupo, parâmetros> usado no formulário inline por grupo (ParametrosGrupoForm)
 // sem a página precisar chamar prisma diretamente (convenção do resto do app: página só chama
-// lib/metrics).
+// lib/metrics). leadTimeUrgenteDias (2026-11-19): só cadastro/exposição por ora — ainda não
+// consumido por calcularSugestaoBestSeller nem por nenhum outro ponto da engine (não existe
+// ainda conceito de "modo urgente"/compra expressa no motor de cálculo; essa é decisão de
+// produto pendente, fora do escopo desta mudança).
 export async function getParametrosBestSellerPorGrupo(): Promise<
-  { grupo: string; estoqueSegurancaUnidades: number | null; leadTimeDias: number | null }[]
+  { grupo: string; estoqueSegurancaUnidades: number | null; leadTimeDias: number | null; leadTimeUrgenteDias: number | null }[]
 > {
   const rows = await prisma.coberturaMeta.findMany({
-    select: { grupo: true, estoqueSegurancaUnidades: true, leadTimeDias: true },
+    select: { grupo: true, estoqueSegurancaUnidades: true, leadTimeDias: true, leadTimeUrgenteDias: true },
   });
   return rows;
 }
