@@ -505,8 +505,20 @@ function valorParaHistorico(v: unknown): string | null {
 // Cria ou atualiza a classificação de um produto, registrando em ClassificacaoProdutoHistorico
 // só os campos que de fato mudaram (seção 2: "histórico de alterações quando viável") — inclui a
 // reclassificação Drop↔Best Seller, cenário de teste explícito (seção 11).
+//
+// Decisão do Rodrigo (2026-11-19): dataLancamento passa a ser obrigatória daqui pra frente, mas
+// só para CLASSIFICAÇÃO NOVA — hoje só ~0,04% dos ~2681 cods já classificados têm essa data, e a
+// decisão foi instituir o preenchimento sistemático sem retroagir. Por isso a trava abaixo olha
+// só pra `existente` (se já havia linha em ClassificacaoProduto pra este cod): editar/reclassificar
+// um cod que já existia NUNCA é bloqueado por este campo, mesmo que a edição nunca tenha tido
+// dataLancamento preenchida. Esta é a validação de servidor (não confia só no formulário) — quem
+// chama (classificacao-actions.ts) ainda valida no form/action antes de chegar aqui.
 export async function upsertClassificacaoProduto(input: ClassificacaoInput, alteradoPor?: string) {
   const existente = await prisma.classificacaoProduto.findUnique({ where: { cod: input.cod } });
+
+  if (!existente && !input.dataLancamento) {
+    throw new Error("Data de lançamento é obrigatória para novas classificações.");
+  }
 
   const salvo = await prisma.classificacaoProduto.upsert({
     where: { cod: input.cod },

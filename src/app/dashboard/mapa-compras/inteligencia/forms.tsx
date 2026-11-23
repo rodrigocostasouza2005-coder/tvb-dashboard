@@ -43,7 +43,11 @@ export function ClassificarProdutoForm({ cod, produto, grupo, colecao }: { cod: 
         ))}
       </select>
       <input type="text" name="colecao" placeholder="Coleção/Drop (opcional)" defaultValue={colecao ?? ""} className={`${inputClass} w-32`} />
-      <input type="date" name="dataLancamento" title="Data de lançamento" className={inputClass} />
+      {/* Obrigatória: esta tela só classifica produto que AINDA não tem linha em
+          ClassificacaoProduto (fila de revisão), ou seja, é sempre criação — decisão do Rodrigo
+          2026-11-19 de exigir dataLancamento daqui pra frente, sem retroagir aos já existentes
+          (validada também no servidor em classificacao-actions.ts/upsertClassificacaoProduto). */}
+      <input type="date" name="dataLancamento" required title="Data de lançamento (obrigatória)" className={inputClass} />
       <input type="date" name="dataEncerramentoPrevista" title="Data prevista de encerramento (Drop)" className={inputClass} />
       <input type="number" name="orcamentoDrop" placeholder="Orçamento do Drop (R$)" step="0.01" className={`${inputClass} w-28`} />
       <button type="submit" className={btnClass}>

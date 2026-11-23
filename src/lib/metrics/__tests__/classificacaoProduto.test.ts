@@ -113,9 +113,63 @@ describe("upsertClassificacaoProduto", () => {
       tipoCompra: TipoCompraProduto.BEST_SELLER,
       statusComercial: StatusComercialProduto.ATIVO,
       possibilidadeReposicao: PossibilidadeReposicao.SIM,
+      dataLancamento: new Date("2026-11-19"),
     });
 
     expect(historicoCreateMany).not.toHaveBeenCalled();
+  });
+
+  // Decisão do Rodrigo (2026-11-19): dataLancamento obrigatória daqui pra frente, só pra
+  // classificação NOVA — não pode retroagir aos ~2681 cods já classificados sem essa data.
+  it("classificação NOVA sem dataLancamento é rejeitada (obrigatória daqui pra frente)", async () => {
+    classificacaoFindUnique.mockResolvedValue(null);
+
+    const { upsertClassificacaoProduto } = await import("../compras-inteligencia");
+    await expect(
+      upsertClassificacaoProduto({
+        cod: "COD-NOVO-SEM-DATA",
+        produto: "Camiseta Nova",
+        grupo: "Camisetas",
+        tipoCompra: TipoCompraProduto.BEST_SELLER,
+        statusComercial: StatusComercialProduto.ATIVO,
+        possibilidadeReposicao: PossibilidadeReposicao.SIM,
+      })
+    ).rejects.toThrow("Data de lançamento é obrigatória para novas classificações.");
+
+    expect(classificacaoUpsert).not.toHaveBeenCalled();
+  });
+
+  // Edição de um cod que JÁ tinha classificação nunca é bloqueada por este campo, mesmo que a
+  // linha existente nunca tenha tido dataLancamento preenchida — é exatamente o caso dos ~2681
+  // cods já classificados hoje: continuam editáveis sem exigir backfill retroativo.
+  it("reclassificar cod que JÁ existe (sem dataLancamento, nem antes nem agora) continua permitido", async () => {
+    classificacaoFindUnique.mockResolvedValue({
+      id: "cls-1",
+      cod: "COD-1",
+      produto: "Camiseta X",
+      grupo: "Camisetas",
+      colecao: null,
+      tipoCompra: TipoCompraProduto.DROP,
+      statusComercial: StatusComercialProduto.ATIVO,
+      possibilidadeReposicao: PossibilidadeReposicao.A_CONFIRMAR,
+      dataLancamento: null,
+      dataEncerramentoPrevista: null,
+      orcamentoDrop: null,
+      observacoes: null,
+    });
+    classificacaoUpsert.mockResolvedValue({ id: "cls-1", cod: "COD-1" });
+
+    const { upsertClassificacaoProduto } = await import("../compras-inteligencia");
+    await upsertClassificacaoProduto({
+      cod: "COD-1",
+      produto: "Camiseta X",
+      grupo: "Camisetas",
+      tipoCompra: TipoCompraProduto.BEST_SELLER,
+      statusComercial: StatusComercialProduto.ATIVO,
+      possibilidadeReposicao: PossibilidadeReposicao.SIM,
+    });
+
+    expect(classificacaoUpsert).toHaveBeenCalledTimes(1);
   });
 
   it("sem mudança nenhuma -> não grava histórico vazio", async () => {

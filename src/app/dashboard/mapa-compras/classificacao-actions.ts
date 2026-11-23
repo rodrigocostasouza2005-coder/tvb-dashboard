@@ -51,7 +51,13 @@ export async function classificarProdutoAction(formData: FormData) {
   const cod = String(formData.get("cod") ?? "").trim();
   const produto = String(formData.get("produto") ?? "").trim();
   const grupo = String(formData.get("grupo") ?? "").trim();
-  if (!cod || !produto || !grupo) return;
+  // Única tela que usa esta action é a fila de revisão (alertas-view.tsx) — por definição só
+  // lista cods SEM classificação ainda, então esta ação é sempre CRIAÇÃO de linha nova em
+  // ClassificacaoProduto. Por isso dataLancamento é exigida aqui no mesmo nível dos outros
+  // campos obrigatórios (decisão do Rodrigo 2026-11-19: obrigatória daqui pra frente, nunca
+  // retroagindo aos ~2681 cods já classificados sem essa data — ver upsertClassificacaoProduto).
+  const dataLancamento = parseDate(formData.get("dataLancamento"));
+  if (!cod || !produto || !grupo || !dataLancamento) return;
 
   const tipoCompra = String(formData.get("tipoCompra") ?? "") as TipoCompraProduto;
   const statusComercial = String(formData.get("statusComercial") ?? "") as StatusComercialProduto;
@@ -73,7 +79,7 @@ export async function classificarProdutoAction(formData: FormData) {
       tipoCompra,
       statusComercial,
       possibilidadeReposicao,
-      dataLancamento: parseDate(formData.get("dataLancamento")),
+      dataLancamento,
       dataEncerramentoPrevista: parseDate(formData.get("dataEncerramentoPrevista")),
       orcamentoDrop: parseFloatOrNull(formData.get("orcamentoDrop")),
       observacoes: (formData.get("observacoes") as string) || null,
@@ -138,6 +144,22 @@ export async function classificarProdutoEmLoteAction(formData: FormData) {
   const dataEncerramentoPrevista = parseDate(formData.get("dataEncerramentoPrevista"));
   const orcamentoDrop = parseFloatOrNull(formData.get("orcamentoDrop"));
   const observacoes = (formData.get("observacoes") as string) || null;
+
+  // Decisão do Rodrigo (2026-11-19): dataLancamento obrigatória daqui pra frente, só pra
+  // classificação NOVA — nunca retroagindo aos cods já classificados. Esta tela mistura os dois
+  // casos num único submit (produto NAO_CLASSIFICADO = todos os cods são novos; MISTO = pode ter
+  // cods já classificados com tipoCompra diferente E cods ainda sem nenhuma linha): por isso
+  // confere contra o cadastro real quais de `codsValidos` JÁ têm ClassificacaoProduto — se
+  // nenhum deles é novo, a decisão é só reclassificação (editar quem já existe) e dataLancamento
+  // continua opcional; se há pelo menos 1 cod novo, exige a data pra TODO o lote (a UI sempre
+  // envia todos os cods do produto de uma vez, não dá pra separar "só os novos" neste submit).
+  const classificacoesExistentes = await prisma.classificacaoProduto.findMany({
+    where: { cod: { in: codsValidos } },
+    select: { cod: true },
+  });
+  const codsComClassificacaoExistente = new Set(classificacoesExistentes.map((c) => c.cod));
+  const temCodNovo = codsValidos.some((cod) => !codsComClassificacaoExistente.has(cod));
+  if (temCodNovo && !dataLancamento) return;
 
   // Sequencial, não Promise.all: cada chamada já faz leitura+escrita+histórico (ver
   // upsertClassificacaoProduto) — paralelizar N upserts na mesma transação implícita de
