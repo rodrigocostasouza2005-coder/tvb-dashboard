@@ -51,6 +51,11 @@ import {
   type LinhaClassificacaoAntiga,
 } from "../src/lib/metrics/classificacao-migracao";
 
+// Mesma constante de reposicao-bestseller-consolidada.ts (PR #118, ainda não mergeado nesta
+// branch, que foi criada antes dele) — inline só pra este diagnóstico de dry-run, não duplica
+// lógica de produção nenhuma, só confirma se tipoCompra já bate com a fonte real (colecao).
+const COLECAO_BEST_SELLER = "BESTSELLER";
+
 const prisma = new PrismaClient();
 
 async function colunaExiste(tabela: string, coluna: string): Promise<boolean> {
@@ -133,6 +138,39 @@ async function main() {
   for (const r of [...vendas, ...estoque]) {
     if (!corPorCod.has(r.cod) && r.cor != null) corPorCod.set(r.cod, r.cor);
   }
+
+  // Pergunta do Rodrigo (2026-11-24): dá pra decidir Best Seller x Drop pela coleção real em vez
+  // de confiar no tipoCompra classificado manualmente? Resposta: SIM, pra ESSE campo específico —
+  // mesma fonte já adotada em reposicao-bestseller-consolidada.ts/compras-inteligencia.ts (PR
+  // #118/#119). Verificação abaixo: cruza tipoCompra salvo contra colecao real de Sale/StockSnapshot
+  // pras 8 linhas — só pra CONFIRMAR consistência, não substitui a classificação (ela já está
+  // salva; isto é auditoria, não correção).
+  const colecaoRaw = await prisma.$queryRawUnsafe<{ cod: string; colecao: string | null }[]>(
+    `SELECT cod, colecao FROM (
+       SELECT cod, colecao FROM "Sale" WHERE cod = ANY($1)
+       UNION ALL
+       SELECT cod, colecao FROM "StockSnapshot" WHERE cod = ANY($1)
+     ) t WHERE colecao IS NOT NULL`,
+    cods
+  );
+  const colecaoPorCod = new Map<string, Set<string>>();
+  for (const r of colecaoRaw) {
+    if (!colecaoPorCod.has(r.cod)) colecaoPorCod.set(r.cod, new Set());
+    colecaoPorCod.get(r.cod)!.add(r.colecao as string);
+  }
+  console.log(`\n--- VERIFICAÇÃO tipoCompra vs colecao real (Best Seller = colecao "${COLECAO_BEST_SELLER}") ---`);
+  let inconsistencias = 0;
+  for (const l of linhas) {
+    const colecoes = colecaoPorCod.get(l.cod) ?? new Set();
+    const ehBestSellerPelaColecao = colecoes.has(COLECAO_BEST_SELLER);
+    const tipoCompraEsperado = ehBestSellerPelaColecao ? "BEST_SELLER" : "DROP";
+    const bate = tipoCompraEsperado === l.tipoCompra;
+    if (!bate) inconsistencias++;
+    console.log(
+      `  cod=${l.cod} produto="${l.produto}" tipoCompra salvo=${l.tipoCompra} | colecao(ões) real(is)=${[...colecoes].join("/") || "(nenhuma encontrada)"} | esperado pela colecao=${tipoCompraEsperado} | ${bate ? "OK" : "DIVERGE"}`
+    );
+  }
+  console.log(`Total de inconsistências tipoCompra x colecao: ${inconsistencias} de ${linhas.length}`);
 
   const { grupos, semBaseReal } = agruparEResolverClassificacoes(linhas, corPorCod);
 
