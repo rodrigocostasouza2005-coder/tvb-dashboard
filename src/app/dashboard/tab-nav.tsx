@@ -89,7 +89,7 @@ export function TabNav({ visibleKeys, isAdmin }: { visibleKeys: TabKey[]; isAdmi
 
         // Gather nav-visible entries for this group
         const realEntries = TABS.filter(
-          (t) =>
+          (t): t is Extract<typeof t, { key: TabKey; href: string }> =>
             t.group === group.key &&
             !t.todo &&
             t.key !== undefined &&
@@ -121,20 +121,30 @@ export function TabNav({ visibleKeys, isAdmin }: { visibleKeys: TabKey[]; isAdmi
 
             {isOpen && (
               <div
-                className="absolute left-0 top-full z-50 mt-1 min-w-[220px] rounded-lg border border-[var(--border)] bg-[var(--surface-1)] py-1 shadow-lg"
+                className="absolute left-0 top-full z-50 mt-1 min-w-[240px] rounded-lg border border-[var(--border)] bg-[var(--surface-1)] py-1 shadow-lg"
               >
                 {realEntries.map((t) => {
                   // t.key and t.href are defined here (filtered above)
                   const href = t.href as string;
                   const itemActive = isPathActive(href);
+                  // Hierarquia "aba-mãe" (ex: Planejamento de Estoque → Mapa de Compras,
+                  // Inteligência de Distribuição, Estoque Mínimo Manual): indentação + borda
+                  // à esquerda dentro do MESMO dropdown, sem submenu/flyout separado — mais
+                  // simples de implementar e de usar (sem hover extra, sem risco de clipping
+                  // na borda da tela, funciona igual em touch). A mãe só é renderizada em
+                  // destaque (negrito) se tiver pelo menos uma filha visível; uma filha só é
+                  // indentada se a mãe também estiver visível no menu (senão renderiza normal,
+                  // evitando indentação "órfã" quando o usuário tem acesso restrito).
+                  const isParentTab = realEntries.some((e) => e.parent === t.key);
+                  const isChildTab = t.parent !== undefined && realEntries.some((e) => e.key === t.parent);
+                  const weightClass = itemActive ? "font-medium" : isParentTab ? "font-semibold" : "font-normal";
+                  const colorClass = itemActive ? "text-[var(--series-1)]" : "text-[var(--text-primary)]";
                   return (
                     <Link
                       key={href}
                       href={`${href}${filterQs}`}
-                      className={`mx-1 block rounded-md px-3 py-2 text-sm hover:bg-[var(--page-plane)] ${
-                        itemActive
-                          ? "text-[var(--series-1)] font-medium"
-                          : "text-[var(--text-primary)]"
+                      className={`mx-1 block rounded-md px-3 py-2 text-sm hover:bg-[var(--page-plane)] ${weightClass} ${colorClass} ${
+                        isChildTab ? "ml-3 border-l border-[var(--border)] pl-3 text-[13px]" : ""
                       }`}
                     >
                       {t.label}

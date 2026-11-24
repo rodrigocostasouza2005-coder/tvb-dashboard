@@ -52,7 +52,11 @@ export type TabKey =
 export type TabGroup = "visao-geral" | "resumo-dia" | "vendas" | "estoque" | "atacado" | "clientes" | "marketing" | "pesquisa" | "lamina" | "performance" | "black-friday";
 
 export type TabEntry =
-  | { key: TabKey; label: string; href: string; group: TabGroup; todo?: false }
+  // `parent` é opcional e só existe pra marcar uma tab como FILHA de outra tab do MESMO group,
+  // pro dropdown de navegação (tab-nav.tsx) renderizar indentada sob a mãe. Não afeta controle de
+  // acesso (allowedTabs continua por TabKey individual) nem nenhum outro consumidor de TABS —
+  // é lido só na renderização do menu.
+  | { key: TabKey; label: string; href: string; group: TabGroup; parent?: TabKey; todo?: false }
   | { key?: never; label: string; href?: never; group: TabGroup; todo: true };
 
 export const TABS: TabEntry[] = [
@@ -91,23 +95,27 @@ export const TABS: TabEntry[] = [
   { key: "reposicao", label: "Reposição de lojas", href: "/dashboard/reposicao", group: "estoque" },
   { key: "estoque-minimo", label: "Estoque Mínimo", href: "/dashboard/estoque-minimo", group: "estoque" },
   { key: "estoque-retirada", label: "Sugestão de Retirada", href: "/dashboard/estoque-retirada", group: "estoque" },
-  { key: "mapa-compras", label: "Mapa de Compras", href: "/dashboard/mapa-compras", group: "estoque" },
+  // Fase 1 do Planejamento Inteligente de Estoque (2026-11-16) — colocado dentro do grupo
+  // "estoque" já existente de propósito (pedido do Rodrigo: não criar 11ª aba isolada sem
+  // resolver navegação primeiro). Desde 2026-11-24 é a ABA-MÃE no menu: Mapa de Compras,
+  // Inteligência de Distribuição e Estoque Mínimo Manual são suas filhas (`parent:
+  // "planejamento-estoque"` abaixo) — pedido explícito do Rodrigo pra não ficarem soltas no
+  // mesmo nível do dropdown junto com itens não relacionados (estoque-atual, cobertura, etc).
+  // Continua sendo uma página real e clicável, não um "guarda-chuva" vazio.
+  { key: "planejamento-estoque", label: "Planejamento de Estoque", href: "/dashboard/planejamento-estoque", group: "estoque" },
+  { key: "mapa-compras", label: "Mapa de Compras", href: "/dashboard/mapa-compras", group: "estoque", parent: "planejamento-estoque" },
   // Agente de Inteligência de Distribuição (2026-10-30) — deliberadamente separado do Mapa de
   // Compras: aqui não se calcula compra, só compara o mesmo produto entre as posições de estoque
   // comerciais. Desde 2026-11-11 isso inclui o CD/Site nas 3 direções (loja↔loja, CD/Site→loja,
   // loja→CD/Site), não só varejo-com-varejo. Ver src/lib/metrics/distribuicao-estoque.ts.
-  { key: "distribuicao-estoque", label: "Inteligência de Distribuição", href: "/dashboard/distribuicao-estoque", group: "estoque" },
-  // Fase 1 do Planejamento Inteligente de Estoque (2026-11-16) — colocado dentro do grupo
-  // "estoque" já existente de propósito (pedido do Rodrigo: não criar 11ª aba isolada sem
-  // resolver navegação primeiro). Mover/renomear/fundir com outra aba depois é trivial (1 linha).
-  { key: "planejamento-estoque", label: "Planejamento de Estoque", href: "/dashboard/planejamento-estoque", group: "estoque" },
+  { key: "distribuicao-estoque", label: "Inteligência de Distribuição", href: "/dashboard/distribuicao-estoque", group: "estoque", parent: "planejamento-estoque" },
   // Estoque mínimo MANUAL por SKU (pedido do Rodrigo, 2026-11-18 — generaliza §19, que começou só
   // Best Seller) — NÃO é a mesma coisa que "Estoque Mínimo" acima (StockMinimumRule, por LOJA
   // individual). Este aqui é definido manualmente pela empresa, por cod (= produto+cor+tamanho),
   // somando TODAS as posições (lojas + CD/Site), pra QUALQUER SKU — nome diferente de propósito
   // pra não repetir a confusão já documentada (§19.3 item 1: "estoque mínimo" significava 3 coisas
   // diferentes, mesmo nome).
-  { key: "estoque-minimo-manual", label: "Estoque Mínimo Manual", href: "/dashboard/estoque-minimo-manual", group: "estoque" },
+  { key: "estoque-minimo-manual", label: "Estoque Mínimo Manual", href: "/dashboard/estoque-minimo-manual", group: "estoque", parent: "planejamento-estoque" },
 
   // atacado
   { key: "atacado", label: "Vendas", href: "/dashboard/atacado", group: "atacado" },
