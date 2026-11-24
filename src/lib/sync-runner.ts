@@ -174,7 +174,7 @@ export async function syncArmazenadores(client: DapicClient) {
   return { storeByDapicId, primaryStoreId, atacadoStoreId };
 }
 
-async function syncEstoque(client: DapicClient, storeByDapicId: Map<number, string>) {
+export async function syncEstoque(client: DapicClient, storeByDapicId: Map<number, string>) {
   const linhas = await client.fetchEstoqueTodosArmazenadores();
   // Achado na investigação forense de 2026-11-12 (defasagem real de ~3h no estoque de produção):
   // a API do DAPIC responder HTTP 200 com lista vazia (hiccup transitório do lado deles, nunca
@@ -196,11 +196,23 @@ async function syncEstoque(client: DapicClient, storeByDapicId: Map<number, stri
   for (const l of linhas) {
     const storeId = storeByDapicId.get(l.IdArmazenador);
     if (!storeId) continue;
+    // Achado real em 2026-11-24 (pedido do Rodrigo: "não quero que matéria prima tenha no
+    // radar"): /armazenadores/produtos devolve, junto com produto acabado de verdade, linhas de
+    // insumo de produção (ilhós, zíper, tecido, etiqueta genérica, embalagem, base de camiseta
+    // semi-acabada) — essas linhas SEMPRE vêm com Grupo null no DAPIC, aparecem IDENTICAMENTE em
+    // TODO armazém (inclusive lojas de venda normais, não um armazém de insumo isolado) e nunca
+    // têm estoque real (quantidadeReal sempre 0). Confirmado contra produção: de ~2771 linhas por
+    // loja, exatamente as mesmas 60 têm Grupo null — produto acabado de verdade SEMPRE tem Grupo
+    // (Camisetas, Calça, Classic Lisa, etc.). Pular aqui, antes de gravar em StockSnapshot/
+    // StockSnapshotDiario, é a correção na raiz — resolve em toda tela que lê StockSnapshot
+    // (Estoque, Distribuição, Planejamento, Mapa de Compras, Estoque Mínimo Manual) de uma vez,
+    // em vez de filtrar em cada UI separadamente.
+    if (l.Grupo == null) continue;
     data.push({
       storeId,
       cod: String(l.IdGradeProduto),
       produto: stripReferenciaPrefix(l.Produto),
-      grupo: l.Grupo ?? "(sem grupo)",
+      grupo: l.Grupo,
       cor: l.Cor ?? null,
       tamanho: l.Tamanho ?? null,
       colecao: l.Colecao ?? null,

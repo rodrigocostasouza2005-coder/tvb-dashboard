@@ -1472,3 +1472,54 @@ describe("syncFaturas — fecha a janela de fatura 'Aberta no dia, Fechada depoi
     expect(resultado.vendas).toBe(0);
   });
 });
+
+// Achado real (2026-11-24, pedido do Rodrigo: "não quero que matéria prima tenha no radar"):
+// /armazenadores/produtos mistura produto acabado com insumo de produção (ilhós, zíper, tecido,
+// embalagem) — insumo sempre vem com Grupo null, produto acabado sempre tem Grupo. syncEstoque
+// agora pula qualquer linha com Grupo null antes de gravar em StockSnapshot/StockSnapshotDiario.
+describe("syncEstoque — nunca grava insumo de produção (Grupo null) em StockSnapshot", () => {
+  it("linha com Grupo null é descartada, nunca chega no upsert/count", async () => {
+    const client = {
+      label: "loja-a",
+      fetchEstoqueTodosArmazenadores: vi.fn().mockResolvedValue([
+        { IdArmazenador: 1, IdGradeProduto: 471, Produto: "ILHOS", Grupo: null, QuantidadeReal: 0 },
+      ]),
+    } as unknown as DapicClient;
+
+    const { syncEstoque } = await import("../sync-runner");
+    const count = await syncEstoque(client, new Map([[1, "store-a"]]));
+
+    expect(count).toBe(0);
+    expect(executeRaw).not.toHaveBeenCalled();
+  });
+
+  it("mistura de insumo (Grupo null) com produto real (Grupo preenchido) — só o produto real é contado/gravado", async () => {
+    const client = {
+      label: "loja-a",
+      fetchEstoqueTodosArmazenadores: vi.fn().mockResolvedValue([
+        { IdArmazenador: 1, IdGradeProduto: 469, Produto: "TAG GENERICO", Grupo: null, QuantidadeReal: 0 },
+        { IdArmazenador: 1, IdGradeProduto: 500, Produto: "Camisa X", Grupo: "Camisas", QuantidadeReal: 10 },
+      ]),
+    } as unknown as DapicClient;
+
+    const { syncEstoque } = await import("../sync-runner");
+    const count = await syncEstoque(client, new Map([[1, "store-a"]]));
+
+    expect(count).toBe(1);
+    expect(executeRaw).toHaveBeenCalled();
+  });
+
+  it("produto real com Grupo preenchido continua sendo gravado normalmente (comportamento antigo intacto)", async () => {
+    const client = {
+      label: "loja-a",
+      fetchEstoqueTodosArmazenadores: vi.fn().mockResolvedValue([
+        { IdArmazenador: 1, IdGradeProduto: 500, Produto: "Camisa X", Grupo: "Camisas", QuantidadeReal: 10 },
+      ]),
+    } as unknown as DapicClient;
+
+    const { syncEstoque } = await import("../sync-runner");
+    const count = await syncEstoque(client, new Map([[1, "store-a"]]));
+
+    expect(count).toBe(1);
+  });
+});
