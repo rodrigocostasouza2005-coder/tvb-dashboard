@@ -7,7 +7,6 @@ import { requireTabAccess } from "@/lib/tabs";
 import { StatTile } from "../stat-tile";
 import { EstoqueMinimoManualFiltros } from "./filtros";
 import { ProdutosConsolidadoTable } from "./produtos-table";
-import { ProdutoDetalhe } from "./produto-detalhe";
 
 const BASE_PATH = "/dashboard/estoque-minimo-manual";
 
@@ -16,6 +15,12 @@ const BASE_PATH = "/dashboard/estoque-minimo-manual";
 // de sessão/permissão de estoque-minimo/page.tsx (StockMinimumRule, OUTRA tela, por LOJA
 // individual — este aqui é da EMPRESA, por cod = produto+cor+tamanho, somando todas as posições,
 // e vale pra QUALQUER SKU — classificado como Best Seller/Drop ou não).
+//
+// Redesenho (2026-11-24, achado real: Rodrigo não conseguia achar onde editar o mínimo) — antes
+// exigia clicar num produto, navegar via querystring ?produto=, e rolar até uma tabela de detalhe
+// separada pra só então achar o campo de edição. Agora produtos-table.tsx expande tudo inline
+// (<details>, mesmo padrão de distribuicao-table.tsx) com o campo de edição direto na linha do
+// tamanho — não precisa mais de navegação nem de ProdutoDetalhe separado.
 export default async function EstoqueMinimoManualPage({
   searchParams,
 }: {
@@ -29,7 +34,6 @@ export default async function EstoqueMinimoManualPage({
   const rawParams = await searchParams;
   const tamanhoFiltro = toArray(rawParams.tamanho);
   const busca = typeof rawParams.busca === "string" ? rawParams.busca : "";
-  const produtoAberto = typeof rawParams.produto === "string" ? rawParams.produto : undefined;
 
   const grupoRestricao = await getGrupoRestriction(user.role);
   const allowedStores = getStoreRestriction(user);
@@ -52,14 +56,6 @@ export default async function EstoqueMinimoManualPage({
   const atencoes = itens.filter((i) => i.nivelAlerta === "ATENCAO").length;
   const semMinimo = itens.filter((i) => i.nivelAlerta === "SEM_MINIMO_DEFINIDO").length;
 
-  const queryParams = new URLSearchParams();
-  for (const t of tamanhoFiltro) queryParams.append("tamanho", t);
-  if (busca.trim()) queryParams.set("busca", busca.trim());
-  const queryString = queryParams.toString();
-  const fecharHref = queryString ? `${BASE_PATH}?${queryString}` : BASE_PATH;
-
-  const itensDoProdutoAberto = produtoAberto ? itens.filter((i) => i.produto === produtoAberto) : [];
-
   return (
     <div>
       <h1 className="mb-1 text-lg font-semibold">Estoque Mínimo Manual</h1>
@@ -69,6 +65,9 @@ export default async function EstoqueMinimoManualPage({
         unidades do tamanho 42 não cobrem o 36 ter só 34). Vale pra qualquer SKU — Best Seller, Drop ou sem
         classificação — o valor é sempre definido manualmente por você, nunca estimado pelo sistema. Não é a mesma
         coisa que a aba &quot;Estoque Mínimo&quot; existente (aquela é por loja individual, não da empresa toda).
+        {podeEditar && (
+          <> <strong>Clique num produto abaixo pra abrir e editar o mínimo de cada tamanho direto na linha.</strong></>
+        )}
       </p>
 
       <section className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
@@ -80,11 +79,7 @@ export default async function EstoqueMinimoManualPage({
 
       <EstoqueMinimoManualFiltros basePath={BASE_PATH} tamanhos={tamanhos} value={{ tamanhoIn: tamanhoFiltro, busca }} />
 
-      {produtoAberto && (
-        <ProdutoDetalhe produto={produtoAberto} itens={itensDoProdutoAberto} podeEditar={podeEditar} fecharHref={fecharHref} />
-      )}
-
-      <ProdutosConsolidadoTable itens={itens} basePath={BASE_PATH} queryString={queryString} produtoAberto={produtoAberto} />
+      <ProdutosConsolidadoTable itens={itens} podeEditar={podeEditar} />
     </div>
   );
 }

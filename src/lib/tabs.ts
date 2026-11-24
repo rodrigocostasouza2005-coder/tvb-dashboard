@@ -41,6 +41,7 @@ export type TabKey =
   | "distribuicao-estoque"
   | "planejamento-estoque"
   | "estoque-minimo-manual"
+  | "estoque-minimo-alertas"
   | "performance"
   | "analise-performance"
   | "analytics-site"
@@ -116,6 +117,11 @@ export const TABS: TabEntry[] = [
   // pra não repetir a confusão já documentada (§19.3 item 1: "estoque mínimo" significava 3 coisas
   // diferentes, mesmo nome).
   { key: "estoque-minimo-manual", label: "Estoque Mínimo Manual", href: "/dashboard/estoque-minimo-manual", group: "estoque", parent: "planejamento-estoque" },
+  // Aba nova (pedido do Rodrigo, 2026-11-24): checagem rápida de "quem está perto/abaixo do
+  // mínimo da empresa" — SEM editar nada aqui, só ler. É o mesmo cálculo de nivelAlerta já usado
+  // em Estoque Mínimo Manual (getEstoqueMinimoManual), filtrado pra CRÍTICO/ATENÇÃO. Separado de
+  // propósito da tela de edição: um é "ajustar o número", o outro é "o que preciso olhar hoje".
+  { key: "estoque-minimo-alertas", label: "Alertas de Estoque Mínimo", href: "/dashboard/estoque-minimo-alertas", group: "estoque", parent: "planejamento-estoque" },
 
   // atacado
   { key: "atacado", label: "Vendas", href: "/dashboard/atacado", group: "atacado" },
@@ -166,7 +172,7 @@ export const GROUPS: { key: TabGroup; label: string; single?: boolean }[] = [
 ];
 
 const BLOCKED_BY_DEFAULT_FOR_VENDEDOR: TabKey[] = [
-  "clientes", "clientes-segmentacao", "clientes-ficha", "clientes-produto", "clientes-produtos-entrada", "vendedores", "estoque-minimo", "estoque-minimo-manual", "contatos-vendedores", "marketing-templates",
+  "clientes", "clientes-segmentacao", "clientes-ficha", "clientes-produto", "clientes-produtos-entrada", "vendedores", "estoque-minimo", "estoque-minimo-manual", "estoque-minimo-alertas", "contatos-vendedores", "marketing-templates",
   "performance", "analise-performance",
   // Central Black Friday mistura CAC/investimento em mídia e dado por canal — mesma régua de
   // "informação financeira/estratégica" que já esconde Performance/Análise de Performance do
