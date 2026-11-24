@@ -11,10 +11,18 @@ function tituloDiagnostico(l: ComparacaoVariante["porLoja"][number]): string {
   return `Cobertura: ${formatNumero(l.coberturaDias, 1)} dias · Vendas 30/60/90d: ${formatNumero(l.vendasDias30)}/${formatNumero(l.vendasDias60)}/${formatNumero(l.vendasDias90)}`;
 }
 
+// Cada produto é um <details> nativo (0 JS novo) — ABERTO por padrão só quando tem variante em
+// ruptura/cobertura crítica (o que precisa de atenção já aparece pronto pra ler), FECHADO por
+// padrão nos demais. Antes, TODOS os produtos do filtro vinham sempre abertos como tabelas
+// completas empilhadas verticalmente — numa base com dezenas/centenas de produtos isso virava uma
+// parede de rolagem sem nenhuma hierarquia (achado real: "o layout está me incomodando muito",
+// Rodrigo 2026-11-24). Mesmo padrão já usado em "Mantido" (distribuicao-estoque/movimentacoes.tsx)
+// e nas seções de premissas/avisos do Mapa de Compras.
 function ProdutoTabela({ produto, variantes }: { produto: string; variantes: ComparacaoVariante[] }) {
   const comDesequilibrio = variantes.filter((v) =>
     v.porLoja.some((l) => l.diagnostico === "ruptura" || l.diagnostico === "cobertura_critica")
   ).length;
+  const precisaAtencao = comDesequilibrio > 0;
 
   // Lojas na ordem em que já vêm do backend (consistente, ver porLoja) — colunas derivadas
   // dinamicamente, nunca hardcoded, pra não quebrar se a lista de lojas mudar.
@@ -30,15 +38,18 @@ function ProdutoTabela({ produto, variantes }: { produto: string; variantes: Com
   }
 
   return (
-    <div className="border-b border-[var(--gridline)] last:border-0">
-      <div className="flex w-full flex-wrap items-center justify-between gap-2 px-4 py-2.5">
+    <details className="group border-b border-[var(--gridline)] last:border-0" open={precisaAtencao}>
+      <summary className="flex w-full cursor-pointer list-none flex-wrap items-center justify-between gap-2 px-4 py-2.5 hover:bg-[var(--page-plane)] [&::-webkit-details-marker]:hidden">
         <span className="flex items-center gap-1.5 text-sm font-medium text-[var(--text-primary)]">
+          <span aria-hidden className="inline-block shrink-0 text-[var(--text-muted)] transition-transform group-open:rotate-90">
+            ▸
+          </span>
           {produto}
           <span className="text-xs font-normal text-[var(--text-muted)]">
             ({variantes.length} variante{variantes.length > 1 ? "s" : ""})
           </span>
         </span>
-        {comDesequilibrio > 0 && (
+        {precisaAtencao && (
           <span
             className="whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold"
             style={{ backgroundColor: "color-mix(in srgb, var(--status-critical) 15%, transparent)", color: "var(--status-critical)" }}
@@ -46,7 +57,7 @@ function ProdutoTabela({ produto, variantes }: { produto: string; variantes: Com
             {comDesequilibrio} com ruptura/cobertura crítica
           </span>
         )}
-      </div>
+      </summary>
       <div className="overflow-x-auto px-4 pb-3">
         <table className="w-full text-xs">
           <thead>
@@ -103,7 +114,7 @@ function ProdutoTabela({ produto, variantes }: { produto: string; variantes: Com
           </tbody>
         </table>
       </div>
-    </div>
+    </details>
   );
 }
 
@@ -125,8 +136,19 @@ export function DistribuicaoTable({ variantes }: { variantes: ComparacaoVariante
     );
   }
 
+  const comAtencao = produtos.filter(([, vs]) =>
+    vs.some((v) => v.porLoja.some((l) => l.diagnostico === "ruptura" || l.diagnostico === "cobertura_critica"))
+  ).length;
+
   return (
     <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--gridline)] px-4 py-2 text-[11px] text-[var(--text-muted)]">
+        <span>
+          {produtos.length} produto{produtos.length > 1 ? "s" : ""} no filtro
+          {comAtencao > 0 && ` · ${comAtencao} já aberto(s) por ter ruptura/cobertura crítica`}
+        </span>
+        <span>Clique no nome do produto pra abrir/fechar o detalhe</span>
+      </div>
       {produtos.map(([produto, vs]) => (
         <ProdutoTabela key={produto} produto={produto} variantes={vs} />
       ))}

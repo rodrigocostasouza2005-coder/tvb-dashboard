@@ -40,7 +40,11 @@ export function AbaNav({
   atual: AbaDistribuicao;
 }) {
   return (
-    <div className="mb-4 flex flex-wrap gap-1 border-b border-[var(--gridline)] pb-2" role="tablist">
+    // Sublinhado (border-b-2), não mais o "pill" preenchido antigo — unifica com o padrão de aba
+    // interna já usado em planejamento-estoque/produto-aba-nav.tsx (reformulação 2026-11-23) e com
+    // o TabNav global (dashboard/tab-nav.tsx): a mesma linguagem visual de navegação em toda a tela,
+    // em vez de dois estilos de "aba" diferentes convivendo no mesmo produto.
+    <div className="mb-4 flex flex-wrap gap-1 border-b border-[var(--gridline)]" role="tablist">
       {ABAS.map((aba) => (
         <Link
           key={aba.value}
@@ -48,10 +52,10 @@ export function AbaNav({
           scroll={false}
           role="tab"
           aria-selected={atual === aba.value}
-          className={`rounded-md px-3 py-1.5 text-xs font-medium ${
+          className={`border-b-2 px-3 py-2 text-xs font-medium ${
             atual === aba.value
-              ? "bg-[var(--series-1)] text-white"
-              : "border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[var(--surface-1)]"
+              ? "border-[var(--series-1)] text-[var(--text-primary)]"
+              : "border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
           }`}
         >
           {aba.label}

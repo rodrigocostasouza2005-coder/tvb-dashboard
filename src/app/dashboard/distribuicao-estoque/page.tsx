@@ -96,6 +96,7 @@ export default async function DistribuicaoEstoquePage({
 
   return (
     <div>
+      <h1 className="mb-1 text-lg font-semibold">Distribuição de Estoque</h1>
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <p className="max-w-4xl text-sm text-[var(--text-secondary)]">
           Compara o mesmo produto (SKU: cor+tamanho) entre <strong>todas as posições de estoque comerciais</strong> —
