@@ -677,7 +677,28 @@ export async function syncFaturas(
   const hoje = new Date();
   const inicio = new Date(hoje);
   inicio.setDate(inicio.getDate() - dias);
-  const faturas = await client.fetchFaturas(toDateStr(inicio), toDateStr(hoje));
+  // Achado em 2026-11-24 (caso real: pedido Shopify #12191, Felipe Haddad, 2026-11-14): fatura
+  // criada no dia D mas que só fecha (Status "Fechado") alguns dias depois (comum sob volume alto,
+  // ex. Black Friday) nunca era capturada — o sync normal olha só a janela de 1 dia por
+  // DataFechamento, e como não é revisitado, essa venda ficava perdida pra sempre. Mesma classe de
+  // bug que já motivou reconciliarCancelamentosFaturas (ver abaixo) para o caso de cancelamento;
+  // aqui é o caso de FECHAMENTO atrasado. Busca também por FiltrarPor=Modificacao (fechar a fatura
+  // atualiza DataModificacao) numa janela mais larga (Math.max(dias, RECONCILIACAO_DIAS), nunca
+  // menor que a janela normal nem que a reconciliação padrão), mescla com a lista normal sem
+  // duplicar por Id. upsertSalesComVendedorAtualizavel (abaixo) já é idempotente — reprocessar uma
+  // fatura que já foi sincronizada pela janela normal é seguro, nunca duplica.
+  const diasModificadas = Math.max(dias, RECONCILIACAO_DIAS);
+  const inicioModificadas = new Date(hoje);
+  inicioModificadas.setDate(inicioModificadas.getDate() - diasModificadas);
+  const [faturasJanela, faturasModificadas] = await Promise.all([
+    client.fetchFaturas(toDateStr(inicio), toDateStr(hoje)),
+    client.fetchFaturasModificadas(toDateStr(inicioModificadas), toDateStr(hoje)),
+  ]);
+  const faturasPorId = new Map(faturasJanela.map((f) => [f.Id, f]));
+  for (const f of faturasModificadas) {
+    if (!faturasPorId.has(f.Id)) faturasPorId.set(f.Id, f);
+  }
+  const faturas = [...faturasPorId.values()];
 
   const saleData: Prisma.SaleCreateManyInput[] = [];
   const giftData: Prisma.GiftCreateManyInput[] = [];

@@ -265,7 +265,23 @@ export async function getTopClientes(
   liquido = false,
   query?: string
 ) {
-  const q = query?.trim();
+  let q = query?.trim();
+  // Achado em 2026-11-24 (caso real: CPF 34188858885/Felipe Haddad não aparecia na Pesquisa):
+  // esta função só buscava por clienteNome (contains) — diferente da Ficha do Cliente
+  // (getClienteFicha acima), que já resolve CPF/CNPJ via ClienteCadastro. Mesmo padrão replicado
+  // aqui: se o texto digitado, só dígitos, tiver 8+ caracteres (CPF tem 11, CNPJ 14), tenta
+  // resolver pra um clienteNome exato via ClienteCadastro antes de montar o filtro. Se não achar
+  // por CPF, cai pro comportamento antigo (contains por nome), sem mudar nada pra quem já buscava
+  // por nome.
+  if (q) {
+    const somenteDigitos = q.replace(/\D/g, "");
+    if (somenteDigitos.length >= 8) {
+      const cadastroPorCpf = await prisma.$queryRaw<{ nome: string }[]>`
+        SELECT "nome" FROM "ClienteCadastro" WHERE regexp_replace("cpfCnpj", '[^0-9]', '', 'g') = ${somenteDigitos} LIMIT 1
+      `;
+      if (cadastroPorCpf.length > 0) q = cadastroPorCpf[0].nome;
+    }
+  }
   const where: Prisma.SaleWhereInput = {
     ...saleWhere(filters),
     clienteNome: q ? { contains: q, mode: "insensitive" } : { not: null },

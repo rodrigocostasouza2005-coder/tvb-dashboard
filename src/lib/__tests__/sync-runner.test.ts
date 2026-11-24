@@ -1375,3 +1375,100 @@ describe("getSyncStatusDetalhado — statusVisual/ultimaAtualizacaoReal/duracaoM
     expect(detalhado.ga4.statusVisual).toBe("atualizado"); // 48h de idade, mas sem limiar aplicável — não é "atrasado"
   });
 });
+
+// Achado real (2026-11-24, caso Shopify #12191/Felipe Haddad): fatura criada dentro da janela
+// normal de 1 dia mas que só fecha (Status "Fechado") alguns dias depois nunca era capturada — o
+// sync normal filtra por DataFechamento dentro de uma janela de 1 dia que nunca é revisitada.
+// syncFaturas agora busca também por FiltrarPor=Modificacao (fetchFaturasModificadas) numa janela
+// mais larga e mescla com a lista normal, sem duplicar por Id.
+describe("syncFaturas — fecha a janela de fatura 'Aberta no dia, Fechada depois' (mesma classe de bug do cancelamento)", () => {
+  function produtoFixture(idGradeProduto: number): import("@/lib/connectors/dapic").DapicFaturaProduto {
+    return {
+      IdProduto: idGradeProduto,
+      Grupo: "Camisetas",
+      Marca: null,
+      Colecao: null,
+      Id: idGradeProduto,
+      IdGradeProduto: idGradeProduto,
+      Produto: "REF123 - Ultra Light Treko",
+      Cor: "Preto",
+      Tamanho: "40",
+      Tipo: "Venda",
+      Quantidade: 1,
+      Valores: { ValorUnitario: 269.1, ValorTotal: 269.1, ValorDesconto: 0, ValorAcrescimo: 0, ValorFrete: 0 },
+    };
+  }
+
+  function faturaFixture(id: number, status: string): import("@/lib/connectors/dapic").DapicFatura {
+    return {
+      Status: status,
+      Id: id,
+      Codigo: `F${id}`,
+      CodigoExterno: null,
+      DataCadastro: "2026-11-10T10:00:00",
+      DataEmissao: "2026-11-10T10:00:00",
+      DataFechamento: status === "Fechado" ? "2026-11-14T10:00:00" : null,
+      DataModificacao: "2026-11-14T10:00:00",
+      IdCliente: 999,
+      Cliente: "Felipe Haddad",
+      ClienteFantasia: null,
+      ValorLiquido: 269.1,
+      Cidade: null,
+      Estado: null,
+      Empresa: "Site",
+    };
+  }
+
+  it("fatura que só existe na lista 'Modificada' (fechou fora da janela de 1 dia) é processada — era o caso real que sumia", async () => {
+    const fetchFaturaProdutos = vi.fn((id: number) => Promise.resolve([produtoFixture(id)]));
+    const fetchFaturaDetalhe = vi.fn().mockResolvedValue(null);
+    const client = {
+      label: "cd-atacado",
+      fetchFaturas: vi.fn().mockResolvedValue([]), // nada "Fechado" dentro da janela normal de 1 dia
+      fetchFaturasModificadas: vi.fn().mockResolvedValue([faturaFixture(12191, "Fechado")]),
+      fetchFaturaProdutos,
+      fetchFaturaDetalhe,
+    } as unknown as DapicClient;
+
+    const { syncFaturas } = await import("../sync-runner");
+    const resultado = await syncFaturas(client, "store-cd", null, 1, new Map());
+
+    expect(fetchFaturaProdutos).toHaveBeenCalledTimes(1);
+    expect(fetchFaturaProdutos).toHaveBeenCalledWith(12191);
+    expect(resultado.vendas).toBe(1);
+  });
+
+  it("fatura presente nas duas listas (janela normal + modificada) é processada só 1 vez — nunca duplica", async () => {
+    const fetchFaturaProdutos = vi.fn((id: number) => Promise.resolve([produtoFixture(id)]));
+    const client = {
+      label: "cd-atacado",
+      fetchFaturas: vi.fn().mockResolvedValue([faturaFixture(500, "Fechado")]),
+      fetchFaturasModificadas: vi.fn().mockResolvedValue([faturaFixture(500, "Fechado")]),
+      fetchFaturaProdutos,
+      fetchFaturaDetalhe: vi.fn().mockResolvedValue(null),
+    } as unknown as DapicClient;
+
+    const { syncFaturas } = await import("../sync-runner");
+    const resultado = await syncFaturas(client, "store-cd", null, 1, new Map());
+
+    expect(fetchFaturaProdutos).toHaveBeenCalledTimes(1);
+    expect(resultado.vendas).toBe(1);
+  });
+
+  it("fatura ainda 'Aberta' na lista modificada continua sendo ignorada (só Status Fechado vira venda)", async () => {
+    const fetchFaturaProdutos = vi.fn((id: number) => Promise.resolve([produtoFixture(id)]));
+    const client = {
+      label: "cd-atacado",
+      fetchFaturas: vi.fn().mockResolvedValue([]),
+      fetchFaturasModificadas: vi.fn().mockResolvedValue([faturaFixture(777, "Aberto")]),
+      fetchFaturaProdutos,
+      fetchFaturaDetalhe: vi.fn().mockResolvedValue(null),
+    } as unknown as DapicClient;
+
+    const { syncFaturas } = await import("../sync-runner");
+    const resultado = await syncFaturas(client, "store-cd", null, 1, new Map());
+
+    expect(fetchFaturaProdutos).not.toHaveBeenCalled();
+    expect(resultado.vendas).toBe(0);
+  });
+});
