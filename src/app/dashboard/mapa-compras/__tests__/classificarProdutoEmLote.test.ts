@@ -12,6 +12,7 @@ const saleFindMany = vi.fn();
 const stockSnapshotFindMany = vi.fn();
 const classificacaoProdutoUpsert = vi.fn();
 const classificacaoProdutoFindUnique = vi.fn();
+const classificacaoProdutoFindMany = vi.fn();
 const classificacaoProdutoHistoricoCreateMany = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
@@ -21,6 +22,7 @@ vi.mock("@/lib/prisma", () => ({
     classificacaoProduto: {
       upsert: (...a: unknown[]) => classificacaoProdutoUpsert(...a),
       findUnique: (...a: unknown[]) => classificacaoProdutoFindUnique(...a),
+      findMany: (...a: unknown[]) => classificacaoProdutoFindMany(...a),
     },
     classificacaoProdutoHistorico: { createMany: (...a: unknown[]) => classificacaoProdutoHistoricoCreateMany(...a) },
   },
@@ -35,6 +37,12 @@ function formDataComCods(produto: string, cods: string[], extras: Record<string,
   fd.set("tipoCompra", extras.tipoCompra ?? "BEST_SELLER");
   fd.set("statusComercial", extras.statusComercial ?? "ATIVO");
   fd.set("possibilidadeReposicao", extras.possibilidadeReposicao ?? "SIM");
+  // Default não-vazio: estes testes já cobrem outras regras (posse de cod, dedup, histórico) e
+  // por padrão simulam cods novos (classificacaoProdutoFindUnique resolve null) — sem isso, a
+  // nova obrigatoriedade de dataLancamento pra classificação nova (ver classificarProdutoEmLote)
+  // rejeitaria o submit e quebraria esses testes por um motivo que não é o deles. Os testes
+  // específicos da nova regra, abaixo, sobrescrevem explicitamente com "".
+  fd.set("dataLancamento", extras.dataLancamento ?? "2026-11-19");
   return fd;
 }
 
@@ -44,6 +52,7 @@ describe("classificarProdutoEmLoteAction — segurança e integridade", () => {
     stockSnapshotFindMany.mockReset().mockResolvedValue([]);
     classificacaoProdutoUpsert.mockReset();
     classificacaoProdutoFindUnique.mockReset().mockResolvedValue(null);
+    classificacaoProdutoFindMany.mockReset().mockResolvedValue([]); // por padrão, nenhum cod já tem classificação (cenário "todos novos")
     classificacaoProdutoHistoricoCreateMany.mockReset();
   });
 
@@ -136,6 +145,7 @@ describe("classificarProdutoEmLoteAction — segurança e integridade", () => {
 
   it("preserva histórico de classificação: quando o cod JÁ tinha classificação diferente, grava diff em classificacaoProdutoHistorico (não apaga o que havia antes)", async () => {
     saleFindMany.mockResolvedValue([{ cod: "COD-1", produto: "Camisa Polo", grupo: "Polos" }]);
+    classificacaoProdutoFindMany.mockResolvedValue([{ cod: "COD-1" }]);
     classificacaoProdutoFindUnique.mockResolvedValue({
       cod: "COD-1", produto: "Camisa Polo", grupo: "Polos", colecao: null,
       tipoCompra: "DROP", statusComercial: "ATIVO", possibilidadeReposicao: "SIM",
@@ -153,5 +163,48 @@ describe("classificarProdutoEmLoteAction — segurança e integridade", () => {
     expect(classificacaoProdutoHistoricoCreateMany).toHaveBeenCalledTimes(1);
     const diffs = (classificacaoProdutoHistoricoCreateMany.mock.calls[0][0] as { data: { campo: string }[] }).data;
     expect(diffs.some((d) => d.campo === "tipoCompra")).toBe(true);
+  });
+
+  // Decisão do Rodrigo (2026-11-19): dataLancamento obrigatória daqui pra frente, só pra
+  // classificação NOVA — nunca retroagindo aos cods já classificados sem essa data.
+  describe("obrigatoriedade de dataLancamento (daqui pra frente, sem retroagir)", () => {
+    it("rejeita o lote inteiro quando há cod NOVO (sem classificação ainda) e dataLancamento não foi informada — nenhum upsert acontece", async () => {
+      saleFindMany.mockResolvedValue([{ cod: "COD-1", produto: "Camisa Polo", grupo: "Polos" }]);
+      classificacaoProdutoFindMany.mockResolvedValue([]); // COD-1 não tem classificação ainda
+
+      const { classificarProdutoEmLoteAction } = await import("../classificacao-actions");
+      await classificarProdutoEmLoteAction(formDataComCods("Camisa Polo", ["COD-1"], { dataLancamento: "" }));
+
+      expect(classificacaoProdutoUpsert).not.toHaveBeenCalled();
+    });
+
+    it("permite reclassificar SEM dataLancamento quando TODOS os cods do lote já têm classificação existente (edição, não criação)", async () => {
+      saleFindMany.mockResolvedValue([{ cod: "COD-1", produto: "Camisa Polo", grupo: "Polos" }]);
+      classificacaoProdutoFindMany.mockResolvedValue([{ cod: "COD-1" }]); // já existe
+      classificacaoProdutoFindUnique.mockResolvedValue({
+        cod: "COD-1", produto: "Camisa Polo", grupo: "Polos", colecao: null,
+        tipoCompra: "DROP", statusComercial: "ATIVO", possibilidadeReposicao: "SIM",
+        dataLancamento: null, dataEncerramentoPrevista: null, orcamentoDrop: null, observacoes: null,
+      });
+      classificacaoProdutoUpsert.mockResolvedValue({ id: "cls-1", cod: "COD-1" });
+
+      const { classificarProdutoEmLoteAction } = await import("../classificacao-actions");
+      await classificarProdutoEmLoteAction(formDataComCods("Camisa Polo", ["COD-1"], { tipoCompra: "BEST_SELLER", dataLancamento: "" }));
+
+      expect(classificacaoProdutoUpsert).toHaveBeenCalledTimes(1);
+    });
+
+    it("lote MISTO (1 cod já classificado + 1 cod novo) sem dataLancamento é rejeitado por completo — nenhum dos dois é gravado", async () => {
+      saleFindMany.mockResolvedValue([
+        { cod: "COD-JA-EXISTE", produto: "Camisa Polo", grupo: "Polos" },
+        { cod: "COD-NOVO", produto: "Camisa Polo", grupo: "Polos" },
+      ]);
+      classificacaoProdutoFindMany.mockResolvedValue([{ cod: "COD-JA-EXISTE" }]); // COD-NOVO não está aqui
+
+      const { classificarProdutoEmLoteAction } = await import("../classificacao-actions");
+      await classificarProdutoEmLoteAction(formDataComCods("Camisa Polo", ["COD-JA-EXISTE", "COD-NOVO"], { dataLancamento: "" }));
+
+      expect(classificacaoProdutoUpsert).not.toHaveBeenCalled();
+    });
   });
 });

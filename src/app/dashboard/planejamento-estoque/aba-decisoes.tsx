@@ -92,6 +92,21 @@ export function AbaDecisoesProduto({
                 <option value={PossibilidadeReposicao.A_CONFIRMAR}>A confirmar</option>
               </select>
             </label>
+            <label className="flex flex-col gap-0.5 text-[var(--text-muted)]">
+              Data de lançamento{classificacao === "NAO_CLASSIFICADO" ? " (obrigatória)" : " (se algum SKU ainda não tiver classificação)"}
+              {/* Obrigatória no servidor só quando pelo menos 1 destes SKUs está sendo
+                  CLASSIFICADO por aqui pela primeira vez (decisão do Rodrigo 2026-11-19 — nunca
+                  retroage aos já classificados). NAO_CLASSIFICADO = todos novos, então exigimos
+                  já aqui no form; em MISTO pode ser reclassificação pura de SKUs que já tinham
+                  linha, então o campo fica visível mas não bloqueado no cliente — o servidor
+                  confere caso a caso em classificarProdutoEmLoteAction. */}
+              <input
+                type="date"
+                name="dataLancamento"
+                required={classificacao === "NAO_CLASSIFICADO"}
+                className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1 text-[var(--text-primary)]"
+              />
+            </label>
             <button type="submit" className="rounded-md border border-[var(--border)] px-3 py-1.5 font-medium text-[var(--text-secondary)] hover:bg-[var(--page-plane)]">
               Classificar {detalhe.cods.length} SKU(s)
             </button>
