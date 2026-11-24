@@ -42,24 +42,13 @@ describe("getVisaoConsolidadaCompras", () => {
     saleFindMany.mockReset();
     stockSnapshotFindMany.mockReset();
 
+    // getRecomendacoesBestSeller não consulta mais ClassificacaoProduto pra decidir quem é Best
+    // Seller (correção de 2026-11-23, revisão do PR #119 — ver comentário em
+    // compras-inteligencia.ts) — só o ramo DROP (que depende de dataLancamento/
+    // dataEncerramentoPrevista/possibilidadeReposicao/orcamentoDrop, dado genuinamente manual sem
+    // equivalente em colecao) continua vindo de ClassificacaoProduto aqui.
     classificacaoFindMany.mockImplementation((args: { where?: { tipoCompra?: TipoCompraProduto }; select?: unknown }) => {
       if (args.select) return Promise.resolve([]); // fila de revisão: nenhum produto classificado pendente neste teste
-      if (args.where?.tipoCompra === TipoCompraProduto.BEST_SELLER) {
-        return Promise.resolve([
-          {
-            cod: "BS-1",
-            produto: "Camiseta Azul",
-            grupo: "Camisetas",
-            colecao: null,
-            tipoCompra: TipoCompraProduto.BEST_SELLER,
-            statusComercial: StatusComercialProduto.ATIVO,
-            possibilidadeReposicao: PossibilidadeReposicao.SIM,
-            dataLancamento: null,
-            dataEncerramentoPrevista: null,
-            orcamentoDrop: null,
-          },
-        ]);
-      }
       if (args.where?.tipoCompra === TipoCompraProduto.DROP) {
         return Promise.resolve([
           {
@@ -80,7 +69,16 @@ describe("getVisaoConsolidadaCompras", () => {
     });
 
     saleFindMany.mockResolvedValue([]);
-    stockSnapshotFindMany.mockResolvedValue([]);
+    // Best Seller agora vem de StockSnapshot.colecao === "BESTSELLER" (mesma fonte já usada e
+    // validada em reposicao-bestseller-consolidada.ts). O MESMO prisma.stockSnapshot.findMany
+    // também é usado por getFilaRevisaoClassificacao (where.quantidadeDisponivel.gt) — precisa
+    // distinguir pelas duas formas de `where` reais, nunca um mock único cego.
+    stockSnapshotFindMany.mockImplementation((args: { where?: { colecao?: string; quantidadeDisponivel?: unknown } }) => {
+      if (args.where?.colecao === "BESTSELLER") {
+        return Promise.resolve([{ cod: "BS-1", produto: "Camiseta Azul", grupo: "Camisetas" }]);
+      }
+      return Promise.resolve([]); // fila de revisão: nenhum produto pendente por padrão neste cenário
+    });
 
     // sale.groupBy: 3 formatos diferentes usados pelo código (vendas recentes com _sum+saleDate
     // range, primeira venda com _min, vendas acumuladas do Drop com _sum sem range de data).
@@ -168,7 +166,14 @@ describe("getVisaoConsolidadaCompras", () => {
   });
 
   it("produto na fila de revisão não entra em nenhum grupo nem na priorização", async () => {
-    stockSnapshotFindMany.mockResolvedValue([{ cod: "NOVO-1", produto: "Produto Novo", grupo: "Camisetas", colecao: null }]);
+    // Override local: mantém o mesmo Best Seller (BS-1, colecao=BESTSELLER) do beforeEach, mas
+    // a consulta de fila de revisão (quantidadeDisponivel.gt) agora devolve 1 produto novo.
+    stockSnapshotFindMany.mockImplementation((args: { where?: { colecao?: string } }) => {
+      if (args.where?.colecao === "BESTSELLER") {
+        return Promise.resolve([{ cod: "BS-1", produto: "Camiseta Azul", grupo: "Camisetas" }]);
+      }
+      return Promise.resolve([{ cod: "NOVO-1", produto: "Produto Novo", grupo: "Camisetas", colecao: null }]);
+    });
     const { getVisaoConsolidadaCompras } = await import("../compras-inteligencia");
     const visao = await getVisaoConsolidadaCompras({});
     expect(visao.produtosFilaRevisaoCount).toBe(1);
