@@ -1,6 +1,7 @@
 import type { ProdutoExcessoDistribuicao, DecisoesMovimentacaoPorStatus } from "@/lib/metrics";
 import { tipoMovimentacaoLabel } from "@/lib/metrics";
 import { prioridadeInfo, confiancaInfo, statusHistoricoInfo, formatNumero } from "../distribuicao-estoque/format";
+import { MiniStatTile } from "../stat-tile";
 
 // Fase 2B — "gestão inteligente de excesso e distribuição" (docs/planejamento-inteligente-estoque.md
 // §10.6, ajuste de regra Rodrigo 2026-11-17 em §11). Decisão de arquitetura: em vez de criar uma
@@ -48,10 +49,14 @@ export function ExcessoDistribuicaoSection({
       )}
 
       <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <MiniStat label="Excesso no CD/Site" value={dados.excessoCD} destaque={dados.excessoCD > 0} />
-        <MiniStat label="Deve permanecer no CD" value={dados.estoqueCDPermanece} />
-        <MiniStat label="Excesso em loja" value={dados.excessoLojas} destaque={dados.excessoLojas > 0} />
-        <MiniStat label="Lojas em ruptura/crítico" value={dados.rupturaLojas} destaque={dados.rupturaLojas > 0} critico={dados.rupturaLojas > 0} />
+        <MiniStatTile label="Excesso no CD/Site" value={formatNumero(dados.excessoCD)} tone={dados.excessoCD > 0 ? "warning" : "default"} />
+        <MiniStatTile label="Deve permanecer no CD" value={formatNumero(dados.estoqueCDPermanece)} />
+        <MiniStatTile label="Excesso em loja" value={formatNumero(dados.excessoLojas)} tone={dados.excessoLojas > 0 ? "warning" : "default"} />
+        <MiniStatTile
+          label="Lojas em ruptura/crítico"
+          value={formatNumero(dados.rupturaLojas)}
+          tone={dados.rupturaLojas > 0 ? "critical" : "default"}
+        />
       </div>
 
       {dados.rupturaComExcessoDisponivel && (
@@ -174,18 +179,6 @@ export function DecisoesMovimentacaoResumo({ decisoes }: { decisoes: DecisoesMov
           Histórico de decisões indisponível neste ambiente (migration DecisaoMovimentacaoEstoque pendente).
         </p>
       )}
-    </div>
-  );
-}
-
-function MiniStat({ label, value, destaque, critico }: { label: string; value: number; destaque?: boolean; critico?: boolean }) {
-  const cor = critico ? "var(--status-critical)" : destaque ? "var(--status-warning)" : "var(--text-primary)";
-  return (
-    <div className="rounded-md border border-[var(--gridline)] px-3 py-2">
-      <div className="text-[10px] text-[var(--text-muted)]">{label}</div>
-      <div className="text-sm font-semibold tabular-nums" style={{ color: cor }}>
-        {formatNumero(value)}
-      </div>
     </div>
   );
 }

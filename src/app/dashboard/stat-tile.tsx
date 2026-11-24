@@ -52,3 +52,29 @@ export function StatTile({
     </div>
   );
 }
+
+// Versão compacta do StatTile acima pra números dentro de um card já aninhado (ex: 4 mini-stats
+// dentro de um painel de produto) — StatTile inteiro (p-4, shadow, valor text-xl/2xl) é grande
+// demais nesse contexto. Antes existiam DUAS cópias quase idênticas deste componente
+// (planejamento-estoque/excesso-distribuicao.tsx e reposicao-bestseller.tsx) — unificado aqui pra
+// não ter 2 versões levemente diferentes do mesmo mini-cartão de número espalhadas pelo código.
+export function MiniStatTile({
+  label,
+  value,
+  tone = "default",
+}: {
+  label: string;
+  value: string;
+  tone?: "default" | "warning" | "critical";
+}) {
+  const color =
+    tone === "critical" ? "var(--status-critical)" : tone === "warning" ? "var(--status-warning)" : "var(--text-primary)";
+  return (
+    <div className="rounded-md border border-[var(--gridline)] px-2.5 py-1.5">
+      <div className="text-[10px] text-[var(--text-muted)]">{label}</div>
+      <div className="text-sm font-semibold tabular-nums" style={{ color }}>
+        {value}
+      </div>
+    </div>
+  );
+}

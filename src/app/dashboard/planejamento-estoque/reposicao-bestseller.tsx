@@ -1,6 +1,7 @@
 import type { ItemReposicaoBestSellerConsolidada } from "@/lib/metrics";
 import { formatNumber } from "./format";
 import { MinimoManualForm } from "../estoque-minimo-manual/forms";
+import { MiniStatTile } from "../stat-tile";
 
 // Reposição Best Seller CONSOLIDADA na empresa (pedido do Rodrigo, 2026-11-23) — seção nova
 // dentro de Planejamento de Estoque, "por enquanto" (ele pretende reformular esta aba inteira
@@ -117,21 +118,21 @@ function ReposicaoBestSellerCard({
       </div>
 
       <div className="mb-2 grid grid-cols-2 gap-2 text-center">
-        <MiniStat label="Disponível" value={item.quantidadeDisponivel} />
+        <MiniStatTile label="Disponível" value={formatNumber(item.quantidadeDisponivel)} />
         {semMinimo ? (
-          <div className="rounded-md border border-[var(--gridline)] px-2 py-1.5">
+          <div className="rounded-md border border-[var(--gridline)] px-2.5 py-1.5">
             <div className="text-[10px] text-[var(--text-muted)]">Falta repor</div>
             <div className="text-xs font-medium" style={{ color: "var(--status-warning)" }}>
               defina o mínimo
             </div>
           </div>
         ) : (
-          <MiniStat label="Falta repor" value={item.falta} critico />
+          <MiniStatTile label="Falta repor" value={formatNumber(item.falta ?? 0)} tone="critical" />
         )}
       </div>
 
       {podeEditarMinimo ? (
-        <div className="rounded-md border border-[var(--gridline)] px-2 py-1.5">
+        <div className="rounded-md border border-[var(--gridline)] px-2.5 py-1.5">
           <div className="mb-1 text-[10px] text-[var(--text-muted)]">
             Mínimo {semMinimo ? "— cadastrar agora" : "(editar aqui)"}
           </div>
@@ -142,7 +143,7 @@ function ReposicaoBestSellerCard({
           />
         </div>
       ) : (
-        <MiniStat label="Mínimo" value={item.estoqueMinimo} />
+        <MiniStatTile label="Mínimo" value={item.estoqueMinimo != null ? formatNumber(item.estoqueMinimo) : "—"} />
       )}
     </div>
   );
@@ -165,19 +166,5 @@ function CountBadge({ value, label, tone }: { value: number; label: string; tone
     >
       {value} {label}
     </span>
-  );
-}
-
-function MiniStat({ label, value, critico }: { label: string; value: number | null; critico?: boolean }) {
-  return (
-    <div className="rounded-md border border-[var(--gridline)] px-2 py-1.5">
-      <div className="text-[10px] text-[var(--text-muted)]">{label}</div>
-      <div
-        className="text-sm font-semibold tabular-nums"
-        style={{ color: critico ? "var(--status-critical)" : "var(--text-primary)" }}
-      >
-        {value != null ? formatNumber(value) : "—"}
-      </div>
-    </div>
   );
 }

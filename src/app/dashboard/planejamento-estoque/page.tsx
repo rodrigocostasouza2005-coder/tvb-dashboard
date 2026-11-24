@@ -165,6 +165,7 @@ export default async function PlanejamentoEstoquePage({
 
   return (
     <div>
+      <h1 className="mb-1 text-lg font-semibold">Planejamento de Estoque</h1>
       <p className="mb-4 max-w-4xl text-sm text-[var(--text-secondary)]">
         Centro de decisão operacional: o que temos em estoque, onde está, o que exige ação, e o que fazer — comprar,
         transferir, aguardar ou reduzir exposição. Cobertura é estoque disponível ÷ velocidade média de venda nos
