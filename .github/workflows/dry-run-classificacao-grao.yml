@@ -1,0 +1,23 @@
+name: Dry-run migracao classificacao produto+cor
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dry-run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Dry run (so leitura, nunca escreve)
+        run: npx tsx scripts/backfill-classificacao-produto-cor.ts
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
