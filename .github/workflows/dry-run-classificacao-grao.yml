@@ -2,6 +2,11 @@ name: Dry-run migracao classificacao produto+cor
 
 on:
   workflow_dispatch:
+    inputs:
+      apply:
+        description: "Digite 'apply' pra consolidar de verdade (default: dry-run, so leitura)"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -17,7 +22,12 @@ jobs:
           node-version: "22"
           cache: npm
       - run: npm ci
-      - name: Dry run (so leitura, nunca escreve)
-        run: npx tsx scripts/backfill-classificacao-produto-cor.ts
+      - name: Rodar migracao (dry-run por padrao)
+        run: |
+          if [ "${{ github.event.inputs.apply }}" = "apply" ]; then
+            npx tsx scripts/backfill-classificacao-produto-cor.ts --apply
+          else
+            npx tsx scripts/backfill-classificacao-produto-cor.ts
+          fi
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
