@@ -53,7 +53,18 @@ export type Diagnostico =
   | "cobertura_critica"
   | "equilibrado"
   | "cobertura_excessiva"
-  | "estoque_parado";
+  | "estoque_parado"
+  // CORREÇÃO (Reformulação do Planejamento de Estoque, 2026-11-23) — achado da auditoria de Fase 1
+  // (docs/auditoria-planejamento-estoque-reformulacao-2026-11-23.md §3.1): "estoqueAtual>0 e
+  // vendasDias90=0" virava incondicionalmente "estoque_parado", sem distinguir produto recém-
+  // lançado (ainda não teve 90 dias de janela de venda) de estoque genuinamente morto. Esse erro
+  // alimentava recomendação de transferência/liquidação (prepararOrigens, aplicarRetencoes) pra
+  // peça que simplesmente ainda não teve chance de vender. "lancamento_recente" é um estado NOVO,
+  // deliberadamente separado de "estoque_parado" (nunca um alias/label cosmético) — ver
+  // diagnosticarVariante abaixo: ele NUNCA é elegível como origem de transferência nem conta como
+  // excesso (prepararOrigens/aplicarRetencoes continuam comparando só com a string exata
+  // "estoque_parado", então este novo estado fica fora dessas réguas por construção).
+  | "lancamento_recente";
 
 export type VariantePorLoja = {
   // Id da POSIÇÃO (pro CD/Site são os 2 storeIds juntos, "id1|id2" — ver PosicaoEstoque.posicaoId).
@@ -91,6 +102,19 @@ export function limiarExcessivo(tipoPosicao: TipoPosicao): number {
   return tipoPosicao === "cd_site" ? COBERTURA_EXCESSIVA_CD_SITE_DIAS : COBERTURA_EXCESSIVA_DIAS;
 }
 
+// `contexto.recemLancado` (opcional, default indefinido = comportamento IDÊNTICO ao de antes desta
+// correção): true só quando o chamador já verificou, com dado real, as DUAS condições que
+// justificam "ainda não teve chance de vender" em vez de "parou de vender":
+//   1. nunca houve venda registrada pra este SKU/produto em TODO o histórico (não só nos últimos
+//      90 dias) — um produto que já vendeu antes e parou é "estoque_parado" de verdade, não recém-
+//      lançado, mesmo que tenha ganhado uma reposição recente;
+//   2. a produção mais antiga conhecida (ProductionOrder.dataFinalizacaoProducao, Finalizado) pra
+//      este SKU/produto aconteceu dentro da mesma janela de 90 dias usada por vendasDias90 — ou
+//      seja, o estoque físico que existe hoje não teve nem 90 dias de vitrine.
+// Quando o chamador não calcula isso (contexto omitido — a maioria dos sites de chamada antigos,
+// ex. planejamento-avaliacao.ts, que avalia retrospectivamente DEPOIS de 90 dias já terem passado,
+// quando a distinção perde sentido), o comportamento é EXATAMENTE o de antes: qualquer
+// estoque>0+vendas90=0 continua "estoque_parado". Isto é aditivo, nunca uma mudança de default.
 export function diagnosticarVariante(
   v: {
     estoqueAtual: number;
@@ -99,15 +123,39 @@ export function diagnosticarVariante(
     velocidadeDiaria: number;
     coberturaDias: number | null;
   },
-  tipoPosicao: TipoPosicao = "loja"
+  tipoPosicao: TipoPosicao = "loja",
+  contexto?: { recemLancado?: boolean }
 ): Diagnostico {
   if (v.estoqueAtual === 0 && v.vendasDias90 === 0) return "sem_dado";
   if (v.estoqueAtual === 0 && v.vendasDias90 > 0) return "ruptura";
-  if (v.estoqueAtual > 0 && v.vendasDias90 === 0) return "estoque_parado";
+  if (v.estoqueAtual > 0 && v.vendasDias90 === 0) {
+    return contexto?.recemLancado ? "lancamento_recente" : "estoque_parado";
+  }
   if (v.coberturaDias == null) return "sem_dado";
   if (v.coberturaDias < COBERTURA_CRITICA_DIAS) return "cobertura_critica";
   if (v.coberturaDias > limiarExcessivo(tipoPosicao)) return "cobertura_excessiva";
   return "equilibrado";
+}
+
+// Camada de DADO (pura o suficiente pra ser testada com Map sintético) que decide `recemLancado`
+// por SKU, a partir de dois sinais já confirmados confiáveis pela auditoria de Fase 1: histórico
+// COMPLETO de venda (Sale, sem filtro de data — "já vendeu alguma vez, mesmo há muito tempo?") e
+// primeira produção finalizada (ProductionOrder, 0 lacuna de data quando Finalizado, ~82% de
+// cobertura de cod em 2026-11-23 — muito mais populado que dataLancamento/statusComercial
+// manuais, que a auditoria mediu em 0,04%/0,3%). Extraída pra ser compartilhada pelos dois grãos
+// que precisam dela (por cod×loja aqui, por produto agregado em planejamento-estoque.ts).
+export function calcularRecemLancado(args: {
+  primeiraVenda: Date | null;
+  primeiraProducaoFinalizada: Date | null;
+  janelaDias?: number;
+  agora?: Date;
+}): boolean {
+  if (args.primeiraVenda != null) return false; // já vendeu antes -> nunca é "recente", é parado de verdade
+  if (args.primeiraProducaoFinalizada == null) return false; // sem dado de produção -> preserva o default antigo (estoque_parado)
+  const janela = args.janelaDias ?? JANELA_DIAS.d90;
+  const agora = args.agora ?? new Date();
+  const diasDesdeProducao = (agora.getTime() - args.primeiraProducaoFinalizada.getTime()) / 86_400_000;
+  return diasDesdeProducao <= janela;
 }
 
 // BUG REAL confirmado pelo Rodrigo em produção (2026-11-13): vendasDias30/60/90 do CD/Site vinham
@@ -1266,7 +1314,7 @@ async function montarComparacaoSemCache(filters: ComparacaoFiltro): Promise<Comp
   const agora = new Date();
   const desde = (dias: number) => new Date(agora.getTime() - dias * 86_400_000);
 
-  const [vendas30, vendas60, vendas90, minimumRules, classificacoes] = await Promise.all([
+  const [vendas30, vendas60, vendas90, minimumRules, classificacoes, primeirasVendas, primeirasProducoes] = await Promise.all([
     prisma.sale.groupBy({
       by: ["storeId", "cod"],
       where: { status: { not: "Cancelada" }, storeId: { in: storeIds }, cod: { in: cods }, saleDate: { gte: desde(JANELA_DIAS.d30) } },
@@ -1286,9 +1334,36 @@ async function montarComparacaoSemCache(filters: ComparacaoFiltro): Promise<Comp
     // Só a classificação já cadastrada — nunca inferida aqui (ver ClassificacaoProduto no schema:
     // produto sem linha fica "desconhecido", não herda BEST_SELLER por vender muito).
     prisma.classificacaoProduto.findMany({ where: { cod: { in: cods } }, select: { cod: true, tipoCompra: true } }),
+    // Correção "estoque_parado" vs. "lancamento_recente" (ver diagnosticarVariante/
+    // calcularRecemLancado acima): histórico COMPLETO de venda por cod, sem filtro de data — é o
+    // mesmo tipo de query (_min sem janela) que planejamento-estoque.ts já usa por produto pra
+    // "diasHistoricoDisponivel". storeId não entra no filtro de propósito: "já vendeu alguma vez
+    // em QUALQUER posição" é o que importa pra saber se o SKU é conhecido do mercado.
+    prisma.sale.groupBy({
+      by: ["cod"],
+      where: { status: { not: "Cancelada" }, cod: { in: cods } },
+      _min: { saleDate: true },
+    }),
+    prisma.productionOrder.groupBy({
+      by: ["cod"],
+      where: { cod: { in: cods }, status: "Finalizado", dataFinalizacaoProducao: { not: null } },
+      _min: { dataFinalizacaoProducao: true },
+    }),
   ]);
 
   const tipoCompraPorCod = new Map(classificacoes.map((c) => [c.cod, c.tipoCompra]));
+  const primeiraVendaPorCod = new Map(primeirasVendas.map((r) => [r.cod, r._min.saleDate]));
+  const primeiraProducaoPorCod = new Map(primeirasProducoes.map((r) => [r.cod, r._min.dataFinalizacaoProducao]));
+  const recemLancadoPorCod = new Map(
+    cods.map((cod) => [
+      cod,
+      calcularRecemLancado({
+        primeiraVenda: primeiraVendaPorCod.get(cod) ?? null,
+        primeiraProducaoFinalizada: primeiraProducaoPorCod.get(cod) ?? null,
+        agora,
+      }),
+    ])
+  );
 
   // Agrega estoque/venda por POSIÇÃO (soma os storeIds de uma mesma posição — é assim que CD e
   // ATACADO viram uma posição única sem duplicar nem sobrescrever a quantidade).
@@ -1354,7 +1429,8 @@ async function montarComparacaoSemCache(filters: ComparacaoFiltro): Promise<Comp
       const estoqueMinimo = minimoRegra.length > 0 ? Math.max(...minimoRegra) : minimoDapicPorPosicao.get(k) ?? null;
       const diagnostico = diagnosticarVariante(
         { estoqueAtual, vendasDias30, vendasDias90, velocidadeDiaria, coberturaDias },
-        p.tipo
+        p.tipo,
+        { recemLancado: recemLancadoPorCod.get(cod) ?? false }
       );
       return {
         storeId: p.posicaoId,
@@ -1579,6 +1655,11 @@ export type VisaoGeralDistribuicao = {
   oportunidadesRedistribuicao: number;
   pecasMovimentaveis: number;
   alertasEstoqueParado: number;
+  // Correção da regra de "estoque parado" (ver diagnosticarVariante/calcularRecemLancado): contador
+  // SEPARADO (nunca somado em alertasEstoqueParado) pra nunca escondido — variante×unidade com
+  // estoque e zero venda em 90d, mas que a auditoria/motor já reconhece como "ainda não teve chance
+  // de vender" (nunca vendeu + produção finalizada dentro da mesma janela de 90d).
+  alertasLancamentoRecente: number;
   variantesAnalisadas: number;
   semDadoSuficiente: number;
   unidadesIgnoradas: { nome: string; motivo: string }[];
@@ -1613,6 +1694,7 @@ export async function getVisaoGeralDistribuicao(
 
   let estoqueTotal = 0;
   let alertasEstoqueParado = 0;
+  let alertasLancamentoRecente = 0;
   let semDadoSuficiente = 0;
 
   for (const v of variantes) {
@@ -1633,6 +1715,7 @@ export async function getVisaoGeralDistribuicao(
         u.variantesParadas += 1;
         alertasEstoqueParado += 1;
       }
+      if (l.diagnostico === "lancamento_recente") alertasLancamentoRecente += 1;
     }
   }
 
@@ -1659,6 +1742,7 @@ export async function getVisaoGeralDistribuicao(
     oportunidadesRedistribuicao: mov.movimentacoes.filter((m) => m.classificacao === "REDISTRIBUIR").length,
     pecasMovimentaveis: mov.movimentacoes.reduce((s, m) => s + m.quantidadeSugerida, 0),
     alertasEstoqueParado,
+    alertasLancamentoRecente,
     variantesAnalisadas: variantes.length,
     semDadoSuficiente,
     unidadesIgnoradas: posicoes.ignoradas,

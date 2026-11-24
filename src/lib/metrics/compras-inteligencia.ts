@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { Prisma, TipoCompraProduto, StatusComercialProduto, PossibilidadeReposicao } from "@prisma/client";
 import { dropEmCicloAtivo } from "./planejamento-distribuicao";
+import { COLECAO_BEST_SELLER } from "./reposicao-bestseller-consolidada";
 
 // ---------------------------------------------------------------------------
 // MOTOR DE CÁLCULO — BEST SELLER vs DROP
@@ -751,18 +752,54 @@ export type RecomendacaoBestSellerPorProduto = SugestaoBestSeller & {
 // por produto, agregável por grupo). Só considera produtos já classificados como BEST_SELLER em
 // ClassificacaoProduto — produto na fila de revisão não entra aqui (pedido explícito: nunca tratar
 // desconhecido como Best Seller).
+// ---------------------------------------------------------------------------
+// CORREÇÃO DE FONTE (2026-11-23, Reformulação do Planejamento de Estoque — achado de revisão do
+// PR #119, antes do merge): esta função filtrava por ClassificacaoProduto.tipoCompra=BEST_SELLER.
+// Achado real: esse campo tem cobertura quase nula (0 cods classificados BEST_SELLER no dev hoje;
+// 2 de 2.681 em produção em 2026-11-18, por amostragem da auditoria §2) — o processo de
+// classificação manual NUNCA foi operacionalizado de verdade. O Rodrigo já havia corrigido esse
+// EXATO problema pro painel novo da Zona 1 (reposicao-bestseller-consolidada.ts, 2026-11-23):
+// usar `colecao === "BESTSELLER"` em StockSnapshot (dado sincronizado do DAPIC, 329 cods/46
+// produtos reais hoje), não ClassificacaoProduto. Esta função ficou de fora daquela correção na
+// primeira versão deste PR — sem isso, um produto Best Seller de verdade (por coleção) aparecia
+// certo no painel da Zona 1 mas SEM nenhuma recomendação Best Seller na Aba 4/Mapa de Compras do
+// MESMO produto, porque ClassificacaoProduto não tem linha pra ele. Corrigido aqui pra usar a
+// MESMA fonte (COLECAO_BEST_SELLER), reaproveitada de reposicao-bestseller-consolidada.ts — nunca
+// uma segunda constante com o mesmo valor.
+//
+// O CÁLCULO (calcularSugestaoBestSeller) não muda nada: nenhum dos seus parâmetros vem de
+// ClassificacaoProduto — estoqueSegurancaUnidades/leadTimeDias vêm de CoberturaMeta POR GRUPO
+// (não por SKU classificado), venda/estoque/custo vêm de Sale/StockSnapshot/ProductionOrder. Só a
+// fonte de "quais cods entram no universo Best Seller" mudou.
+//
+// `colecaoIn`/`statusComercialIn` (ComprasFiltro) são campos de ClassificacaoProduto — não existem
+// nesta fonte nova (StockSnapshot não tem "coleção sazonal"/"status comercial" nesse sentido; a
+// própria "BESTSELLER" já é uma coleção fixa e evergreen, não uma entre várias). Em vez de
+// silenciosamente ignorá-los, preservo o efeito prático que já existia antes desta correção:
+// como as 2 linhas Best Seller que chegaram a existir em ClassificacaoProduto tinham
+// `colecao: null`, qualquer filtro de `colecaoIn` com valor(es) específico(s) já excluía Best
+// Seller do resultado (nenhum valor bate com null) — por isso, quando `colecaoIn` vem preenchido,
+// esta função retorna [] (Best Seller nunca pertence a uma coleção sazonal específica). Sem
+// `statusComercial` nesta fonte pra comparar, `statusComercialIn` preenchido também retorna []
+// (nunca assume "ativo" por adivinhação quando o usuário pediu um filtro de status específico).
+// ClassificacaoProduto continua existindo e sendo usada normalmente em tudo o mais (Drop, fila de
+// revisão, histórico de decisão) — esta mudança é só a fonte de identidade do universo Best Seller.
 export async function getRecomendacoesBestSeller(filters: ComprasFiltro = {}): Promise<RecomendacaoBestSellerPorProduto[]> {
-  const classificados = await prisma.classificacaoProduto.findMany({
-    where: {
-      tipoCompra: TipoCompraProduto.BEST_SELLER,
-      ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
-      ...(filters.colecaoIn ? { colecao: { in: filters.colecaoIn } } : {}),
-      ...(filters.statusComercialIn ? { statusComercial: { in: filters.statusComercialIn } } : {}),
-    },
-  });
-  if (classificados.length === 0) return [];
+  if ((filters.colecaoIn && filters.colecaoIn.length > 0) || (filters.statusComercialIn && filters.statusComercialIn.length > 0)) {
+    return [];
+  }
 
-  const cods = classificados.map((c) => c.cod);
+  const stockRows = await prisma.stockSnapshot.findMany({
+    where: {
+      colecao: COLECAO_BEST_SELLER,
+      ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
+    },
+    distinct: ["cod"],
+    select: { cod: true, produto: true, grupo: true },
+  });
+  if (stockRows.length === 0) return [];
+
+  const cods = stockRows.map((c) => c.cod);
   const [velocidade, pedidosAberto, estoqueRows, coberturaMetas, custoPorCod] = await Promise.all([
     getVendaMediaDiariaPorCod(cods),
     getPedidosEmAbertoPorCod(cods),
@@ -774,7 +811,7 @@ export async function getRecomendacoesBestSeller(filters: ComprasFiltro = {}): P
   const estoqueByCod = new Map(estoqueRows.map((e) => [e.cod, e._sum.quantidadeDisponivel ?? 0]));
   const metaByGrupo = new Map(coberturaMetas.map((m) => [m.grupo, m]));
 
-  return classificados.map((c) => {
+  return stockRows.map((c) => {
     const meta = metaByGrupo.get(c.grupo);
     const horizonteCoberturaDias =
       filters.horizonteDiasOverride ?? (meta ? Math.round(meta.mesesCobertura * 30) : HORIZONTE_PADRAO_DIAS);
@@ -805,6 +842,19 @@ export type RecomendacaoDropPorProduto = SugestaoDrop & {
 // diasRestantesJanela vem de dataEncerramentoPrevista quando cadastrada; sem data, não há como
 // saber quanto falta de janela — fica null e a função pura recebe 0 (sem previsão futura), com
 // aviso explícito (não assume janela infinita nem fecha arbitrariamente).
+//
+// DELIBERADAMENTE NÃO movido pra `colecao` como getRecomendacoesBestSeller acima (2026-11-23,
+// revisão do PR #119): diferente de Best Seller (1 coleção fixa "BESTSELLER"), um Drop precisa de
+// `dataLancamento`, `dataEncerramentoPrevista`, `possibilidadeReposicao` e `orcamentoDrop` —
+// campos genuinamente manuais que só existem em ClassificacaoProduto, sem equivalente em
+// StockSnapshot/Sale (não existe "data de encerramento previsto" sincronizada do DAPIC). Trocar a
+// fonte aqui faria a função perder a única informação que permite calcular janela comercial
+// restante e risco de ruptura/sobra do Drop — não é um caso de "dado mais confiável disponível em
+// outro lugar", é dado que SÓ existe aqui. A mesma baixa cobertura de classificação (achado da
+// auditoria §2) continua sendo uma limitação real do Drop (poucos Drops classificados = poucas
+// recomendações de Drop calculáveis) — mas a correção correta pra isso é operacionalizar o
+// cadastro de ClassificacaoProduto pra Drop (fora do escopo desta reformulação), não trocar a
+// fonte por uma que não tem o dado necessário.
 export async function getRecomendacoesDrop(filters: ComprasFiltro = {}): Promise<RecomendacaoDropPorProduto[]> {
   const classificados = await prisma.classificacaoProduto.findMany({
     where: {
@@ -1078,9 +1128,17 @@ export async function registrarDecisaoCompra(input: RegistrarDecisaoInput) {
   });
 }
 
-export async function getHistoricoDecisoesCompra(filters: { grupo?: string; cod?: string } = {}) {
+// `codIn` (2026-11-23, Reformulação do Planejamento de Estoque — Aba "Decisões e Ações"): extensão
+// aditiva pra listar decisões de TODOS os cods de um produto de uma vez (vários SKUs/cor/tamanho),
+// sem precisar de N chamadas. Nunca muda o comportamento de `grupo`/`cod` (continuam exatamente
+// como estavam) — `codIn` é só mais um filtro opcional, combinável com os demais via AND.
+export async function getHistoricoDecisoesCompra(filters: { grupo?: string; cod?: string; codIn?: string[] } = {}) {
   return prisma.decisaoCompra.findMany({
-    where: { ...(filters.grupo ? { grupo: filters.grupo } : {}), ...(filters.cod ? { cod: filters.cod } : {}) },
+    where: {
+      ...(filters.grupo ? { grupo: filters.grupo } : {}),
+      ...(filters.cod ? { cod: filters.cod } : {}),
+      ...(filters.codIn ? { cod: { in: filters.codIn } } : {}),
+    },
     orderBy: { decididoEm: "desc" },
   });
 }

@@ -1,56 +1,63 @@
-import { TipoCompraProduto, StatusComercialProduto, PossibilidadeReposicao } from "@prisma/client";
+import type { DecisaoCompra } from "@prisma/client";
 import type {
   ProdutoPlanejamentoDetalhe,
+  ProdutoPlanejamento,
   ClassificacaoAgregada,
   RecomendacaoGradeProduto,
   ProdutoExcessoDistribuicao,
   DecisoesMovimentacaoPorStatus,
+  ItemMinimoManual,
+  RecomendacaoPrincipal,
 } from "@/lib/metrics";
-import { classificarProdutoEmLoteAction } from "../mapa-compras/classificacao-actions";
-import { SalesTrendChart } from "../sales-trend-chart";
-import { formatNumber } from "./format";
-import { ExcessoDistribuicaoSection } from "./excesso-distribuicao";
-import { GradeRecomendadaSection } from "./grade-recomendada";
+import type { RawSearchParams } from "@/lib/filters";
+import { ProdutoAbaNav, parseProdutoAba, type ProdutoAba } from "./produto-aba-nav";
+import { AbaVisaoGeralProduto } from "./aba-visao-geral";
+import { AbaGradeProduto } from "./aba-grade";
+import { AbaDistribuicaoProduto } from "./aba-distribuicao";
+import { AbaReposicaoProduto } from "./aba-reposicao";
+import { AbaDecisoesProduto } from "./aba-decisoes";
 
-const STATUS_COMERCIAL_LABEL: Record<StatusComercialProduto, string> = {
-  ATIVO: "Ativo",
-  EM_LANCAMENTO: "Em lançamento",
-  EM_REPOSICAO: "Em reposição",
-  EM_ENCERRAMENTO: "Em encerramento",
-  DESCONTINUADO: "Descontinuado",
-};
-
-// "Não misturar cores de forma que distorça a curva de tamanhos" — por isso a tabela de tamanho
-// é SEMPRE renderizada dentro do bloco de uma cor específica, nunca somada entre cores (ver
-// getProdutoPlanejamentoDetalhe, src/lib/metrics/planejamento-estoque.ts).
+// Zona 3 do pedido do Rodrigo (Reformulação do Planejamento de Estoque, 2026-11-23) — este
+// componente é hoje só o SHELL: cabeçalho + navegação por abas + roteamento pra uma das 5 abas
+// (Visão Geral / Grade / Distribuição / Reposição e Compras / Decisões e Ações). Antes
+// (produto-detalhe.tsx pré-reformulação, ver auditoria §1.2), este MESMO componente empilhava até
+// 8 blocos verticalmente sem nenhuma divisão — essa é a mudança estrutural central da missão.
+// Nenhum dado novo é buscado aqui: tudo já vem resolvido de page.tsx (mesmo padrão de antes), só a
+// APRESENTAÇÃO foi reorganizada. "Manter seleção de produto e filtros ao navegar entre abas" é
+// garantido por aba/produto/grupo/tamanho/busca/situacao/sort/dir viverem todos no searchParam,
+// nunca em estado client.
 export function ProdutoDetalhe({
   detalhe,
+  linha,
   classificacao,
   grade,
   podeClassificar,
   fecharHref,
   excessoDistribuicao,
   decisoesMovimentacao,
+  decisoesCompra,
+  minimoManual,
+  recomendacaoPrincipal,
   distribuicaoHref,
+  basePath,
+  searchParams,
 }: {
   detalhe: ProdutoPlanejamentoDetalhe;
+  linha: ProdutoPlanejamento | undefined;
   classificacao: ClassificacaoAgregada;
   grade: RecomendacaoGradeProduto | null;
   podeClassificar: boolean;
   fecharHref: string;
   excessoDistribuicao: ProdutoExcessoDistribuicao | null;
   decisoesMovimentacao: DecisoesMovimentacaoPorStatus | null;
+  decisoesCompra: DecisaoCompra[];
+  minimoManual: ItemMinimoManual[];
+  recomendacaoPrincipal: RecomendacaoPrincipal | null;
   distribuicaoHref: string;
+  basePath: string;
+  searchParams: RawSearchParams;
 }) {
-  const evolucao = detalhe.evolucaoVendas.map((d) => ({ day: d.day, unitsSold: d.unitsLiquida, revenue: d.revenueLiquida }));
-  const temRecomendacao = detalhe.recomendacoesBestSeller.length > 0 || detalhe.recomendacoesDrop.length > 0;
-  const precisaClassificar = classificacao === "NAO_CLASSIFICADO" || classificacao === "MISTO";
-  // Fase 2B (ajuste de regra Rodrigo 2026-11-17): mostra a seção de excesso/distribuição pra
-  // QUALQUER classificação — inclusive NAO_CLASSIFICADO/MISTO — sempre que o motor encontrou
-  // algum sinal real (excesso/ruptura/oportunidade/retenção). "Classificação pendente" é exibida
-  // explicitamente dentro da seção (ver excesso-distribuicao.tsx) em vez de esconder o produto ou
-  // aplicar a régua de Best Seller/Drop sem base.
-  const mostrarExcessoDistribuicao = excessoDistribuicao != null;
+  const aba: ProdutoAba = parseProdutoAba(searchParams.aba);
 
   return (
     <div className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
@@ -63,179 +70,21 @@ export function ProdutoDetalhe({
         </a>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 p-4 lg:grid-cols-2">
-        <div>
-          <h3 className="mb-2 text-xs font-medium text-[var(--text-muted)]">Evolução de vendas (90 dias, líquida)</h3>
-          <SalesTrendChart data={evolucao} showRevenue={false} />
-        </div>
+      <ProdutoAbaNav basePath={basePath} searchParams={searchParams} atual={aba} />
 
-        <div>
-          <h3 className="mb-2 text-xs font-medium text-[var(--text-muted)]">
-            Estoque e demanda por loja/CD
-          </h3>
-          <p className="mb-2 text-[11px] text-[var(--text-muted)]">
-            Venda do CD/Site já inclui o que ele abasteceu pras lojas (giro aparente daquela posição) — comparar entre
-            lojas é seguro, mas não é &quot;venda total da empresa&quot;.
-          </p>
-          <div className="overflow-x-auto rounded-md border border-[var(--gridline)]">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
-                  <th className="px-3 py-1.5 font-medium">Posição</th>
-                  <th className="px-3 py-1.5 font-medium text-right">Estoque</th>
-                  <th className="px-3 py-1.5 font-medium text-right">Vendas 30d</th>
-                  <th className="px-3 py-1.5 font-medium text-right">Cobertura</th>
-                </tr>
-              </thead>
-              <tbody>
-                {detalhe.porLoja.map((l) => (
-                  <tr key={l.posicaoId} className="border-b border-[var(--gridline)] last:border-0">
-                    <td className="px-3 py-1.5 text-[var(--text-secondary)]">{l.posicaoNome}</td>
-                    <td className="px-3 py-1.5 tabular-nums text-right text-[var(--text-secondary)]">{formatNumber(l.estoqueAtual)}</td>
-                    <td className="px-3 py-1.5 tabular-nums text-right text-[var(--text-secondary)]">{formatNumber(l.vendasDias30)}</td>
-                    <td className="px-3 py-1.5 tabular-nums text-right text-[var(--text-secondary)]">
-                      {l.coberturaDias != null ? `${l.coberturaDias.toFixed(0)}d` : "—"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
-      {podeClassificar && precisaClassificar && (
-        <div className="border-t border-[var(--gridline)] p-4">
-          <h3 className="mb-1 text-xs font-medium text-[var(--text-muted)]">
-            Classificar todos os {detalhe.cods.length} SKU(s) deste produto de uma vez
-          </h3>
-          <p className="mb-2 text-[11px] text-[var(--text-muted)]">
-            {classificacao === "MISTO"
-              ? `Os ${detalhe.cods.length} SKU(s) deste produto têm classificações diferentes hoje — a decisão escolhida abaixo substitui TODAS elas pela mesma.`
-              : `Nenhum dos ${detalhe.cods.length} SKU(s) deste produto está classificado ainda. A decisão continua 100% manual — isto só evita repetir o clique por cor/tamanho.`}{" "}
-            O servidor confere cada SKU contra o cadastro real antes de gravar (nunca aceita um SKU de outro produto).
-          </p>
-          <form action={classificarProdutoEmLoteAction} className="flex flex-wrap items-end gap-2 text-xs">
-            <input type="hidden" name="produto" value={detalhe.produto} />
-            {detalhe.cods.map((cod) => (
-              <input key={cod} type="hidden" name="cod" value={cod} />
-            ))}
-            <label className="flex flex-col gap-0.5 text-[var(--text-muted)]">
-              Tipo de compra
-              <select name="tipoCompra" required defaultValue="" className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1 text-[var(--text-primary)]">
-                <option value="" disabled>
-                  Selecione
-                </option>
-                <option value={TipoCompraProduto.BEST_SELLER}>Best Seller</option>
-                <option value={TipoCompraProduto.DROP}>Drop</option>
-              </select>
-            </label>
-            <label className="flex flex-col gap-0.5 text-[var(--text-muted)]">
-              Status comercial
-              <select name="statusComercial" required defaultValue={StatusComercialProduto.ATIVO} className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1 text-[var(--text-primary)]">
-                {Object.values(StatusComercialProduto).map((s) => (
-                  <option key={s} value={s}>
-                    {STATUS_COMERCIAL_LABEL[s]}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="flex flex-col gap-0.5 text-[var(--text-muted)]">
-              Possibilidade de reposição
-              <select name="possibilidadeReposicao" required defaultValue={PossibilidadeReposicao.A_CONFIRMAR} className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1 text-[var(--text-primary)]">
-                <option value={PossibilidadeReposicao.SIM}>Sim</option>
-                <option value={PossibilidadeReposicao.NAO}>Não</option>
-                <option value={PossibilidadeReposicao.A_CONFIRMAR}>A confirmar</option>
-              </select>
-            </label>
-            <button type="submit" className="rounded-md border border-[var(--border)] px-3 py-1.5 font-medium text-[var(--text-secondary)] hover:bg-[var(--page-plane)]">
-              Classificar {detalhe.cods.length} SKU(s)
-            </button>
-          </form>
-        </div>
+      {aba === "geral" && <AbaVisaoGeralProduto detalhe={detalhe} linha={linha} recomendacao={recomendacaoPrincipal} />}
+      {aba === "grade" && <AbaGradeProduto detalhe={detalhe} grade={grade} />}
+      {aba === "distribuicao" && <AbaDistribuicaoProduto excesso={excessoDistribuicao} distribuicaoHref={distribuicaoHref} />}
+      {aba === "reposicao" && (
+        <AbaReposicaoProduto detalhe={detalhe} excesso={excessoDistribuicao} minimoManual={minimoManual} podeEditarMinimo={podeClassificar} />
       )}
-
-      <div className="border-t border-[var(--gridline)] p-4">
-        <h3 className="mb-2 text-xs font-medium text-[var(--text-muted)]">
-          Distribuição por tamanho (por cor — nunca somada entre cores diferentes)
-        </h3>
-        <div className="flex flex-col gap-3">
-          {detalhe.porCor.map((c) => (
-            <div key={c.cor ?? "sem-cor"} className="overflow-x-auto rounded-md border border-[var(--gridline)]">
-              <div className="border-b border-[var(--gridline)] bg-[var(--page-plane)] px-3 py-1 text-xs font-medium text-[var(--text-secondary)]">
-                {c.cor ?? "Cor não informada"}
-              </div>
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
-                    <th className="px-3 py-1.5 font-medium">Tamanho</th>
-                    <th className="px-3 py-1.5 font-medium text-right">Estoque total</th>
-                    <th className="px-3 py-1.5 font-medium text-right">CD/Site</th>
-                    <th className="px-3 py-1.5 font-medium text-right">Lojas</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {c.porTamanho.map((t) => (
-                    <tr key={t.tamanho ?? "sem-tamanho"} className="border-b border-[var(--gridline)] last:border-0">
-                      <td className="px-3 py-1.5 text-[var(--text-secondary)]">{t.tamanho ?? "—"}</td>
-                      <td className="px-3 py-1.5 tabular-nums text-right text-[var(--text-secondary)]">{formatNumber(t.estoqueTotal)}</td>
-                      <td className="px-3 py-1.5 tabular-nums text-right text-[var(--text-secondary)]">{formatNumber(t.estoqueCD)}</td>
-                      <td className="px-3 py-1.5 tabular-nums text-right text-[var(--text-secondary)]">{formatNumber(t.estoqueLojas)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {detalhe.quantidadeEmTransito > 0 && (
-        <div className="border-t border-[var(--gridline)] px-4 py-3 text-xs text-[var(--text-secondary)]">
-          <strong>{formatNumber(detalhe.quantidadeEmTransito)} unidade(s) em produção/trânsito</strong> — sem data de
-          chegada confiável hoje (o DAPIC não informa previsão de finalização), por isso não está somada ao estoque
-          disponível acima.
-        </div>
-      )}
-
-      {grade && <GradeRecomendadaSection grade={grade} />}
-
-      {temRecomendacao && (
-        <div className="border-t border-[var(--gridline)] p-4">
-          <h3 className="mb-2 text-xs font-medium text-[var(--text-muted)]">Recomendação do motor de compras (por SKU)</h3>
-          <div className="flex flex-col gap-2 text-xs">
-            {detalhe.recomendacoesBestSeller.map((r) => (
-              <div key={r.cod} className="rounded-md border border-[var(--gridline)] p-2">
-                <div className="font-medium text-[var(--text-primary)]">Best Seller · {r.cod}</div>
-                <div className="text-[var(--text-secondary)]">
-                  Sugestão: {formatNumber(r.quantidadeSugerida)} un. · Cobertura atual:{" "}
-                  {r.coberturaAtualDias != null ? `${r.coberturaAtualDias.toFixed(0)}d` : "—"} ·{" "}
-                  {r.confiavel ? "confiável" : "baixa confiança"}
-                </div>
-                {r.premissas.length > 0 && <div className="mt-1 text-[var(--text-muted)]">{r.premissas.join(" · ")}</div>}
-              </div>
-            ))}
-            {detalhe.recomendacoesDrop.map((r) => (
-              <div key={r.cod} className="rounded-md border border-[var(--gridline)] p-2">
-                <div className="font-medium text-[var(--text-primary)]">Drop · {r.cod}</div>
-                <div className="text-[var(--text-secondary)]">
-                  {r.diasRestantesJanela > 0 ? `${r.diasRestantesJanela} dia(s) restantes na janela · ` : ""}
-                  {r.riscoRuptura && "risco de ruptura"}
-                  {r.riscoRuptura && r.riscoSobra && " · "}
-                  {r.riscoSobra && "risco de sobra"}
-                  {!r.riscoRuptura && !r.riscoSobra && "sem risco identificado"}
-                </div>
-                {r.premissas.length > 0 && <div className="mt-1 text-[var(--text-muted)]">{r.premissas.join(" · ")}</div>}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {mostrarExcessoDistribuicao && (
-        <ExcessoDistribuicaoSection
-          dados={excessoDistribuicao!}
-          decisoes={decisoesMovimentacao}
+      {aba === "decisoes" && (
+        <AbaDecisoesProduto
+          detalhe={detalhe}
+          classificacao={classificacao}
+          podeClassificar={podeClassificar}
+          decisoesMovimentacao={decisoesMovimentacao}
+          decisoesCompra={decisoesCompra}
           distribuicaoHref={distribuicaoHref}
         />
       )}

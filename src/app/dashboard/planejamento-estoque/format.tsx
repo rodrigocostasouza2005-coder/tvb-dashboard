@@ -12,6 +12,9 @@ export const SITUACAO_LABEL: Record<Diagnostico, string> = {
   equilibrado: "Equilibrado",
   cobertura_excessiva: "Possível excesso",
   estoque_parado: "Sem movimentação",
+  // Correção da regra de "estoque parado" (Reformulação do Planejamento de Estoque, 2026-11-23) —
+  // ver comentário completo em diagnosticarVariante/calcularRecemLancado (distribuicao-estoque.ts).
+  lancamento_recente: "Recém-lançado (aguardando giro)",
 };
 
 // Mesmos tokens de status já definidos em globals.css (--status-good/warning/serious/critical)
@@ -23,6 +26,10 @@ export const SITUACAO_COR: Record<Diagnostico, string> = {
   equilibrado: "text-[var(--status-good)]",
   cobertura_excessiva: "text-[var(--status-warning)]",
   estoque_parado: "text-[var(--status-warning)]",
+  // Cor informativa (mesma de distribuicao-estoque/format.ts), nunca a de alerta (warning/critical)
+  // — "recém-lançado" não é um problema a resolver, é um estado honesto de "ainda sem dado
+  // suficiente pra julgar", igual a sem_dado mas com causa conhecida.
+  lancamento_recente: "text-[var(--series-1)]",
 };
 
 export const CLASSIFICACAO_LABEL: Record<ClassificacaoAgregada, string> = {

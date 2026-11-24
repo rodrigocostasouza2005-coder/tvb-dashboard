@@ -6,9 +6,25 @@ const getRecomendacoesBestSeller = vi.fn();
 const getRecomendacoesDrop = vi.fn();
 const getDailySalesByProduto = vi.fn();
 const saleGroupBy = vi.fn();
+// Correção "estoque_parado" vs. "lancamento_recente" (ver planejamento-estoque.ts): novas queries
+// usadas só pra decidir calcularRecemLancado. Default (beforeEach) devolve "nenhuma produção
+// conhecida", que faz calcularRecemLancado sempre retornar false — ou seja, PRESERVA o
+// comportamento de antes desta correção pra todo teste que não mock explicitamente o contrário.
+const productionOrderGroupBy = vi.fn();
+const saleAggregate = vi.fn();
+const productionOrderAggregate = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
-  prisma: { sale: { groupBy: (...a: unknown[]) => saleGroupBy(...a) } },
+  prisma: {
+    sale: {
+      groupBy: (...a: unknown[]) => saleGroupBy(...a),
+      aggregate: (...a: unknown[]) => saleAggregate(...a),
+    },
+    productionOrder: {
+      groupBy: (...a: unknown[]) => productionOrderGroupBy(...a),
+      aggregate: (...a: unknown[]) => productionOrderAggregate(...a),
+    },
+  },
 }));
 
 // diagnosticarVariante é função pura (sem Prisma) — mantida real, não mockada, pra testar a
@@ -52,6 +68,9 @@ beforeEach(() => {
   getRecomendacoesDrop.mockReset().mockResolvedValue([]);
   getDailySalesByProduto.mockReset().mockResolvedValue([]);
   saleGroupBy.mockReset();
+  productionOrderGroupBy.mockReset().mockResolvedValue([]);
+  saleAggregate.mockReset().mockResolvedValue({ _min: { saleDate: null } });
+  productionOrderAggregate.mockReset().mockResolvedValue({ _min: { dataFinalizacaoProducao: null } });
 });
 
 describe("getProdutosPlanejamento", () => {
@@ -393,5 +412,153 @@ describe("getProdutoPlanejamentoDetalhe — Fase 2: correção da cobertura/diag
     expect(loja.vendasDias30).toBe(3); // 0 + 3, agregado
     expect(loja.vendasDias90).toBe(9); // 0 + 9, agregado
     expect(loja.diagnostico).toBe("cobertura_excessiva"); // reflete o AGREGADO, não o 1º cod (que seria "sem_dado")
+  });
+});
+
+// Correção "estoque_parado" vs. "lancamento_recente" (Reformulação do Planejamento de Estoque,
+// 2026-11-23 — achado §3.1 da auditoria): estoque>0 + vendasDias90=0 não pode mais virar
+// incondicionalmente "estoque_parado" quando o produto nunca vendeu E a produção mais antiga
+// conhecida é recente. Ver calcularRecemLancado/diagnosticarVariante em distribuicao-estoque.ts.
+describe("getProdutosPlanejamento — correção estoque_parado vs. lancamento_recente", () => {
+  const hoje = new Date();
+
+  it("estoque>0, nunca vendeu, produção finalizada há 20 dias (<=90) -> lancamento_recente, NUNCA estoque_parado", async () => {
+    getComparacaoCompleta.mockResolvedValue({
+      variantes: [
+        baseVariante({
+          porLoja: [
+            { storeId: "loja-a", storeCode: "A", storeName: "Loja A", tipoPosicao: "loja", estoqueAtual: 50, vendasDias30: 0, vendasDias60: 0, vendasDias90: 0, velocidadeDiaria: 0, coberturaDias: null, estoqueMinimo: null, diagnostico: "sem_dado" },
+          ],
+        }),
+      ],
+      posicoes: {}, colunas: [], gradePorProdutoPosicao: {},
+    });
+    saleGroupBy
+      .mockReset()
+      .mockResolvedValueOnce([]) // v30: nunca vendeu
+      .mockResolvedValueOnce([]) // v60
+      .mockResolvedValueOnce([]) // v90
+      .mockResolvedValueOnce([]); // histórico (_min saleDate) — sem linha = nunca vendeu
+    productionOrderGroupBy.mockResolvedValue([
+      { produto: "Camisa Polo", _min: { dataFinalizacaoProducao: new Date(hoje.getTime() - 20 * 86_400_000) } },
+    ]);
+
+    const { getProdutosPlanejamento } = await import("../planejamento-estoque");
+    const [r] = await getProdutosPlanejamento();
+
+    expect(r.situacao).toBe("lancamento_recente");
+  });
+
+  it("estoque>0, nunca vendeu, produção finalizada há 200 dias (>90) -> continua estoque_parado (sem dado de 'ainda muito novo')", async () => {
+    getComparacaoCompleta.mockResolvedValue({
+      variantes: [
+        baseVariante({
+          porLoja: [
+            { storeId: "loja-a", storeCode: "A", storeName: "Loja A", tipoPosicao: "loja", estoqueAtual: 50, vendasDias30: 0, vendasDias60: 0, vendasDias90: 0, velocidadeDiaria: 0, coberturaDias: null, estoqueMinimo: null, diagnostico: "sem_dado" },
+          ],
+        }),
+      ],
+      posicoes: {}, colunas: [], gradePorProdutoPosicao: {},
+    });
+    saleGroupBy.mockReset().mockResolvedValueOnce([]).mockResolvedValueOnce([]).mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+    productionOrderGroupBy.mockResolvedValue([
+      { produto: "Camisa Polo", _min: { dataFinalizacaoProducao: new Date(hoje.getTime() - 200 * 86_400_000) } },
+    ]);
+
+    const { getProdutosPlanejamento } = await import("../planejamento-estoque");
+    const [r] = await getProdutosPlanejamento();
+
+    expect(r.situacao).toBe("estoque_parado");
+  });
+
+  it("estoque>0, JÁ VENDEU antes (mesmo há muito tempo) e tem produção recente (ex.: reposição) -> continua estoque_parado, nunca lancamento_recente", async () => {
+    getComparacaoCompleta.mockResolvedValue({
+      variantes: [
+        baseVariante({
+          porLoja: [
+            { storeId: "loja-a", storeCode: "A", storeName: "Loja A", tipoPosicao: "loja", estoqueAtual: 50, vendasDias30: 0, vendasDias60: 0, vendasDias90: 0, velocidadeDiaria: 0, coberturaDias: null, estoqueMinimo: null, diagnostico: "sem_dado" },
+          ],
+        }),
+      ],
+      posicoes: {}, colunas: [], gradePorProdutoPosicao: {},
+    });
+    saleGroupBy
+      .mockReset()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      // histórico: já vendeu há 400 dias (fora da janela de 90d usada pros totais, mas prova
+      // que o produto é CONHECIDO do mercado, não um lançamento)
+      .mockResolvedValueOnce([{ produto: "Camisa Polo", _min: { saleDate: new Date(hoje.getTime() - 400 * 86_400_000) } }]);
+    // Produção "recente" (reposição) não deveria importar: já vendeu antes é suficiente pra NUNCA
+    // ser lancamento_recente (ver calcularRecemLancado: primeiraVenda != null -> sempre false).
+    productionOrderGroupBy.mockResolvedValue([
+      { produto: "Camisa Polo", _min: { dataFinalizacaoProducao: new Date(hoje.getTime() - 5 * 86_400_000) } },
+    ]);
+
+    const { getProdutosPlanejamento } = await import("../planejamento-estoque");
+    const [r] = await getProdutosPlanejamento();
+
+    expect(r.situacao).toBe("estoque_parado");
+  });
+
+  it("sem NENHUM dado de ProductionOrder pro produto -> preserva o comportamento antigo (estoque_parado), nunca assume lançamento recente por omissão", async () => {
+    getComparacaoCompleta.mockResolvedValue({
+      variantes: [
+        baseVariante({
+          porLoja: [
+            { storeId: "loja-a", storeCode: "A", storeName: "Loja A", tipoPosicao: "loja", estoqueAtual: 50, vendasDias30: 0, vendasDias60: 0, vendasDias90: 0, velocidadeDiaria: 0, coberturaDias: null, estoqueMinimo: null, diagnostico: "sem_dado" },
+          ],
+        }),
+      ],
+      posicoes: {}, colunas: [], gradePorProdutoPosicao: {},
+    });
+    saleGroupBy.mockReset().mockResolvedValueOnce([]).mockResolvedValueOnce([]).mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+    productionOrderGroupBy.mockResolvedValue([]); // sem nenhuma ordem de produção conhecida
+
+    const { getProdutosPlanejamento } = await import("../planejamento-estoque");
+    const [r] = await getProdutosPlanejamento();
+
+    expect(r.situacao).toBe("estoque_parado");
+  });
+});
+
+describe("getProdutoPlanejamentoDetalhe — correção estoque_parado vs. lancamento_recente (por loja)", () => {
+  it("produto nunca vendeu e produção finalizada há 10 dias -> diagnóstico por loja é lancamento_recente", async () => {
+    getComparacaoCompleta.mockResolvedValue({
+      variantes: [
+        baseVariante({
+          porLoja: [{ storeId: "loja-a", storeCode: "A", storeName: "Loja A", tipoPosicao: "loja", estoqueAtual: 40, vendasDias30: 0, vendasDias60: 0, vendasDias90: 0, velocidadeDiaria: 0, coberturaDias: null, estoqueMinimo: null, diagnostico: "sem_dado" }],
+        }),
+      ],
+      posicoes: {}, colunas: [], gradePorProdutoPosicao: {},
+    });
+    saleAggregate.mockResolvedValue({ _min: { saleDate: null } });
+    productionOrderAggregate.mockResolvedValue({ _min: { dataFinalizacaoProducao: new Date(Date.now() - 10 * 86_400_000) } });
+
+    const { getProdutoPlanejamentoDetalhe } = await import("../planejamento-estoque");
+    const detalhe = await getProdutoPlanejamentoDetalhe("Camisa Polo");
+
+    const loja = detalhe!.porLoja.find((l) => l.posicaoId === "loja-a")!;
+    expect(loja.diagnostico).toBe("lancamento_recente");
+  });
+
+  it("produto já vendeu antes -> diagnóstico por loja continua estoque_parado mesmo com produção recente", async () => {
+    getComparacaoCompleta.mockResolvedValue({
+      variantes: [
+        baseVariante({
+          porLoja: [{ storeId: "loja-a", storeCode: "A", storeName: "Loja A", tipoPosicao: "loja", estoqueAtual: 40, vendasDias30: 0, vendasDias60: 0, vendasDias90: 0, velocidadeDiaria: 0, coberturaDias: null, estoqueMinimo: null, diagnostico: "sem_dado" }],
+        }),
+      ],
+      posicoes: {}, colunas: [], gradePorProdutoPosicao: {},
+    });
+    saleAggregate.mockResolvedValue({ _min: { saleDate: new Date(Date.now() - 365 * 86_400_000) } });
+    productionOrderAggregate.mockResolvedValue({ _min: { dataFinalizacaoProducao: new Date(Date.now() - 5 * 86_400_000) } });
+
+    const { getProdutoPlanejamentoDetalhe } = await import("../planejamento-estoque");
+    const detalhe = await getProdutoPlanejamentoDetalhe("Camisa Polo");
+
+    const loja = detalhe!.porLoja.find((l) => l.posicaoId === "loja-a")!;
+    expect(loja.diagnostico).toBe("estoque_parado");
   });
 });

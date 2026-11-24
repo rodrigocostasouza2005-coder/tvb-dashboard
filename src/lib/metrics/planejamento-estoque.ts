@@ -3,6 +3,7 @@ import type { TipoCompraProduto } from "@prisma/client";
 import {
   getComparacaoCompleta,
   diagnosticarVariante,
+  calcularRecemLancado,
   type ComparacaoFiltro,
   type Diagnostico,
 } from "./distribuicao-estoque";
@@ -120,18 +121,28 @@ export async function getProdutosPlanejamento(filtro: ComparacaoFiltro = {}): Pr
   const produtos = [...porProduto.keys()];
   const todosCods = [...new Set(variantes.map((v) => v.cod))];
 
-  const [v30, v60, v90, historico, pedidosAberto] = await Promise.all([
+  const [v30, v60, v90, historico, pedidosAberto, producoesPorProduto] = await Promise.all([
     prisma.sale.groupBy({ by: ["produto"], where: { status: { not: "Cancelada" }, produto: { in: produtos }, saleDate: { gte: desde(30) } }, _sum: { quantidade: true } }),
     prisma.sale.groupBy({ by: ["produto"], where: { status: { not: "Cancelada" }, produto: { in: produtos }, saleDate: { gte: desde(60) } }, _sum: { quantidade: true } }),
     prisma.sale.groupBy({ by: ["produto"], where: { status: { not: "Cancelada" }, produto: { in: produtos }, saleDate: { gte: desde(90) } }, _sum: { quantidade: true } }),
     prisma.sale.groupBy({ by: ["produto"], where: { status: { not: "Cancelada" }, produto: { in: produtos } }, _min: { saleDate: true } }),
     getPedidosEmAbertoPorCod(todosCods),
+    // Correção "estoque_parado" vs. "lancamento_recente" (ver diagnosticarVariante/
+    // calcularRecemLancado, distribuicao-estoque.ts): primeira produção finalizada por PRODUTO
+    // (não por cod aqui — este é o grão agregado da tabela principal), mesma fonte confiável
+    // (ProductionOrder, 0 lacuna de data quando Finalizado) usada no motor de distribuição.
+    prisma.productionOrder.groupBy({
+      by: ["produto"],
+      where: { produto: { in: produtos }, status: "Finalizado", dataFinalizacaoProducao: { not: null } },
+      _min: { dataFinalizacaoProducao: true },
+    }),
   ]);
 
   const v30ByProduto = new Map(v30.map((r) => [r.produto, r._sum.quantidade ?? 0]));
   const v60ByProduto = new Map(v60.map((r) => [r.produto, r._sum.quantidade ?? 0]));
   const v90ByProduto = new Map(v90.map((r) => [r.produto, r._sum.quantidade ?? 0]));
   const primeiraVendaByProduto = new Map(historico.map((r) => [r.produto, r._min.saleDate]));
+  const primeiraProducaoByProduto = new Map(producoesPorProduto.map((r) => [r.produto, r._min.dataFinalizacaoProducao]));
 
   const resultado: ProdutoPlanejamento[] = [];
   for (const acc of porProduto.values()) {
@@ -143,12 +154,21 @@ export async function getProdutosPlanejamento(filtro: ComparacaoFiltro = {}): Pr
     const confiavel = diasHistoricoDisponivel >= MIN_DIAS_HISTORICO_CONFIAVEL;
     const velocidadeDiaria = confiavel && vendasDias90 > 0 ? vendasDias90 / 90 : 0;
     const coberturaDias = velocidadeDiaria > 0 ? Math.round((acc.estoqueTotal / velocidadeDiaria) * 10) / 10 : null;
+    // Correção "estoque_parado" vs. "lancamento_recente" (achado da auditoria de Fase 1, §3.1):
+    // só é "recém-lançado" quando o produto NUNCA vendeu (primeira===null) E a produção mais
+    // antiga conhecida é recente — nunca pra um produto que já vendeu antes e parou.
+    const recemLancado = calcularRecemLancado({
+      primeiraVenda: primeira,
+      primeiraProducaoFinalizada: primeiraProducaoByProduto.get(acc.produto) ?? null,
+      agora: agora(),
+    });
     // "loja" (não "cd_site") como referência de limiar de excesso no agregado por produto —
     // blenda CD+lojas num número só, e o limiar mais conservador (60d, não 90d) é a escolha mais
     // segura pra não mascarar excesso real só porque o CD tolera mais profundidade.
     const situacao = diagnosticarVariante(
       { estoqueAtual: acc.estoqueTotal, vendasDias30, vendasDias90, velocidadeDiaria, coberturaDias },
-      "loja"
+      "loja",
+      { recemLancado }
     );
     const classificacao: ClassificacaoAgregada = classificarAgregado(acc.tipos);
     const cods = [...acc.cods];
@@ -281,23 +301,40 @@ export async function getProdutoPlanejamentoDetalhe(
       porLojaMap.set(l.storeId, atual);
     }
   }
-  const porLoja: LojaDetalhe[] = [...porLojaMap.values()]
-    .map((l) => {
-      const velocidadeDiaria = l.vendasDias90 > 0 ? l.vendasDias90 / 90 : 0;
-      const coberturaDias = velocidadeDiaria > 0 ? Math.round((l.estoqueAtual / velocidadeDiaria) * 10) / 10 : null;
-      const diagnostico = diagnosticarVariante({ estoqueAtual: l.estoqueAtual, vendasDias30: l.vendasDias30, vendasDias90: l.vendasDias90, velocidadeDiaria, coberturaDias }, l.tipoPosicao);
-      return { posicaoId: l.posicaoId, posicaoNome: l.posicaoNome, tipoPosicao: l.tipoPosicao, estoqueAtual: l.estoqueAtual, vendasDias30: l.vendasDias30, vendasDias90: l.vendasDias90, coberturaDias, diagnostico };
-    })
-    .sort((a, b) => a.posicaoNome.localeCompare(b.posicaoNome, "pt-BR"));
-
   const to = new Date();
   const from = new Date(to.getTime() - 90 * 86_400_000);
-  const [evolucaoVendas, pedidosAberto, recBS, recDrop] = await Promise.all([
+  const [evolucaoVendas, pedidosAberto, recBS, recDrop, primeiraVendaProduto, primeiraProducaoProduto] = await Promise.all([
     getDailySalesByProduto({ storeIds: filtro.storeIdsPermitidas, from, to }, produto),
     getPedidosEmAbertoPorCod(cods),
     getRecomendacoesBestSeller({ grupoIn: [grupo] }),
     getRecomendacoesDrop({ grupoIn: [grupo] }),
+    // Correção "estoque_parado" vs. "lancamento_recente" (mesma fonte/régua do agregado em
+    // getProdutosPlanejamento, aqui num único aggregate — é 1 produto só, groupBy seria overkill).
+    prisma.sale.aggregate({ where: { status: { not: "Cancelada" }, produto }, _min: { saleDate: true } }),
+    prisma.productionOrder.aggregate({
+      where: { produto, status: "Finalizado", dataFinalizacaoProducao: { not: null } },
+      _min: { dataFinalizacaoProducao: true },
+    }),
   ]);
+
+  const recemLancado = calcularRecemLancado({
+    primeiraVenda: primeiraVendaProduto._min.saleDate,
+    primeiraProducaoFinalizada: primeiraProducaoProduto._min.dataFinalizacaoProducao,
+    agora: to,
+  });
+
+  const porLoja: LojaDetalhe[] = [...porLojaMap.values()]
+    .map((l) => {
+      const velocidadeDiaria = l.vendasDias90 > 0 ? l.vendasDias90 / 90 : 0;
+      const coberturaDias = velocidadeDiaria > 0 ? Math.round((l.estoqueAtual / velocidadeDiaria) * 10) / 10 : null;
+      const diagnostico = diagnosticarVariante(
+        { estoqueAtual: l.estoqueAtual, vendasDias30: l.vendasDias30, vendasDias90: l.vendasDias90, velocidadeDiaria, coberturaDias },
+        l.tipoPosicao,
+        { recemLancado }
+      );
+      return { posicaoId: l.posicaoId, posicaoNome: l.posicaoNome, tipoPosicao: l.tipoPosicao, estoqueAtual: l.estoqueAtual, vendasDias30: l.vendasDias30, vendasDias90: l.vendasDias90, coberturaDias, diagnostico };
+    })
+    .sort((a, b) => a.posicaoNome.localeCompare(b.posicaoNome, "pt-BR"));
 
   const recebimentos = cods.flatMap((c) => pedidosAberto.get(c) ?? []);
   const quantidadeEmTransito = recebimentos.reduce((s, r) => s + r.quantidade, 0);

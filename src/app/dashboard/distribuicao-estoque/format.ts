@@ -21,6 +21,8 @@ export function diagnosticoInfo(d: Diagnostico): { label: string; color: string 
       return { label: "Cobertura crítica", color: "var(--status-serious)" };
     case "estoque_parado":
       return { label: "Estoque parado", color: "var(--status-warning)" };
+    case "lancamento_recente":
+      return { label: "Recém-lançado (aguardando giro)", color: "var(--series-1)" };
     case "cobertura_excessiva":
       return { label: "Excesso", color: "var(--status-warning)" };
     case "equilibrado":
