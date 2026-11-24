@@ -10,6 +10,7 @@
 import { PrismaClient } from "@prisma/client";
 import { detectarPossivelDuplicata, type CandidatoDedup } from "../../src/lib/prospeccao/motor-qualificacao";
 import { derivarUrlsCandidatasPorEmail } from "../../src/lib/prospeccao/pesquisa-web";
+import { normalizarChave } from "../../src/lib/prospeccao/normalizacao-texto";
 
 const prisma = new PrismaClient();
 
@@ -67,6 +68,23 @@ async function main() {
   console.log(`\nProspectos com pelo menos 1 sinal de possível duplicata: ${totalPares}`);
   for (const [tipo, count] of duplicatasPorTipo) {
     console.log(`  ${tipo}: ${count} ocorrências`);
+  }
+
+  // Grupos reais por nome+município (só dado comercial público: nome fantasia + cidade/UF — sem
+  // CNPJ/contato, mesma regra de privacidade do resto deste script) — pra separar "rede legítima
+  // com mesmo nome em cidades diferentes" (não aparece aqui, já que exige MESMA cidade) de
+  // "cadastro duplicado de verdade" antes de decidir o que fazer com os 74 sinais do agregado.
+  const grupos = new Map<string, { nomeFantasia: string; cidade: string | null; estado: string | null; ids: string[] }>();
+  for (const c of candidatos) {
+    const chave = `${normalizarChave(c.nomeFantasia)}|${c.estado ?? ""}|${c.cidade ?? ""}`;
+    const grupo = grupos.get(chave) ?? { nomeFantasia: c.nomeFantasia, cidade: c.cidade, estado: c.estado, ids: [] };
+    grupo.ids.push(c.id);
+    grupos.set(chave, grupo);
+  }
+  const gruposDuplicados = [...grupos.values()].filter((g) => g.ids.length > 1).sort((a, b) => b.ids.length - a.ids.length);
+  console.log(`\nGrupos nome+município com 2+ cadastros (top 20 de ${gruposDuplicados.length}):`);
+  for (const g of gruposDuplicados.slice(0, 20)) {
+    console.log(`  ${g.ids.length}x "${g.nomeFantasia}" · ${g.cidade ?? "?"}/${g.estado ?? "?"}`);
   }
 
   // Diagnóstico temporário (branch diagnostico-pesquisa-comercial-temp, não mergeado em main):
