@@ -203,7 +203,7 @@ export default async function PlanejamentoEstoquePage({
         </p>
       )}
 
-      <ReposicaoBestSellerSection itens={reposicaoBestSeller} />
+      <ReposicaoBestSellerSection itens={reposicaoBestSeller} podeEditarMinimo={podeClassificar} />
 
       {/* Zona 2 — Lista/Priorização de produtos. */}
       <PlanejamentoFiltros basePath={BASE_PATH} grupos={grupos} tamanhos={tamanhos} value={{ grupoIn: grupoFiltro, tamanhoIn: tamanhoFiltro, busca }} />

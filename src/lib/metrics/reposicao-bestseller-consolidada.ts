@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { getVendaMediaDiariaPorCod } from "./compras-inteligencia";
 
 // Reposição Best Seller CONSOLIDADA na empresa (pedido do Rodrigo, 2026-11-23) — painel novo
 // dentro de Planejamento de Estoque (ver planejamento-estoque/reposicao-bestseller.tsx). 1 card
@@ -34,6 +35,11 @@ export type ItemReposicaoBestSellerConsolidada = {
   // estoqueMinimo - quantidadeDisponivel. Sempre > 0 nos itens retornados (o filtro abaixo só
   // deixa passar falta real).
   falta: number;
+  // Venda média diária consolidada (rede toda) — só pra alimentar a sugestão informativa de
+  // MinimoManualForm (mesmo componente de edição inline reaproveitado de
+  // estoque-minimo-manual/forms.tsx, pedido do Rodrigo em 2026-11-24: editar o mínimo direto no
+  // card, sem trocar de aba). Nunca usado pra decidir falta/alerta aqui, só pro texto de ajuda.
+  velocidadeDiariaConsolidada: number;
 };
 
 type StockRow = {
@@ -58,7 +64,8 @@ type StockRow = {
 // sub-contar o estoque real só por causa de um rótulo de coleção inconsistente numa posição.
 export function agregarReposicaoBestSellerConsolidada(
   stockRows: StockRow[],
-  minimosPorCod: Map<string, number> // só cods com EstoqueMinimoManual.valor != null
+  minimosPorCod: Map<string, number>, // só cods com EstoqueMinimoManual.valor != null
+  velocidadePorCod: Map<string, number> = new Map() // mediaDiaria por cod, default 0 (testes antigos não precisam passar)
 ): ItemReposicaoBestSellerConsolidada[] {
   const codsBestSeller = new Set(
     stockRows.filter((r) => r.colecao === COLECAO_BEST_SELLER).map((r) => r.cod)
@@ -84,7 +91,14 @@ export function agregarReposicaoBestSellerConsolidada(
     const quantidadeDisponivel = disponivelPorCod.get(cod) ?? 0;
     if (quantidadeDisponivel >= estoqueMinimo) continue; // sem falta real
     const meta = metaPorCod.get(cod)!;
-    itens.push({ cod, ...meta, quantidadeDisponivel, estoqueMinimo, falta: estoqueMinimo - quantidadeDisponivel });
+    itens.push({
+      cod,
+      ...meta,
+      quantidadeDisponivel,
+      estoqueMinimo,
+      falta: estoqueMinimo - quantidadeDisponivel,
+      velocidadeDiariaConsolidada: velocidadePorCod.get(cod) ?? 0,
+    });
   }
 
   // Maior falta primeiro (prioridade de reposição), depois produto em ordem alfabética.
@@ -111,11 +125,15 @@ export async function getReposicaoBestSellerConsolidada(filtro: {
   const cods = [...new Set(stockRows.filter((r) => r.colecao === COLECAO_BEST_SELLER).map((r) => r.cod))];
   if (cods.length === 0) return [];
 
-  const minimos = await prisma.estoqueMinimoManual.findMany({
-    where: { cod: { in: cods }, valor: { not: null } },
-    select: { cod: true, valor: true },
-  });
+  const [minimos, velocidades] = await Promise.all([
+    prisma.estoqueMinimoManual.findMany({
+      where: { cod: { in: cods }, valor: { not: null } },
+      select: { cod: true, valor: true },
+    }),
+    getVendaMediaDiariaPorCod(cods),
+  ]);
   const minimosPorCod = new Map(minimos.map((m) => [m.cod, m.valor as number]));
+  const velocidadePorCod = new Map([...velocidades].map(([cod, v]) => [cod, v.mediaDiaria]));
 
-  return agregarReposicaoBestSellerConsolidada(stockRows, minimosPorCod);
+  return agregarReposicaoBestSellerConsolidada(stockRows, minimosPorCod, velocidadePorCod);
 }

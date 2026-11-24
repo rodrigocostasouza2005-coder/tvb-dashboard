@@ -1,5 +1,6 @@
 import type { ItemReposicaoBestSellerConsolidada } from "@/lib/metrics";
 import { formatNumber } from "./format";
+import { MinimoManualForm } from "../estoque-minimo-manual/forms";
 
 // Reposição Best Seller CONSOLIDADA na empresa (pedido do Rodrigo, 2026-11-23) — seção nova
 // dentro de Planejamento de Estoque, "por enquanto" (ele pretende reformular esta aba inteira
@@ -12,7 +13,13 @@ import { formatNumber } from "./format";
 // --status-critical, pill de tag em rounded-full — mesmo padrão de
 // estoque-minimo-manual/produto-detalhe.tsx) em vez de inventar um componente de card novo do
 // zero.
-export function ReposicaoBestSellerSection({ itens }: { itens: ItemReposicaoBestSellerConsolidada[] }) {
+export function ReposicaoBestSellerSection({
+  itens,
+  podeEditarMinimo,
+}: {
+  itens: ItemReposicaoBestSellerConsolidada[];
+  podeEditarMinimo: boolean;
+}) {
   return (
     <section className="mb-6 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_1px_2px_rgba(0,0,0,0.04)] p-4">
       <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
@@ -39,7 +46,7 @@ export function ReposicaoBestSellerSection({ itens }: { itens: ItemReposicaoBest
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {itens.map((item) => (
-            <ReposicaoBestSellerCard key={item.cod} item={item} />
+            <ReposicaoBestSellerCard key={item.cod} item={item} podeEditarMinimo={podeEditarMinimo} />
           ))}
         </div>
       )}
@@ -47,7 +54,13 @@ export function ReposicaoBestSellerSection({ itens }: { itens: ItemReposicaoBest
   );
 }
 
-function ReposicaoBestSellerCard({ item }: { item: ItemReposicaoBestSellerConsolidada }) {
+function ReposicaoBestSellerCard({
+  item,
+  podeEditarMinimo,
+}: {
+  item: ItemReposicaoBestSellerConsolidada;
+  podeEditarMinimo: boolean;
+}) {
   return (
     <div className="rounded-lg border border-[var(--border)] p-3">
       <div className="mb-1.5 flex items-start justify-between gap-2">
@@ -63,11 +76,23 @@ function ReposicaoBestSellerCard({ item }: { item: ItemReposicaoBestSellerConsol
         {item.tamanho && <Tag>Tamanho: {item.tamanho}</Tag>}
       </div>
 
-      <div className="grid grid-cols-3 gap-2 text-center">
-        <MiniStat label="Mínimo" value={item.estoqueMinimo} />
+      <div className="mb-2 grid grid-cols-2 gap-2 text-center">
         <MiniStat label="Disponível" value={item.quantidadeDisponivel} />
         <MiniStat label="Falta repor" value={item.falta} critico />
       </div>
+
+      {podeEditarMinimo ? (
+        <div className="rounded-md border border-[var(--gridline)] px-2 py-1.5">
+          <div className="mb-1 text-[10px] text-[var(--text-muted)]">Mínimo (editar aqui)</div>
+          <MinimoManualForm
+            cod={item.cod}
+            minimoDefinido={item.estoqueMinimo}
+            velocidadeDiariaConsolidada={item.velocidadeDiariaConsolidada}
+          />
+        </div>
+      ) : (
+        <MiniStat label="Mínimo" value={item.estoqueMinimo} />
+      )}
     </div>
   );
 }

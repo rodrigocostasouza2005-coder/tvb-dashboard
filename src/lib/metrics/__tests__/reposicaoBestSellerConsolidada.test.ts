@@ -104,4 +104,22 @@ describe("agregarReposicaoBestSellerConsolidada (pura)", () => {
     );
     expect(itens[0]).toMatchObject({ produto: "Vestido", grupo: "Vestidos", cor: "Preto", tamanho: "P" });
   });
+
+  // Edição inline do mínimo direto no card (pedido do Rodrigo, 2026-11-24: "editar o mínimo direto
+  // ali, sem trocar de aba") — MinimoManualForm (reaproveitado de estoque-minimo-manual/forms.tsx)
+  // só usa velocidadeDiariaConsolidada pro texto de ajuda (sugestão), nunca pra decidir falta.
+  it("velocidadeDiariaConsolidada vem do mapa passado, default 0 quando não informado (retrocompatível)", () => {
+    const comVelocidade = agregarReposicaoBestSellerConsolidada(
+      [stockRow({ cod: "COD-5", quantidadeDisponivel: 1 })],
+      new Map([["COD-5", 10]]),
+      new Map([["COD-5", 2.5]])
+    );
+    expect(comVelocidade[0]).toMatchObject({ velocidadeDiariaConsolidada: 2.5 });
+
+    const semVelocidade = agregarReposicaoBestSellerConsolidada(
+      [stockRow({ cod: "COD-6", quantidadeDisponivel: 1 })],
+      new Map([["COD-6", 10]])
+    );
+    expect(semVelocidade[0]).toMatchObject({ velocidadeDiariaConsolidada: 0 });
+  });
 });
