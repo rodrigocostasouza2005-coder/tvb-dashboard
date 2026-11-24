@@ -48,12 +48,17 @@ describe("agregarReposicaoBestSellerConsolidada (pura)", () => {
     expect(itens).toHaveLength(0);
   });
 
-  it("SKU Best Seller sem EstoqueMinimoManual cadastrado (sem entrada no mapa de mínimos) nunca aparece como falta", () => {
+  // Achado real em 2026-11-24: os 141 SKUs Best Seller do Neon dev estavam TODOS sem mínimo
+  // cadastrado — a versão anterior (excluía quem não tinha mínimo) deixava o painel sempre vazio,
+  // sem nenhum ponto de partida pra cadastrar o primeiro valor. Agora aparece com falta=null (uma
+  // chamada pra ação — "cadastre o mínimo" — distinta de "já sei que está em falta").
+  it("SKU Best Seller sem EstoqueMinimoManual cadastrado aparece com falta=null (chamada pra cadastrar, não falta real)", () => {
     const itens = agregarReposicaoBestSellerConsolidada(
       [stockRow({ cod: "COD-SEM-MINIMO", quantidadeDisponivel: 0 })],
       new Map() // nenhum mínimo cadastrado pra nenhum cod
     );
-    expect(itens).toHaveLength(0);
+    expect(itens).toHaveLength(1);
+    expect(itens[0]).toMatchObject({ cod: "COD-SEM-MINIMO", estoqueMinimo: null, falta: null });
   });
 
   it("cod com colecao divergente entre posições (achado real no Neon dev) ainda soma TODAS as posições, não só as rotuladas BESTSELLER", () => {
@@ -74,7 +79,7 @@ describe("agregarReposicaoBestSellerConsolidada (pura)", () => {
   it("falta é exatamente estoqueMinimo - quantidadeDisponivel, nunca negativa (filtro garante só falta real)", () => {
     const itens = agregarReposicaoBestSellerConsolidada([stockRow({ cod: "COD-3", quantidadeDisponivel: 4 })], new Map([["COD-3", 9]]));
     expect(itens[0].falta).toBe(5);
-    expect(itens.every((i) => i.falta > 0)).toBe(true);
+    expect(itens.every((i) => i.falta == null || i.falta > 0)).toBe(true);
   });
 
   it("ordena por maior falta primeiro, depois produto alfabético em caso de empate", () => {
@@ -121,5 +126,27 @@ describe("agregarReposicaoBestSellerConsolidada (pura)", () => {
       new Map([["COD-6", 10]])
     );
     expect(semVelocidade[0]).toMatchObject({ velocidadeDiariaConsolidada: 0 });
+  });
+
+  it("itens sem mínimo definido (falta=null) sempre vêm DEPOIS de toda falta real, mesmo que o produto venha antes alfabeticamente", () => {
+    const itens = agregarReposicaoBestSellerConsolidada(
+      [
+        stockRow({ cod: "COD-AAA-SEM-MINIMO", produto: "AAA Sem Mínimo", quantidadeDisponivel: 0 }),
+        stockRow({ cod: "COD-ZZZ-COM-FALTA", produto: "ZZZ Com Falta", quantidadeDisponivel: 1 }),
+      ],
+      new Map([["COD-ZZZ-COM-FALTA", 10]]) // só este tem mínimo cadastrado
+    );
+    expect(itens.map((i) => i.cod)).toEqual(["COD-ZZZ-COM-FALTA", "COD-AAA-SEM-MINIMO"]);
+  });
+
+  it("dentro do grupo 'sem mínimo definido', ordena por produto alfabético", () => {
+    const itens = agregarReposicaoBestSellerConsolidada(
+      [
+        stockRow({ cod: "COD-B", produto: "Bermuda", quantidadeDisponivel: 0 }),
+        stockRow({ cod: "COD-A", produto: "Alpargata", quantidadeDisponivel: 0 }),
+      ],
+      new Map() // nenhum tem mínimo
+    );
+    expect(itens.map((i) => i.cod)).toEqual(["COD-A", "COD-B"]);
   });
 });

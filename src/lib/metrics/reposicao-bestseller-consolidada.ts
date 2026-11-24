@@ -31,10 +31,14 @@ export type ItemReposicaoBestSellerConsolidada = {
   // EMPRESA decidiu manter... somando TODAS as posições"). Não existe "mínimo por loja" aqui pra
   // agregar — o único trabalho de consolidação real deste painel é do lado do ESTOQUE
   // (quantidadeDisponivel), não do mínimo, que já chega pronto.
-  estoqueMinimo: number;
-  // estoqueMinimo - quantidadeDisponivel. Sempre > 0 nos itens retornados (o filtro abaixo só
-  // deixa passar falta real).
-  falta: number;
+  // null = SEM mínimo cadastrado ainda (achado real em 2026-11-24: os 141 SKUs Best Seller do
+  // Neon dev estavam TODOS sem mínimo — o painel aparecia vazio pra sempre, sem nenhum ponto de
+  // partida pra cadastrar o primeiro valor). Esses itens agora aparecem aqui também, como chamada
+  // pra ação, não só quem já tem mínimo e está com falta.
+  estoqueMinimo: number | null;
+  // estoqueMinimo - quantidadeDisponivel. null quando não há mínimo definido ainda (nunca inventa
+  // uma falta sem régua — mesma regra de getEstoqueMinimoManual/SEM_MINIMO_DEFINIDO).
+  falta: number | null;
   // Venda média diária consolidada (rede toda) — só pra alimentar a sugestão informativa de
   // MinimoManualForm (mesmo componente de edição inline reaproveitado de
   // estoque-minimo-manual/forms.tsx, pedido do Rodrigo em 2026-11-24: editar o mínimo direto no
@@ -53,8 +57,11 @@ type StockRow = {
 };
 
 // Função PURA (sem Prisma) — recebe linhas de estoque já carregadas (qualquer posição: loja ou
-// CD/Site) e o mapa de mínimos já definidos, devolve só os SKUs Best Seller com falta real
-// agregada. Testável com dado sintético, mesmo padrão de reposicao-sinais.ts/distribuicao-estoque.ts.
+// CD/Site) e o mapa de mínimos já definidos, devolve os SKUs Best Seller que precisam de alguma
+// ação: falta real (já tem mínimo, estoque abaixo dele) OU sem mínimo cadastrado ainda (falta=null,
+// chamada pra ação de cadastrar — ver achado de 2026-11-24 no comentário do tipo acima). Só fica de
+// fora quem já tem mínimo e está OK. Testável com dado sintético, mesmo padrão de
+// reposicao-sinais.ts/distribuicao-estoque.ts.
 //
 // Achado real no Neon dev (2026-11-23): ~9% dos cods (242 de 2.681) têm `colecao` DIVERGENTE entre
 // posições — provável ruído de timing de sync por loja contra o DAPIC, não uma mudança real de
@@ -84,25 +91,32 @@ export function agregarReposicaoBestSellerConsolidada(
 
   const itens: ItemReposicaoBestSellerConsolidada[] = [];
   for (const cod of codsBestSeller) {
-    const estoqueMinimo = minimosPorCod.get(cod);
-    // Sem mínimo cadastrado: nunca aparece como "falta" sem régua definida (mesma regra de
-    // getEstoqueMinimoManual — SEM_MINIMO_DEFINIDO nunca é tratado como crítico por adivinhação).
-    if (estoqueMinimo == null) continue;
+    const estoqueMinimoDefinido = minimosPorCod.get(cod) ?? null;
     const quantidadeDisponivel = disponivelPorCod.get(cod) ?? 0;
-    if (quantidadeDisponivel >= estoqueMinimo) continue; // sem falta real
+    // Com mínimo definido e sem falta real: já está OK, não precisa de ação — único caso que
+    // fica de fora. Sem mínimo (precisa cadastrar) ou com falta real (precisa repor) — os dois
+    // aparecem, porque os dois pedem uma ação do Rodrigo.
+    if (estoqueMinimoDefinido != null && quantidadeDisponivel >= estoqueMinimoDefinido) continue;
     const meta = metaPorCod.get(cod)!;
     itens.push({
       cod,
       ...meta,
       quantidadeDisponivel,
-      estoqueMinimo,
-      falta: estoqueMinimo - quantidadeDisponivel,
+      estoqueMinimo: estoqueMinimoDefinido,
+      falta: estoqueMinimoDefinido != null ? estoqueMinimoDefinido - quantidadeDisponivel : null,
       velocidadeDiariaConsolidada: velocidadePorCod.get(cod) ?? 0,
     });
   }
 
-  // Maior falta primeiro (prioridade de reposição), depois produto em ordem alfabética.
-  itens.sort((a, b) => b.falta - a.falta || a.produto.localeCompare(b.produto, "pt-BR"));
+  // Maior falta primeiro (prioridade de reposição); "sem mínimo definido" (falta=null) vai por
+  // último, depois de toda falta real — é uma ação pendente, mas menos urgente que repor algo que
+  // já sabemos que está em falta. Produto em ordem alfabética desempata nos dois grupos.
+  itens.sort((a, b) => {
+    if (a.falta == null && b.falta == null) return a.produto.localeCompare(b.produto, "pt-BR");
+    if (a.falta == null) return 1;
+    if (b.falta == null) return -1;
+    return b.falta - a.falta || a.produto.localeCompare(b.produto, "pt-BR");
+  });
   return itens;
 }
 
