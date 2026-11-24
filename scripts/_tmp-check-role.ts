@@ -1,10 +1,10 @@
 import { PrismaClient } from "@prisma/client";
 const prisma = new PrismaClient();
 (async () => {
-  const user = await prisma.user.findUnique({
-    where: { email: "rodrigoximbe2005@gmail.com" },
+  const users = await prisma.user.findMany({
     select: { email: true, role: true, allowedTabs: true },
+    orderBy: { email: "asc" },
   });
-  console.log(JSON.stringify(user, null, 2));
+  console.log(JSON.stringify(users, null, 2));
   await prisma.$disconnect();
 })();
