@@ -1,0 +1,33 @@
+name: Grant aba estoque-minimo-alertas (ADMIN/GESTAO)
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "Digite 'apply' pra escrever de verdade (default: dry-run, so leitura)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  grant:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Grant (dry-run por padrao)
+        run: |
+          if [ "${{ github.event.inputs.apply }}" = "apply" ]; then
+            npx tsx scripts/_tmp-grant-estoque-minimo-alertas.ts --apply
+          else
+            npx tsx scripts/_tmp-grant-estoque-minimo-alertas.ts
+          fi
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
