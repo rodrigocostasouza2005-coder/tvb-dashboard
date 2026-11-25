@@ -113,9 +113,26 @@ describe("defaultFiltroBlackFridayStrPura", () => {
     expect(to).toBe("2026-11-20");
   });
 
-  it("bem depois (ex: 2027), from continua fixo em 2026-11-10 — não é um range rolante, é o início real da campanha", () => {
+  // Bug real corrigido em 2026-11-25: a versão anterior só conferia o início da janela, nunca o
+  // fim — "to" seguia crescendo pra sempre com "hoje" mesmo depois da campanha ter encerrado
+  // (01/12/2026), misturando operação normal com Black Friday em qualquer card/gráfico que herda
+  // esse default. A partir daqui, com a campanha encerrada, o range padrão fica FIXO na janela
+  // completa da campanha (10/11 a 01/12), não importa quão longe no futuro "hoje" esteja.
+  it("exatamente no último dia da campanha (2026-12-01), ainda é 'hoje' dentro do range — to acompanha hoje", () => {
+    const { from, to } = defaultFiltroBlackFridayStrPura(new Date("2026-12-01T12:00:00.000-03:00"));
+    expect(from).toBe("2026-11-10");
+    expect(to).toBe("2026-12-01");
+  });
+
+  it("um dia depois do fim (2026-12-02), range já fica fixo na janela completa da campanha, não cresce mais", () => {
+    const { from, to } = defaultFiltroBlackFridayStrPura(new Date("2026-12-02T12:00:00.000-03:00"));
+    expect(from).toBe("2026-11-10");
+    expect(to).toBe("2026-12-01");
+  });
+
+  it("bem depois do fim (ex: 2027), range continua fixo na janela completa da campanha — NÃO é um range rolante que cresce pra sempre", () => {
     const { from, to } = defaultFiltroBlackFridayStrPura(new Date("2027-03-01T12:00:00.000-03:00"));
     expect(from).toBe("2026-11-10");
-    expect(to).toBe("2027-03-01");
+    expect(to).toBe("2026-12-01");
   });
 });

@@ -291,6 +291,20 @@ export async function getPerformanceEvolucao(filters: PerformanceFilters, granul
     }));
 }
 
+// Separa "melhores" e "piores" por engajamento garantindo índices SEMPRE disjuntos — bug real
+// (achado em auditoria 2026-11-25): com slice(0,5) + slice(-5), qualquer N entre 6 e 9 cruzava os
+// dois blocos (o mesmo conteúdo aparecia nas duas listas). Regra única pra qualquer N: cada lado
+// recebe no máximo 5, mas nunca mais que metade de N — garante que os dois lados nunca se tocam,
+// inclusive quando N é pequeno (N<10) ou ímpar (sobra 1 item "do meio" que não entra em nenhum
+// lado, de propósito, pra não fingir que é "melhor" ou "pior" com uma amostra tão pequena).
+export function splitMelhoresPiores<T>(comEngOrdenado: T[]): { melhores: T[]; piores: T[] } {
+  const n = comEngOrdenado.length;
+  const ladoSize = Math.min(5, Math.floor(n / 2));
+  const melhores = comEngOrdenado.slice(0, ladoSize);
+  const piores = ladoSize > 0 ? comEngOrdenado.slice(n - ladoSize).reverse() : [];
+  return { melhores, piores };
+}
+
 export async function getPerfilDetalhe(perfil: string, filters: PerformanceFilters) {
   const rows = await prisma.contentPerformance.findMany({
     where: { ...contentWhere({ ...filters, perfilIn: undefined }), perfil },
@@ -304,6 +318,7 @@ export async function getPerfilDetalhe(perfil: string, filters: PerformanceFilte
   const engajamentoTotal = comEng.reduce((s, r) => s + (r.engajamento ?? 0), 0);
 
   const comEngOrdenado = [...comEng].sort((a, b) => (b.engajamento ?? 0) - (a.engajamento ?? 0));
+  const { melhores: melhoresConteudos, piores: pioresConteudos } = splitMelhoresPiores(comEngOrdenado);
 
   return {
     perfil,
@@ -317,8 +332,8 @@ export async function getPerfilDetalhe(perfil: string, filters: PerformanceFilte
     pctQualificacao: pct(qualificados, rows.length),
     engajamentoTotal: comEng.length > 0 ? engajamentoTotal : null,
     engajamentoMedio: avg(engajamentoTotal, comEng.length),
-    melhoresConteudos: comEngOrdenado.slice(0, 5),
-    pioresConteudos: comEngOrdenado.length > 5 ? comEngOrdenado.slice(-5).reverse() : [],
+    melhoresConteudos,
+    pioresConteudos,
     registros: rows,
   };
 }

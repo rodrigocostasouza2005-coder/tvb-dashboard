@@ -68,9 +68,18 @@ export async function getBannerStatus(): Promise<BannerStatus> {
 // a promessa de função pura (testável com `now` fixo) sem nenhum teste pegar isso na hora, só
 // apareceu quando a data real do sistema mudou de dia no meio da sessão. Corrigido pra calcular
 // "últimos 30 dias" usando SÓ o `now` recebido, nunca o relógio real.
+// Correção 2026-11-25: a versão original só conferia o INÍCIO da janela (hojeStr >= inicioStr),
+// nunca o fim (BANNER_FIM_BRT) — depois de 01/12/2026 (campanha encerrada) o range padrão
+// continuava crescendo pra sempre (de 10/11 até "hoje", que podia já ser meses depois), misturando
+// a campanha com a operação normal em todo card/gráfico/comparação que herda esse filtro. Agora,
+// com a campanha encerrada (hojeStr > fimStr), o padrão passa a ser a janela FIXA e completa da
+// campanha (10/11 a 01/12) — nunca mais cresce. Só afeta o DEFAULT: seleção manual de data (query
+// string) continua tendo prioridade sempre, isso não muda aqui.
 export function defaultFiltroBlackFridayStrPura(now: Date): { from: string; to: string } {
   const hojeStr = todayBrasiliaStr(now);
   const inicioStr = todayBrasiliaStr(BANNER_INICIO_BRT);
+  const fimStr = todayBrasiliaStr(BANNER_FIM_BRT);
+  if (hojeStr > fimStr) return { from: inicioStr, to: fimStr };
   if (hojeStr >= inicioStr) return { from: inicioStr, to: hojeStr };
   const trintaDiasAtras = new Date(now.getTime() - 30 * 86400000);
   return { from: todayBrasiliaStr(trintaDiasAtras), to: hojeStr };
