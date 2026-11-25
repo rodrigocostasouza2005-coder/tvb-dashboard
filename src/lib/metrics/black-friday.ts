@@ -506,10 +506,31 @@ export type ComparativoDiaBlackFriday = {
 };
 
 export type ComparativoAcumuladoBlackFriday = {
+  // ===== Campanha completa (TODOS os dias cadastrados na planilha, passados e futuros) =====
+  // Responde "quanto da meta TOTAL da campanha já foi atingido até agora" — NUNCA "estou no
+  // ritmo", porque o denominador inclui dias que ainda nem chegaram (sempre deprime o % enquanto
+  // a campanha está rodando). Ver atingimentoRitmoPct abaixo pra essa outra pergunta.
   metaReceita2026: number;
   receitaReal2026: number;
-  atingimentoPct: number | null;
+  atingimentoTotalPct: number | null;
   diferencaReal: number;
+
+  // ===== Até hoje (bug corrigido em 2026-11-25) =====
+  // Até a versão anterior, só existia o par acima — misturava meta de dias futuros (que nunca
+  // tiveram chance de vender nada) com a receita só dos dias já passados, deprimindo o %
+  // artificialmente mesmo quando o ritmo está exatamente no alvo. Esses 4 campos cortam em
+  // "hoje" dos dois lados (meta E real), respondendo "estou no ritmo até agora?" — nunca misturar
+  // estes com os de cima na UI. Quando hojeStr é null (fora da janela cadastrada, campanha não
+  // começou/já terminou), não há "até hoje" sensato: os 3 primeiros ficam 0 e o % fica null
+  // (nunca cai pra janela inteira como fallback silencioso). Quando hojeStr é posterior ao último
+  // dia cadastrado (campanha já terminou), TODOS os dias contam como "<=hoje" — nesse caso
+  // atingimentoRitmoPct e atingimentoTotalPct convergem pro mesmo número, o que é o comportamento
+  // correto (campanha encerrada = "até hoje" é "a campanha toda").
+  metaAcumuladaAteHoje: number;
+  realAcumuladoAteHoje: number;
+  atingimentoRitmoPct: number | null;
+  diferencaRealAteHoje: number;
+
   // Soma de receitaReal2026 SÓ dos dias que têm receitaReal2025 (comparação justa, mesmos dias
   // dos dois anos) — pedido do Rodrigo em 2026-11-08 ("card de % de crescimento ano contra
   // ano"). Null quando nenhum dia da janela tem dado de 2025 (nunca inventa 0, que pareceria
@@ -576,11 +597,21 @@ export function montarComparativoMetaDiariaBlackFriday(
       } satisfies ComparativoDiaBlackFriday;
     });
 
-  // Acumulado no mês = soma de TODOS os dias cadastrados (a planilha só cadastra dia de
-  // campanha real, então "acumulado" aqui já é "acumulado da campanha até onde a planilha
-  // cobre" — não existe hoje um corte de "só até hoje", ver comentário da função async abaixo).
+  // Acumulado da CAMPANHA COMPLETA = soma de TODOS os dias cadastrados (passados e futuros).
+  // "quanto da meta total já foi atingido", nunca "estou no ritmo" — ver atingimentoRitmoPct
+  // abaixo pra essa 2ª pergunta, calculada separadamente num bloco próprio.
   const metaAcumulada = dias.reduce((s, d) => s + d.metaReceita2026, 0);
   const realAcumulado = dias.reduce((s, d) => s + d.receitaReal2026, 0);
+
+  // Acumulado ATÉ HOJE — mesmo corte em `hojeStr` dos dois lados (meta E real), corrigindo o bug
+  // de 2026-11-25: antes a meta acumulada somava TODOS os dias cadastrados (inclusive os
+  // futuros, que nunca tiveram chance de vender nada) contra a receita real só dos dias já
+  // passados, deprimindo o % artificialmente mesmo com o ritmo em dia. Quando hojeStr é null
+  // (fora da janela cadastrada), não há "até hoje" sensato — fica 0/null, nunca cai pra janela
+  // inteira como fallback silencioso.
+  const diasAteHoje = hojeStr != null ? dias.filter((d) => d.data <= hojeStr) : [];
+  const metaAcumuladaAteHoje = diasAteHoje.reduce((s, d) => s + d.metaReceita2026, 0);
+  const realAcumuladoAteHoje = diasAteHoje.reduce((s, d) => s + d.receitaReal2026, 0);
 
   // Só os dias com receitaReal2025 real E já ocorridos em 2026 (<= hoje) — comparação justa
   // ano-contra-ano. Bug real corrigido em 2026-11-09: a planilha de 2025 é histórico completo
@@ -604,8 +635,12 @@ export function montarComparativoMetaDiariaBlackFriday(
     acumulado: {
       metaReceita2026: metaAcumulada,
       receitaReal2026: realAcumulado,
-      atingimentoPct: metaAcumulada !== 0 ? (realAcumulado / metaAcumulada) * 100 : null,
+      atingimentoTotalPct: metaAcumulada !== 0 ? (realAcumulado / metaAcumulada) * 100 : null,
       diferencaReal: realAcumulado - metaAcumulada,
+      metaAcumuladaAteHoje,
+      realAcumuladoAteHoje,
+      atingimentoRitmoPct: hojeStr != null && metaAcumuladaAteHoje !== 0 ? (realAcumuladoAteHoje / metaAcumuladaAteHoje) * 100 : null,
+      diferencaRealAteHoje: realAcumuladoAteHoje - metaAcumuladaAteHoje,
       receitaReal2026ComparavelA2025: real2026Comparavel,
       receitaReal2025Acumulada: real2025Acumulada,
       crescimentoAnualAcumuladoPct,
@@ -621,8 +656,12 @@ function resumoMetaDiariaVazio(disponivel: boolean): ResumoMetaDiariaBlackFriday
     acumulado: {
       metaReceita2026: 0,
       receitaReal2026: 0,
-      atingimentoPct: null,
+      atingimentoTotalPct: null,
       diferencaReal: 0,
+      metaAcumuladaAteHoje: 0,
+      realAcumuladoAteHoje: 0,
+      atingimentoRitmoPct: null,
+      diferencaRealAteHoje: 0,
       receitaReal2026ComparavelA2025: null,
       receitaReal2025Acumulada: null,
       crescimentoAnualAcumuladoPct: null,

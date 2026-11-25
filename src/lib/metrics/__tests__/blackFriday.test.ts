@@ -484,7 +484,7 @@ describe("montarComparativoMetaDiariaBlackFriday", () => {
     expect(dia.atingimentoPct).toBeCloseTo((25000 / 30000) * 100, 5);
   });
 
-  it("acumulado soma todos os dias cadastrados (meta, real, diferença) e calcula % atingimento acumulado", () => {
+  it("acumulado (campanha completa) soma todos os dias cadastrados (meta, real, diferença) e calcula % atingimento total", () => {
     const metas = [
       { data: "2026-11-01", metaReceita2026: 5000, receitaReal2025: 2927.08, acao: null },
       { data: "2026-11-02", metaReceita2026: 5000, receitaReal2025: 1800.72, acao: null },
@@ -499,7 +499,97 @@ describe("montarComparativoMetaDiariaBlackFriday", () => {
     expect(resumo.acumulado.metaReceita2026).toBe(10000);
     expect(resumo.acumulado.receitaReal2026).toBe(8000);
     expect(resumo.acumulado.diferencaReal).toBe(-2000);
-    expect(resumo.acumulado.atingimentoPct).toBeCloseTo(80, 5);
+    expect(resumo.acumulado.atingimentoTotalPct).toBeCloseTo(80, 5);
+  });
+
+  // Bug real corrigido em 2026-11-25: a fórmula de "% atingimento" acumulado misturava a META de
+  // TODOS os dias cadastrados (inclusive dias futuros, que nunca tiveram chance de vender nada)
+  // com a receita real só dos dias já passados — deprimindo o % mesmo quando o ritmo estava
+  // exatamente no alvo. Agora existem 2 métricas separadas: atingimentoTotalPct (campanha
+  // completa, testado acima) e atingimentoRitmoPct (só dias <= hoje, testado abaixo).
+  describe("atingimentoRitmoPct — meta e real cortados em 'hoje', nunca misturando dia futuro", () => {
+    it("ritmo exatamente no alvo até hoje -> 100%, mesmo a campanha tendo dias futuros com meta cadastrada", () => {
+      const metas = [
+        { data: "2026-11-01", metaReceita2026: 10000, receitaReal2025: null, acao: null }, // passado
+        { data: "2026-11-02", metaReceita2026: 10000, receitaReal2025: null, acao: null }, // "hoje"
+        { data: "2026-11-03", metaReceita2026: 10000, receitaReal2025: null, acao: null }, // futuro
+        { data: "2026-11-04", metaReceita2026: 10000, receitaReal2025: null, acao: null }, // futuro
+      ];
+      // Receita real bate EXATAMENTE a meta dos 2 dias já passados (01 e 02) — dias futuros (03 e
+      // 04) não têm nenhuma venda ainda (nem aparecem no Map, como getSalesByDay devolveria).
+      const receitaRealPorDia = new Map([
+        ["2026-11-01", 10000],
+        ["2026-11-02", 10000],
+      ]);
+
+      const resumo = montarComparativoMetaDiariaBlackFriday(metas, receitaRealPorDia, "2026-11-02");
+
+      expect(resumo.acumulado.metaAcumuladaAteHoje).toBe(20000); // só 01+02, nunca os 40000 totais
+      expect(resumo.acumulado.realAcumuladoAteHoje).toBe(20000);
+      expect(resumo.acumulado.atingimentoRitmoPct).toBeCloseTo(100, 5);
+      // A métrica de campanha completa continua existindo, separada, e mostra o número deprimido
+      // de verdade (20000 realizado / 40000 de meta total) — é uma pergunta DIFERENTE ("quanto da
+      // meta total já foi atingido"), nunca deve ser confundida com o ritmo.
+      expect(resumo.acumulado.metaReceita2026).toBe(40000);
+      expect(resumo.acumulado.atingimentoTotalPct).toBeCloseTo(50, 5);
+    });
+
+    it("ritmo acima da meta até hoje -> acima de 100%", () => {
+      const metas = [
+        { data: "2026-11-01", metaReceita2026: 10000, receitaReal2025: null, acao: null },
+        { data: "2026-11-02", metaReceita2026: 10000, receitaReal2025: null, acao: null }, // futuro
+      ];
+      const receitaRealPorDia = new Map([["2026-11-01", 15000]]); // 50% acima da meta do dia
+
+      const resumo = montarComparativoMetaDiariaBlackFriday(metas, receitaRealPorDia, "2026-11-01");
+
+      expect(resumo.acumulado.metaAcumuladaAteHoje).toBe(10000);
+      expect(resumo.acumulado.realAcumuladoAteHoje).toBe(15000);
+      expect(resumo.acumulado.atingimentoRitmoPct).toBeCloseTo(150, 5);
+    });
+
+    it("campanha com poucos dias já passados -> ritmo não é distorcido pelos dias futuros (métrica de campanha completa, sim)", () => {
+      const metas = [
+        { data: "2026-11-01", metaReceita2026: 1000, receitaReal2025: null, acao: null }, // único dia passado
+        { data: "2026-11-02", metaReceita2026: 50000, receitaReal2025: null, acao: null }, // futuro, meta enorme
+        { data: "2026-11-03", metaReceita2026: 50000, receitaReal2025: null, acao: null }, // futuro, meta enorme
+      ];
+      const receitaRealPorDia = new Map([["2026-11-01", 1000]]); // bateu a meta do único dia já passado
+
+      const resumo = montarComparativoMetaDiariaBlackFriday(metas, receitaRealPorDia, "2026-11-01");
+
+      // Ritmo: só o dia 01 entra — 100%, nunca afundado pelos 100000 de meta futura.
+      expect(resumo.acumulado.atingimentoRitmoPct).toBeCloseTo(100, 5);
+      // Campanha completa: aqui SIM a meta futura entra — número bem menor, de propósito (é outra
+      // pergunta).
+      expect(resumo.acumulado.atingimentoTotalPct).toBeCloseTo((1000 / 101000) * 100, 5);
+    });
+
+    it("hojeStr fora da janela cadastrada (null) -> atingimentoRitmoPct null, nunca cai pra janela inteira como fallback", () => {
+      const metas = [{ data: "2026-11-01", metaReceita2026: 5000, receitaReal2025: null, acao: null }];
+      const resumo = montarComparativoMetaDiariaBlackFriday(metas, new Map([["2026-11-01", 5000]])); // sem hojeStr
+
+      expect(resumo.acumulado.metaAcumuladaAteHoje).toBe(0);
+      expect(resumo.acumulado.realAcumuladoAteHoje).toBe(0);
+      expect(resumo.acumulado.atingimentoRitmoPct).toBeNull();
+    });
+
+    it("hojeStr posterior ao último dia cadastrado (campanha já terminou) -> ritmo converge pro total, todos os dias contam", () => {
+      const metas = [
+        { data: "2026-11-01", metaReceita2026: 5000, receitaReal2025: null, acao: null },
+        { data: "2026-11-02", metaReceita2026: 5000, receitaReal2025: null, acao: null },
+      ];
+      const receitaRealPorDia = new Map([
+        ["2026-11-01", 4000],
+        ["2026-11-02", 6000],
+      ]);
+
+      const resumo = montarComparativoMetaDiariaBlackFriday(metas, receitaRealPorDia, "2026-12-15");
+
+      expect(resumo.acumulado.metaAcumuladaAteHoje).toBe(resumo.acumulado.metaReceita2026);
+      expect(resumo.acumulado.realAcumuladoAteHoje).toBe(resumo.acumulado.receitaReal2026);
+      expect(resumo.acumulado.atingimentoRitmoPct).toBeCloseTo(resumo.acumulado.atingimentoTotalPct!, 5);
+    });
   });
 
   // Card "Crescimento anual (acumulado)" — pedido do Rodrigo em 2026-11-08.
@@ -668,8 +758,12 @@ describe("getComparativoMetaDiariaBlackFriday — escopado só ao e-commerce (CD
     expect(resumo.acumulado).toEqual({
       metaReceita2026: 0,
       receitaReal2026: 0,
-      atingimentoPct: null,
+      atingimentoTotalPct: null,
       diferencaReal: 0,
+      metaAcumuladaAteHoje: 0,
+      realAcumuladoAteHoje: 0,
+      atingimentoRitmoPct: null,
+      diferencaRealAteHoje: 0,
       receitaReal2026ComparavelA2025: null,
       receitaReal2025Acumulada: null,
       crescimentoAnualAcumuladoPct: null,

@@ -341,15 +341,35 @@ export default async function BlackFridayPage({
               status={comparativoMetaDiaria.hoje?.crescimentoAnualPct != null ? (comparativoMetaDiaria.hoje.crescimentoAnualPct >= 0 ? "good" : "critical") : undefined}
             />
           </section>
+          <p className="mb-2 mt-2 text-xs text-[var(--text-muted)]">
+            <strong>Atingimento até hoje</strong> responde &quot;estou no ritmo?&quot; (meta e real
+            cortados só nos dias já passados). <strong>Atingimento da campanha</strong> responde
+            &quot;quanto da meta TOTAL já foi atingido&quot; (inclui dias futuros na meta, por isso é
+            sempre menor enquanto a campanha ainda está rodando) — nunca misture os dois.
+          </p>
+          <section className="mb-3 grid grid-cols-2 gap-4 sm:grid-cols-4">
+            <StatTile label="Real até hoje (e-commerce)" value={formatBRL(comparativoMetaDiaria.acumulado.realAcumuladoAteHoje)} />
+            <StatTile label="Meta até hoje" value={formatBRL(comparativoMetaDiaria.acumulado.metaAcumuladaAteHoje)} />
+            <StatTile
+              label="Atingimento até hoje"
+              value={comparativoMetaDiaria.acumulado.atingimentoRitmoPct != null ? formatPercent(comparativoMetaDiaria.acumulado.atingimentoRitmoPct) : "—"}
+              subValue={comparativoMetaDiaria.acumulado.atingimentoRitmoPct == null ? "Hoje está fora do período da campanha cadastrado" : "Ritmo: meta e real só dos dias já passados"}
+              status={comparativoMetaDiaria.acumulado.atingimentoRitmoPct != null ? (comparativoMetaDiaria.acumulado.atingimentoRitmoPct >= 100 ? "good" : "critical") : undefined}
+            />
+            <StatTile label="Diferença até hoje" value={formatBRL(comparativoMetaDiaria.acumulado.diferencaRealAteHoje)} />
+          </section>
           <section className="mb-3 grid grid-cols-2 gap-4 sm:grid-cols-4">
             <StatTile label="Acumulado real 2026 (e-commerce)" value={formatBRL(comparativoMetaDiaria.acumulado.receitaReal2026)} />
-            <StatTile label="Meta acumulada" value={formatBRL(comparativoMetaDiaria.acumulado.metaReceita2026)} />
+            <StatTile label="Meta acumulada (campanha completa)" value={formatBRL(comparativoMetaDiaria.acumulado.metaReceita2026)} />
             <StatTile
-              label="% atingimento acumulado"
-              value={comparativoMetaDiaria.acumulado.atingimentoPct != null ? formatPercent(comparativoMetaDiaria.acumulado.atingimentoPct) : "—"}
-              status={comparativoMetaDiaria.acumulado.atingimentoPct != null ? (comparativoMetaDiaria.acumulado.atingimentoPct >= 100 ? "good" : "critical") : undefined}
+              label="Atingimento da campanha"
+              value={comparativoMetaDiaria.acumulado.atingimentoTotalPct != null ? formatPercent(comparativoMetaDiaria.acumulado.atingimentoTotalPct) : "—"}
+              subValue="Meta TOTAL cadastrada (inclui dias futuros) vs. real até agora"
+              status={comparativoMetaDiaria.acumulado.atingimentoTotalPct != null ? (comparativoMetaDiaria.acumulado.atingimentoTotalPct >= 100 ? "good" : "critical") : undefined}
             />
-            <StatTile label="Diferença acumulada" value={formatBRL(comparativoMetaDiaria.acumulado.diferencaReal)} />
+            <StatTile label="Diferença acumulada (campanha completa)" value={formatBRL(comparativoMetaDiaria.acumulado.diferencaReal)} />
+          </section>
+          <section className="mb-3 grid grid-cols-2 gap-4 sm:grid-cols-4">
             <StatTile
               label="Crescimento anual (acumulado)"
               value={comparativoMetaDiaria.acumulado.crescimentoAnualAcumuladoPct != null ? formatPercent(comparativoMetaDiaria.acumulado.crescimentoAnualAcumuladoPct) : "—"}
