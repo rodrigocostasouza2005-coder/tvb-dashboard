@@ -124,7 +124,10 @@ export default async function EstoqueAtualPage({
         <ExpandableStockTable
           columnLabel="Grupo"
           rows={rows}
-          produtoRows={produtoRows.map((p) => ({ groupKey: p.grupo, key: p.key, quantidade: p.quantidade, valorCusto: p.valorCusto, valorVenda: p.valorVenda }))}
+          // key usa p.produto (nome puro), nunca p.key — desde 2026-11-25 key é a chave composta
+          // "grupo::produto" (evita colisão entre produtos de mesmo nome em grupos diferentes),
+          // exibir ela aqui mostraria "Grupo::Produto" em vez do nome do produto.
+          produtoRows={produtoRows.map((p) => ({ groupKey: p.grupo, key: p.produto, quantidade: p.quantidade, valorCusto: p.valorCusto, valorVenda: p.valorVenda }))}
           totalQuantidade={totalQuantidade}
           showFinancials={showFinancials}
         />

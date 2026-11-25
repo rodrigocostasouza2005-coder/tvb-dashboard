@@ -4,7 +4,17 @@ import { useState } from "react";
 import type { MetaInsight } from "@/lib/connectors/meta-ads";
 import { FotoGaleria } from "./foto-galeria";
 
-export type InvestimentoRow = MetaInsight & { nome: string; fotos: string[]; ativo: boolean };
+// Campos financeiros (gasto/CPC/CPM/custoPorCompra/ROAS) ficam OPCIONAIS — quando o usuário não
+// pode ver financeiro (canSeeFinancials=false), a página (page.tsx) remove esses campos do
+// próprio objeto ANTES de passar como prop, não só esconde a coluna aqui. `showFinancials`
+// abaixo decide se as colunas aparecem; os campos oriundos de `MetaInsight` que NÃO são
+// monetários (cliques, ctrPct, compras, impressoes, alcance) continuam sempre presentes.
+export type InvestimentoRow = Omit<MetaInsight, "gasto" | "cpc" | "cpm" | "custoPorCompra" | "roas"> &
+  Partial<Pick<MetaInsight, "gasto" | "cpc" | "cpm" | "custoPorCompra" | "roas">> & {
+    nome: string;
+    fotos: string[];
+    ativo: boolean;
+  };
 
 function formatBRL(v: number) {
   return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -16,9 +26,14 @@ function formatBRL(v: number) {
 export function InvestimentoMetaAds({
   porConjunto,
   porCriativo,
+  showFinancials,
 }: {
   porConjunto: InvestimentoRow[];
   porCriativo: InvestimentoRow[];
+  // Controla SÓ a exibição das colunas monetárias (Gasto/CPC/CPM/Custo por compra/ROAS) — a
+  // proteção de verdade já aconteceu no servidor (page.tsx nem manda esses campos quando false);
+  // isto aqui é só pra não deixar colunas de "—" vazias sem sentido pra quem não tem acesso.
+  showFinancials: boolean;
 }) {
   const [modo, setModo] = useState<"conjunto" | "criativo">("conjunto");
   // Só ativos ligado por padrão — pedido do Rodrigo em 2026-09-28 ("eu quero só os ativos"). O
@@ -68,14 +83,14 @@ export function InvestimentoMetaAds({
             <tr className="border-b border-[var(--gridline)] text-left text-[var(--text-muted)]">
               <th className="px-4 py-2 font-medium">{rotulo}</th>
               <th className="px-4 py-2 font-medium">Foto</th>
-              <th className="px-4 py-2 font-medium text-right">Gasto</th>
+              {showFinancials && <th className="px-4 py-2 font-medium text-right">Gasto</th>}
               <th className="px-4 py-2 font-medium text-right">Cliques</th>
               <th className="px-4 py-2 font-medium text-right">CTR</th>
-              <th className="px-4 py-2 font-medium text-right">CPC</th>
-              <th className="px-4 py-2 font-medium text-right">CPM</th>
+              {showFinancials && <th className="px-4 py-2 font-medium text-right">CPC</th>}
+              {showFinancials && <th className="px-4 py-2 font-medium text-right">CPM</th>}
               <th className="px-4 py-2 font-medium text-right">Compras</th>
-              <th className="px-4 py-2 font-medium text-right">Custo/compra</th>
-              <th className="px-4 py-2 font-medium text-right">ROAS</th>
+              {showFinancials && <th className="px-4 py-2 font-medium text-right">Custo/compra</th>}
+              {showFinancials && <th className="px-4 py-2 font-medium text-right">ROAS</th>}
             </tr>
           </thead>
           <tbody>
@@ -97,26 +112,36 @@ export function InvestimentoMetaAds({
                 <td className="px-4 py-2">
                   <FotoGaleria fotos={i.fotos} label={i.nome} />
                 </td>
-                <td className="px-4 py-2 text-right tabular-nums font-medium">{formatBRL(i.gasto)}</td>
+                {showFinancials && (
+                  <td className="px-4 py-2 text-right tabular-nums font-medium">{formatBRL(i.gasto ?? 0)}</td>
+                )}
                 <td className="px-4 py-2 text-right tabular-nums">{i.cliques.toLocaleString("pt-BR")}</td>
                 <td className="px-4 py-2 text-right tabular-nums">{i.ctrPct.toFixed(2)}%</td>
-                <td className="px-4 py-2 text-right tabular-nums">{formatBRL(i.cpc)}</td>
-                <td className="px-4 py-2 text-right tabular-nums">{formatBRL(i.cpm)}</td>
+                {showFinancials && (
+                  <td className="px-4 py-2 text-right tabular-nums">{formatBRL(i.cpc ?? 0)}</td>
+                )}
+                {showFinancials && (
+                  <td className="px-4 py-2 text-right tabular-nums">{formatBRL(i.cpm ?? 0)}</td>
+                )}
                 <td className="px-4 py-2 text-right tabular-nums">{i.compras.toLocaleString("pt-BR")}</td>
-                <td className="px-4 py-2 text-right tabular-nums">
-                  {i.custoPorCompra != null ? formatBRL(i.custoPorCompra) : "—"}
-                </td>
-                <td
-                  className="px-4 py-2 text-right tabular-nums font-medium"
-                  style={{ color: i.roas != null && i.roas >= 1 ? "var(--status-good)" : "var(--status-critical)" }}
-                >
-                  {i.roas != null ? `${i.roas.toFixed(2)}x` : "—"}
-                </td>
+                {showFinancials && (
+                  <td className="px-4 py-2 text-right tabular-nums">
+                    {i.custoPorCompra != null ? formatBRL(i.custoPorCompra) : "—"}
+                  </td>
+                )}
+                {showFinancials && (
+                  <td
+                    className="px-4 py-2 text-right tabular-nums font-medium"
+                    style={{ color: i.roas != null && i.roas >= 1 ? "var(--status-good)" : "var(--status-critical)" }}
+                  >
+                    {i.roas != null ? `${i.roas.toFixed(2)}x` : "—"}
+                  </td>
+                )}
               </tr>
             ))}
             {linhas.length === 0 && (
               <tr>
-                <td colSpan={10} className="px-4 py-6 text-center text-[var(--text-muted)]">
+                <td colSpan={showFinancials ? 10 : 5} className="px-4 py-6 text-center text-[var(--text-muted)]">
                   Sem dado de investimento no período (ou Meta Ads não conectado).
                 </td>
               </tr>

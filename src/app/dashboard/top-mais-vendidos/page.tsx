@@ -50,8 +50,10 @@ export default async function TopMaisVendidosPage({
   const top = allRows.slice(0, LIMIT);
 
   // Dropdown de tamanho (estoque disponível + vendido) — só busca pros 10 produtos do ranking,
-  // pedido do Rodrigo em 2026-09-28.
-  const tamanhoPorProduto = await getTamanhoBreakdown(filters, top.map((r) => r.key));
+  // pedido do Rodrigo em 2026-09-28. Passa {grupo, produto} (não só o nome) pra getTamanhoBreakdown
+  // não misturar tamanho/estoque de 2 produtos com o mesmo nome em grupos diferentes (bug real
+  // achado em auditoria 2026-11-25, mesma causa do `key` composto usado abaixo).
+  const tamanhoPorProduto = await getTamanhoBreakdown(filters, top.map((r) => ({ grupo: r.grupo, produto: r.produto })));
   const topComTamanhos = top.map((r) => ({
     ...r,
     estoque: estoqueByProduto.get(r.key) ?? 0,
@@ -77,7 +79,7 @@ export default async function TopMaisVendidosPage({
           Top {LIMIT} produtos {showFinancials ? "por receita líquida" : "por unidades líquidas"}
         </h2>
         <MetricBarChart
-          data={top.map((r) => ({ key: r.key, value: showFinancials ? r.revenue : r.unitsSold }))}
+          data={top.map((r) => ({ key: r.produto, value: showFinancials ? r.revenue : r.unitsSold }))}
           format={showFinancials ? "currency" : "number"}
           color="var(--series-1)"
         />

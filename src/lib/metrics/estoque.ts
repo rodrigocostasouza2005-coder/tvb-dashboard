@@ -940,7 +940,20 @@ export async function getEstoqueAtualPorGrupoProduto(filters: Pick<DashboardFilt
     byKey.set(mapKey, acc);
   }
   return [...byKey.values()]
-    .map((v) => ({ grupo: v.grupo, key: v.produto, quantidade: v.quantidade, valorCusto: v.valorCusto, valorVenda: v.valorVenda }))
+    .map((v) => ({
+      grupo: v.grupo,
+      produto: v.produto,
+      // Chave de IDENTIDADE composta grupo+produto — mesma correção/motivo de
+      // getSalesByGrupoProduto (vendas.ts): nome de produto não é único entre grupos, usar só
+      // `v.produto` como `key` fazia o lookup de estoque (estoqueByProduto em
+      // top-mais-vendidos/top-menos-vendidos) misturar estoque de produtos de grupos diferentes
+      // com o mesmo nome. A AGREGAÇÃO em si (byKey acima) já era por grupo+produto; só o `key`
+      // exposto estava errado.
+      key: `${v.grupo}::${v.produto}`,
+      quantidade: v.quantidade,
+      valorCusto: v.valorCusto,
+      valorVenda: v.valorVenda,
+    }))
     .sort((a, b) => b.quantidade - a.quantidade);
 }
 
@@ -1684,44 +1697,92 @@ export async function getStockCoverage(
 
 export type TamanhoBreakdownRow = { tamanho: string; estoque: number; vendido: number };
 
+// Item de busca de getTamanhoBreakdown: string = só o nome do produto (comportamento antigo,
+// agrega por NOME em qualquer grupo — é o que mapa-compras/page.tsx já faz hoje, que deduplica
+// produtos por nome ANTES de chamar esta função, perdendo o grupo de propósito nesse fluxo);
+// {grupo, produto} = busca grupo-aware, sem colisão entre grupos (ver comentário abaixo).
+export type TamanhoBreakdownItem = string | { grupo: string; produto: string };
+
 // Quebra por tamanho (estoque disponível + vendido no período/filtro) pra um conjunto de
 // produtos — pedido do Rodrigo em 2026-09-28, pro dropdown de tamanho no Top 10 mais/menos
 // vendidos. Só busca os produtos passados (não a base inteira), então é barato mesmo pra poucas
 // linhas como um top 10.
+//
+// Bug real achado em auditoria 2026-11-25: a versão antiga só recebia `produtos: string[]` e
+// agregava Sale/StockSnapshot por NOME de produto (sem grupo) — dois produtos com o mesmo nome
+// em grupos diferentes (ex.: "Clássico" em Camisetas e em Shorts) tinham o tamanho/estoque
+// SOMADO junto numa única entrada do Map, misturando os dois. Corrigido pra aceitar também
+// `{grupo, produto}` (usado por top-mais-vendidos/top-menos-vendidos, que já sabem o grupo de
+// cada produto do ranking) e devolver, pra esses, uma entrada por chave composta `grupo::produto`
+// — sem mistura. Quem só tem o nome (string, ex. mapa-compras) continua recebendo o Map chaveado
+// por nome puro, exatamente como antes (nenhuma mudança de comportamento pra esse caller).
 export async function getTamanhoBreakdown(
   filters: DashboardFilters,
-  produtos: string[]
+  produtos: TamanhoBreakdownItem[]
 ): Promise<Map<string, TamanhoBreakdownRow[]>> {
   if (produtos.length === 0) return new Map();
 
+  const semGrupo = produtos.filter((p): p is string => typeof p === "string");
+  const comGrupo = produtos.filter((p): p is { grupo: string; produto: string } => typeof p !== "string");
+
+  // Mesmo array de condições OR serve pra Sale e StockSnapshot — ambos os models têm os campos
+  // `grupo`/`produto` com o mesmo tipo (String), então o shape é estruturalmente compatível com
+  // Prisma.SaleWhereInput[] e Prisma.StockSnapshotWhereInput[] ao mesmo tempo.
+  type ProdutoOrFiltro = { produto: { in: string[] } } | { grupo: string; produto: string };
+  const orFiltro: ProdutoOrFiltro[] = [
+    ...(semGrupo.length > 0 ? [{ produto: { in: semGrupo } }] : []),
+    ...comGrupo.map((p) => ({ grupo: p.grupo, produto: p.produto })),
+  ];
+
   const [vendasTamanho, stock] = await Promise.all([
     prisma.sale.groupBy({
-      by: ["produto", "tamanho"],
-      where: { ...saleWhere(filters), produto: { in: produtos } },
+      by: ["grupo", "produto", "tamanho"],
+      where: { ...saleWhere(filters), OR: orFiltro },
       _sum: { quantidade: true },
     }),
     prisma.stockSnapshot.findMany({
-      where: { ...stockWhere(filters), produto: { in: produtos } },
-      select: { produto: true, tamanho: true, quantidadeDisponivel: true },
+      where: { ...stockWhere(filters), OR: orFiltro },
+      select: { grupo: true, produto: true, tamanho: true, quantidadeDisponivel: true },
     }),
   ]);
 
-  const porProduto = new Map<string, Map<string, TamanhoBreakdownRow>>();
-  function linha(produto: string, tamanhoRaw: string | null): TamanhoBreakdownRow {
+  const semGrupoSet = new Set(semGrupo);
+  const comGrupoSet = new Set(comGrupo.map((p) => `${p.grupo}\x00${p.produto}`));
+
+  // Uma linha de venda/estoque pode alimentar as duas chaves (nome puro E grupo::produto) se as
+  // duas formas de busca foram pedidas ao mesmo tempo — casos reais hoje nunca misturam as duas
+  // formas numa mesma chamada, mas a função fica correta nos dois.
+  function chavesParaLinha(grupo: string, produto: string): string[] {
+    const chaves: string[] = [];
+    if (comGrupoSet.has(`${grupo}\x00${produto}`)) chaves.push(`${grupo}::${produto}`);
+    if (semGrupoSet.has(produto)) chaves.push(produto);
+    return chaves;
+  }
+
+  const porChave = new Map<string, Map<string, TamanhoBreakdownRow>>();
+  function linha(chave: string, tamanhoRaw: string | null): TamanhoBreakdownRow {
     const tamanho = tamanhoRaw ?? "—";
-    const porTamanho = porProduto.get(produto) ?? new Map<string, TamanhoBreakdownRow>();
+    const porTamanho = porChave.get(chave) ?? new Map<string, TamanhoBreakdownRow>();
     const entry = porTamanho.get(tamanho) ?? { tamanho, estoque: 0, vendido: 0 };
     porTamanho.set(tamanho, entry);
-    porProduto.set(produto, porTamanho);
+    porChave.set(chave, porTamanho);
     return entry;
   }
-  for (const v of vendasTamanho) linha(v.produto, v.tamanho).vendido += v._sum.quantidade ?? 0;
-  for (const s of stock) linha(s.produto, s.tamanho).estoque += s.quantidadeDisponivel;
+  for (const v of vendasTamanho) {
+    for (const chave of chavesParaLinha(v.grupo, v.produto)) {
+      linha(chave, v.tamanho).vendido += v._sum.quantidade ?? 0;
+    }
+  }
+  for (const s of stock) {
+    for (const chave of chavesParaLinha(s.grupo, s.produto)) {
+      linha(chave, s.tamanho).estoque += s.quantidadeDisponivel;
+    }
+  }
 
   const result = new Map<string, TamanhoBreakdownRow[]>();
-  for (const [produto, porTamanho] of porProduto) {
+  for (const [chave, porTamanho] of porChave) {
     const ordem = sortTamanhos([...porTamanho.keys()]);
-    result.set(produto, ordem.map((t) => porTamanho.get(t)!));
+    result.set(chave, ordem.map((t) => porTamanho.get(t)!));
   }
   return result;
 }

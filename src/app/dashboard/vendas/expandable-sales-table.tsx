@@ -3,7 +3,13 @@
 import { Fragment, useState } from "react";
 
 type Row = { key: string; unitsSold: number; revenue: number };
-type ProdutoRow = { grupo: string; key: string; unitsSold: number; revenue: number };
+// `produto` é opcional: quando dimension="grupo", produtoRows vem de getSalesByGrupoProduto
+// (vendas.ts), cujo `key` desde 2026-11-25 é a chave composta "grupo::produto" (correção de
+// colisão de nome entre grupos) — `produto` carrega o nome puro pra exibição/match. Quando
+// dimension="tamanho"/"produto", produtoRows vem de getSalesByTamanhoProduto/
+// getSalesByProdutoTamanho (não tocadas pela correção), que não têm esse campo — nesses casos
+// `key` já é o nome puro, mesmo comportamento de sempre.
+type ProdutoRow = { grupo: string; produto?: string; key: string; unitsSold: number; revenue: number };
 type TamanhoRow = { grupo: string; produto: string; key: string; unitsSold: number; revenue: number };
 
 function formatBRL(value: number) {
@@ -107,9 +113,10 @@ export function ExpandableSalesTable({
                 {/* Level 2 — produto (sub-row) */}
                 {isOpen &&
                   produtos.map((p) => {
+                    const nomeProduto = p.produto ?? p.key;
                     const subKey = `${r.key}\x00${p.key}`;
                     const isSubOpen = openSub.has(subKey);
-                    const tamanhos = (tamanhoRows?.filter((t) => t.grupo === r.key && t.produto === p.key) ?? [])
+                    const tamanhos = (tamanhoRows?.filter((t) => t.grupo === r.key && t.produto === nomeProduto) ?? [])
                       .slice()
                       .sort((a, b) => compareTamanho(a.key, b.key));
                     return (
@@ -128,7 +135,7 @@ export function ExpandableSalesTable({
                               >
                                 {tamanhos.length > 0 ? "▸" : ""}
                               </span>
-                              {p.key}
+                              {nomeProduto}
                             </button>
                           </td>
                           <td className="px-4 py-1.5 tabular-nums text-[var(--text-secondary)]">

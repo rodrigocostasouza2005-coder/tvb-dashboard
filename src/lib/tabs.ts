@@ -178,6 +178,13 @@ const BLOCKED_BY_DEFAULT_FOR_VENDEDOR: TabKey[] = [
   // "informação financeira/estratégica" que já esconde Performance/Análise de Performance do
   // VENDEDOR por padrão. Admin libera manualmente em /dashboard/admin se quiser.
   "black-friday",
+  // Analytics do Site mistura tráfego (GA4, sem problema) com investimento em mídia do Meta Ads
+  // (gasto, CPC, CPM, custo/compra, ROAS) — mesmo vazamento financeiro já bloqueado em
+  // black-friday/performance/analise-performance. Achado em auditoria 2026-11-25: a página nunca
+  // chamava canSeeFinancials, então mesmo sem essa aba VENDEDOR já não via os números (não tinha
+  // acesso à página); agora que a página gira em showFinancials, bloquear por padrão aqui também
+  // (admin libera manualmente se quiser, mesmo padrão das outras).
+  "analytics-site",
 ];
 
 export function defaultAllowedTabs(role: Role): TabKey[] {

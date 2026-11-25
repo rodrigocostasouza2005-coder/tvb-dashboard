@@ -3,8 +3,13 @@
 import { Fragment, useState } from "react";
 
 export type TopProdutoRow = {
-  key: string; // produto
+  // Chave de IDENTIDADE composta `${grupo}::${produto}` — NÃO é texto pra exibir (nome de
+  // produto não é único entre grupos, ex. "Clássico" existe em Camisetas e em Shorts; ver
+  // getSalesByGrupoProduto em vendas.ts). Usada só pra React key / estado de linha aberta /
+  // lookup em Map. Pra exibir o nome do produto, usar `produto`.
+  key: string;
   grupo: string;
+  produto: string;
   unitsSold: number;
   revenue: number;
   estoque: number;
@@ -73,7 +78,7 @@ export function TopProdutosTable({
                       >
                         {temTamanhos ? "▸" : ""}
                       </span>
-                      {r.key}
+                      {r.produto}
                     </button>
                   </td>
                   <td className="px-4 py-2 tabular-nums text-right text-[var(--text-secondary)]">

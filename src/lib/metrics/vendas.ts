@@ -544,7 +544,14 @@ export async function getSalesByGrupoProduto(filters: DashboardFilters) {
   return rows
     .map((r) => ({
       grupo: r.grupo,
-      key: r.produto,
+      produto: r.produto,
+      // Chave de IDENTIDADE composta grupo+produto — nome de produto não é único entre grupos
+      // (ex.: "Clássico" existe em Camisetas e em Shorts). Bug real achado em auditoria
+      // 2026-11-25: usar só `r.produto` como `key` fazia qualquer consumidor que indexasse por
+      // essa chave (netByReturns em core.ts, os Maps de estoque/tamanho em Top 10 Mais/Menos
+      // Vendidos) misturar receita/estoque/devolução de produtos de grupos diferentes que só
+      // coincidem no nome. `produto` continua exposto separado, só pra exibição.
+      key: `${r.grupo}::${r.produto}`,
       unitsSold: r._sum.quantidade ?? 0,
       revenue: r._sum.valorTotalLiquido ?? 0,
     }))
@@ -627,7 +634,11 @@ export async function getReturnsByGrupoProduto(filters: DashboardFilters) {
   return rows
     .map((r) => ({
       grupo: r.grupo,
-      key: r.produto,
+      produto: r.produto,
+      // Mesma correção de key composta de getSalesByGrupoProduto (ver comentário lá) — precisa
+      // casar exatamente com o `key` de getSalesByGrupoProduto pra netByReturns (core.ts) netar
+      // a devolução do produto certo, não de qualquer produto com o mesmo nome em outro grupo.
+      key: `${r.grupo}::${r.produto}`,
       unitsReturned: r._sum.quantidade ?? 0,
       value: r._sum.valorTotal ?? 0,
     }))

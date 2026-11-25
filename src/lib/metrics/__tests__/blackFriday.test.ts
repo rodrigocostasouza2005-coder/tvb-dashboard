@@ -158,8 +158,8 @@ describe("montarVendasPorCanal", () => {
 describe("montarProdutosBlackFriday — classificação por Coleção (Sale.colecao)", () => {
   it("produto sem nenhuma venda com coleção preenchida cai em SEM_CLASSIFICACAO, nunca inventa por volume/receita", () => {
     const liquido = [
-      { grupo: "Camisa", key: "Camisa Classic", unitsSold: 500, revenue: 50000 }, // alto volume/receita
-      { grupo: "Shorts", key: "Shorts Liso", unitsSold: 1, revenue: 10 }, // baixo volume/receita
+      { grupo: "Camisa", produto: "Camisa Classic", key: "Camisa Classic", unitsSold: 500, revenue: 50000 }, // alto volume/receita
+      { grupo: "Shorts", produto: "Shorts Liso", key: "Shorts Liso", unitsSold: 1, revenue: 10 }, // baixo volume/receita
     ];
     const colecoes = new Map<string, string[]>(); // nenhuma coleção vista no período
     const rows = montarProdutosBlackFriday(liquido, colecoes);
@@ -170,8 +170,8 @@ describe("montarProdutosBlackFriday — classificação por Coleção (Sale.cole
 
   it("coleção 'Bestseller' (case-insensitive) classifica BEST_SELLER; qualquer outra coleção classifica DROP", () => {
     const liquido = [
-      { grupo: "Camisa", key: "Camisa Classic", unitsSold: 500, revenue: 50000 },
-      { grupo: "Shorts", key: "Shorts Liso", unitsSold: 1, revenue: 10 },
+      { grupo: "Camisa", produto: "Camisa Classic", key: "Camisa Classic", unitsSold: 500, revenue: 50000 },
+      { grupo: "Shorts", produto: "Shorts Liso", key: "Shorts Liso", unitsSold: 1, revenue: 10 },
     ];
     const colecoes = new Map<string, string[]>([
       ["Camisa::Camisa Classic", ["Drop1 Inverno.26"]],
@@ -185,14 +185,14 @@ describe("montarProdutosBlackFriday — classificação por Coleção (Sale.cole
   });
 
   it("só usa a coleção quando a chave grupo::produto bate exatamente — não casa parcial nem por produto isolado", () => {
-    const liquido = [{ grupo: "Camisa", key: "Camisa Classic", unitsSold: 10, revenue: 1000 }];
+    const liquido = [{ grupo: "Camisa", produto: "Camisa Classic", key: "Camisa Classic", unitsSold: 10, revenue: 1000 }];
     const colecoes = new Map<string, string[]>([["OutroGrupo::Camisa Classic", ["BESTSELLER"]]]);
     const rows = montarProdutosBlackFriday(liquido, colecoes);
     expect(rows[0].classificacao).toBe("SEM_CLASSIFICACAO");
   });
 
   it("produto com vendas em mais de uma coleção no período é BEST_SELLER se QUALQUER uma delas for Bestseller", () => {
-    const liquido = [{ grupo: "Camisa", key: "Camisa Classic", unitsSold: 10, revenue: 1000 }];
+    const liquido = [{ grupo: "Camisa", produto: "Camisa Classic", key: "Camisa Classic", unitsSold: 10, revenue: 1000 }];
     const colecoes = new Map<string, string[]>([["Camisa::Camisa Classic", ["Verão 27", "BESTSELLER"]]]);
     const rows = montarProdutosBlackFriday(liquido, colecoes);
     expect(rows[0].classificacao).toBe("BEST_SELLER");
@@ -243,8 +243,8 @@ describe("excluirAtacado", () => {
 describe("montarVendasPorFaixaDesconto", () => {
   it("produto sem linha correspondente em PrecoBlackFriday cai no bucket 0%, junto com produtos que têm desconto=0 explícito", () => {
     const liquido = [
-      { grupo: "Camisa", key: "Camisa Sem Preço", unitsSold: 10, revenue: 1000 }, // sem linha na planilha
-      { grupo: "Camisa", key: "Camisa Desconto Zero", unitsSold: 4, revenue: 400 }, // desconto=0 explícito
+      { grupo: "Camisa", produto: "Camisa Sem Preço", key: "Camisa Sem Preço", unitsSold: 10, revenue: 1000 }, // sem linha na planilha
+      { grupo: "Camisa", produto: "Camisa Desconto Zero", key: "Camisa Desconto Zero", unitsSold: 4, revenue: 400 }, // desconto=0 explícito
     ];
     const precos = new Map<string, number>([["Camisa::Camisa Desconto Zero", 0]]);
     const rows = montarVendasPorFaixaDesconto(liquido, precos, [0, 0.1, 0.2]);
@@ -264,8 +264,8 @@ describe("montarVendasPorFaixaDesconto", () => {
 
   it("cada produto da faixa traz o estoque atual total da TVB, 0 quando não cadastrado", () => {
     const liquido = [
-      { grupo: "Camisa", key: "Camisa Classic", unitsSold: 10, revenue: 1000 },
-      { grupo: "Camisa", key: "Camisa Sem Estoque", unitsSold: 1, revenue: 100 },
+      { grupo: "Camisa", produto: "Camisa Classic", key: "Camisa Classic", unitsSold: 10, revenue: 1000 },
+      { grupo: "Camisa", produto: "Camisa Sem Estoque", key: "Camisa Sem Estoque", unitsSold: 1, revenue: 100 },
     ];
     const precos = new Map<string, number>();
     const estoquePorProduto = new Map([["Camisa::Camisa Classic", 77]]);
@@ -277,7 +277,7 @@ describe("montarVendasPorFaixaDesconto", () => {
   });
 
   it("garante o bucket 0% mesmo que a planilha não tenha nenhuma linha com desconto=0 cadastrado", () => {
-    const liquido = [{ grupo: "Camisa", key: "Camisa Sem Preço", unitsSold: 10, revenue: 1000 }];
+    const liquido = [{ grupo: "Camisa", produto: "Camisa Sem Preço", key: "Camisa Sem Preço", unitsSold: 10, revenue: 1000 }];
     const precos = new Map<string, number>(); // nenhum preço cadastrado pra esse produto
     const rows = montarVendasPorFaixaDesconto(liquido, precos, [0.1, 0.2]); // faixasReais sem 0
 
@@ -289,8 +289,8 @@ describe("montarVendasPorFaixaDesconto", () => {
 
   it("agrega venda líquida (já descontada devolução, via netByReturns) corretamente por faixa", () => {
     const liquido = [
-      { grupo: "Camisa", key: "Camisa A", unitsSold: 8, revenue: 800 }, // já líquido: 10 vendidas - 2 devolvidas
-      { grupo: "Camisa", key: "Camisa B", unitsSold: 5, revenue: 500 },
+      { grupo: "Camisa", produto: "Camisa A", key: "Camisa A", unitsSold: 8, revenue: 800 }, // já líquido: 10 vendidas - 2 devolvidas
+      { grupo: "Camisa", produto: "Camisa B", key: "Camisa B", unitsSold: 5, revenue: 500 },
     ];
     const precos = new Map<string, number>([
       ["Camisa::Camisa A", 0.2],
@@ -317,7 +317,7 @@ describe("montarVendasPorFaixaDesconto", () => {
   });
 
   it("ordena por desconto ascendente", () => {
-    const liquido = [{ grupo: "G", key: "P", unitsSold: 1, revenue: 1 }];
+    const liquido = [{ grupo: "G", produto: "P", key: "P", unitsSold: 1, revenue: 1 }];
     const precos = new Map<string, number>(); // cai em 0%
     const rows = montarVendasPorFaixaDesconto(liquido, precos, [0.3, 0.1, 0.45, 0]);
     expect(rows.map((r) => r.desconto)).toEqual([0, 0.1, 0.3, 0.45]);
@@ -330,9 +330,9 @@ describe("montarVendasPorFaixaDesconto", () => {
 
   it("produtos dentro de cada faixa vêm ordenados por receita líquida decrescente", () => {
     const liquido = [
-      { grupo: "Camisa", key: "Camisa Baixa Receita", unitsSold: 1, revenue: 100 },
-      { grupo: "Camisa", key: "Camisa Alta Receita", unitsSold: 1, revenue: 900 },
-      { grupo: "Camisa", key: "Camisa Media Receita", unitsSold: 1, revenue: 500 },
+      { grupo: "Camisa", produto: "Camisa Baixa Receita", key: "Camisa Baixa Receita", unitsSold: 1, revenue: 100 },
+      { grupo: "Camisa", produto: "Camisa Alta Receita", key: "Camisa Alta Receita", unitsSold: 1, revenue: 900 },
+      { grupo: "Camisa", produto: "Camisa Media Receita", key: "Camisa Media Receita", unitsSold: 1, revenue: 500 },
     ];
     const precos = new Map<string, number>([
       ["Camisa::Camisa Baixa Receita", 0.1],
@@ -986,22 +986,22 @@ describe("montarVendasPorEstadoEcommerce", () => {
 // agora vem do CADASTRADO em PrecoBlackFriday, nunca calculado por preço de referência).
 describe("montarTop20ProdutosComDesconto", () => {
   it("lê % desconto direto do cadastro (PrecoBlackFriday)", () => {
-    const liquido = [{ grupo: "Camisa", key: "Camisa Classic", unitsSold: 10, revenue: 2000 }];
+    const liquido = [{ grupo: "Camisa", produto: "Camisa Classic", key: "Camisa Classic", unitsSold: 10, revenue: 2000 }];
     const descontos = new Map([["Camisa::Camisa Classic", 0.2]]);
     const rows = montarTop20ProdutosComDesconto(liquido, descontos, 100000);
     expect(rows[0].descontoPct).toBeCloseTo(20);
   });
 
   it("produto sem linha correspondente em PrecoBlackFriday mostra desconto indisponível (null), nunca fabrica 0%", () => {
-    const liquido = [{ grupo: "Camisa", key: "Camisa Nova", unitsSold: 5, revenue: 500 }];
+    const liquido = [{ grupo: "Camisa", produto: "Camisa Nova", key: "Camisa Nova", unitsSold: 5, revenue: 500 }];
     const rows = montarTop20ProdutosComDesconto(liquido, new Map(), 10000);
     expect(rows[0].descontoPct).toBeNull();
   });
 
   it("traz o estoque atual total da TVB pra este produto (grupo+produto), 0 quando não cadastrado", () => {
     const liquido = [
-      { grupo: "Camisa", key: "Camisa Classic", unitsSold: 10, revenue: 2000 },
-      { grupo: "Camisa", key: "Camisa Sem Estoque", unitsSold: 1, revenue: 100 },
+      { grupo: "Camisa", produto: "Camisa Classic", key: "Camisa Classic", unitsSold: 10, revenue: 2000 },
+      { grupo: "Camisa", produto: "Camisa Sem Estoque", key: "Camisa Sem Estoque", unitsSold: 1, revenue: 100 },
     ];
     const estoque = new Map([["Camisa::Camisa Classic", 42]]);
     const rows = montarTop20ProdutosComDesconto(liquido, new Map(), 2100, "revenue", 20, estoque);
@@ -1011,9 +1011,9 @@ describe("montarTop20ProdutosComDesconto", () => {
 
   it("ordena por receita líquida decrescente por padrão", () => {
     const liquido = [
-      { grupo: "G", key: "Baixa receita", unitsSold: 100, revenue: 100 },
-      { grupo: "G", key: "Alta receita", unitsSold: 1, revenue: 900 },
-      { grupo: "G", key: "Média receita", unitsSold: 10, revenue: 500 },
+      { grupo: "G", produto: "Baixa receita", key: "Baixa receita", unitsSold: 100, revenue: 100 },
+      { grupo: "G", produto: "Alta receita", key: "Alta receita", unitsSold: 1, revenue: 900 },
+      { grupo: "G", produto: "Média receita", key: "Média receita", unitsSold: 10, revenue: 500 },
     ];
     const rows = montarTop20ProdutosComDesconto(liquido, new Map(), 1500);
     expect(rows.map((r) => r.produto)).toEqual(["Alta receita", "Média receita", "Baixa receita"]);
@@ -1021,8 +1021,8 @@ describe("montarTop20ProdutosComDesconto", () => {
 
   it("alterando ordenarPor pra 'unidades', ordena por unidades vendidas decrescente", () => {
     const liquido = [
-      { grupo: "G", key: "Poucas unidades", unitsSold: 1, revenue: 900 },
-      { grupo: "G", key: "Muitas unidades", unitsSold: 100, revenue: 100 },
+      { grupo: "G", produto: "Poucas unidades", key: "Poucas unidades", unitsSold: 1, revenue: 900 },
+      { grupo: "G", produto: "Muitas unidades", key: "Muitas unidades", unitsSold: 100, revenue: 100 },
     ];
     const rows = montarTop20ProdutosComDesconto(liquido, new Map(), 1000, "unidades");
     expect(rows.map((r) => r.produto)).toEqual(["Muitas unidades", "Poucas unidades"]);
@@ -1031,7 +1031,7 @@ describe("montarTop20ProdutosComDesconto", () => {
   it("corta no limite (padrão 20), mantendo só os top N por receita", () => {
     const liquido = Array.from({ length: 25 }, (_, i) => ({
       grupo: "G",
-      key: `Produto ${i}`,
+      produto: `Produto ${i}`, key: `Produto ${i}`,
       unitsSold: 1,
       revenue: 25 - i, // produto 0 tem a maior receita
     }));
@@ -1041,19 +1041,19 @@ describe("montarTop20ProdutosComDesconto", () => {
   });
 
   it("% de participação no faturamento usa o total do período passado pelo chamador, não recalcula sozinho", () => {
-    const liquido = [{ grupo: "G", key: "P", unitsSold: 1, revenue: 250 }];
+    const liquido = [{ grupo: "G", produto: "P", key: "P", unitsSold: 1, revenue: 250 }];
     const rows = montarTop20ProdutosComDesconto(liquido, new Map(), 1000); // total do período = 1000
     expect(rows[0].participacaoFaturamentoPct).toBeCloseTo(25); // 250/1000 = 25%
   });
 
   it("faturamento total do período zero/negativo -> participação null, nunca divide por zero", () => {
-    const liquido = [{ grupo: "G", key: "P", unitsSold: 1, revenue: 250 }];
+    const liquido = [{ grupo: "G", produto: "P", key: "P", unitsSold: 1, revenue: 250 }];
     const rows = montarTop20ProdutosComDesconto(liquido, new Map(), 0);
     expect(rows[0].participacaoFaturamentoPct).toBeNull();
   });
 
   it("preserva grupo/produto/unidades/receita do agregado, pra tabela não precisar de outra consulta", () => {
-    const liquido = [{ grupo: "Camisa", key: "Camisa Classic", unitsSold: 5, revenue: 500 }];
+    const liquido = [{ grupo: "Camisa", produto: "Camisa Classic", key: "Camisa Classic", unitsSold: 5, revenue: 500 }];
     const rows = montarTop20ProdutosComDesconto(liquido, new Map(), 10000);
     expect(rows[0]).toMatchObject({ grupo: "Camisa", produto: "Camisa Classic", unitsSold: 5, revenue: 500 });
   });
@@ -1065,9 +1065,9 @@ describe("montarTop20ProdutosComDesconto", () => {
 describe("montarTop20GruposComDesconto", () => {
   it("agrega unidades/receita de todos os produtos do mesmo grupo", () => {
     const liquido = [
-      { grupo: "Camisa", key: "Classic", unitsSold: 10, revenue: 1000 },
-      { grupo: "Camisa", key: "Slim", unitsSold: 5, revenue: 500 },
-      { grupo: "Shorts", key: "Liso", unitsSold: 3, revenue: 300 },
+      { grupo: "Camisa", produto: "Classic", key: "Classic", unitsSold: 10, revenue: 1000 },
+      { grupo: "Camisa", produto: "Slim", key: "Slim", unitsSold: 5, revenue: 500 },
+      { grupo: "Shorts", produto: "Liso", key: "Liso", unitsSold: 3, revenue: 300 },
     ];
     const rows = montarTop20GruposComDesconto(liquido, new Map(), 1800);
     const camisa = rows.find((r) => r.grupo === "Camisa");
@@ -1077,8 +1077,8 @@ describe("montarTop20GruposComDesconto", () => {
 
   it("desconto do grupo é média ponderada por receita, só entre produtos com desconto cadastrado", () => {
     const liquido = [
-      { grupo: "Camisa", key: "Classic", unitsSold: 10, revenue: 800 }, // 20% desconto
-      { grupo: "Camisa", key: "Slim", unitsSold: 5, revenue: 200 }, // 40% desconto
+      { grupo: "Camisa", produto: "Classic", key: "Classic", unitsSold: 10, revenue: 800 }, // 20% desconto
+      { grupo: "Camisa", produto: "Slim", key: "Slim", unitsSold: 5, revenue: 200 }, // 40% desconto
     ];
     const descontos = new Map([
       ["Camisa::Classic", 0.2],
@@ -1091,8 +1091,8 @@ describe("montarTop20GruposComDesconto", () => {
 
   it("produto do grupo sem desconto cadastrado NÃO entra no peso nem no numerador da média", () => {
     const liquido = [
-      { grupo: "Camisa", key: "Classic", unitsSold: 10, revenue: 800 }, // 20% desconto, cadastrado
-      { grupo: "Camisa", key: "Sem Cadastro", unitsSold: 5, revenue: 2000 }, // sem desconto cadastrado
+      { grupo: "Camisa", produto: "Classic", key: "Classic", unitsSold: 10, revenue: 800 }, // 20% desconto, cadastrado
+      { grupo: "Camisa", produto: "Sem Cadastro", key: "Sem Cadastro", unitsSold: 5, revenue: 2000 }, // sem desconto cadastrado
     ];
     const descontos = new Map([["Camisa::Classic", 0.2]]);
     const rows = montarTop20GruposComDesconto(liquido, descontos, 3000);
@@ -1103,15 +1103,15 @@ describe("montarTop20GruposComDesconto", () => {
   });
 
   it("grupo sem NENHUM produto cadastrado mostra desconto indisponível (null), nunca 0%/média fabricada", () => {
-    const liquido = [{ grupo: "Camisa", key: "Novo Produto", unitsSold: 5, revenue: 500 }];
+    const liquido = [{ grupo: "Camisa", produto: "Novo Produto", key: "Novo Produto", unitsSold: 5, revenue: 500 }];
     const rows = montarTop20GruposComDesconto(liquido, new Map(), 10000);
     expect(rows[0].descontoMedioPct).toBeNull();
   });
 
   it("traz o estoque atual total da TVB pra este grupo (soma de todos os produtos), 0 quando não cadastrado", () => {
     const liquido = [
-      { grupo: "Camisa", key: "Classic", unitsSold: 10, revenue: 800 },
-      { grupo: "Shorts", key: "Liso", unitsSold: 3, revenue: 300 },
+      { grupo: "Camisa", produto: "Classic", key: "Classic", unitsSold: 10, revenue: 800 },
+      { grupo: "Shorts", produto: "Liso", key: "Liso", unitsSold: 3, revenue: 300 },
     ];
     const estoquePorGrupo = new Map([["Camisa", 99]]);
     const rows = montarTop20GruposComDesconto(liquido, new Map(), 1100, "revenue", 20, estoquePorGrupo);
@@ -1122,12 +1122,56 @@ describe("montarTop20GruposComDesconto", () => {
   it("ordena por receita decrescente por padrão e corta no limite", () => {
     const liquido = Array.from({ length: 25 }, (_, i) => ({
       grupo: `Grupo ${i}`,
-      key: "P",
+      produto: "P", key: "P",
       unitsSold: 1,
       revenue: 25 - i,
     }));
     const rows = montarTop20GruposComDesconto(liquido, new Map(), 1000);
     expect(rows).toHaveLength(20);
     expect(rows[0].grupo).toBe("Grupo 0");
+  });
+});
+
+// Regressão (2026-11-25): getSalesByGrupoProduto/getReturnsByGrupoProduto (vendas.ts) corrigiram
+// a colisão de identidade entre produtos de mesmo nome em grupos diferentes trocando `key` pra
+// chave composta "grupo::produto" — mas todo consumidor em black-friday.ts que montava
+// `${v.grupo}::${v.key}` pra cruzar com colecoesPorProduto/descontosCadastrados/estoquePorProduto
+// (indexados por "grupo::produto" de verdade) ficaria com prefixo duplicado e NUNCA bateria mais
+// nenhum lookup. Os testes acima não pegam essa regressão porque sempre usam key === produto —
+// esta suíte usa valores DIFERENTES de propósito pra provar que o código usa `v.produto`, nunca
+// `v.key`, nos 4 pontos de integração.
+describe("integração key≠produto — nenhum lookup usa v.key (sempre v.produto)", () => {
+  const liquidoComKeyComposta = [
+    { grupo: "Camisa", produto: "Classic", key: "Camisa::Classic", unitsSold: 10, revenue: 1000 },
+  ];
+
+  it("montarProdutosBlackFriday: classificação bate mesmo com key composta", () => {
+    const colecoes = new Map<string, string[]>([["Camisa::Classic", ["BESTSELLER"]]]);
+    const rows = montarProdutosBlackFriday(liquidoComKeyComposta, colecoes);
+    expect(rows[0].produto).toBe("Classic");
+    expect(rows[0].classificacao).toBe("BEST_SELLER");
+  });
+
+  it("montarVendasPorFaixaDesconto: desconto cadastrado é encontrado mesmo com key composta", () => {
+    const precos = new Map([["Camisa::Classic", 0.2]]);
+    const rows = montarVendasPorFaixaDesconto(liquidoComKeyComposta, precos, [0.2]);
+    const faixa20 = rows.find((r) => r.desconto === 0.2);
+    expect(faixa20?.unitsSold).toBe(10);
+  });
+
+  it("montarTop20ProdutosComDesconto: desconto, nome exibido e estoque corretos mesmo com key composta", () => {
+    const descontos = new Map([["Camisa::Classic", 0.2]]);
+    const estoque = new Map([["Camisa::Classic", 42]]);
+    const rows = montarTop20ProdutosComDesconto(liquidoComKeyComposta, descontos, 1000, "revenue", 20, estoque);
+    expect(rows[0].produto).toBe("Classic");
+    expect(rows[0].descontoPct).toBe(20);
+    expect(rows[0].estoqueAtual).toBe(42);
+  });
+
+  it("montarTop20GruposComDesconto: desconto ponderado encontrado mesmo com key composta", () => {
+    const descontos = new Map([["Camisa::Classic", 0.2]]);
+    const rows = montarTop20GruposComDesconto(liquidoComKeyComposta, descontos, 1000);
+    expect(rows[0].grupo).toBe("Camisa");
+    expect(rows[0].descontoMedioPct).toBeCloseTo(20);
   });
 });

@@ -287,19 +287,24 @@ function normalizarColecao(colecao: string): string {
 // coleções distintas vistas por produto no período. Testável sem banco, ver
 // __tests__/blackFriday.test.ts.
 export function montarProdutosBlackFriday(
-  liquido: { grupo: string; key: string; unitsSold: number; revenue: number }[],
+  liquido: { grupo: string; produto: string; key: string; unitsSold: number; revenue: number }[],
   colecoesPorProduto: Map<string, string[]>,
   limit = 20
 ): ProdutoBlackFriday[] {
   return liquido
     .map((v) => {
-      const colecoes = colecoesPorProduto.get(`${v.grupo}::${v.key}`) ?? [];
+      // `key` é a chave de IDENTIDADE composta grupo::produto (ver getSalesByGrupoProduto,
+      // vendas.ts) — colecoesPorProduto já é indexado por grupo::produto, então aqui usamos
+      // `v.produto` (nome puro) pra montar a MESMA chave, nunca `v.key` (que desde a correção de
+      // 2026-11-25 já É "grupo::produto" — usar `v.key` aqui duplicaria o prefixo e nunca bateria
+      // no mapa).
+      const colecoes = colecoesPorProduto.get(`${v.grupo}::${v.produto}`) ?? [];
       const temBestseller = colecoes.some((c) => normalizarColecao(c) === NOME_COLECAO_BESTSELLER);
       const classificacao: ProdutoBlackFriday["classificacao"] =
         colecoes.length === 0 ? "SEM_CLASSIFICACAO" : temBestseller ? "BEST_SELLER" : "DROP";
       return {
         grupo: v.grupo,
-        produto: v.key,
+        produto: v.produto,
         unitsSold: v.unitsSold,
         revenue: v.revenue,
         classificacao,
@@ -392,7 +397,7 @@ export type FaixaDescontoRow = {
 // venda); o bucket 0 é sempre garantido independentemente de `faixasReais` conter 0 ou não —
 // testável sem banco, ver __tests__/blackFriday.test.ts.
 export function montarVendasPorFaixaDesconto(
-  liquido: { grupo: string; key: string; unitsSold: number; revenue: number }[],
+  liquido: { grupo: string; produto: string; key: string; unitsSold: number; revenue: number }[],
   precosPorProduto: Map<string, number>,
   faixasReais: number[],
   estoquePorProduto: Map<string, number> = new Map()
@@ -413,7 +418,9 @@ export function montarVendasPorFaixaDesconto(
   getBucket(0); // garante o bucket 0% mesmo que a planilha não tenha nenhuma linha com desconto=0
 
   for (const v of liquido) {
-    const chaveProduto = `${v.grupo}::${v.key}`;
+    // v.produto (nome puro), nunca v.key — key já é grupo::produto desde a correção de
+    // 2026-11-25 (ver comentário em montarProdutosBlackFriday acima).
+    const chaveProduto = `${v.grupo}::${v.produto}`;
     const desconto = precosPorProduto.has(chaveProduto) ? precosPorProduto.get(chaveProduto)! : 0;
     const b = getBucket(desconto);
     b.unitsSold += v.unitsSold;
@@ -997,7 +1004,7 @@ export type Top20ProdutoDesconto = {
 // e o mapa de desconto cadastrado (PrecoBlackFriday, via getPrecosPorProduto) por grupo+produto,
 // e monta o ranking. Testável sem banco, ver __tests__/blackFriday.test.ts.
 export function montarTop20ProdutosComDesconto(
-  liquido: { grupo: string; key: string; unitsSold: number; revenue: number }[],
+  liquido: { grupo: string; produto: string; key: string; unitsSold: number; revenue: number }[],
   descontosCadastrados: Map<string, number>,
   faturamentoTotalPeriodo: number,
   ordenarPor: "revenue" | "unidades" = "revenue",
@@ -1006,17 +1013,18 @@ export function montarTop20ProdutosComDesconto(
 ): Top20ProdutoDesconto[] {
   return liquido
     .map((v) => {
-      const desconto = descontosCadastrados.get(`${v.grupo}::${v.key}`);
+      // v.produto (nome puro), nunca v.key — ver comentário em montarProdutosBlackFriday acima.
+      const desconto = descontosCadastrados.get(`${v.grupo}::${v.produto}`);
       const participacaoFaturamentoPct =
         faturamentoTotalPeriodo > 0 ? (v.revenue / faturamentoTotalPeriodo) * 100 : null;
       return {
         grupo: v.grupo,
-        produto: v.key,
+        produto: v.produto,
         unitsSold: v.unitsSold,
         revenue: v.revenue,
         descontoPct: desconto != null ? desconto * 100 : null,
         participacaoFaturamentoPct,
-        estoqueAtual: estoquePorProduto.get(`${v.grupo}::${v.key}`) ?? 0,
+        estoqueAtual: estoquePorProduto.get(`${v.grupo}::${v.produto}`) ?? 0,
       } satisfies Top20ProdutoDesconto;
     })
     .sort((a, b) => (ordenarPor === "unidades" ? b.unitsSold - a.unitsSold : b.revenue - a.revenue))
@@ -1047,7 +1055,7 @@ export type Top20GrupoDesconto = {
 // Função PURA — mesma entrada de montarTop20ProdutosComDesconto (venda líquida por grupo+produto
 // + mapa de desconto cadastrado), agregada por grupo. Testável sem banco.
 export function montarTop20GruposComDesconto(
-  liquido: { grupo: string; key: string; unitsSold: number; revenue: number }[],
+  liquido: { grupo: string; produto: string; key: string; unitsSold: number; revenue: number }[],
   descontosCadastrados: Map<string, number>,
   faturamentoTotalPeriodo: number,
   ordenarPor: "revenue" | "unidades" = "revenue",
@@ -1056,7 +1064,8 @@ export function montarTop20GruposComDesconto(
 ): Top20GrupoDesconto[] {
   const porGrupo = new Map<string, { unitsSold: number; revenue: number; revenueComDesconto: number; descontoPonderadoSoma: number }>();
   for (const v of liquido) {
-    const desconto = descontosCadastrados.get(`${v.grupo}::${v.key}`);
+    // v.produto (nome puro), nunca v.key — ver comentário em montarProdutosBlackFriday acima.
+    const desconto = descontosCadastrados.get(`${v.grupo}::${v.produto}`);
     const acc = porGrupo.get(v.grupo) ?? { unitsSold: 0, revenue: 0, revenueComDesconto: 0, descontoPonderadoSoma: 0 };
     acc.unitsSold += v.unitsSold;
     acc.revenue += v.revenue;

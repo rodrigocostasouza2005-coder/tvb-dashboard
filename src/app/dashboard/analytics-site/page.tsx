@@ -22,6 +22,7 @@ import {
 import { after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
+import { canSeeFinancials } from "@/lib/permissions";
 import { requireTabAccess } from "@/lib/tabs";
 import { defaultRecentRangeStr, type RawSearchParams } from "@/lib/filters";
 import { StatTile } from "../stat-tile";
@@ -50,6 +51,16 @@ export default async function AnalyticsSitePage({
   const user = await getSessionUser();
   if (!user) return null;
   requireTabAccess(user, user.role, "analytics-site");
+
+  // Vazamento de dado financeiro achado em auditoria 2026-11-25: esta página nunca checava
+  // canSeeFinancials — investimento em mídia do Meta Ads (gasto, CPC, CPM, custo/compra, ROAS)
+  // ia pro componente cliente incondicionalmente, pro usuário final. A proteção precisa estar
+  // AQUI (server) e não só escondendo a UI no componente cliente: qualquer prop passada pra um
+  // componente cliente entra no payload serializado que o navegador recebe, visível por quem
+  // souber abrir o DevTools, mesmo que o componente escolha não renderizar aquela coluna. Por
+  // isso os campos financeiros (ver `stripFinanceiro` abaixo) são removidos do objeto ANTES de
+  // virar prop — nunca chegam a existir no payload quando showFinancials é false.
+  const showFinancials = canSeeFinancials(user);
 
   const rawParams = await searchParams;
   const defaults = defaultRecentRangeStr(30);
@@ -189,14 +200,26 @@ export default async function AnalyticsSitePage({
   if (statusAnuncioR.status === "fulfilled") statusPorAnuncio = statusAnuncioR.value;
   else errosFotoStatus.push(`status por anúncio (${motivo(statusAnuncioR)})`);
 
+  // Remove os campos monetários do próprio objeto (não só zera/esconde) quando o usuário não pode
+  // ver financeiro — `gasto`/`cpc`/`cpm`/`custoPorCompra`/`roas` nem chegam a existir no objeto
+  // que vira prop do componente cliente, então nenhuma manipulação de URL/parâmetro no navegador
+  // recupera esse dado (ele simplesmente nunca estava no payload). Cliques/CTR/compras não são
+  // valor em R$ e continuam visíveis pra todo mundo, igual já era.
+  function stripFinanceiro<T extends { gasto: number; cpc: number; cpm: number; custoPorCompra: number | null; roas: number | null }>(
+    insight: T
+  ): Omit<T, "gasto" | "cpc" | "cpm" | "custoPorCompra" | "roas"> {
+    const { gasto: _gasto, cpc: _cpc, cpm: _cpm, custoPorCompra: _custoPorCompra, roas: _roas, ...resto } = insight;
+    return resto;
+  }
+
   const investimentoRowsConjunto: InvestimentoRow[] = investimentoPorConjunto.map((i) => ({
-    ...i,
+    ...(showFinancials ? i : stripFinanceiro(i)),
     nome: i.conjunto,
     fotos: fotosPorConjunto.get(i.conjunto) ?? [],
     ativo: statusPorConjunto.get(i.conjunto) ?? false,
   }));
   const investimentoRowsCriativo: InvestimentoRow[] = investimentoPorAnuncio.map((i) => ({
-    ...i,
+    ...(showFinancials ? i : stripFinanceiro(i)),
     nome: i.anuncio,
     fotos: fotosPorAnuncio.get(i.anuncio) ?? [],
     ativo: statusPorAnuncio.get(i.anuncio) ?? false,
@@ -368,7 +391,7 @@ export default async function AnalyticsSitePage({
               Algumas fotos/status de anúncios do Meta Ads não carregaram agora: {errosFotoStatus.join(" · ")}
             </p>
           )}
-          <InvestimentoMetaAds porConjunto={investimentoRowsConjunto} porCriativo={investimentoRowsCriativo} />
+          <InvestimentoMetaAds porConjunto={investimentoRowsConjunto} porCriativo={investimentoRowsCriativo} showFinancials={showFinancials} />
 
           {/* ── Público: quem visita ── */}
           <h2 className="mb-3 text-base font-semibold">Público — quem visita</h2>

@@ -151,10 +151,13 @@ export default async function CurvaAbcPage({
 
   const showFinancials = canSeeFinancials(user);
 
-  // Por produto — já vem ordenado por receita desc
+  // Por produto — já vem ordenado por receita desc. `name` usa `r.produto` (nome puro), nunca
+  // `r.key` — desde a correção de 2026-11-25, `key` é a chave composta "grupo::produto" (evita
+  // colisão entre produtos de mesmo nome em grupos diferentes), e exibir ela confundiria o nome
+  // do produto na tela.
   const porProduto = allRows
     .filter((r) => r.revenue > 0)
-    .map((r) => ({ name: r.key, extra: r.grupo, unitsSold: r.unitsSold, revenue: r.revenue }));
+    .map((r) => ({ name: r.produto, extra: r.grupo, unitsSold: r.unitsSold, revenue: r.revenue }));
 
   // Por grupo — agrega produto rows por grupo
   const grupoMap = new Map<string, { unitsSold: number; revenue: number }>();
