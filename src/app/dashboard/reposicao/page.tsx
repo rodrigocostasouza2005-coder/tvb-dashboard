@@ -6,9 +6,7 @@ import {
   getMarcas,
   getDistinctColecoes,
   getEstoqueMinimoManual,
-  getMovimentacoesRecomendadas,
   construirMapaMinimoManualPorCod,
-  construirMapaTransferenciaPorCodELoja,
 } from "@/lib/metrics";
 import { getGrupoRestriction, getStoreRestriction } from "@/lib/permissions";
 import { parseFilters, toDateInputValue, type RawSearchParams } from "@/lib/filters";
@@ -17,8 +15,8 @@ import { FilterBar } from "../filter-bar";
 import { CollapsibleFilters } from "../collapsible-filters";
 import { MetricBarChart } from "../metric-bar-chart";
 import { ModoToggle, parseReplenishmentModo } from "./modo-toggle";
-import { MinimoManualInfo, TransferenciaInfo } from "./sinais";
-import type { ItemMinimoManual, SinalTransferencia } from "@/lib/metrics";
+import { MinimoManualInfo } from "./sinais";
+import type { ItemMinimoManual } from "@/lib/metrics";
 
 export default async function ReposicaoPage({
   searchParams,
@@ -60,25 +58,18 @@ export default async function ReposicaoPage({
 
   const rows = modo === "minimo" ? rowsMinimo : rowsVendas;
 
-  // Sinais ADITIVOS (pedido do Rodrigo, 2026-11-18) — nunca alteram falta/estoqueMinimo/
-  // origemSugerida calculados acima, só cruzam cada linha já mostrada com dois motores que já
-  // existem: (1) mínimo MANUAL por SKU (getEstoqueMinimoManual, vale pra qualquer cod, somando
-  // todas as posições da empresa) e (2) oportunidade de transferência já sugerida pelo motor de
-  // Distribuição (getMovimentacoesRecomendadas) pro MESMO cod + MESMA loja de destino. Só busca
-  // quando há linha pra mostrar (evita 2 passadas pesadas em cima de uma tabela vazia).
+  // Sinal ADITIVO (pedido do Rodrigo, 2026-11-18) — nunca altera falta/estoqueMinimo/
+  // origemSugerida calculados acima, só cruza cada linha já mostrada com o mínimo MANUAL por SKU
+  // (getEstoqueMinimoManual, vale pra qualquer cod, somando todas as posições da empresa). Só
+  // busca quando há linha pra mostrar (evita passada pesada em cima de uma tabela vazia).
   // storeIdsPermitidas usa a RESTRIÇÃO de permissão do usuário (allowedStores), nunca o filtro de
-  // loja selecionado na tela — o mínimo manual e as oportunidades de transferência precisam
-  // comparar a empresa toda (todas as posições que o usuário pode ver), não só a loja filtrada.
+  // loja selecionado na tela — o mínimo manual precisa comparar a empresa toda (todas as posições
+  // que o usuário pode ver), não só a loja filtrada.
   let minimoManualPorCod = new Map<string, ItemMinimoManual>();
-  let transferenciaPorCodELoja = new Map<string, SinalTransferencia>();
   if (rows.length > 0) {
     const sinaisFiltro = { grupoIn: filters.grupoIn, colecaoIn: filters.colecaoIn, storeIdsPermitidas: allowedStores };
-    const [itensMinimoManual, movimentacoesRecomendadas] = await Promise.all([
-      getEstoqueMinimoManual(sinaisFiltro),
-      getMovimentacoesRecomendadas(sinaisFiltro),
-    ]);
+    const itensMinimoManual = await getEstoqueMinimoManual(sinaisFiltro);
     minimoManualPorCod = construirMapaMinimoManualPorCod(itensMinimoManual);
-    transferenciaPorCodELoja = construirMapaTransferenciaPorCodELoja(movimentacoesRecomendadas.movimentacoes);
   }
 
   return (
@@ -154,7 +145,6 @@ export default async function ReposicaoPage({
                 <th className="px-4 py-2 font-medium">Repor de</th>
                 <th className="px-4 py-2 font-medium">Disponível na origem</th>
                 <th className="px-4 py-2 font-medium">Mínimo manual (empresa)</th>
-                <th className="px-4 py-2 font-medium">Transferência disponível</th>
               </tr>
             </thead>
             <tbody>
@@ -174,14 +164,11 @@ export default async function ReposicaoPage({
                   <td className="px-4 py-2">
                     <MinimoManualInfo item={minimoManualPorCod.get(r.cod)} />
                   </td>
-                  <td className="px-4 py-2">
-                    <TransferenciaInfo sinal={transferenciaPorCodELoja.get(`${r.storeId}::${r.cod}`)} />
-                  </td>
                 </tr>
               ))}
               {rowsMinimo.length === 0 && (
                 <tr>
-                  <td colSpan={11} className="px-4 py-6 text-center text-[var(--text-muted)]">
+                  <td colSpan={10} className="px-4 py-6 text-center text-[var(--text-muted)]">
                     Nada abaixo do estoque mínimo no filtro atual.
                   </td>
                 </tr>
@@ -204,7 +191,6 @@ export default async function ReposicaoPage({
                 <th className="px-4 py-2 font-medium">Repor de</th>
                 <th className="px-4 py-2 font-medium">Disponível na origem</th>
                 <th className="px-4 py-2 font-medium">Mínimo manual (empresa)</th>
-                <th className="px-4 py-2 font-medium">Transferência disponível</th>
               </tr>
             </thead>
             <tbody>
@@ -242,14 +228,11 @@ export default async function ReposicaoPage({
                   <td className="px-4 py-2">
                     <MinimoManualInfo item={minimoManualPorCod.get(r.cod)} />
                   </td>
-                  <td className="px-4 py-2">
-                    <TransferenciaInfo sinal={transferenciaPorCodELoja.get(`${r.storeId}::${r.cod}`)} />
-                  </td>
                 </tr>
               ))}
               {rowsVendas.length === 0 && (
                 <tr>
-                  <td colSpan={11} className="px-4 py-6 text-center text-[var(--text-muted)]">
+                  <td colSpan={10} className="px-4 py-6 text-center text-[var(--text-muted)]">
                     Nada vende, no ritmo médio das últimas 8 semanas, mais do que tem disponível.
                   </td>
                 </tr>

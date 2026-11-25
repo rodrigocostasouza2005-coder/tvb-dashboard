@@ -1,11 +1,11 @@
-import type { ItemMinimoManual, SinalTransferencia } from "@/lib/metrics";
+import type { ItemMinimoManual } from "@/lib/metrics";
 import { NIVEL_COR, NIVEL_LABEL, formatNumero } from "../estoque-minimo-manual/format";
 
-// Dois sinais ADITIVOS da tela de Reposição de lojas (nunca alteram falta/estoqueMinimo/
-// origemSugerida já calculados em getReplenishment/getReplenishmentPorVendas, src/lib/metrics/
-// estoque.ts) — ver src/lib/metrics/reposicao-sinais.ts pra como os mapas usados aqui são
-// montados. Mesma paleta/conceito de badge já usada em estoque-minimo-manual/format.tsx (--status-
-// critical/warning/good + --text-muted), reaproveitada direto, sem inventar cor nova.
+// Sinal ADITIVO da tela de Reposição de lojas (nunca altera falta/estoqueMinimo/origemSugerida
+// já calculados em getReplenishment/getReplenishmentPorVendas, src/lib/metrics/estoque.ts) — ver
+// src/lib/metrics/reposicao-sinais.ts pra como o mapa usado aqui é montado. Mesma paleta/conceito
+// de badge já usada em estoque-minimo-manual/format.tsx (--status-critical/warning/good +
+// --text-muted), reaproveitada direto, sem inventar cor nova.
 
 export function MinimoManualInfo({ item }: { item: ItemMinimoManual | undefined }) {
   if (!item || item.minimoDefinido == null) {
@@ -20,18 +20,6 @@ export function MinimoManualInfo({ item }: { item: ItemMinimoManual | undefined 
           {NIVEL_LABEL[item.nivelAlerta].toUpperCase()}
         </span>
       </span>
-    </span>
-  );
-}
-
-export function TransferenciaInfo({ sinal }: { sinal: SinalTransferencia | undefined }) {
-  if (!sinal || sinal.quantidade <= 0) {
-    return <span className="text-[var(--text-muted)]">—</span>;
-  }
-  return (
-    <span className="text-xs text-[var(--text-secondary)]">
-      Há {formatNumero(sinal.quantidade)} un. disponíveis pra transferência de {sinal.origens.join(", ")} antes de
-      comprar/repor.
     </span>
   );
 }
