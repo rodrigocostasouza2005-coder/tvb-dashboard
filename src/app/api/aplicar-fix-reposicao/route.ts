@@ -40,6 +40,10 @@ const STATEMENTS: string[] = [
   // que ser removidas ANTES do travamento de NOT NULL abaixo, senão ele falha de novo (eram
   // exatamente a causa do erro P2022 original — nunca existiram antes de 2026-11-03).
   `DELETE FROM "ClassificacaoProduto" WHERE "cod" IS NULL;`,
+  // ON CONFLICT (cod) nos 61 INSERTs abaixo exige que o índice único já exista — criado aqui,
+  // antes dos inserts (não ao final como antes, que falhava com 42P10 "no unique or exclusion
+  // constraint matching").
+  `CREATE UNIQUE INDEX IF NOT EXISTS "ClassificacaoProduto_cod_key" ON "ClassificacaoProduto"("cod");`,
   `INSERT INTO "ClassificacaoProduto" (id, cod, produto, grupo, colecao, "tipoCompra", "statusComercial", "possibilidadeReposicao", "dataLancamento", "dataEncerramentoPrevista", "orcamentoDrop", observacoes, "createdAt", "updatedAt") VALUES ('70f20f19-a2f4-45fb-b546-e43b324a9f58', '2142', 'Classic Black', 'Classic Lisa', 'BESTSELLER', 'BEST_SELLER', 'ATIVO', 'A_CONFIRMAR', NULL, NULL, NULL, NULL, now(), now()) ON CONFLICT (cod) DO NOTHING`,
   `INSERT INTO "ClassificacaoProduto" (id, cod, produto, grupo, colecao, "tipoCompra", "statusComercial", "possibilidadeReposicao", "dataLancamento", "dataEncerramentoPrevista", "orcamentoDrop", observacoes, "createdAt", "updatedAt") VALUES ('0b6c8eb0-556c-44f7-b69b-ec253bcf1cfa', '961', 'Classic Black', 'Classic Lisa', 'BESTSELLER', 'BEST_SELLER', 'ATIVO', 'A_CONFIRMAR', NULL, NULL, NULL, NULL, now(), now()) ON CONFLICT (cod) DO NOTHING`,
   `INSERT INTO "ClassificacaoProduto" (id, cod, produto, grupo, colecao, "tipoCompra", "statusComercial", "possibilidadeReposicao", "dataLancamento", "dataEncerramentoPrevista", "orcamentoDrop", observacoes, "createdAt", "updatedAt") VALUES ('4ee78637-363f-42c8-80a0-0e259b5a8eec', '962', 'Classic Black', 'Classic Lisa', 'BESTSELLER', 'BEST_SELLER', 'ATIVO', 'A_CONFIRMAR', NULL, NULL, NULL, NULL, now(), now()) ON CONFLICT (cod) DO NOTHING`,
@@ -102,7 +106,6 @@ const STATEMENTS: string[] = [
   `INSERT INTO "ClassificacaoProduto" (id, cod, produto, grupo, colecao, "tipoCompra", "statusComercial", "possibilidadeReposicao", "dataLancamento", "dataEncerramentoPrevista", "orcamentoDrop", observacoes, "createdAt", "updatedAt") VALUES ('6e543474-7054-4973-9797-543f4540299e', '2578', 'Ultra Light Treko Reverso', 'Ultra Light', 'Verão 27', 'DROP', 'ATIVO', 'A_CONFIRMAR', NULL, NULL, NULL, NULL, now(), now()) ON CONFLICT (cod) DO NOTHING`,
   `INSERT INTO "ClassificacaoProduto" (id, cod, produto, grupo, colecao, "tipoCompra", "statusComercial", "possibilidadeReposicao", "dataLancamento", "dataEncerramentoPrevista", "orcamentoDrop", observacoes, "createdAt", "updatedAt") VALUES ('afaacb8f-b742-4a69-a61e-f95e187c801d', '2579', 'Ultra Light Treko Reverso', 'Ultra Light', 'Verão 27', 'DROP', 'ATIVO', 'A_CONFIRMAR', NULL, NULL, NULL, NULL, now(), now()) ON CONFLICT (cod) DO NOTHING`,
   `ALTER TABLE "ClassificacaoProduto" ALTER COLUMN "cod" SET NOT NULL;`,
-  `CREATE UNIQUE INDEX IF NOT EXISTS "ClassificacaoProduto_cod_key" ON "ClassificacaoProduto"("cod");`,
 ];
 
 async function handle(request: NextRequest) {
