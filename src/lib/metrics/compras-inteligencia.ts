@@ -389,6 +389,34 @@ export function priorizarOrcamentoCompras(
 // seus cods, mas tamanhos diferentes PODEM ter sido classificados diferente (cada cod é
 // classificado individualmente) — esta ponte decide qual tipo representa o produto como um todo.
 
+// ---------------------------------------------------------------------------
+// IDENTIDADE "BEST SELLER" — fonte única (correção 2026-11-25, auditoria pós-incidente)
+// ---------------------------------------------------------------------------
+// A correção de 2026-11-23 (ver comentário de getRecomendacoesBestSeller mais abaixo) trocou a
+// fonte de identidade Best Seller de ClassificacaoProduto.tipoCompra pra StockSnapshot.colecao
+// === COLECAO_BEST_SELLER, mas só dentro desta função — distribuicao-estoque.ts,
+// planejamento-estoque.ts, planejamento-distribuicao.ts e a matriz do Mapa de Compras
+// (matriz-helpers.ts) continuaram lendo só ClassificacaoProduto.tipoCompra, cada um com sua
+// própria leitura implícita de "o que é Best Seller". Resultado real (incidente de 2026-11-25): um
+// produto Best Seller de verdade (por coleção, sem linha em ClassificacaoProduto) aparecia certo
+// num painel e invisível/"sem classificação" em outro, na mesma tela do mesmo Rodrigo.
+//
+// Regra de precedência ÚNICA, usada por TODOS os lugares que precisam saber se um cod é Best
+// Seller (reaproveitar esta função, nunca duplicar a regra): classificação manual explícita em
+// ClassificacaoProduto.tipoCompra, quando existe, SOBRESCREVE a inferência automática — é a
+// decisão humana mais recente (pode até ser DROP numa coleção chamada BESTSELLER, caso raro mas
+// intencional se alguém reclassificou). Na ausência de linha em ClassificacaoProduto pra aquele
+// cod, colecao === COLECAO_BEST_SELLER já basta pra tratar como Best Seller — nunca depende de
+// cadastro manual pra existir. DROP nunca é inferido por colecao (não existe "coleção = Drop"
+// genérica, só a ausência de BESTSELLER).
+export function resolverTipoCompraEfetivo(
+  tipoCompraManual: TipoCompraProduto | null | undefined,
+  colecao: string | null | undefined
+): TipoCompraProduto | null {
+  if (tipoCompraManual != null) return tipoCompraManual;
+  return colecao === COLECAO_BEST_SELLER ? TipoCompraProduto.BEST_SELLER : null;
+}
+
 export type ClassificacaoComReceita = { tipoCompra: TipoCompraProduto; receita: number };
 
 // Pura, testável sem banco. Empate exato de receita (incluindo 0-0, produto sem venda ainda) cai
@@ -542,7 +570,14 @@ export async function upsertClassificacaoProduto(input: ClassificacaoInput, alte
       tipoCompra: input.tipoCompra,
       statusComercial: input.statusComercial,
       possibilidadeReposicao: input.possibilidadeReposicao,
-      dataLancamento: input.dataLancamento ?? null,
+      // Achado 2 da auditoria pós-incidente de 2026-11-25: dataLancamento NUNCA é apagada por um
+      // form vazio. classificarProdutoEmLoteAction só exige a data pra cod NOVO (ver comentário
+      // acima) — numa reclassificação em lote de um produto que já existia, o campo chega vazio
+      // (null) de propósito, e sem este fallback o upsert sobrescrevia silenciosamente o
+      // dataLancamento REAL já cadastrado com null pra TODOS os cods do lote. Só grava um valor
+      // novo quando o form de fato informou um (input.dataLancamento != null) — senão preserva o
+      // que já estava salvo.
+      dataLancamento: input.dataLancamento ?? existente?.dataLancamento ?? null,
       dataEncerramentoPrevista: input.dataEncerramentoPrevista ?? null,
       orcamentoDrop: input.orcamentoDrop ?? null,
       observacoes: input.observacoes ?? null,

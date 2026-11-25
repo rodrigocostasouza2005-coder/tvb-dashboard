@@ -5,8 +5,11 @@ import {
   calcularSugestaoDrop,
   priorizarOrcamentoCompras,
   resolverTipoCompraProduto,
+  resolverTipoCompraEfetivo,
+  upsertClassificacaoProduto,
   type InputBestSeller,
   type InputDrop,
+  type ClassificacaoInput,
   type ItemPriorizavel,
 } from "../compras-inteligencia";
 
@@ -17,10 +20,18 @@ const classificacaoFindMany = vi.fn();
 const saleGroupBy = vi.fn();
 const stockSnapshotGroupBy = vi.fn();
 const productionOrderGroupBy = vi.fn();
+const classificacaoFindUnique = vi.fn();
+const classificacaoUpsert = vi.fn();
+const classificacaoHistoricoCreateMany = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    classificacaoProduto: { findMany: (...a: unknown[]) => classificacaoFindMany(...a) },
+    classificacaoProduto: {
+      findMany: (...a: unknown[]) => classificacaoFindMany(...a),
+      findUnique: (...a: unknown[]) => classificacaoFindUnique(...a),
+      upsert: (...a: unknown[]) => classificacaoUpsert(...a),
+    },
+    classificacaoProdutoHistorico: { createMany: (...a: unknown[]) => classificacaoHistoricoCreateMany(...a) },
     sale: { groupBy: (...a: unknown[]) => saleGroupBy(...a) },
     stockSnapshot: { groupBy: (...a: unknown[]) => stockSnapshotGroupBy(...a) },
     productionOrder: { groupBy: (...a: unknown[]) => productionOrderGroupBy(...a) },
@@ -392,5 +403,98 @@ describe("resolverTipoCompraProduto", () => {
       { tipoCompra: TipoCompraProduto.DROP, receita: 1000 },
     ]);
     expect(r).toEqual({ tipoCompra: TipoCompraProduto.BEST_SELLER, divergente: true });
+  });
+});
+
+// Achado 1 da auditoria pós-incidente de 2026-11-25: fonte única de identidade "Best Seller" —
+// classificação manual (ClassificacaoProduto.tipoCompra) sobrescreve quando existe; na ausência,
+// colecao === "BESTSELLER" já basta. Testada aqui porque é a função central reaproveitada por
+// distribuicao-estoque.ts/planejamento-estoque.ts/planejamento-distribuicao.ts/matriz-helpers.ts.
+describe("resolverTipoCompraEfetivo (fonte única de identidade Best Seller)", () => {
+  it("sem classificação manual e colecao BESTSELLER -> BEST_SELLER", () => {
+    expect(resolverTipoCompraEfetivo(null, "BESTSELLER")).toBe(TipoCompraProduto.BEST_SELLER);
+  });
+
+  it("sem classificação manual e colecao de Drop sazonal -> null (nunca inferido)", () => {
+    expect(resolverTipoCompraEfetivo(null, "V26.1")).toBeNull();
+  });
+
+  it("sem classificação manual e sem colecao -> null", () => {
+    expect(resolverTipoCompraEfetivo(undefined, null)).toBeNull();
+  });
+
+  it("classificação manual DROP sobrescreve colecao BESTSELLER (decisão humana mais recente vence)", () => {
+    expect(resolverTipoCompraEfetivo(TipoCompraProduto.DROP, "BESTSELLER")).toBe(TipoCompraProduto.DROP);
+  });
+
+  it("classificação manual BEST_SELLER vale mesmo com colecao de Drop sazonal", () => {
+    expect(resolverTipoCompraEfetivo(TipoCompraProduto.BEST_SELLER, "V26.1")).toBe(TipoCompraProduto.BEST_SELLER);
+  });
+});
+
+// Achado 2 da auditoria pós-incidente de 2026-11-25: classificarProdutoEmLoteAction grava o MESMO
+// dataLancamento do form pra todos os cods do lote — quando o campo vem vazio (reclassificação,
+// não exige a data), upsertClassificacaoProduto não pode apagar um dataLancamento REAL já
+// cadastrado substituindo por null.
+describe("upsertClassificacaoProduto — nunca apaga dataLancamento real com null do form vazio", () => {
+  const baseInput: ClassificacaoInput = {
+    cod: "COD-1",
+    produto: "Camisa Polo",
+    grupo: "Polos",
+    colecao: null,
+    tipoCompra: TipoCompraProduto.BEST_SELLER,
+    statusComercial: StatusComercialProduto.ATIVO,
+    possibilidadeReposicao: PossibilidadeReposicao.SIM,
+    orcamentoDrop: null,
+    observacoes: null,
+  };
+
+  beforeEach(() => {
+    classificacaoFindUnique.mockReset();
+    classificacaoUpsert.mockReset().mockResolvedValue({ id: "cls-1" });
+    classificacaoHistoricoCreateMany.mockReset();
+  });
+
+  it("reclassificação (produto já existia) com dataLancamento vazio no form PRESERVA a data real já cadastrada", async () => {
+    const dataReal = new Date("2026-01-10T00:00:00.000Z");
+    classificacaoFindUnique.mockResolvedValue({
+      cod: "COD-1", produto: "Camisa Polo", grupo: "Polos", colecao: null,
+      tipoCompra: TipoCompraProduto.DROP, statusComercial: StatusComercialProduto.ATIVO,
+      possibilidadeReposicao: PossibilidadeReposicao.SIM,
+      dataLancamento: dataReal, dataEncerramentoPrevista: null, orcamentoDrop: null, observacoes: null,
+    });
+
+    // Mesmo cenário do form de reclassificação em lote: dataLancamento não informada (null) porque
+    // o cod já tinha classificação (classificarProdutoEmLoteAction só exige a data pra cod novo).
+    await upsertClassificacaoProduto({ ...baseInput, dataLancamento: null }, "gestao@tvb.com");
+
+    expect(classificacaoUpsert).toHaveBeenCalledTimes(1);
+    const { update } = classificacaoUpsert.mock.calls[0][0] as { update: { dataLancamento: Date | null } };
+    expect(update.dataLancamento).toEqual(dataReal);
+  });
+
+  it("quando o form informa uma data real, ela sobrescreve a anterior normalmente (nunca trava uma correção legítima)", async () => {
+    const dataAntiga = new Date("2026-01-10T00:00:00.000Z");
+    const dataNova = new Date("2026-02-20T00:00:00.000Z");
+    classificacaoFindUnique.mockResolvedValue({
+      cod: "COD-1", produto: "Camisa Polo", grupo: "Polos", colecao: null,
+      tipoCompra: TipoCompraProduto.DROP, statusComercial: StatusComercialProduto.ATIVO,
+      possibilidadeReposicao: PossibilidadeReposicao.SIM,
+      dataLancamento: dataAntiga, dataEncerramentoPrevista: null, orcamentoDrop: null, observacoes: null,
+    });
+
+    await upsertClassificacaoProduto({ ...baseInput, dataLancamento: dataNova }, "gestao@tvb.com");
+
+    const { update } = classificacaoUpsert.mock.calls[0][0] as { update: { dataLancamento: Date | null } };
+    expect(update.dataLancamento).toEqual(dataNova);
+  });
+
+  it("produto novo (sem linha existente) sem dataLancamento continua rejeitado (regra de obrigatoriedade pra classificação nova, inalterada)", async () => {
+    classificacaoFindUnique.mockResolvedValue(null);
+
+    await expect(upsertClassificacaoProduto({ ...baseInput, dataLancamento: null }, "gestao@tvb.com")).rejects.toThrow(
+      "Data de lançamento é obrigatória"
+    );
+    expect(classificacaoUpsert).not.toHaveBeenCalled();
   });
 });

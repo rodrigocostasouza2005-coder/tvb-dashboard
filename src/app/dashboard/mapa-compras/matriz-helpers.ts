@@ -124,12 +124,32 @@ function agregarDrop(rows: RecomendacaoDropPorProduto[]): RecomendacaoAgregadaPr
   };
 }
 
+// Achado 1 da auditoria pós-incidente de 2026-11-25: `classificacaoPorProduto` (ponte feita por
+// getClassificacaoPorProduto, compras-inteligencia.ts) só cobre produtos com pelo menos 1 linha em
+// ClassificacaoProduto. Um produto Best Seller REAL (StockSnapshot.colecao === "BESTSELLER", a
+// mesma fonte que getRecomendacoesBestSeller já usa desde 2026-11-23 — ver bsPorCod abaixo) mas sem
+// NENHUMA linha manual caía fora do Map e era descartado pela matriz inteira (`if (!classificacao)
+// continue`), como se fosse "fila de revisão" — mesmo tendo uma recomendação de compra calculada e
+// tudo. Este índice auxiliar (grupo::produto -> linhas de bsPorCod) é a mesma regra de precedência
+// de resolverTipoCompraEfetivo (compras-inteligencia.ts): só é consultado quando NÃO há
+// classificação manual pra aquele produto.
+function indexarBsPorProduto(
+  bsPorCod: Map<string, RecomendacaoBestSellerPorProduto>
+): Map<string, RecomendacaoBestSellerPorProduto[]> {
+  const mapa = new Map<string, RecomendacaoBestSellerPorProduto[]>();
+  for (const r of bsPorCod.values()) {
+    const key = `${r.grupo}::${r.produto}`;
+    const arr = mapa.get(key) ?? [];
+    arr.push(r);
+    mapa.set(key, arr);
+  }
+  return mapa;
+}
+
 // Pura: recebe os dados já buscados (grade mensal por grupo/produto + classificação por produto
 // + recomendações já calculadas pela Inteligência de Compras, indexadas por cod) e devolve UMA
 // matriz por família/grupo, cada grupo com dois sub-blocos fixos (BESTSELLER/Drop) + o total dos
-// dois somado. Nenhuma chamada a banco aqui — testável sem mock de Prisma, só não tem teste
-// dedicado nesta entrega (ver plano: coberto pela validação manual via dev+curl, por ser
-// composição de dado já testado nas camadas de baixo).
+// dois somado. Nenhuma chamada a banco aqui — testável sem mock de Prisma.
 export function particionarMatrizCompras(
   grupos: MapaComprasGrupo[],
   classificacaoPorProduto: Map<string, ClassificacaoPorProdutoEntry>,
@@ -138,14 +158,30 @@ export function particionarMatrizCompras(
   todosMeses: string[]
 ): GrupoMatrizUnificado[] {
   const resultado: GrupoMatrizUnificado[] = [];
+  const bsPorProduto = indexarBsPorProduto(bsPorCod);
 
   for (const grupo of grupos) {
     const produtosBS: ProdutoMatriz[] = [];
     const produtosDrop: ProdutoMatriz[] = [];
 
     for (const produto of grupo.produtos) {
-      const classificacao = classificacaoPorProduto.get(`${grupo.grupo}::${produto.produto}`);
-      if (!classificacao) continue; // sem classificação -> fila de revisão, nunca aqui
+      const chaveProduto = `${grupo.grupo}::${produto.produto}`;
+      const classificacao = classificacaoPorProduto.get(chaveProduto);
+
+      if (!classificacao) {
+        // Sem classificação manual: ainda pode ser Best Seller real por colecao (ver comentário
+        // de indexarBsPorProduto acima) — nunca inventa Drop pra quem não tem classificação nem
+        // bsPorCod (esse caso continua caindo fora, na fila de revisão, como antes).
+        const bsRows = bsPorProduto.get(chaveProduto);
+        if (!bsRows || bsRows.length === 0) continue;
+        produtosBS.push({
+          ...produto,
+          cods: bsRows.map((r) => r.cod),
+          divergente: false,
+          recomendacao: agregarBestSeller(bsRows),
+        });
+        continue;
+      }
 
       const bsRows = classificacao.cods.map((c) => bsPorCod.get(c)).filter((r): r is RecomendacaoBestSellerPorProduto => !!r);
       const dropRows = classificacao.cods.map((c) => dropPorCod.get(c)).filter((r): r is RecomendacaoDropPorProduto => !!r);

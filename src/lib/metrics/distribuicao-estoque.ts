@@ -9,7 +9,7 @@ import {
   type PosicoesEstoque,
 } from "./core";
 import { matchMinimumRule } from "./estoque";
-import { getPedidosEmAbertoPorCod } from "./compras-inteligencia";
+import { getPedidosEmAbertoPorCod, resolverTipoCompraEfetivo } from "./compras-inteligencia";
 
 // ---------------------------------------------------------------------------
 // AGENTE DE INTELIGÊNCIA DE DISTRIBUIÇÃO DE ESTOQUE
@@ -319,9 +319,10 @@ export type GradePosicao = {
 };
 
 export type ContextoMovimentacao = ContextoVariante & {
-  // Vem de ClassificacaoProduto (cadastro já existente, ver compras-inteligencia.ts). null =
-  // produto NÃO classificado — tratado como "desconhecido", nunca como Best Seller nem como Drop
-  // (mesma regra do Mapa de Compras: produto sem linha cai na fila de revisão, não herda tipo).
+  // Resolvido por resolverTipoCompraEfetivo (compras-inteligencia.ts, achado 1 da auditoria de
+  // 2026-11-25): ClassificacaoProduto.tipoCompra manual quando existe, senão colecao ===
+  // "BESTSELLER" já qualifica como BEST_SELLER. null = nem classificação manual nem colecao
+  // Best Seller — "desconhecido" de verdade, nunca herdado por volume de venda.
   tipoCompra: TipoCompraProduto | null;
   // Venda real do SKU no SITE (ecommerce) nos últimos 90 dias — só a store "CD", sem atacado
   // (ver PosicaoEstoque.storeIdEcommerce). É o "potencial de venda online" do recolhimento, medido
@@ -1331,8 +1332,16 @@ async function montarComparacaoSemCache(filters: ComparacaoFiltro): Promise<Comp
       _sum: { quantidade: true },
     }),
     prisma.stockMinimumRule.findMany(),
-    // Só a classificação já cadastrada — nunca inferida aqui (ver ClassificacaoProduto no schema:
-    // produto sem linha fica "desconhecido", não herda BEST_SELLER por vender muito).
+    // Classificação manual já cadastrada — nunca inferida de venda/estoque aqui (ver
+    // ClassificacaoProduto no schema: produto sem linha nunca herda BEST_SELLER só por vender
+    // muito). CORREÇÃO (2026-11-25, achado 1 da auditoria pós-incidente): este comentário dizia
+    // "nunca inferida", mas isso tornava um Best Seller REAL (colecao === "BESTSELLER" em
+    // StockSnapshot, fonte já usada por getRecomendacoesBestSeller/reposicao-bestseller-
+    // consolidada desde 2026-11-23) invisível aqui sempre que não tinha linha manual em
+    // ClassificacaoProduto — o mesmo produto aparecia como Best Seller num painel e "sem
+    // classificação" neste motor de Distribuição. A regra agora é resolverTipoCompraEfetivo
+    // (compras-inteligencia.ts): manual sobrescreve quando existe, colecao decide na ausência —
+    // nunca inferida por VOLUME de venda, só por colecao, que é dado de catálogo, não de giro.
     prisma.classificacaoProduto.findMany({ where: { cod: { in: cods } }, select: { cod: true, tipoCompra: true } }),
     // Correção "estoque_parado" vs. "lancamento_recente" (ver diagnosticarVariante/
     // calcularRecemLancado acima): histórico COMPLETO de venda por cod, sem filtro de data — é o
@@ -1456,7 +1465,11 @@ async function montarComparacaoSemCache(filters: ComparacaoFiltro): Promise<Comp
       tamanho: meta.tamanho,
       colecao: meta.colecao,
       porLoja,
-      tipoCompra: tipoCompraPorCod.get(cod) ?? null,
+      // resolverTipoCompraEfetivo (achado 1, 2026-11-25): manual (ClassificacaoProduto) vence
+      // quando existe; na ausência, colecao === "BESTSELLER" já qualifica como Best Seller —
+      // mesma fonte de identidade usada em getRecomendacoesBestSeller/reposicao-bestseller-
+      // consolidada, nunca uma segunda régua divergente pra Distribuição.
+      tipoCompra: resolverTipoCompraEfetivo(tipoCompraPorCod.get(cod) ?? null, meta.colecao),
       vendasSite90: vendasSite90PorCod.get(cod) ?? 0,
     });
   }
