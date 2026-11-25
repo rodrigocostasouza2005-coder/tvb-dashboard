@@ -902,15 +902,29 @@ async function getDevolvidoPorVendedor(filters: Pick<DashboardFilters, "storeIds
 }
 
 export async function getVendedorRanking(filters: DashboardFilters) {
-  const [rows, devolvidoPorVendedor] = await Promise.all([
+  const where: Prisma.SaleWhereInput = { ...saleWhere(filters), vendedor: { not: null } };
+  const [rows, pedidosRows, devolvidoPorVendedor] = await Promise.all([
     prisma.sale.groupBy({
       by: ["storeId", "vendedor"],
-      where: { ...saleWhere(filters), vendedor: { not: null } },
+      where,
       _sum: { quantidade: true, valorTotalLiquido: true },
-      _count: { _all: true },
     }),
+    // "Pedidos" precisa ser PEDIDO distinto (storeId+dapicVendaId), não linha de item vendido —
+    // mesmo bug já corrigido em getTopClientes/getSalesByStore (_count._all contava linha, não
+    // pedido; 1 pedido pode ter várias linhas/produtos, inflando o número). Esse campo não é
+    // renderizado em nenhuma tela hoje (/dashboard/vendedores não lê `pedidos`), mas corrigido
+    // pra não ficar uma armadilha de número errado pra um uso futuro.
+    prisma.sale.groupBy({ by: ["storeId", "vendedor", "dapicVendaId"], where }),
     getDevolvidoPorVendedor(filters),
   ]);
+
+  const pedidosPorVendedor = new Map<string, Set<string>>();
+  for (const p of pedidosRows) {
+    const key = `${p.storeId}::${p.vendedor}`;
+    const set = pedidosPorVendedor.get(key) ?? new Set<string>();
+    set.add(`${p.storeId}::${p.dapicVendaId}`);
+    pedidosPorVendedor.set(key, set);
+  }
 
   const storeIds = [...new Set(rows.map((r) => r.storeId))];
   const stores = await prisma.store.findMany({ where: { id: { in: storeIds } } });
@@ -924,7 +938,7 @@ export async function getVendedorRanking(filters: DashboardFilters) {
       return {
         vendedor: r.vendedor as string,
         storeName: storeName.get(r.storeId) ?? r.storeId,
-        pedidos: r._count._all,
+        pedidos: pedidosPorVendedor.get(`${r.storeId}::${r.vendedor}`)?.size ?? 0,
         unidadesBrutas,
         unidadesLiquidas: unidadesBrutas - devolvido.unidades,
         receitaBruta,
@@ -1176,10 +1190,17 @@ export async function getDailySalesByProduto(
   }
   for (const r of returnRows) {
     const day = new Date(r.day).toISOString().slice(0, 10);
-    const cur = byDay.get(day);
-    if (!cur) continue;
+    // Bug real achado em 2026-11-25: devolução de um dia em que o produto NÃO teve nenhuma venda
+    // (ex: comprado numa data, devolvido numa visita/pedido posterior) era descartada em
+    // silêncio (`if (!cur) continue`) em vez de entrar no gráfico — o dia simplesmente não
+    // aparecia nem com vendido=0. Corrigido pra sempre criar a entrada do dia quando falta,
+    // com venda bruta 0 e devolução real — a devolução nunca é perdida, só não tem venda bruta
+    // pra descontar NAQUELE dia específico (fica negativa, de propósito, mesmo tratamento já
+    // usado em getClienteFicha pra "devolução > compra").
+    const cur = byDay.get(day) ?? { day, unitsBruta: 0, unitsLiquida: 0, revenueBruta: 0, revenueLiquida: 0 };
     cur.unitsLiquida -= Number(r.units);
     cur.revenueLiquida -= Number(r.value);
+    byDay.set(day, cur);
   }
 
   return [...byDay.values()].sort((a, b) => a.day.localeCompare(b.day));
@@ -1249,18 +1270,19 @@ export async function getDailySalesByProdutoPorLoja(
     dayRow[seriesName] = (dayRow[seriesName] ?? 0) + Number(r.revenue);
     byDay.set(day, dayRow);
   }
-  // Mesmo comportamento de getDailySalesByProduto: devolução só desconta em dia que já teve
-  // VENDA desse produto (qualquer loja) — se o dia não existe em byDay, a devolução é ignorada
-  // (mesmo "quirk" da função que esta substitui em granularidade, reproduzido de propósito aqui
-  // pra a soma das lojas bater exatamente com o total já mostrado no 1º gráfico da página).
-  const diasComVenda = new Set(byDay.keys());
+  // Até 2026-11-25 descontava a devolução só em dia que já tinha VENDA desse produto (qualquer
+  // loja) — dia só de devolução (sem venda no período) era silenciosamente ignorado. Igual ao
+  // bug gêmeo corrigido em getDailySalesByProduto (comentário lá tem o caso completo): agora
+  // sempre cria a linha do dia quando falta, pra nunca perder devolução real e pra continuar
+  // batendo com o total do 1º gráfico da página (que já soma a devolução desse jeito).
   for (const r of returnRows) {
     const seriesName = seriesNameByStoreId.get(r.storeId);
     if (!seriesName) continue;
     const day = new Date(r.day).toISOString().slice(0, 10);
-    if (!diasComVenda.has(day)) continue;
-    const dayRow = byDay.get(day)!;
+    seriesNames.add(seriesName);
+    const dayRow = byDay.get(day) ?? {};
     dayRow[seriesName] = (dayRow[seriesName] ?? 0) - Number(r.value);
+    byDay.set(day, dayRow);
   }
 
   const series = [...seriesNames].sort();
@@ -1362,9 +1384,15 @@ export async function getTopParaIncentivar(dias = 30, limit = 10, storeIds?: str
       where: { ...stockWhere({ storeIds }), colecao: { not: "BESTSELLER" } },
       _sum: { quantidadeDisponivel: true },
     }),
+    // Bug real achado em 2026-11-25: montava o próprio `where` (só saleDate+storeId) em vez de
+    // usar saleWhere(filters) — a regra central de "venda válida" (status != 'Cancelada', ver
+    // comentário em saleWhere, core.ts) não se aplicava aqui, então venda cancelada inflava
+    // "vendido" e escondia produto que na verdade precisava de incentivo (diferença artificialmente
+    // menor). `to: new Date()` reproduz o comportamento antigo (sem limite superior, que na
+    // prática nunca pegava venda além de "agora" de qualquer jeito).
     prisma.sale.groupBy({
       by: ["produto"],
-      where: { saleDate: { gte: desde }, ...(storeIds !== undefined ? { storeId: { in: storeIds } } : {}) },
+      where: saleWhere({ storeIds, from: desde, to: new Date() }),
       _sum: { quantidade: true },
     }),
   ]);

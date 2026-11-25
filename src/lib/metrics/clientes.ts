@@ -230,11 +230,36 @@ export async function getNovosERecorrentesClientes(filters: DashboardFilters) {
 // — junta de volta com Sale (storeId+dapicVendaId) pra descobrir de quem foi cada devolução.
 // Devolução é sempre B2C (confirmado pelo Rodrigo em 2026-08-21), então não faz sentido
 // chamar isso quando canal="b2b" (líquida = bruta nesse caso, sem devolução nenhuma).
+//
+// Bug real (investigação de 2026-11-25, continuação de "Faturamento negativo cd-atacado" e da
+// auditoria complementar que achou a mesma contaminação aqui): pra loja CD e ATACADO (token
+// cd-atacado), Sale.dapicVendaId vem de /faturas (campo "Id" da fatura), mas Return.dapicVendaId
+// da MESMA loja vem de /vendaspdv (campo "Id" da venda de PDV) — são DOIS espaços de Id
+// diferentes dentro da própria API do DAPIC, que só colidem numericamente por coincidência,
+// nunca porque são "a mesma venda". Juntar por storeId+dapicVendaId nessas 2 lojas atribui
+// devolução ao cliente errado por sorte do número bater, não por correlação real.
+//
+// Investigamos se existia algo confiável pra substituir essa chave (CPF/CNPJ do cliente, Id de
+// cliente, produto+data+valor): não existe, com o dado que a API expõe hoje. /vendaspdv (única
+// fonte de devolução pra esse token) nunca devolve NENHUM identificador de cliente, só nome em
+// texto livre (ver cliente-cadastro-link.ts, comentário no topo) — e nem esse nome é gravado no
+// Return (schema.prisma, model Return não tem campo clienteNome; adicionar um exigiria migration,
+// fora do escopo desta correção). Sem identificador nenhum do lado da devolução, produto+data+
+// valor também não dá confiança real (mesmo produto/dia tem várias vendas de clientes diferentes
+// no Site). Decisão: preferir "honestamente incerto" a "silenciosamente errado" — devolução de
+// CD/ATACADO É CONTADA no total da empresa (getReturnsByDimension/getReturnsByGrupoProduto, que
+// não dependem desse join), só NÃO é atribuída a um cliente individual aqui. Resultado prático:
+// pra esses 2 clientes.clienteNome específicos de CD/ATACADO, líquida == bruta nesta função (não
+// porque "não houve devolução", mas porque não dá pra saber com confiança QUEM devolveu).
 async function getValorDevolvidoPorCliente(filters: Pick<DashboardFilters, "storeIds" | "grupoIn" | "from" | "to">) {
-  const returns = await prisma.return.findMany({
+  const returnsBrutos = await prisma.return.findMany({
     where: { ...returnWhere(filters), dapicVendaId: { not: null } },
     select: { storeId: true, dapicVendaId: true, valorTotal: true },
   });
+  if (returnsBrutos.length === 0) return new Map<string, number>();
+
+  const storeIdsSemCorrelacaoConfiavel = new Set(await getSiteAtacadoStoreIds());
+  const returns = returnsBrutos.filter((r) => !storeIdsSemCorrelacaoConfiavel.has(r.storeId));
   if (returns.length === 0) return new Map<string, number>();
 
   const dapicVendaIds = [...new Set(returns.map((r) => r.dapicVendaId as number))];
@@ -693,12 +718,21 @@ export async function getProdutosLiquidosPorClientes(
 
   // Devolução — junta por storeId+dapicVendaId (Return não tem clienteNome) usando o mapa de
   // pedido→cliente que já montamos acima, então dá pra atribuir certo com 1 query só pra todos.
-  const storeIds = [...new Set(sales.map((s) => s.storeId))];
+  //
+  // CD/ATACADO excluídos da busca de propósito — ver comentário completo em
+  // getValorDevolvidoPorCliente (acima neste arquivo): pra esse token, Return.dapicVendaId vem de
+  // /vendaspdv enquanto Sale.dapicVendaId vem de /faturas (espaços de Id diferentes), então juntar
+  // por essa chave nessas 2 lojas atribuiria devolução ao cliente errado por coincidência
+  // numérica. Melhor não subtrair (líquida = bruta pra esse recorte) do que subtrair errado.
+  const storeIdsSemCorrelacaoConfiavel = new Set(await getSiteAtacadoStoreIds());
+  const storeIds = [...new Set(sales.map((s) => s.storeId))].filter((id) => !storeIdsSemCorrelacaoConfiavel.has(id));
   const vendaIds = [...new Set(sales.map((s) => s.dapicVendaId))];
-  const returns = await prisma.return.findMany({
-    where: { status: { not: "Cancelada" }, storeId: { in: storeIds }, dapicVendaId: { in: vendaIds } },
-    select: { storeId: true, dapicVendaId: true, produto: true, quantidade: true },
-  });
+  const returns = storeIds.length > 0
+    ? await prisma.return.findMany({
+        where: { status: { not: "Cancelada" }, storeId: { in: storeIds }, dapicVendaId: { in: vendaIds } },
+        select: { storeId: true, dapicVendaId: true, produto: true, quantidade: true },
+      })
+    : [];
   for (const r of returns) {
     const norm = pedidoToCliente.get(`${r.storeId}::${r.dapicVendaId}`);
     if (!norm) continue;
@@ -998,11 +1032,19 @@ export async function getCrossSellPorDimensao(
   // Devolução é sempre B2C (regra confirmada com o Rodrigo) — em canal="b2b" não existe, pula a
   // query. Junta por storeId+dapicVendaId (Return não tem clienteNome) restrito aos pedidos
   // desses clientes especificamente.
+  //
+  // CD/ATACADO excluídos de storeIdsCliente aqui de propósito — ver comentário completo em
+  // getValorDevolvidoPorCliente (acima neste arquivo): pra esse token, Return.dapicVendaId
+  // (origem /vendaspdv) e Sale.dapicVendaId (origem /faturas) são espaços de Id diferentes, então
+  // juntar por essa chave nessas 2 lojas atribuiria devolução ao cliente errado por coincidência
+  // numérica. Melhor não netar (líquida = bruta pra esse recorte) do que netar errado.
   const devolvidoPorProduto = new Map<string, { unidades: number; valor: number }>();
   const devolvidoPorGrupo = new Map<string, { unidades: number; valor: number }>();
-  if (canal !== "b2b" && pedidoKeys.size > 0) {
+  const storeIdsSemCorrelacaoConfiavel = new Set(await getSiteAtacadoStoreIds());
+  const storeIdsClienteConfiaveis = [...storeIdsCliente].filter((id) => !storeIdsSemCorrelacaoConfiavel.has(id));
+  if (canal !== "b2b" && pedidoKeys.size > 0 && storeIdsClienteConfiaveis.length > 0) {
     const returns = await prisma.return.findMany({
-      where: { status: { not: "Cancelada" }, storeId: { in: [...storeIdsCliente] }, dapicVendaId: { in: [...dapicVendaIdsCliente] } },
+      where: { status: { not: "Cancelada" }, storeId: { in: storeIdsClienteConfiaveis }, dapicVendaId: { in: [...dapicVendaIdsCliente] } },
       select: { storeId: true, dapicVendaId: true, produto: true, grupo: true, quantidade: true, valorTotal: true },
     });
     for (const r of returns) {
@@ -1424,9 +1466,18 @@ export async function getClienteFicha(
   // "produto" (não precisa mais nada da Sale pra saber o quê foi devolvido), então dá pra netar
   // certo por produto, não só o total do cliente — antes "Produtos mais comprados" ficava bruto
   // mesmo com o resumo do topo mostrando líquida, número inconsistente na mesma tela.
-  const storeIdsCliente = [...new Set(sales.map((s) => s.storeId))];
+  //
+  // CD/ATACADO excluídos de storeIdsCliente aqui de propósito — ver comentário completo em
+  // getValorDevolvidoPorCliente (acima neste arquivo): pra esse token, Return.dapicVendaId
+  // (origem /vendaspdv) e Sale.dapicVendaId (origem /faturas) são espaços de Id diferentes, então
+  // juntar por essa chave nessas 2 lojas atribuiria devolução ao cliente errado por coincidência
+  // numérica. Pra um cliente cuja única presença é Site/Atacado, esta ficha mostra receita/
+  // unidades líquida == bruta (nenhuma devolução atribuída com confiança), em vez de um número
+  // errado por sorte de Id bater.
+  const storeIdsSemCorrelacaoConfiavel = new Set(await getSiteAtacadoStoreIds());
+  const storeIdsCliente = [...new Set(sales.map((s) => s.storeId))].filter((id) => !storeIdsSemCorrelacaoConfiavel.has(id));
   const dapicVendaIdsCliente = [...new Set(sales.map((s) => s.dapicVendaId))];
-  const returnsCliente = dapicVendaIdsCliente.length > 0
+  const returnsCliente = storeIdsCliente.length > 0 && dapicVendaIdsCliente.length > 0
     ? await prisma.return.findMany({
         where: { status: { not: "Cancelada" }, storeId: { in: storeIdsCliente }, dapicVendaId: { in: dapicVendaIdsCliente } },
         select: { storeId: true, dapicVendaId: true, produto: true, tamanho: true, grupo: true, quantidade: true, valorTotal: true },
