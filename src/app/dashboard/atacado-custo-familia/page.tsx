@@ -1,5 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
-import { getStores, getMarcas, getTabelasPreco, getDistinctColecoes, type DashboardFilters } from "@/lib/metrics";
+import { getSiteAtacadoStoreIds, getMarcas, getTabelasPreco, getDistinctColecoes, type DashboardFilters } from "@/lib/metrics";
 import { canSeeFinancials, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestriction, getGrupoRestriction } from "@/lib/permissions";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
@@ -34,10 +34,21 @@ export default async function AtacadoCustoFamiliaPage({ searchParams }: { search
   const allowedTabelasPreco = getTabelaPrecoRestriction(user);
 
   const parsedFilters = parseFilters(rawParams, { allowedStoreIds: allowedStores });
-  const selectedStoreIds = parsedFilters.storeIds ?? allowedStores;
 
-  const [stores, marcas, tabelasPreco, colecoes] = await Promise.all([
-    getStores(allowedStores),
+  // Atacado só existe no canal Site+Atacado (2 lojas: CD e ATACADO, ver getSiteAtacadoStoreIds) —
+  // mesma restrição já aplicada em getAtacadoVendas/getAtacadoCidades/getAtacadoClientes
+  // (src/lib/metrics/atacado.ts). Sem isso, essa página (única do grupo Atacado que NÃO passa
+  // pelas funções de atacado.ts — usa buildCustoFamiliaViewModel direto) ficava usando TODAS as
+  // lojas liberadas pro usuário (allowedStores), misturando varejo com atacado — achado em
+  // auditoria de 2026-11-25. Usuário restrito que não tem nenhuma das duas lojas liberadas não
+  // vê nada aqui, igual às outras 3 páginas de Atacado.
+  const siteAtacadoIds = await getSiteAtacadoStoreIds();
+  const selectedStoreIds =
+    parsedFilters.storeIds !== undefined
+      ? siteAtacadoIds.filter((id) => parsedFilters.storeIds!.includes(id))
+      : siteAtacadoIds;
+
+  const [marcas, tabelasPreco, colecoes] = await Promise.all([
     getMarcas(allowedMarcas),
     getTabelasPreco(allowedTabelasPreco),
     getDistinctColecoes(),
@@ -61,7 +72,7 @@ export default async function AtacadoCustoFamiliaPage({ searchParams }: { search
         <CollapsibleFilters defaultOpen={filtrosOpen}>
           <FilterBar
             action="/dashboard/atacado-custo-familia"
-            stores={stores}
+            stores={[]}
             marcas={marcas}
             tabelasPreco={tabelasPreco}
             colecoes={colecoes}
@@ -84,7 +95,7 @@ export default async function AtacadoCustoFamiliaPage({ searchParams }: { search
       <CollapsibleFilters defaultOpen={filtrosOpen}>
         <FilterBar
           action="/dashboard/atacado-custo-familia"
-          stores={stores}
+          stores={[]}
           marcas={marcas}
           tabelasPreco={tabelasPreco}
           colecoes={colecoes}
