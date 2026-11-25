@@ -166,17 +166,70 @@ export type StockVsSalesCombinadoRow = {
   unitsSold: number;
 };
 
+// Mapa produto → marca, construído a partir de Sale — marca é um atributo estável do PRODUTO em
+// si (não varia por transação como tabelaPreco varia), confirmado com dado real em 2026-11-25:
+// dos 314 produtos distintos da base, NENHUM aparece com mais de 1 marca diferente no histórico
+// inteiro de Sale, mesmo olhando a base inteira sem separar por grupo. Usado só pra aplicar o
+// filtro de Marca no ESTOQUE (StockSnapshot não tem coluna marca — ver model em
+// prisma/schema.prisma), coisa que getSalesByDimension/getSalesByGrupoProdutoTamanho já faziam
+// pro lado de vendas (via saleWhere, que inclui marca) mas nunca existia pro lado de estoque —
+// bug real achado em auditoria (2026-11-25): a coluna "Estoque atual" de Estoque × Vendas
+// ignorava o filtro de Marca da tela.
+// IMPORTANTE: diferente de tabelaPreco (ver comentário em getSellthroughByColecao, sellthrough.ts,
+// e em getStockVsSalesUncached abaixo), marca É seguro inferir aqui porque é 1:1 por nome de
+// produto na base real — não é a mesma categoria de problema do bug de colisão de nome de produto
+// entre grupos (esse é sobre SOMAR quantidade errada quando dois produtos de grupos diferentes
+// têm o mesmo nome; aqui só lemos a marca, que já é idêntica nos dois grupos quando isso ocorre).
+async function getProdutoMarcaMap(): Promise<Map<string, string>> {
+  const rows = await prisma.sale.findMany({
+    where: { marca: { not: null } },
+    select: { produto: true, marca: true },
+    distinct: ["produto"],
+  });
+  const map = new Map<string, string>();
+  for (const r of rows) if (r.marca) map.set(r.produto, r.marca);
+  return map;
+}
+
+// Aplica o filtro de Marca num array de StockSnapshot já buscado. Não pode entrar no `where` do
+// Prisma como entra em Sale/Return (StockSnapshot não tem coluna marca) — é um filtro pós-fetch
+// pela marca inferida do nome do produto (ver getProdutoMarcaMap acima). Produto nunca visto em
+// Sale com marca preenchida (marca desconhecida) PASSA sempre — mesma filosofia de "null não é
+// marca proibida, é dado que ainda não foi inferido" já usada em saleWhere() (core.ts); não
+// queremos esconder estoque de um produto novo/sem venda ainda só porque não sabemos a marca dele.
+function filtrarStockPorMarca<T extends { produto: string }>(
+  stock: T[],
+  marcas: string[] | undefined,
+  produtoMarca: Map<string, string>
+): T[] {
+  if (marcas === undefined) return stock;
+  return stock.filter((s) => {
+    const marca = produtoMarca.get(s.produto);
+    return marca === undefined || marcas.includes(marca);
+  });
+}
+
 // Estoque × Vendas em granularidade máxima (grupo+produto+tamanho juntos, não 1 dimensão de
 // cada vez) — pedido do Rodrigo em 2026-08-31 pra deixar a aba "dinâmica", parecida com o
 // cross-filter do Power BI: o cliente busca essa lista UMA vez e filtra grupo→produto→tamanho
 // inteiramente no navegador (sem round-trip), então precisa de todas as combinações de uma vez.
 // Vendido já líquido (desconta devolução, mesmo padrão de netByReturns usado no resto da aba).
 export async function getStockVsSalesCombinado(filters: DashboardFilters): Promise<StockVsSalesCombinadoRow[]> {
-  const [salesRows, returnRows, stockRows] = await Promise.all([
+  const [salesRows, returnRows, stockRowsRaw, produtoMarca] = await Promise.all([
     getSalesByGrupoProdutoTamanho(filters),
     getReturnsByGrupoProdutoTamanho(filters),
     latestStockSnapshots(filters),
+    // Só busca o mapa produto→marca quando o filtro de Marca está ativo (query extra evitável).
+    filters.marcas !== undefined ? getProdutoMarcaMap() : Promise.resolve(new Map<string, string>()),
   ]);
+  const stockRows = filtrarStockPorMarca(stockRowsRaw, filters.marcas, produtoMarca);
+  // tabelasPreco NUNCA filtra estoque aqui: StockSnapshot não tem (e não pode ter de forma
+  // confiável) o conceito de tabela de preço — tabela de preço é um atributo da TRANSAÇÃO de
+  // venda, não do produto/estoque físico (confirmado com dado real: 297 dos 314 produtos têm
+  // mais de 1 tabelaPreco diferente ao longo do histórico — ver evidência completa em
+  // getSellthroughByColecao, sellthrough.ts). currentStock desta função sempre representa
+  // "todas as tabelas de preço", mesmo com o filtro de Tabela de Preço ativo na tela — decisão
+  // deliberada, não bug pendente.
 
   const returnByKey = new Map<string, number>();
   for (const r of returnRows) {
@@ -290,14 +343,23 @@ async function getStockVsSalesUncached(filters: DashboardFilters, dimension: Dim
   const allTimeFilters: DashboardFilters = { ...filters, from: new Date(0), to: new Date() };
   const empresaToda: DashboardFilters = { ...allTimeFilters, storeIds: undefined, tabelasPreco: undefined };
 
-  const [sales, salesAllTime, stock, salesEmpresaToda, stockEmpresaToda, producedByKey] = await Promise.all([
+  const [sales, salesAllTime, stockRaw, salesEmpresaToda, stockEmpresaTodaRaw, producedByKey, produtoMarca] = await Promise.all([
     getSalesByDimension(filters, dimension),
     getSalesByDimension(allTimeFilters, dimension),
     latestStockSnapshots(filters),
     getSalesByDimension(empresaToda, dimension),
     latestStockSnapshots(empresaToda),
     getProductionByDimension(filters, dimension),
+    // getProdutoMarcaMap/filtrarStockPorMarca: ver comentário completo em
+    // getStockVsSalesCombinado acima — mesmo bug (coluna "currentStock" ignorava o filtro de
+    // Marca), mesma correção, reaproveitada aqui.
+    filters.marcas !== undefined ? getProdutoMarcaMap() : Promise.resolve(new Map<string, string>()),
   ]);
+  // currentStock (coluna filtrada) e sellThroughEstoque (coluna "empresa toda") agora respeitam
+  // Marca igual ao lado de vendas. tabelasPreco continua deliberadamente fora de ambos — mesma
+  // decisão documentada em getStockVsSalesCombinado (StockSnapshot não tem esse conceito).
+  const stock = filtrarStockPorMarca(stockRaw, filters.marcas, produtoMarca);
+  const stockEmpresaToda = filtrarStockPorMarca(stockEmpresaTodaRaw, empresaToda.marcas, produtoMarca);
   const soldAllTimeByKey = new Map(salesAllTime.map((s) => [s.key, s.unitsSold]));
   const soldEmpresaTodaByKey = new Map(salesEmpresaToda.map((s) => [s.key, s.unitsSold]));
 
@@ -988,7 +1050,10 @@ export async function getSugestoesRetiradaEstoque(
     if (tamanhos.length < 2) continue;
     const zerados = tamanhos.filter((t) => t.quantidade === 0).length;
     const pct = zerados / tamanhos.length;
-    // 60% ou mais zerado já entra (inclusive, não só acima de 60% — confirmado com o Rodrigo).
+    // 40% ou mais zerado já entra (inclusive, não só acima de 40% — confirmado com o Rodrigo).
+    // (Texto corrigido em 2026-11-25: dizia "60%" por engano, desatualizado desde que
+    // LIMIAR_GRADE_QUEBRADA foi baixado de 60% pra 40% no mesmo dia em que foi criado — ver
+    // comentário da constante acima.)
     if (pct < LIMIAR_GRADE_QUEBRADA) continue;
     const tamanhosComEstoque = tamanhos.filter((t) => t.quantidade > 0);
     const estoqueRestante = tamanhosComEstoque.reduce((s, t) => s + t.quantidade, 0);
@@ -1530,6 +1595,22 @@ export async function getMinimumRules() {
 // Cobertura de estoque: pra cada SKU com estoque > 0, calcula quantos dias de venda restam
 // com base na média de vendas dos últimos 30 dias. Status: crítico < 7 dias, atenção 7-30 dias,
 // ok 30-60 dias, excesso > 60 dias, sem-venda se não vendeu nada no período.
+//
+// LIMITAÇÃO CONHECIDA E DOCUMENTADA (auditoria 2026-11-25): filters.tabelasPreco SÓ filtra o
+// `saleAgg` (vendas30d) abaixo, nunca o `stock` (via latestStockSnapshots, logo abaixo) — não é
+// um bug pendente, é o máximo que o schema atual permite. StockSnapshot não tem (e
+// conceitualmente não pode ter de forma confiável) uma coluna tabelaPreco: tabela de preço é um
+// atributo da TRANSAÇÃO de venda (qual tabela precificou aquela venda pra aquele cliente), não
+// um atributo fixo do produto físico parado no estoque. Prova com dado real: dos 314 produtos
+// distintos que aparecem em Sale, 297 (94%) têm MAIS de um tabelaPreco diferente ao longo do
+// histórico — não existe "a tabela de preço do produto X" pra gravar/inferir em StockSnapshot
+// sem mudar o schema (fora do escopo desta correção). Resultado prático: com o filtro de Tabela
+// de Preço ativo, "estoque" (numerador de diasCobertura) continua sendo o total de TODAS as
+// tabelas, enquanto "vendas30d" (denominador) já é só da tabela filtrada — diasCobertura pode
+// ficar otimista (mais "dias restantes" do que o real) nesse cenário. Ver teste
+// "getStockCoverage" em __tests__/sellthroughEstoqueFiltros.test.ts, que trava esse
+// comportamento como intencional — se algum dia o schema ganhar uma forma confiável de
+// tabelaPreco por SKU, revisar aqui.
 export async function getStockCoverage(
   filters: Pick<DashboardFilters, "storeIds" | "grupoIn" | "tabelasPreco">
 ) {

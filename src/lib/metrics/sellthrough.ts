@@ -149,13 +149,27 @@ import {
 
 // Sellthrough por coleção: vendido_total / produzido_total, sem filtro de data.
 // Produzido = ordens de produção (fonte mais correta que estoque+vendido).
-export async function getSellthroughByColecao(filters: Pick<DashboardFilters, "storeIds" | "marcas" | "grupoIn">) {
+export async function getSellthroughByColecao(
+  filters: Pick<DashboardFilters, "storeIds" | "marcas" | "grupoIn" | "tabelasPreco">
+) {
   // Fórmula: ST = saida / (estoque_atual + saida)
   // onde saida = vendas - devoluções + brindes
   // Não depende de ordens de produção (que têm dados incompletos no DAPIC).
 
+  // Sale tem tabelaPreco, Gift não (ver schema.prisma: Gift não guarda campos específicos de
+  // venda como tabelaPreco/cliente/vendedor) — por isso o where de Sale e o de Gift não podem
+  // mais compartilhar o mesmo objeto agora que tabelasPreco entrou no filtro (adicionar
+  // tabelaPreco ao where de Gift quebraria em tempo de compilação, campo não existe no model).
   const saleWhereColl = {
     colecao: { not: null as string | null },
+    ...(filters.storeIds !== undefined ? { storeId: { in: filters.storeIds } } : {}),
+    ...(filters.marcas !== undefined ? { marca: { in: filters.marcas } } : {}),
+    ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
+    ...(filters.tabelasPreco !== undefined ? { tabelaPreco: { in: filters.tabelasPreco } } : {}),
+  };
+  const giftWhereColl = {
+    colecao: { not: null as string | null },
+    ...(filters.storeIds !== undefined ? { storeId: { in: filters.storeIds } } : {}),
     ...(filters.marcas !== undefined ? { marca: { in: filters.marcas } } : {}),
     ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
   };
@@ -164,17 +178,33 @@ export async function getSellthroughByColecao(filters: Pick<DashboardFilters, "s
     grupo: { not: "(sem grupo)" },
     ...(filters.storeIds !== undefined ? { storeId: { in: filters.storeIds } } : {}),
     ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
+    // tabelasPreco deliberadamente NUNCA entra aqui: StockSnapshot não tem campo tabelaPreco
+    // (ver schema.prisma) — tabela de preço é um atributo da TRANSAÇÃO (qual tabela precificou
+    // aquela venda específica pra aquele cliente), não um atributo fixo do produto/estoque.
+    // Confirmado com dado real (2026-11-25): dos 314 produtos distintos que aparecem em Sale,
+    // 297 têm MAIS de um tabelaPreco diferente ao longo do histórico — não existe "a tabela de
+    // preço do produto X" pra inferir e aplicar no estoque sem mudar o schema. Decisão: o
+    // estoque usado aqui é sempre "todas as tabelas", mesmo com o filtro de Tabela de Preço
+    // ativo na tela — mesmo raciocínio documentado em getStockCoverage/getStockVsSales
+    // (estoque.ts).
   };
 
   const [sold, gifted, stock, returned, prodOrderProdutos] = await Promise.all([
     prisma.sale.groupBy({ by: ["colecao"], where: { ...saleWhereColl, status: { not: "Cancelada" } }, _sum: { quantidade: true, valorTotalLiquido: true } }),
-    prisma.gift.groupBy({ by: ["colecao"], where: saleWhereColl, _sum: { quantidade: true } }),
+    prisma.gift.groupBy({ by: ["colecao"], where: giftWhereColl, _sum: { quantidade: true } }),
     // Estoque atual agrupado por colecao
     prisma.stockSnapshot.groupBy({ by: ["colecao"], where: stockWhereColl, _sum: { quantidadeDisponivel: true } }),
-    // Return não tem colecao — mapeia via produto
+    // Return não tem colecao — mapeia via produto. marca/tabelaPreco NÃO entram aqui (mesmo
+    // motivo documentado em returnWhere(), core.ts: backfill incompleto no histórico de
+    // devolução, filtrar por esses campos zeraria devolução real). storeId SIM entra — é a
+    // mesma loja da venda que originou a devolução, sempre populado, sem gap de backfill.
     prisma.return.groupBy({
       by: ["produto"],
-      where: { status: { not: "Cancelada" }, ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}) },
+      where: {
+        status: { not: "Cancelada" },
+        ...(filters.storeIds !== undefined ? { storeId: { in: filters.storeIds } } : {}),
+        ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
+      },
       _sum: { quantidade: true },
     }),
     // Mapa produto → colecao via Sale (que sempre tem colecao quando vem da API)
@@ -219,38 +249,57 @@ export async function getSellthroughByColecao(filters: Pick<DashboardFilters, "s
 // Detalhe de sellthrough por coleção: grupo → produto, incluindo brindes.
 // Fórmula: ST = saida / (estoque_atual + saida), onde saida = vendas - devoluções + brindes.
 export async function getSellthroughColecaoDetalhe(
-  filters: Pick<DashboardFilters, "marcas" | "grupoIn">,
+  filters: Pick<DashboardFilters, "storeIds" | "marcas" | "grupoIn" | "tabelasPreco">,
   colecao?: string
 ) {
   const colecaoFilter = colecao ? { colecao } : { colecao: { not: null as string | null } };
-  const saleGiftWhere = {
+  // Sale tem tabelaPreco, Gift não — mesmo motivo documentado em getSellthroughByColecao acima.
+  // Por isso 2 objetos de where separados (compartilhavam 1 só antes de tabelasPreco existir
+  // aqui).
+  const saleWhereDet = {
     ...colecaoFilter,
+    ...(filters.storeIds !== undefined ? { storeId: { in: filters.storeIds } } : {}),
+    ...(filters.marcas !== undefined ? { marca: { in: filters.marcas } } : {}),
+    ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
+    ...(filters.tabelasPreco !== undefined ? { tabelaPreco: { in: filters.tabelasPreco } } : {}),
+  };
+  const giftWhereDet = {
+    ...colecaoFilter,
+    ...(filters.storeIds !== undefined ? { storeId: { in: filters.storeIds } } : {}),
     ...(filters.marcas !== undefined ? { marca: { in: filters.marcas } } : {}),
     ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
   };
 
   const [sold, gifted, returned, stock] = await Promise.all([
-    prisma.sale.groupBy({ by: ["grupo", "produto"], where: { ...saleGiftWhere, status: { not: "Cancelada" } }, _sum: { quantidade: true, valorTotalLiquido: true } }),
-    prisma.gift.groupBy({ by: ["grupo", "produto"], where: saleGiftWhere, _sum: { quantidade: true } }),
+    prisma.sale.groupBy({ by: ["grupo", "produto"], where: { ...saleWhereDet, status: { not: "Cancelada" } }, _sum: { quantidade: true, valorTotalLiquido: true } }),
+    prisma.gift.groupBy({ by: ["grupo", "produto"], where: giftWhereDet, _sum: { quantidade: true } }),
+    // marca/tabelaPreco não entram direto no where de Return (backfill incompleto, mesmo motivo
+    // de returnWhere() em core.ts) — chegam indiretamente via a lista de produtos que bateram em
+    // Sale. storeId SIM entra direto (sempre populado — é a loja da venda que originou a
+    // devolução).
     prisma.return.groupBy({
       by: ["grupo", "produto"],
       where: {
         status: { not: "Cancelada" },
+        ...(filters.storeIds !== undefined ? { storeId: { in: filters.storeIds } } : {}),
         produto: {
           in: await prisma.sale
-            .findMany({ where: { ...saleGiftWhere, status: { not: "Cancelada" } }, select: { produto: true }, distinct: ["produto"] })
+            .findMany({ where: { ...saleWhereDet, status: { not: "Cancelada" } }, select: { produto: true }, distinct: ["produto"] })
             .then((r) => r.map((s) => s.produto)),
         },
         ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
       },
       _sum: { quantidade: true },
     }),
-    // Estoque atual por grupo+produto para a coleção selecionada
+    // Estoque atual por grupo+produto para a coleção selecionada. storeIds entra (StockSnapshot
+    // tem storeId); tabelasPreco NUNCA entra — StockSnapshot não tem campo tabelaPreco (ver
+    // comentário completo + evidência real em getSellthroughByColecao acima).
     prisma.stockSnapshot.groupBy({
       by: ["grupo", "produto"],
       where: {
         ...colecaoFilter,
         grupo: { not: "(sem grupo)" },
+        ...(filters.storeIds !== undefined ? { storeId: { in: filters.storeIds } } : {}),
         ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
       },
       _sum: { quantidadeDisponivel: true },
@@ -377,7 +426,7 @@ function curvaVidaFromDiasOffset(
 // primeiros `janelaDias` de vida pra uma coleção esgotada há 1 ano não ficar numa régua diferente
 // de uma coleção lançada semana passada.
 export async function getColecaoCurvaVida(
-  filters: Pick<DashboardFilters, "marcas" | "grupoIn">,
+  filters: Pick<DashboardFilters, "storeIds" | "marcas" | "grupoIn">,
   colecoesComDenominador: { colecao: string; produzido: number }[],
   janelaDias = 90
 ): Promise<CurvaVidaColecao[]> {
@@ -385,6 +434,11 @@ export async function getColecaoCurvaVida(
   if (alvo.length === 0) return [];
   const colecoes = alvo.map((c) => c.colecao);
 
+  // storeIds precisa entrar aqui pelo MESMO motivo que já entra no denominador (produzido, via
+  // getSellthroughByColecao → stockWhereColl) — bug real achado em auditoria (2026-11-25): o
+  // numerador (venda diária, abaixo) ignorava o filtro de Loja enquanto o denominador já o
+  // respeitava, fazendo a curva de vida misturar venda de TODAS as lojas contra um "produzido"
+  // de 1 loja só quando o filtro estava ativo.
   const rows = await prisma.$queryRaw<{ colecao: string; dia: Date; unidades: bigint }[]>`
     SELECT "colecao",
       DATE_TRUNC('day', ("saleDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo') AS dia,
@@ -392,6 +446,7 @@ export async function getColecaoCurvaVida(
     FROM "Sale"
     WHERE "status" != 'Cancelada'
       AND "colecao" = ANY(${colecoes})
+      ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
       ${filters.marcas !== undefined ? Prisma.sql`AND "marca" = ANY(${filters.marcas})` : Prisma.empty}
       ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
     GROUP BY "colecao", dia
@@ -444,8 +499,16 @@ export async function getSellthroughHierarquico(
 ): Promise<SellthroughHierarquico[]> {
   if (colecoes.length === 0) return [];
 
+  // storeIds precisa entrar aqui também, não só no estoque — bug real achado em auditoria
+  // (2026-11-25, mesmo padrão de getSellthroughByColecao): antes, Sale/Gift/Return nesta função
+  // ignoravam completamente o filtro de Loja enquanto stockWhereH já o respeitava, inflando
+  // "saida" (vendido-devolvido+brinde) com venda de TODAS as lojas contra um "estoque" de 1 loja
+  // só. getCurvaVidaGrupoEProduto usa o "produzido" calculado aqui como denominador da curva de
+  // vida por Grupo/Produto — sem esse fix, a curva de vida continuaria quebrada mesmo depois do
+  // fix em getColecaoCurvaVida (que só corrige o numerador do nível Coleção).
   const saleWhereH = {
     colecao: { in: colecoes },
+    ...(filters.storeIds !== undefined ? { storeId: { in: filters.storeIds } } : {}),
     ...(filters.marcas !== undefined ? { marca: { in: filters.marcas } } : {}),
     ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
   };
@@ -470,10 +533,14 @@ export async function getSellthroughHierarquico(
     }),
     // Return não tem grupo/produto→colecao confiável em todo o histórico (colecao só passou a ser
     // gravada em 2026-09-14, ver schema.prisma) — mesmo workaround de getSellthroughByColecao:
-    // mapeia produto→colecao via Sale.
+    // mapeia produto→colecao via Sale. storeId entra direto (sempre populado).
     prisma.return.groupBy({
       by: ["grupo", "produto"],
-      where: { status: { not: "Cancelada" }, ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}) },
+      where: {
+        status: { not: "Cancelada" },
+        ...(filters.storeIds !== undefined ? { storeId: { in: filters.storeIds } } : {}),
+        ...(filters.grupoIn ? { grupo: { in: filters.grupoIn } } : {}),
+      },
       _sum: { quantidade: true },
     }),
     prisma.sale.findMany({
@@ -589,6 +656,11 @@ export async function getCurvaVidaGrupoEProduto(
     produzidoPorGrupo.set(k, (produzidoPorGrupo.get(k) ?? 0) + r.produzido);
   }
 
+  // storeIds precisa entrar aqui pelo mesmo motivo de getColecaoCurvaVida (ver comentário lá) —
+  // a função ACEITA storeIds na assinatura (Pick acima) há tempos, mas a query nunca usava o
+  // parâmetro: bug real achado em auditoria (2026-11-25), numerador (venda diária por
+  // grupo/produto) ignorava Loja enquanto o denominador (produzidoPorGrupo, vindo de
+  // getSellthroughHierarquico já corrigido acima) passou a respeitar.
   const rows = await prisma.$queryRaw<{ colecao: string; grupo: string; produto: string; dia: Date; unidades: bigint }[]>`
     SELECT "colecao", "grupo", "produto",
       DATE_TRUNC('day', ("saleDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo') AS dia,
@@ -596,6 +668,7 @@ export async function getCurvaVidaGrupoEProduto(
     FROM "Sale"
     WHERE "status" != 'Cancelada'
       AND "colecao" = ANY(${colecoes})
+      ${filters.storeIds !== undefined ? Prisma.sql`AND "storeId" = ANY(${filters.storeIds})` : Prisma.empty}
       ${filters.marcas !== undefined ? Prisma.sql`AND "marca" = ANY(${filters.marcas})` : Prisma.empty}
       ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
     GROUP BY "colecao", "grupo", "produto", dia
