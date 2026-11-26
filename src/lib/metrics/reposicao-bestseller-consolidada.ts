@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { getVendaMediaDiariaPorCod } from "./compras-inteligencia";
+import { getPosicoesEstoque } from "./core";
 
 // Reposição Best Seller CONSOLIDADA na empresa (pedido do Rodrigo, 2026-11-23) — painel novo
 // dentro de Planejamento de Estoque (ver planejamento-estoque/reposicao-bestseller.tsx). 1 card
@@ -127,9 +128,22 @@ export async function getReposicaoBestSellerConsolidada(filtro: {
   storeIdsPermitidas?: string[];
   grupoIn?: string[];
 } = {}): Promise<ItemReposicaoBestSellerConsolidada[]> {
+  // Achado real (auditoria 2026-11-26): este painel somava StockSnapshot.quantidadeDisponivel
+  // filtrando só por allowedStores bruto, sem passar por getPosicoesEstoque — por isso contava
+  // estoque de armazéns não-comerciais (Defeito/Lixeira/Bonificação/Conserto/Matéria-prima/
+  // Extraviados) como "Disponível", divergindo da aba Reposição (Zona 3), que já usa
+  // getPosicoesEstoque. Mesma fonte única de "posição comercial de verdade" usada no resto do
+  // módulo, não uma allowlist nova.
+  const posicoes = await getPosicoesEstoque(filtro.storeIdsPermitidas);
+  const storeIdsComerciais = [
+    ...posicoes.lojas.flatMap((l) => l.storeIds),
+    ...(posicoes.cdSite?.storeIds ?? []),
+  ];
+  if (storeIdsComerciais.length === 0) return [];
+
   const stockRows = await prisma.stockSnapshot.findMany({
     where: {
-      ...(filtro.storeIdsPermitidas ? { storeId: { in: filtro.storeIdsPermitidas } } : {}),
+      storeId: { in: storeIdsComerciais },
       ...(filtro.grupoIn ? { grupo: { in: filtro.grupoIn } } : {}),
     },
     select: { cod: true, produto: true, grupo: true, cor: true, tamanho: true, colecao: true, quantidadeDisponivel: true },
