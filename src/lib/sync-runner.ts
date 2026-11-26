@@ -587,7 +587,15 @@ export async function upsertSalesComVendedorAtualizavel(saleData: Prisma.SaleCre
       -- estava: ou mantém a mesma resolução, ou melhora (ex: ClienteCadastro daquele cliente foi
       -- sincronizado/corrigido depois da 1ª vez que esta venda foi gravada).
       "clienteCadastroId" = EXCLUDED."clienteCadastroId",
-      "clienteCadastroMatchConfianca" = EXCLUDED."clienteCadastroMatchConfianca"
+      "clienteCadastroMatchConfianca" = EXCLUDED."clienteCadastroMatchConfianca",
+      -- Achado em 2026-11-26 (alerta real de reconciliarLotePersistido): valor não era atualizado
+      -- em conflito, só gravado na 1ª inserção. Se o DAPIC corrige/edita o valor do item DEPOIS
+      -- (ex: desconto aplicado, erro de digitação corrigido na loja) e a venda ainda cai dentro da
+      -- janela normal de 1 dia ou da janela de reconciliação por Modificacao, a sync seguinte
+      -- recalculava "esperado" certo mas nunca gravava — o banco ficava travado no valor velho pra
+      -- sempre, e reconciliarLotePersistido alertava pra sempre, sync após sync, sem nenhuma
+      -- correção automática possível. Mesmo princípio já aplicado a "vendedor" acima.
+      "valorTotalLiquido" = EXCLUDED."valorTotalLiquido"
   `;
 
   const corrigidos: VendedorCorrigido[] = [];
