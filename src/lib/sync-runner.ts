@@ -722,7 +722,11 @@ export async function syncFaturas(
   // mapWithConcurrency já usado em syncVendas (ver tabelaPrecoRealPorVenda acima) pra resolver
   // exatamente esse tipo de gargalo — aqui nunca tinha sido aplicado.
   const dadosPorFatura = new Map<number, { produtos: Awaited<ReturnType<typeof client.fetchFaturaProdutos>>; detalhe: Awaited<ReturnType<typeof client.fetchFaturaDetalhe>> | null }>();
-  await mapWithConcurrency(faturasFechadas, 8, async (fatura) => {
+  // Concorrência 16 (2026-11-26, pós-incidente): 8 ainda deixava a margem curta (~275s de 300s)
+  // sob volume pós-Black Friday. O client DAPIC já tem retry/backoff pra 429 (ver
+  // waitMsFromDapicError, dapic.ts) — um 429 ocasional sob concorrência maior só atrasa aquela
+  // chamada específica, não derruba a sync.
+  await mapWithConcurrency(faturasFechadas, 16, async (fatura) => {
     const [produtos, detalhe] = await Promise.all([
       client.fetchFaturaProdutos(fatura.Id),
       // Tabela de preço REAL da fatura inteira (ver parseTabelaPrecosLabel, dapic.ts) — se a
@@ -1250,6 +1254,9 @@ async function falhaDeLoja(
 // Separado de runSync() pra permitir tentar de novo (retryBudgetMs) sem duplicar a lógica de
 // notificação/log, que só acontece uma vez, no fim, em runSync().
 async function doSync() {
+  // Instrumentação de tempo (2026-11-26, pós-incidente de 15h+ travado): se isso voltar a ficar
+  // lento, dá pra ver onde via `vercel logs`, sem precisar criar rota de diagnóstico de novo.
+  const doSyncInicio = Date.now();
   // "Mais vendidos por loja" olha o dia de ontem inteiro (00h-23h59 Brasília) — não mais
   // últimas 24h corridas nem "desde o último sync" (as duas versões anteriores podiam cair
   // majoritariamente numa janela de madrugada sem movimento das lojas físicas e mostrar só o
@@ -1361,9 +1368,22 @@ async function doSync() {
   const [results, ordensProducaoResult, totalClientes] = await Promise.all([
     (async () => {
       const outrosResultados = await Promise.all(
-        outrasLojas.map((client, i) => sleep(i * STAGGER_MS).then(() => syncOneClient(client)))
+        outrasLojas.map((client, i) =>
+          sleep(i * STAGGER_MS).then(async () => {
+            const t0 = Date.now();
+            const r = await syncOneClient(client);
+            console.log(`[doSync] loja ${client.label} levou ${Date.now() - t0}ms`);
+            return r;
+          })
+        )
       );
-      const cdResultado = cdAtacadoClient ? [await syncOneClient(cdAtacadoClient)] : [];
+      let cdResultado: ResultadoLoja[] = [];
+      if (cdAtacadoClient) {
+        const t0 = Date.now();
+        const r = await syncOneClient(cdAtacadoClient);
+        console.log(`[doSync] loja ${cdAtacadoClient.label} levou ${Date.now() - t0}ms`);
+        cdResultado = [r];
+      }
       return [...outrosResultados, ...cdResultado];
     })(),
     // Não fatal: se o token da matriz ainda não estiver configurado (ex: só em dev, não em
@@ -1490,6 +1510,8 @@ async function doSync() {
       finishedAt: new Date(),
     },
   });
+
+  console.log(`[doSync] total levou ${Date.now() - doSyncInicio}ms`);
 
   return {
     lojas: clients.length,
@@ -1813,6 +1835,29 @@ export async function runCancelamentosRapidos() {
 // registrada) — a sincronização seguinte já tem gap pequeno de novo, não repete o alerta.
 const GAP_ALERTA_CRITICO_HORAS = 10;
 
+// Dedup de alerta (2026-11-26, pós-incidente real de 15h+ travado): reaproveita a tabela
+// SyncLock (id é string livre, já usada pra "sync"/"recovery"/"cancelamentos") só pra marcar
+// "já alertei sobre isso recentemente" — sem precisar de migration nova. Sem isso,
+// alertarSeRecuperandoDeGapCritico é chamada a cada reaquisição de lock (início de
+// runSyncLocked) — durante um episódio travado, o self-heal readquire o lock a cada ~6-7min
+// (SYNC_LOCK_STALE_MIN) e a condição de gap continua verdadeira em TODAS as tentativas, o que
+// manda um alerta Telegram novo a cada ~6-7min enquanto alguém tiver o dashboard aberto (só não
+// viramos spam no incidente real porque, por sorte, ninguém abriu o dashboard boa parte da
+// noite). Isso é um bug pré-existente, não introduzido agora.
+async function jaAlertouRecentemente(chave: string, janelaMin: number, agora: Date): Promise<boolean> {
+  const row = await prisma.syncLock.findUnique({ where: { id: chave } });
+  if (!row) return false;
+  return agora.getTime() - row.startedAt.getTime() < janelaMin * 60_000;
+}
+
+async function marcarAlertaEnviado(chave: string, agora: Date): Promise<void> {
+  await prisma.syncLock.upsert({
+    where: { id: chave },
+    create: { id: chave, startedAt: agora },
+    update: { startedAt: agora },
+  });
+}
+
 export async function alertarSeRecuperandoDeGapCritico(agora: Date): Promise<void> {
   const ultimoSucesso = await prisma.syncLog.findFirst({
     where: { source: "STOCK", status: "SUCCESS" },
@@ -1822,11 +1867,35 @@ export async function alertarSeRecuperandoDeGapCritico(agora: Date): Promise<voi
   if (!ultimoSucesso) return; // nunca houve sync bem-sucedida ainda — nada pra comparar
   const gapHoras = (agora.getTime() - ultimoSucesso.startedAt.getTime()) / 3_600_000;
   if (gapHoras <= GAP_ALERTA_CRITICO_HORAS) return;
+  if (await jaAlertouRecentemente("alerta-gap-critico", 60, agora)) return;
   const desdeStr = ultimoSucesso.startedAt.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" });
   await sendTelegramMessage(
-    `🚨 O Dashboard TVB ficou ${gapHoras.toFixed(1)}h sem nenhuma sincronização bem-sucedida (última: ${desdeStr}). Voltou a atualizar agora, mas vale checar se os crons fixos e o agendador externo (cron-job.org) estão realmente ativos.`,
+    `🚨 O Dashboard TVB está há ${gapHoras.toFixed(1)}h sem nenhuma sincronização bem-sucedida (última: ${desdeStr}). Se isso persistir, pode ser o sync travando — vale checar os logs da Vercel.`,
     { adminOnly: true }
   ).catch(() => {});
+  await marcarAlertaEnviado("alerta-gap-critico", agora).catch(() => {});
+}
+
+// Falha explícita (SyncLog.status="FAILED") hoje só aparecia no badge "falhasConsecutivas" da UI
+// — ninguém sabia a menos que abrisse o dashboard. Isso fecha esse ponto cego mandando alerta
+// direto, com o mesmo dedup por 60min (1 alerta por fonte com falha, não 1 por tentativa).
+export async function alertarSeHouveFalhaRecente(agora: Date): Promise<void> {
+  const falhasRecentes = await prisma.syncLog.findMany({
+    where: { status: "FAILED", finishedAt: { gt: new Date(agora.getTime() - 60 * 60_000) } },
+    orderBy: { finishedAt: "desc" },
+  });
+  const porFonte = new Map<string, (typeof falhasRecentes)[number]>();
+  for (const log of falhasRecentes) {
+    if (!porFonte.has(log.source)) porFonte.set(log.source, log);
+  }
+  for (const [source, log] of porFonte) {
+    if (await jaAlertouRecentemente(`alerta-failed-${source}`, 60, agora)) continue;
+    await sendTelegramMessage(
+      `⚠️ Sincronização de "${source}" falhou: ${log.message ?? "sem detalhe"}`,
+      { adminOnly: true }
+    ).catch(() => {});
+    await marcarAlertaEnviado(`alerta-failed-${source}`, agora).catch(() => {});
+  }
 }
 
 export async function getLastSyncAt(): Promise<{ at: string | null; source: "full" | "cancelamentos" | null }> {
@@ -2088,10 +2157,13 @@ async function runSyncLocked(silent: boolean, retryBudgetMs: number, checkDuplic
   let lastMessage = "";
   let attempt = 0;
 
-  // Checagem de gap crítico ANTES de rodar a sync (ver alertarSeRecuperandoDeGapCritico) — usa o
-  // "agora" de quando este mecanismo conseguiu rodar, não o fim da sync (poderia demorar minutos
-  // e distorcer o gap medido). Melhor-esforço: nunca pode impedir a sync real de rodar.
-  await alertarSeRecuperandoDeGapCritico(new Date()).catch(() => {});
+  // Checagem de gap crítico/falha recente ANTES de rodar a sync (ver alertarSeRecuperandoDeGapCritico
+  // / alertarSeHouveFalhaRecente) — usa o "agora" de quando este mecanismo conseguiu rodar, não o
+  // fim da sync (poderia demorar minutos e distorcer o gap medido). Melhor-esforço: nunca pode
+  // impedir a sync real de rodar.
+  const agoraAlerta = new Date();
+  await alertarSeRecuperandoDeGapCritico(agoraAlerta).catch(() => {});
+  await alertarSeHouveFalhaRecente(agoraAlerta).catch(() => {});
 
   do {
     attempt++;
