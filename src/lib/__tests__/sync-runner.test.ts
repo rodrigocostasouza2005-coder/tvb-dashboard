@@ -1583,6 +1583,37 @@ describe("syncFaturas — fecha a janela de fatura 'Aberta no dia, Fechada depoi
     expect(fetchFaturaProdutos).not.toHaveBeenCalled();
     expect(resultado.vendas).toBe(0);
   });
+
+  // Incidente real (2026-11-26): sync preso 15h+, lock reaberto a cada 6min sem nunca completar
+  // (timeout de 300s da Vercel). Causa raiz: busca de produtos+detalhe por fatura era sequencial
+  // (1 de cada vez), e desde o PR #121 o volume de faturas por janela cresceu bastante (até
+  // RECONCILIACAO_DIAS=7 dias, volume de Black Friday sustentado). Prova que agora roda em
+  // paralelo (concorrência real), não mais 1 fatura de cada vez.
+  it("busca produtos/detalhe de várias faturas em paralelo, não 1 por vez (regressão do incidente de 15h+ travado)", async () => {
+    let emVoo = 0;
+    let maxEmVoo = 0;
+    const fetchFaturaProdutos = vi.fn(async (id: number) => {
+      emVoo++;
+      maxEmVoo = Math.max(maxEmVoo, emVoo);
+      await new Promise((r) => setTimeout(r, 10));
+      emVoo--;
+      return [produtoFixture(id)];
+    });
+    const faturas = Array.from({ length: 20 }, (_, i) => faturaFixture(1000 + i, "Fechado"));
+    const client = {
+      label: "cd-atacado",
+      fetchFaturas: vi.fn().mockResolvedValue(faturas),
+      fetchFaturasModificadas: vi.fn().mockResolvedValue([]),
+      fetchFaturaProdutos,
+      fetchFaturaDetalhe: vi.fn().mockResolvedValue(null),
+    } as unknown as DapicClient;
+
+    const { syncFaturas } = await import("../sync-runner");
+    await syncFaturas(client, "store-cd", null, 1, new Map());
+
+    expect(fetchFaturaProdutos).toHaveBeenCalledTimes(20);
+    expect(maxEmVoo).toBeGreaterThan(1);
+  });
 });
 
 // Achado real (2026-11-24, pedido do Rodrigo: "não quero que matéria prima tenha no radar"):

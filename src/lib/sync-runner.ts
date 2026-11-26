@@ -712,17 +712,32 @@ export async function syncFaturas(
   }
   const faturas = [...faturasPorId.values()];
 
+  const faturasFechadas = faturas.filter((f) => f.Status === "Fechado" && f.DataFechamento);
+  // Achado em 2026-11-26 (incidente real: sync preso 15h+, lock reaberto a cada 6min sem nunca
+  // completar — timeout de 300s da Vercel). Causa raiz: este loop buscava produtos+detalhe de
+  // CADA fatura sequencialmente (2 chamadas de rede, 1 await por vez). Desde o PR #121 (2026-11-24)
+  // a janela de busca inclui FiltrarPor=Modificacao numa janela de até RECONCILIACAO_DIAS=7 dias —
+  // sob volume de Black Friday sustentado (~150-540 faturas/dia medidas), isso significa centenas a
+  // milhares de faturas por chamada de sync, nunca teve concorrência. Mesmo padrão de
+  // mapWithConcurrency já usado em syncVendas (ver tabelaPrecoRealPorVenda acima) pra resolver
+  // exatamente esse tipo de gargalo — aqui nunca tinha sido aplicado.
+  const dadosPorFatura = new Map<number, { produtos: Awaited<ReturnType<typeof client.fetchFaturaProdutos>>; detalhe: Awaited<ReturnType<typeof client.fetchFaturaDetalhe>> | null }>();
+  await mapWithConcurrency(faturasFechadas, 8, async (fatura) => {
+    const [produtos, detalhe] = await Promise.all([
+      client.fetchFaturaProdutos(fatura.Id),
+      // Tabela de preço REAL da fatura inteira (ver parseTabelaPrecosLabel, dapic.ts) — se a
+      // chamada falhar (raro), cai pro heurístico antigo (inferTabelaPrecoComFallbackCliente) só
+      // pra essa fatura, em vez de derrubar a sync inteira.
+      client.fetchFaturaDetalhe(fatura.Id).catch(() => null),
+    ]);
+    dadosPorFatura.set(fatura.Id, { produtos, detalhe });
+  });
+
   const saleData: Prisma.SaleCreateManyInput[] = [];
   const giftData: Prisma.GiftCreateManyInput[] = [];
-  for (const fatura of faturas) {
-    if (fatura.Status !== "Fechado" || !fatura.DataFechamento) continue;
-    const saleDate = parseDapicDateTime(fatura.DataFechamento);
-    const produtos = await client.fetchFaturaProdutos(fatura.Id);
-    // Tabela de preço REAL da fatura inteira (ver parseTabelaPrecosLabel, dapic.ts) — 1 chamada
-    // extra por fatura, mas o volume de faturas/dia é pequeno (medido em 2026-10-01: no máximo
-    // ~2-20/dia pro Site+Atacado). Se a chamada falhar (raro), cai pro heurístico antigo
-    // (inferTabelaPrecoComFallbackCliente) só pra essa fatura, em vez de derrubar a sync inteira.
-    const detalhe = await client.fetchFaturaDetalhe(fatura.Id).catch(() => null);
+  for (const fatura of faturasFechadas) {
+    const saleDate = parseDapicDateTime(fatura.DataFechamento!);
+    const { produtos, detalhe } = dadosPorFatura.get(fatura.Id)!;
     const tabelaPrecoReal = parseTabelaPrecosLabel(detalhe?.TabelaPrecos);
     const itemIndexes = stableItemIndexes(
       produtos,
