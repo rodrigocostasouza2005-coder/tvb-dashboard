@@ -533,6 +533,26 @@ describe("syncParcelas — delete+insert dentro de uma transação", () => {
 
     expect(parcelaCreateMany).not.toHaveBeenCalled();
   });
+
+  // Achado nesta auditoria (2026-11-25): diferente de /armazenadores e /armazenadores/produtos
+  // (que já lançam quando a API devolve lista vazia — ver syncArmazenadores/syncEstoque), /contas/
+  // parcelas nunca teve essa proteção. syncParcelas é o ÚNICO sync que faz delete+insert completo
+  // (truncate-and-reload) — se a API devolver 200 com lista vazia por um hiccup transitório (igual
+  // já confirmado acontecer com /armazenadores/produtos, PR #81), o deleteMany roda, o createMany
+  // não insere nada, e a Inadimplência fica silenciosamente ZERADA (todo dado real apagado), sem
+  // nenhum SyncLog FAILED (Parcela não tem SyncSource próprio — ver DAPIC_SOURCES).
+  it("resposta vazia de /contas/parcelas NÃO pode disparar o delete+insert (apagaria toda a Inadimplência real sem nenhum aviso)", async () => {
+    const client = {
+      label: "cd-atacado",
+      fetchParcelas: () => Promise.resolve([]),
+    } as unknown as DapicClient;
+
+    const { syncParcelas } = await import("../sync-runner");
+    await expect(syncParcelas(client)).rejects.toThrow(/0 parcela/i);
+
+    expect(parcelaDeleteMany).not.toHaveBeenCalled();
+    expect(parcelaCreateMany).not.toHaveBeenCalled();
+  });
 });
 
 // ============================================================================
@@ -930,6 +950,95 @@ describe("runSync — falha TOTAL de 1 loja não derruba as outras (integração
     expect(body.falhasParciais.some((f: string) => f.includes("loja-b") && f.includes("estoque") && f.includes("500"))).toBe(true);
     const stockLogCall = syncLogCreate.mock.calls.find((c) => c[0]?.data?.source === "STOCK");
     expect(stockLogCall?.[0]?.data?.status).toBe("FAILED");
+  });
+
+  // Achado nesta auditoria (2026-11-25): diferente de syncOrdensProducao e syncParcelas (que já
+  // logam com console.error no `.catch` de doSync, ver trechos logo abaixo deste um na função —
+  // "[syncOrdensProducao] falhou"/"[syncParcelas] falhou"), o `.catch(() => 0)` de syncClientes
+  // não logava NADA — uma falha de ClienteCadastro (rede, token, qualquer erro real) desaparecia
+  // por completo, sem nem aparecer no log da função (Vercel), muito menos em SyncLog (Cliente não
+  // tem SyncSource próprio). Corrigido pra logar como o par syncParcelas, mesmo nível de
+  // visibilidade (console.error, não fatal pro resto do sync).
+  it("falha de syncClientes (fetchClientes rejeita) é logada com console.error, igual syncParcelas/syncOrdensProducao", async () => {
+    storeFindFirst.mockResolvedValue(null);
+    storeCreate.mockImplementation(({ data }: { data: { code: string } }) => Promise.resolve({ id: `store-${data.code}` }));
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const cdAtacado = {
+      label: "cd-atacado",
+      fetchArmazenadores: () => Promise.resolve([{ Id: 3, Descricao: "CD" }]),
+      fetchEstoqueTodosArmazenadores: () =>
+        Promise.resolve([{ IdArmazenador: 3, IdGradeProduto: 500, Produto: "Camisa X", Grupo: "Camisas", QuantidadeReal: 10 }]),
+      fetchVendasPdv: () => Promise.resolve([]),
+      fetchVendaPdvDetalhe: () => Promise.resolve(null),
+      fetchVendasPdvModificadas: () => Promise.resolve([]),
+      fetchFaturas: () => Promise.resolve([]),
+      fetchFaturasModificadas: () => Promise.resolve([]),
+      fetchClientes: () => Promise.reject(new Error("DAPIC /clientes (cd-atacado) -> 500 Internal Server Error")),
+      fetchParcelas: () => Promise.resolve([]),
+    } as unknown as DapicClient;
+
+    createDapicClientsMock.mockImplementationOnce(() => [cdAtacado]);
+
+    const { runSync } = await import("../sync-runner");
+    const response = await runSync({ silent: true });
+    expect(response.status ?? 200).not.toBe(500); // não derruba o resto do sync
+
+    const chamadasClientes = consoleErrorSpy.mock.calls.filter((c) => String(c[0]).includes("lientes"));
+    expect(chamadasClientes.length).toBeGreaterThan(0);
+    expect(String(chamadasClientes[0][1] ?? chamadasClientes[0][0])).toContain("500 Internal Server Error");
+
+    consoleErrorSpy.mockRestore();
+  });
+
+  // [RISCO RESIDUAL DOCUMENTADO, NÃO CORRIGIDO NESTA AUDITORIA — 2026-11-25] Achado investigando
+  // item 7 (falha de uma fonte não deveria contaminar outra fonte independente): dentro de
+  // syncOneClient, estoque/vendas/faturas rodam em try/catch SEQUENCIAIS, não independentes entre
+  // si — se "vendas" (syncVendas, /vendaspdv) falhar, a função retorna na hora (ver `return
+  // falhaDeLoja(..., "vendas", ...)`) e NUNCA chega a tentar "faturas" (syncFaturas, /faturas) pro
+  // mesmo cliente, mesmo sendo um endpoint diferente e totalmente independente (fetchFaturas nem é
+  // chamado). O isolamento real comprovado pelos testes acima é só ENTRE LOJAS (loja A não é
+  // afetada pela falha de loja B) — DENTRO da mesma loja/token, uma falha em estágio anterior
+  // (estoque -> vendas -> faturas) bloqueia os estágios seguintes mesmo quando são fontes
+  // logicamente independentes. Em operação normal (cron de ~10min) isso só atrasa a captura da
+  // fatura pro próximo ciclo (não é perda permanente, ver janela de reconciliação), mas é uma
+  // contaminação real — não documentada antes desta auditoria. NÃO corrigido aqui: separar os 3
+  // estágios em try/catch verdadeiramente independentes exigiria redesenhar ResultadoLoja (hoje só
+  // carrega 1 `falha` por loja) e os agregados de falhasVendas/SyncLog em doSync — mudança grande
+  // demais pra aplicar sem validação extensa num motor de cron de produção real.
+  it("[RISCO RESIDUAL DOCUMENTADO, NÃO CORRIGIDO] falha em 'vendas' impede 'faturas' de ser tentado pro MESMO cliente, mesmo sendo endpoint independente", async () => {
+    storeFindFirst.mockResolvedValue(null);
+    storeCreate.mockImplementation(({ data }: { data: { code: string } }) => Promise.resolve({ id: `store-${data.code}` }));
+
+    const fetchFaturasSpy = vi.fn().mockResolvedValue([]);
+    const cdAtacado = {
+      label: "cd-atacado",
+      fetchArmazenadores: () => Promise.resolve([{ Id: 3, Descricao: "CD" }]),
+      fetchEstoqueTodosArmazenadores: () =>
+        Promise.resolve([{ IdArmazenador: 3, IdGradeProduto: 500, Produto: "Camisa X", Grupo: "Camisas", QuantidadeReal: 10 }]),
+      // "vendas" (vendaspdv) falha com um erro real — faturas, se tentado, teria dado real pra
+      // sincronizar (fetchFaturasSpy devolveria [] só porque não é o foco deste teste; o ponto é
+      // que ele nem chega a ser CHAMADO).
+      fetchVendasPdv: () => Promise.reject(new Error("DAPIC /vendaspdv (cd-atacado) -> 500 Internal Server Error")),
+      fetchVendaPdvDetalhe: () => Promise.resolve(null),
+      fetchVendasPdvModificadas: () => Promise.resolve([]),
+      fetchFaturas: fetchFaturasSpy,
+      fetchFaturasModificadas: () => Promise.resolve([]),
+      fetchClientes: () => Promise.resolve([]),
+      fetchParcelas: () => Promise.resolve([{ IdParcela: 1, IdConta: 1, Status: "Aberta", DataEmissao: "2026-01-01T00:00:00", DataVencimento: "2026-02-01T00:00:00", Conta: "C", FormaPagamento: "Boleto", Pessoa: "P", Parcela: 1, Valor: 1, ValorPago: 0, ValorAberto: 1, ValorMulta: 0, ValorJuros: 0 }]),
+    } as unknown as DapicClient;
+
+    createDapicClientsMock.mockImplementationOnce(() => [cdAtacado]);
+
+    const { runSync } = await import("../sync-runner");
+    const response = await runSync({ silent: true });
+    const body = await response.json();
+
+    // Comportamento ATUAL: a falha de "vendas" aparece isolada...
+    expect(body.falhasParciais.some((f: string) => f.includes("cd-atacado") && f.includes("vendas"))).toBe(true);
+    // ...mas "faturas" nunca chega a ser tentado pro mesmo cliente nesta rodada, mesmo sendo um
+    // endpoint independente de /vendaspdv.
+    expect(fetchFaturasSpy).not.toHaveBeenCalled();
   });
 
   // Cenário pedido explicitamente: falha durante a PERSISTÊNCIA (não na busca da API) — a API

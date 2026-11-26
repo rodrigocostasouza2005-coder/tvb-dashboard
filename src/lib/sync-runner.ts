@@ -982,6 +982,22 @@ export async function syncParcelas(client: DapicClient) {
   // Busca só Status=Aberta desde 2024 — cobre inadimplência ativa sem histórico longo.
   const parcelas = await client.fetchParcelas("2024-01-01", toDateStr(new Date()), "Aberta");
 
+  // Achado na auditoria de integridade do motor de sync de 2026-11-25: syncParcelas é o ÚNICO
+  // sync que faz delete+insert completo (truncate-and-reload, ver transação abaixo) — diferente
+  // de /armazenadores e /armazenadores/produtos (que já tratam resposta vazia como falha, ver
+  // syncArmazenadores/syncEstoque acima), /contas/parcelas nunca teve essa proteção. Se a API
+  // devolver HTTP 200 com lista vazia por um hiccup transitório (mesma classe de bug já confirmada
+  // em /armazenadores/produtos, PR #81), o deleteMany abaixo rodaria e o createMany não inseriria
+  // nada — apagando toda a Inadimplência real em silêncio (Parcela não tem SyncSource próprio,
+  // não aparece como FAILED em lugar nenhum). Lança aqui ANTES da transação, pra nunca truncar a
+  // tabela a partir de uma resposta suspeita — reusa o mesmo caminho de falha que o resto do sync
+  // já usa (o `.catch` em doSync loga o erro e mantém o dado antigo intacto).
+  if (parcelas.length === 0) {
+    throw new Error(
+      `DAPIC /contas/parcelas (${client.label}) devolveu 0 parcelas — tratando como falha (nunca apaga a tabela de Inadimplência a partir de uma resposta vazia suspeita)`
+    );
+  }
+
   // Achado em 2026-09-14: a Inadimplência ficou zerada meses porque /contas/parcelas às vezes
   // manda data sem hora ("2025-09-22"), e uma linha assim derrubava o createMany do lote inteiro
   // (500 linhas boas descartadas por 1 ruim) — silencioso, porque Parcela nem tem SyncSource
@@ -1351,10 +1367,13 @@ async function doSync() {
         console.error("[syncOrdensProducao] falhou:", e?.message ?? e);
         return { ok: false as const, count: 0, mensagem: e instanceof Error ? e.message : String(e) };
       }),
-    // Clientes — 1 token basta, não é fatal se falhar
+    // Clientes — 1 token basta, não é fatal se falhar. Achado na auditoria de 2026-11-25: este
+    // `.catch` não logava nada (diferente do par syncParcelas/syncOrdensProducao, logo abaixo/
+    // acima) — uma falha real de ClienteCadastro (rede, token expirado) desaparecia por completo,
+    // sem nenhum rastro nem no console. Mesmo nível de visibilidade dos outros dois agora.
     sleep((outrasLojas.length + 1) * STAGGER_MS)
       .then(() => (cdAtacadoClient ? syncClientes(cdAtacadoClient) : Promise.resolve(0)))
-      .catch(() => 0),
+      .catch((e) => { console.error("[syncClientes] falhou:", e?.message ?? e); return 0; }),
     // Parcelas em aberto (inadimplência) — não é fatal se falhar. Mesmo client que syncClientes
     // (cd-atacado), então não soma outro slot no escalonamento — o dedup de login concorrente
     // (loginPromise em DapicClient) já evita 2 logins pro mesmo token aqui.
