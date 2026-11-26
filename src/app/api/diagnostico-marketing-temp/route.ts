@@ -28,7 +28,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const ga4Result = await getSessoesPorDia({ since: seteDiasAtras, until: hoje });
+    const ga4Result = await getSessoesPorDia({ startDate: seteDiasAtras, endDate: hoje });
     resultado.ga4 = { ok: true, totalDias: ga4Result.length };
   } catch (e) {
     resultado.ga4 = { ok: false, erro: e instanceof Error ? e.message : String(e) };
