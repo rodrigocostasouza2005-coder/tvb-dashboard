@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { Prisma } from "@prisma/client";
 import { getSessionUser } from "@/lib/auth";
 import {
   registrarDecisaoMovimentacao,
@@ -26,11 +27,34 @@ export type ResultadoDecisao = { ok: boolean; mensagem: string };
 // ambiente, a gravação falha com P2021 (tabela não existe). Em vez de estourar um erro bruto na
 // tela, devolve uma mensagem que diz exatamente o que falta — foi uma decisão desta entrega gerar
 // a migration e NÃO aplicá-la em produção.
+//
+// IMPORTANTE (incidente real 2026-11-25 com ClassificacaoProduto.cod): P2021/P2022 é o código
+// genérico do Prisma pra "tabela/coluna não existe" — pode vir de QUALQUER tabela, não só
+// DecisaoMovimentacaoEstoque. O regex antigo (`does not exist|P2021|P2022` OR
+// `DecisaoMovimentacaoEstoque`) tratava QUALQUER erro desse tipo, de qualquer tabela, como "esta
+// migration pendente" — mascarando erros reais e completamente diferentes. Agora: (1) sempre loga
+// o erro técnico real antes de decidir a mensagem; (2) só mostra "migration pendente" quando a
+// mensagem de fato menciona a tabela conhecida.
+const TABELA_CONHECIDA = "DecisaoMovimentacaoEstoque";
+
 function mensagemDeErro(e: unknown): string {
   const texto = e instanceof Error ? e.message : String(e);
-  if (/DecisaoMovimentacaoEstoque|does not exist|P2021|P2022/i.test(texto)) {
-    return "Histórico indisponível: a migration DecisaoMovimentacaoEstoque ainda não foi aplicada neste ambiente.";
+  const codigo = e instanceof Prisma.PrismaClientKnownRequestError ? e.code : null;
+  const ehErroDeEsquema = codigo === "P2021" || codigo === "P2022" || /P2021|P2022/.test(texto);
+
+  if (ehErroDeEsquema) {
+    // Sempre loga o erro técnico real (código Prisma + mensagem completa) antes de decidir qual
+    // mensagem mostrar — nunca engolir em silêncio.
+    console.error("[distribuicao-estoque/actions] Prisma", codigo ?? "(sem código P2021/P2022 explícito)", "-", texto);
+
+    if (texto.includes(TABELA_CONHECIDA)) {
+      return "Histórico indisponível: a migration DecisaoMovimentacaoEstoque ainda não foi aplicada neste ambiente.";
+    }
+    console.error(
+      `[distribuicao-estoque/actions] Erro de esquema NÃO é da tabela conhecida (${TABELA_CONHECIDA}) — não é "migration pendente", tratando como erro genérico.`
+    );
   }
+
   if (/Sem permissão/.test(texto)) return "Sem permissão pra registrar decisão.";
   return "Não foi possível registrar a decisão.";
 }

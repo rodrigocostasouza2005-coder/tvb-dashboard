@@ -1894,9 +1894,37 @@ export type RegistrarDecisaoMovimentacaoInput = {
 };
 
 // Erro do Prisma pra "tabela não existe no banco" (P2021) e "coluna não existe" (P2022) — o
-// estado real deste repositório enquanto a migration não for aplicada.
+// estado real deste repositório enquanto a migration 20261111160000_add_decisao_movimentacao_estoque
+// não for aplicada. IMPORTANTE (incidente real 2026-11-25 com ClassificacaoProduto.cod): P2021/P2022
+// é o código genérico do Prisma pra "tabela/coluna não existe" — pode vir de QUALQUER tabela, não só
+// desta. Por isso: (1) sempre loga o erro técnico real (código, mensagem) antes de decidir, nunca
+// engole silenciosamente; (2) só reporta "migration pendente" quando a mensagem do erro de fato
+// menciona a tabela conhecida aqui (DecisaoMovimentacaoEstoque) — um P2021/P2022 em outra
+// tabela/coluna é um erro real e diferente, não esta migration faltando.
+const TABELA_CONHECIDA = "DecisaoMovimentacaoEstoque";
+
 function ehTabelaInexistente(e: unknown): boolean {
-  return e instanceof Prisma.PrismaClientKnownRequestError && (e.code === "P2021" || e.code === "P2022");
+  if (!(e instanceof Prisma.PrismaClientKnownRequestError) || (e.code !== "P2021" && e.code !== "P2022")) {
+    return false;
+  }
+  // Loga SEMPRE o erro técnico real (código Prisma + mensagem completa + meta, quando houver) —
+  // antes de decidir qual mensagem mostrar pro usuário. Nunca engolir em silêncio.
+  console.error(
+    `[distribuicao-estoque] Prisma ${e.code} em getHistoricoMovimentacoes:`,
+    e.message,
+    e.meta ?? {}
+  );
+  const meta = e.meta as { table?: unknown; column?: unknown } | undefined;
+  const mencionaTabelaConhecida =
+    e.message.includes(TABELA_CONHECIDA) ||
+    (typeof meta?.table === "string" && meta.table.includes(TABELA_CONHECIDA)) ||
+    (typeof meta?.column === "string" && meta.column.includes(TABELA_CONHECIDA));
+  if (!mencionaTabelaConhecida) {
+    console.error(
+      `[distribuicao-estoque] Prisma ${e.code} NÃO é da tabela conhecida (${TABELA_CONHECIDA}) — não é "migration pendente", propagando como erro real.`
+    );
+  }
+  return mencionaTabelaConhecida;
 }
 
 export type HistoricoMovimentacoes = {
