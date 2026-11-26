@@ -279,6 +279,30 @@ async function getValorDevolvidoPorCliente(filters: Pick<DashboardFilters, "stor
   return devolvidoPorCliente;
 }
 
+// Unidades devolvidas por PEDIDO (storeId::dapicVendaId) — usado por quem precisa decidir "esse
+// pedido específico foi 100% devolvido?" (getClienteSegmentacao, getClientesCrmOverview).
+// getClienteFicha já faz esse mesmo cálculo localmente (pedidoUnidadesDevolvido), de onde essa
+// regra foi extraída (auditoria de Clientes, 2026-11-26) — mesmo padrão de exclusão de
+// CD/Atacado (sem chave Sale<->Return confiável nessas 2 lojas) usado em
+// getValorDevolvidoPorCliente acima: pra esse recorte, líquido = bruto (nunca exclui um pedido
+// por sorte de dapicVendaId bater entre /faturas e /vendaspdv).
+async function getUnidadesDevolvidasPorPedido(storeIds: string[], dapicVendaIds: number[]): Promise<Map<string, number>> {
+  const result = new Map<string, number>();
+  if (storeIds.length === 0 || dapicVendaIds.length === 0) return result;
+  const storeIdsSemCorrelacaoConfiavel = new Set(await getSiteAtacadoStoreIds());
+  const storeIdsComCorrelacao = storeIds.filter((id) => !storeIdsSemCorrelacaoConfiavel.has(id));
+  if (storeIdsComCorrelacao.length === 0) return result;
+  const returns = await prisma.return.findMany({
+    where: { status: { not: "Cancelada" }, storeId: { in: storeIdsComCorrelacao }, dapicVendaId: { in: dapicVendaIds } },
+    select: { storeId: true, dapicVendaId: true, quantidade: true },
+  });
+  for (const r of returns) {
+    const key = `${r.storeId}::${r.dapicVendaId}`;
+    result.set(key, (result.get(key) ?? 0) + r.quantidade);
+  }
+  return result;
+}
+
 // liquido=true desconta devolução da receita (usado só na Lâmina Mensal — pedido do Rodrigo
 // em 2026-08-24). Padrão continua bruta pra não mudar o que a aba Clientes já mostra (lá está
 // rotulado "Receita bruta").
@@ -474,13 +498,29 @@ export async function getClientesCrmOverview(
     canal !== "b2b" ? getValorDevolvidoPorCliente(filters) : Promise.resolve(new Map<string, number>()),
   ]);
 
+  // Pedido 100% devolvido não conta como pedido "comprado" de verdade — mesma regra já aplicada
+  // em getClienteFicha (bug real corrigido em 2026-11-26, auditoria de Clientes: até então essa
+  // contagem de pedidos/clientes ativos era 100% sobre Sale bruto, só a receita já netava
+  // devolução). A netagem de receita abaixo (devolvidoPorCliente, por CLIENTE) continua intocada
+  // de propósito — já estava correta, o bug era só na contagem.
+  const storeIdsPeriodo = [...new Set(porPedido.map((r) => r.storeId))];
+  const dapicVendaIdsPeriodo = [...new Set(porPedido.map((r) => r.dapicVendaId))];
+  const devolvidoUnidadesPorPedido = await getUnidadesDevolvidasPorPedido(storeIdsPeriodo, dapicVendaIdsPeriodo);
+
   const porClienteNorm = new Map<string, { pedidos: Set<string>; unidades: number; receita: number; devolvido: number }>();
   for (const r of porPedido) {
     const norm = (r.clienteNome as string).trim().toUpperCase();
     const cur = porClienteNorm.get(norm) ?? { pedidos: new Set<string>(), unidades: 0, receita: 0, devolvido: 0 };
-    cur.pedidos.add(`${r.storeId}::${r.dapicVendaId}`);
     cur.unidades += r._sum.quantidade ?? 0;
     cur.receita += r._sum.valorTotalLiquido ?? 0;
+    const pedidoKey = `${r.storeId}::${r.dapicVendaId}`;
+    const unidadesBrutasPedido = r._sum.quantidade ?? 0;
+    const unidadesLiquidasPedido = unidadesBrutasPedido - (devolvidoUnidadesPorPedido.get(pedidoKey) ?? 0);
+    // Só entra na CONTAGEM de pedidos (e, por tabela, só torna o cliente "ativo") quando sobrou
+    // saldo líquido positivo — receita/unidades continuam somando bruto, igual sempre somaram
+    // (não regride a netagem de receita já validada, só decide quem é pedido/cliente "de
+    // verdade").
+    if (unidadesLiquidasPedido > 0) cur.pedidos.add(pedidoKey);
     porClienteNorm.set(norm, cur);
   }
   // getValorDevolvidoPorCliente é por nome BRUTO (pode ter variante de capitalização diferente
@@ -492,9 +532,13 @@ export async function getClientesCrmOverview(
 
   const primeiraGlobal = await getPrimeiraCompraGlobalPorCliente([...porClienteNorm.keys()]);
 
-  let novos = 0, recorrentes = 0, ocasionais = 0;
+  let novos = 0, recorrentes = 0, ocasionais = 0, ativos = 0;
   let totalPedidos = 0, totalUnidades = 0, totalReceitaBruta = 0, totalDevolvido = 0;
   for (const [norm, v] of porClienteNorm) {
+    // Cliente cujo(s) único(s) pedido(s) do período foram 100% devolvidos não é "ativo" — mesmo
+    // critério acima, aplicado por cliente.
+    if (v.pedidos.size === 0) continue;
+    ativos++;
     const first = primeiraGlobal.get(norm);
     const isNovo = first !== undefined && first >= filters.from && first <= filters.to;
     if (isNovo) novos++;
@@ -507,7 +551,6 @@ export async function getClientesCrmOverview(
   }
   const totalReceitaLiquida = totalReceitaBruta - totalDevolvido;
 
-  const ativos = porClienteNorm.size;
   return {
     ativos,
     novos,
@@ -598,20 +641,53 @@ async function computeClienteSegmentacao(
     },
   });
 
-  const byCliente = new Map<string, { nome: string; last: Date; pedidos: Set<string>; receita: number; porGrupo: Map<string, number>; porLoja: Map<string, number> }>();
+  // Pedido 100% devolvido não é um pedido "comprado" de verdade — mesma regra já aplicada em
+  // getClienteFicha (bug real corrigido em 2026-11-26, auditoria de Clientes: até então
+  // pedidos/receita/recência/corte de VIP eram calculados 100% sobre Sale bruto, sem consultar
+  // Return nenhuma vez). Agrega por PEDIDO (storeId::dapicVendaId) primeiro, pra poder excluir o
+  // pedido inteiro (nunca só netar o valor) quando a devolução cobriu 100% das unidades.
+  type PedidoAgregado = {
+    clienteNorm: string; clienteNome: string; unidadesBrutas: number; receita: number; last: Date;
+    porGrupo: Map<string, number>; porLoja: Map<string, number>;
+  };
+  const porPedido = new Map<string, PedidoAgregado>();
   for (const r of rows) {
     const nome = r.clienteNome as string;
     const norm = nome.trim().toUpperCase();
-    const cur = byCliente.get(norm) ?? { nome, last: r.saleDate, pedidos: new Set<string>(), receita: 0, porGrupo: new Map<string, number>(), porLoja: new Map<string, number>() };
-    if (r.saleDate > cur.last) cur.last = r.saleDate;
-    cur.pedidos.add(`${r.storeId}::${r.dapicVendaId}`);
+    const pedidoKey = `${r.storeId}::${r.dapicVendaId}`;
+    const cur = porPedido.get(pedidoKey) ?? {
+      clienteNorm: norm, clienteNome: nome, unidadesBrutas: 0, receita: 0, last: r.saleDate,
+      porGrupo: new Map<string, number>(), porLoja: new Map<string, number>(),
+    };
+    cur.unidadesBrutas += r.quantidade;
     cur.receita += r.valorTotalLiquido;
+    if (r.saleDate > cur.last) cur.last = r.saleDate;
     cur.porGrupo.set(r.grupo, (cur.porGrupo.get(r.grupo) ?? 0) + r.quantidade);
     // Até 2026-11-17 somava CD+Atacado numa linha só via displayGroup — revertido a pedido do
     // Rodrigo (mesma mudança de groupStoresForFilter/core.ts), Site e Atacado agora separados.
     const loja = r.store.code === "CD" ? "TVB Site" : r.store.name;
     cur.porLoja.set(loja, (cur.porLoja.get(loja) ?? 0) + r.quantidade);
-    byCliente.set(norm, cur);
+    porPedido.set(pedidoKey, cur);
+  }
+
+  const storeIdsPeriodo = [...new Set(rows.map((r) => r.storeId))];
+  const dapicVendaIdsPeriodo = [...new Set(rows.map((r) => r.dapicVendaId))];
+  const devolvidoUnidadesPorPedido = await getUnidadesDevolvidasPorPedido(storeIdsPeriodo, dapicVendaIdsPeriodo);
+
+  const byCliente = new Map<string, { nome: string; last: Date; pedidos: Set<string>; receita: number; porGrupo: Map<string, number>; porLoja: Map<string, number> }>();
+  for (const [pedidoKey, p] of porPedido) {
+    const liquido = p.unidadesBrutas - (devolvidoUnidadesPorPedido.get(pedidoKey) ?? 0);
+    if (liquido <= 0) continue; // pedido 100% devolvido não conta como pedido "comprado" de verdade
+    const cur = byCliente.get(p.clienteNorm) ?? {
+      nome: p.clienteNome, last: p.last, pedidos: new Set<string>(), receita: 0,
+      porGrupo: new Map<string, number>(), porLoja: new Map<string, number>(),
+    };
+    if (p.last > cur.last) cur.last = p.last;
+    cur.pedidos.add(pedidoKey);
+    cur.receita += p.receita;
+    for (const [g, qty] of p.porGrupo) cur.porGrupo.set(g, (cur.porGrupo.get(g) ?? 0) + qty);
+    for (const [l, qty] of p.porLoja) cur.porLoja.set(l, (cur.porLoja.get(l) ?? 0) + qty);
+    byCliente.set(p.clienteNorm, cur);
   }
   if (byCliente.size === 0) return [];
 
@@ -1358,18 +1434,21 @@ export async function getClienteFicha(
     }
   }
 
-  // Cliente é B2B se classifySaleChannel disser B2B — mesma regra usada em todo o resto do
-  // projeto (preço batendo com "Tabela atacado" OU CNPJ/histórico confirmado via
-  // getB2BClienteNomes, checado contra qualquer uma das `variantes` de nome desse cliente). Antes
-  // essa tela só olhava tabelaPreco==="Tabela atacado" direto nas vendas, sem o fallback de
-  // cliente — bug real achado em 2026-10-01: cliente CNPJ que nunca teve preço batendo exato (ex:
-  // NITHI/PROS Comércio de Roupas) aparecia como B2C na Ficha mesmo já corrigido em todo o resto
-  // do dashboard.
+  // B2B/B2C é decidido POR VENDA (classifySaleChannel), nunca pelo cliente inteiro — mesma regra
+  // central de canalWhere/classifySaleChannel (core.ts) e mesmo padrão já usado abaixo em
+  // classificarCanalNota (lista de Notas Fiscais desta própria tela). clienteNomeConhecidoB2B
+  // (via getB2BClienteNomes — preço batendo com "Tabela atacado" alguma vez OU CNPJ/histórico
+  // confirmado) só entra como FALLBACK dentro de classifySaleChannel quando a venda em si não tem
+  // tabelaPreco inferida — nunca sobrescreve uma venda já classificada com confiança como outra
+  // tabela.
+  //
+  // Bug real corrigido em 2026-11-26 (auditoria de Clientes): até então existia aqui um flag
+  // único por cliente (`clienteEhB2B = sales.some(...)`) aplicado a TODAS as vendas dele, então um
+  // cliente de atacado que também comprava no varejo tinha essa compra de varejo contada como B2B
+  // nos KPIs "Pedidos B2B/B2C"/"Receita B2B/B2C" do topo da Ficha — contradizendo a própria lista
+  // de Notas Fiscais da mesma tela, que já classificava por pedido via classificarCanalNota.
   const b2bClientesHistorico = await getB2BClienteNomes();
   const clienteNomeConhecidoB2B = variantes.find((v) => b2bClientesHistorico.has(v)) ?? null;
-  const clienteEhB2B = sales.some(
-    (s) => classifySaleChannel(s.tabelaPreco, clienteNomeConhecidoB2B, b2bClientesHistorico).channel === "B2B"
-  );
 
   const pedidos = new Set<string>();
   // true = pelo menos 1 item do pedido é B2B (Tabela atacado) — pedido misto é raro, mas conta
@@ -1409,7 +1488,8 @@ export async function getClienteFicha(
     pedidos.add(pedidoKey);
     pedidoKeys.add(pedidoKey);
     pedidoUnidadesBruto.set(pedidoKey, (pedidoUnidadesBruto.get(pedidoKey) ?? 0) + s.quantidade);
-    const isB2BLine = clienteEhB2B;
+    // Por venda (não por cliente) — ver comentário completo acima de clienteNomeConhecidoB2B.
+    const isB2BLine = classifySaleChannel(s.tabelaPreco, clienteNomeConhecidoB2B, b2bClientesHistorico).channel === "B2B";
     pedidoCanal.set(pedidoKey, isB2BLine || (pedidoCanal.get(pedidoKey) ?? false));
     unidadesBrutas += s.quantidade;
     receitaBruta += s.valorTotalLiquido;
