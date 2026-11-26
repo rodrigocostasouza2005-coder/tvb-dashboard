@@ -68,6 +68,7 @@ function fonteDapic(source: string, overrides: Partial<SyncStatusDetalhado["dapi
     message: null,
     ultimaAtualizacaoReal: null,
     duracaoMs: null,
+    falhasConsecutivas: 0,
     statusVisual: "sem_dados",
     ...overrides,
   };
@@ -83,6 +84,7 @@ function fonteExterna(source: "META_ADS" | "GA4", overrides: Partial<SyncStatusD
     ultimaAtualizacaoCache: null,
     ultimaAtualizacaoReal: null,
     duracaoMs: null,
+    falhasConsecutivas: 0,
     statusVisual: "sem_dados",
     ...overrides,
   };
@@ -121,7 +123,20 @@ describe("achatarFontes", () => {
       duracaoMs: 1200,
       recordsSynced: 0,
       message: "DAPIC 500",
+      falhasConsecutivas: 0,
     });
+  });
+
+  it("preserva falhasConsecutivas > 0 das 3 fontes (DAPIC, Meta Ads, GA4)", () => {
+    const detalhado = detalhadoBase({
+      dapic: [fonteDapic("SALES", { falhasConsecutivas: 3 }), ...["STOCK", "RETURNS", "PRODUCTION", "GIFTS"].map((s) => fonteDapic(s))],
+      metaAds: fonteExterna("META_ADS", { falhasConsecutivas: 2 }),
+      ga4: fonteExterna("GA4", { falhasConsecutivas: 5 }),
+    });
+    const linhas = achatarFontes(detalhado);
+    expect(linhas.find((l) => l.source === "SALES")?.falhasConsecutivas).toBe(3);
+    expect(linhas.find((l) => l.source === "META_ADS")?.falhasConsecutivas).toBe(2);
+    expect(linhas.find((l) => l.source === "GA4")?.falhasConsecutivas).toBe(5);
   });
 });
 

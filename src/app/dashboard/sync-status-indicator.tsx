@@ -59,6 +59,7 @@ export type FonteLinha = {
   duracaoMs: number | null;
   recordsSynced: number | null;
   message: string | null;
+  falhasConsecutivas: number;
 };
 
 export function achatarFontes(detalhado: SyncStatusDetalhado | null): FonteLinha[] {
@@ -71,6 +72,7 @@ export function achatarFontes(detalhado: SyncStatusDetalhado | null): FonteLinha
       duracaoMs: d.duracaoMs,
       recordsSynced: d.recordsSynced,
       message: d.message,
+      falhasConsecutivas: d.falhasConsecutivas,
     })),
     {
       source: detalhado.metaAds.source,
@@ -79,6 +81,7 @@ export function achatarFontes(detalhado: SyncStatusDetalhado | null): FonteLinha
       duracaoMs: detalhado.metaAds.duracaoMs,
       recordsSynced: detalhado.metaAds.recordsSynced,
       message: detalhado.metaAds.message,
+      falhasConsecutivas: detalhado.metaAds.falhasConsecutivas,
     },
     {
       source: detalhado.ga4.source,
@@ -87,6 +90,7 @@ export function achatarFontes(detalhado: SyncStatusDetalhado | null): FonteLinha
       duracaoMs: detalhado.ga4.duracaoMs,
       recordsSynced: detalhado.ga4.recordsSynced,
       message: detalhado.ga4.message,
+      falhasConsecutivas: detalhado.ga4.falhasConsecutivas,
     },
   ];
 }
@@ -290,6 +294,7 @@ export function SyncStatusIndicator({
                     {f.statusVisual === "erro" && f.message && (
                       <div className="text-[var(--status-critical)]" title={f.message}>
                         {f.message.length > 90 ? `${f.message.slice(0, 90)}…` : f.message}
+                        {f.falhasConsecutivas > 1 && ` (${f.falhasConsecutivas}x em sequência)`}
                       </div>
                     )}
                   </li>

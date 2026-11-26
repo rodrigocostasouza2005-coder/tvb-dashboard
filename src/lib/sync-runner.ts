@@ -1760,6 +1760,41 @@ export async function runCancelamentosRapidos() {
 //   desta tarefa) = última execução da reconciliação rápida.
 // Pega o mais recente dos dois. 2 queries pequenas (1 por chave primária, 1 findFirst numa
 // tabela que só cresce ~5 linhas por sync completo) — nada pesado.
+// Alerta proativo (2026-11-25, pós-incidente de 24/11: ~39h sem NENHUMA sincronização, os 5
+// horários fixos da Vercel não dispararam naquele dia e ninguém ficou sabendo até alguém abrir o
+// dashboard dois dias depois — o self-heal corrigiu sozinho, mas em silêncio). O indicador visual
+// "Atrasado" no cabeçalho (calcularStatusVisualDapic) exige um humano abrir o painel pra notar;
+// este alerta fecha esse ponto cego mandando aviso no Telegram assim que QUALQUER mecanismo
+// conseguir rodar de novo (self-heal, cron fixo, cron externo, manual) — não depende de ninguém
+// estar olhando a tela.
+//
+// GAP_ALERTA_CRITICO_HORAS = 10h: bem acima do maior gap NORMAL observado hoje entre os 5
+// horários fixos quando o cron externo de 10min está fora do ar (~7,9h, ver auditoria de
+// 2026-11-25) — nunca dispara em operação normal (mesmo degradada), só numa falha de verdade tipo
+// a de 24/11. Se o cron de 10min externo for restaurado, os gaps normais caem pra ~10-20min e
+// esse limiar de 10h continua seguro (nunca mais seria atingido por acaso).
+//
+// Dispara UMA vez por episódio sem precisar de tabela/estado novo pra dedup: o gap só fica grande
+// na PRIMEIRA sincronização depois da falha (a comparação é sempre contra a última SUCCESS
+// registrada) — a sincronização seguinte já tem gap pequeno de novo, não repete o alerta.
+const GAP_ALERTA_CRITICO_HORAS = 10;
+
+export async function alertarSeRecuperandoDeGapCritico(agora: Date): Promise<void> {
+  const ultimoSucesso = await prisma.syncLog.findFirst({
+    where: { source: "STOCK", status: "SUCCESS" },
+    orderBy: { startedAt: "desc" },
+    select: { startedAt: true },
+  });
+  if (!ultimoSucesso) return; // nunca houve sync bem-sucedida ainda — nada pra comparar
+  const gapHoras = (agora.getTime() - ultimoSucesso.startedAt.getTime()) / 3_600_000;
+  if (gapHoras <= GAP_ALERTA_CRITICO_HORAS) return;
+  const desdeStr = ultimoSucesso.startedAt.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" });
+  await sendTelegramMessage(
+    `🚨 O Dashboard TVB ficou ${gapHoras.toFixed(1)}h sem nenhuma sincronização bem-sucedida (última: ${desdeStr}). Voltou a atualizar agora, mas vale checar se os crons fixos e o agendador externo (cron-job.org) estão realmente ativos.`,
+    { adminOnly: true }
+  ).catch(() => {});
+}
+
 export async function getLastSyncAt(): Promise<{ at: string | null; source: "full" | "cancelamentos" | null }> {
   const [lastFullSync, cancelamentosLock] = await Promise.all([
     prisma.syncLog.findFirst({ where: { status: "SUCCESS" }, orderBy: { finishedAt: "desc" }, select: { finishedAt: true } }),
@@ -1811,6 +1846,11 @@ export type StatusFonteDapic = {
   // Duração da última execução concluída (sucesso ou falha), em ms — finishedAt - startedAt da
   // mesma linha usada em `status`/`finishedAt` acima. null se a fonte nunca terminou uma execução.
   duracaoMs: number | null;
+  // Quantas tentativas FAILED em sequência, contando a partir da mais recente, até achar a
+  // última SUCCESS (ou o início do histórico) — pedido explícito (auditoria 2026-11-25, Fase 5):
+  // "erro" sozinho não distingue 1 falha isolada (comum, DAPIC instável) de uma sequência real de
+  // falhas (sintoma mais sério). 0 quando a última tentativa já foi SUCCESS.
+  falhasConsecutivas: number;
   statusVisual: StatusVisual;
 };
 
@@ -1837,6 +1877,10 @@ export type StatusFonteExterna = {
   // (`@default(now())`) acaba quase igual ao `finishedAt` da mesma escrita. Limitação conhecida,
   // documentada em vez de corrigida (exigiria tocar analytics-site/page.tsx).
   duracaoMs: number | null;
+  // Mesmo cálculo de StatusFonteDapic.falhasConsecutivas acima — útil aqui mesmo sem conceito de
+  // "atrasado" (ver justificativa de calcularStatusVisualExterna abaixo): distingue 1 tentativa
+  // isolada que falhou de uma sequência real de falhas na busca do Meta Ads/GA4.
+  falhasConsecutivas: number;
   statusVisual: StatusVisual;
 };
 
@@ -1865,12 +1909,22 @@ async function buscarStatusFonte(source: (typeof DAPIC_SOURCES)[number] | (typeo
   ]);
   const duracaoMs =
     ultimo?.finishedAt && ultimo?.startedAt ? ultimo.finishedAt.getTime() - ultimo.startedAt.getTime() : null;
+  // Conta FAILED mais recentes que a última SUCCESS (ou todos, se nunca houve SUCCESS) — é
+  // exatamente a sequência de falhas em aberto agora, sem precisar buscar/iterar lista em JS.
+  const falhasConsecutivas = await prisma.syncLog.count({
+    where: {
+      source,
+      status: "FAILED",
+      finishedAt: ultimaSucesso?.finishedAt ? { gt: ultimaSucesso.finishedAt } : { not: null },
+    },
+  });
   return {
     status: ultimo?.status ?? null,
     finishedAt: ultimo?.finishedAt ? ultimo.finishedAt.toISOString() : null,
     recordsSynced: ultimo?.recordsSynced ?? null,
     message: ultimo?.message ?? null,
     duracaoMs,
+    falhasConsecutivas,
     ultimaAtualizacaoReal: ultimaSucesso?.finishedAt ? ultimaSucesso.finishedAt.toISOString() : null,
   };
 }
@@ -1999,6 +2053,11 @@ async function runSyncLocked(silent: boolean, retryBudgetMs: number, checkDuplic
   const start = Date.now();
   let lastMessage = "";
   let attempt = 0;
+
+  // Checagem de gap crítico ANTES de rodar a sync (ver alertarSeRecuperandoDeGapCritico) — usa o
+  // "agora" de quando este mecanismo conseguiu rodar, não o fim da sync (poderia demorar minutos
+  // e distorcer o gap medido). Melhor-esforço: nunca pode impedir a sync real de rodar.
+  await alertarSeRecuperandoDeGapCritico(new Date()).catch(() => {});
 
   do {
     attempt++;

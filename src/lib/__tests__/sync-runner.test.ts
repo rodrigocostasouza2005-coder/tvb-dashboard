@@ -11,6 +11,7 @@ const syncLockUpsert = vi.fn();
 const syncLockUpdate = vi.fn().mockResolvedValue(undefined);
 const syncLockFindUnique = vi.fn().mockResolvedValue(null);
 const syncLogFindFirst = vi.fn().mockResolvedValue(null);
+const syncLogCount = vi.fn().mockResolvedValue(0);
 const priceCatalogCacheFindFirst = vi.fn().mockResolvedValue(null);
 const parcelaDeleteMany = vi.fn();
 const parcelaCreateMany = vi.fn();
@@ -104,6 +105,7 @@ const mockPrisma = {
   syncLog: {
     create: (...a: unknown[]) => syncLogCreate(...a),
     findFirst: (...a: unknown[]) => syncLogFindFirst(...a),
+    count: (...a: unknown[]) => syncLogCount(...a),
   },
   priceCatalogCache: {
     findFirst: (...a: unknown[]) => priceCatalogCacheFindFirst(...a),
@@ -162,6 +164,7 @@ beforeEach(() => {
   syncLockUpdate.mockReset().mockResolvedValue(undefined);
   syncLockFindUnique.mockReset().mockResolvedValue(null);
   syncLogFindFirst.mockReset().mockResolvedValue(null);
+  syncLogCount.mockReset().mockResolvedValue(0);
   priceCatalogCacheFindFirst.mockReset().mockResolvedValue(null);
   parcelaDeleteMany.mockReset();
   parcelaCreateMany.mockReset().mockResolvedValue({ count: 0 });
