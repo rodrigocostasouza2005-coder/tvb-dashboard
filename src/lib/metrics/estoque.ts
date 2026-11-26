@@ -433,7 +433,17 @@ export async function searchStockVsSalesComTamanhos(filters: DashboardFilters, q
   // getStockVsSales calculado 1x só (era 2x — uma vez pro nome, outra pro tamanho — dobrando o
   // tempo de resposta à toa; achado pelo Rodrigo reclamando que a busca ficou lenta em
   // 2026-09-02). Filtra o resultado já calculado em memória, tanto por nome quanto por tamanho.
-  const all = await getStockVsSales(filters, "produto");
+  const allBruto = await getStockVsSales(filters, "produto");
+  // Líquido (desconta devolução) só aqui, localmente — achado na auditoria Pesquisa/Marketing de
+  // 2026-11-26: "Vendido no período" da Pesquisa vinha bruto (unitsSold/revenue de
+  // getStockVsSales nunca descontam devolução), inconsistente com Top 10 Mais/Menos Vendidos
+  // (líquido desde 2026-08-24) sem nenhum aviso na tela. getStockVsSales é compartilhada com
+  // Marketing (que rotula honestamente "Vendido (bruto)" pro mesmo dado) e outras telas
+  // (Atacado, Clientes, Custo por Família) — netar dentro dela mudaria o comportamento dessas
+  // também. Em vez disso, igual netByReturns faz no resto do Radar, buscamos a devolução por
+  // produto no mesmo filtro e descontamos só na cópia usada pela Pesquisa.
+  const returnsPorProduto = await getReturnsByDimension(filters, "produto");
+  const all = netByReturns(allBruto, returnsPorProduto);
 
   let rows = all;
   if (queryTrim) {

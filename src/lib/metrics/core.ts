@@ -145,6 +145,19 @@ export function netByReturns<T extends { key: string; unitsSold: number; revenue
   });
 }
 
+// Ordena o ranking "Top Mais Vendidos" pelo critério certo pro rótulo exibido: receita líquida
+// quando o usuário vê financeiro ("por receita líquida"), unidades líquidas quando não vê ("por
+// unidades líquidas"). Bug real corrigido em 2026-11-26 (auditoria Pesquisa/Marketing): a página
+// sempre ordenava por receita e só trocava o texto do título conforme showFinancials — contas
+// sem canSeeFinancials (lojas físicas: leblon@, barra@, riosul@, atendimento@) viam um Top 10
+// que dizia "por unidades líquidas" mas na prática era o Top 10 por receita.
+export function sortTopVendidosPorCriterio<T extends { unitsSold: number; revenue: number }>(
+  rows: T[],
+  porReceita: boolean
+): T[] {
+  return [...rows].sort((a, b) => (porReceita ? b.revenue - a.revenue : b.unitsSold - a.unitsSold));
+}
+
 export type DashboardFilters = {
   storeIds?: string[];
   marcas?: string[];

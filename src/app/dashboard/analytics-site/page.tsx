@@ -43,6 +43,16 @@ function formatPct(v: number | null) {
   return v != null ? `${v.toFixed(1)}%` : "—";
 }
 
+// getFunilCompra (google-analytics.ts) usa eventCount bruto do GA4 (não sessão/usuário único)
+// pra calcular a razão entre etapas — add_to_cart pode disparar mais de uma vez por sessão sem
+// um view_item correspondente a cada disparo, então pctDoAnterior/pctDoInicio podem passar de
+// 100%, o que não existe num funil de conversão de verdade. Achado em auditoria 2026-11-26
+// (Pesquisa/Marketing, item 3): corrige só a exibição (clamp visual), já que trocar a métrica
+// de origem (ex: activeUsers por etapa) é mudança maior, fora do escopo dessa correção.
+function formatPctFunil(v: number | null) {
+  return v != null ? `${Math.min(100, v).toFixed(1)}%` : "início";
+}
+
 export default async function AnalyticsSitePage({
   searchParams,
 }: {
@@ -524,13 +534,13 @@ export default async function AnalyticsSitePage({
                   <div className="h-6 flex-1 overflow-hidden rounded-md bg-[var(--page-plane)]">
                     <div
                       className="flex h-full items-center justify-end rounded-md bg-[var(--series-1)] px-2 text-xs font-medium text-white"
-                      style={{ width: `${Math.max(f.pctDoInicio ?? 0, 3)}%` }}
+                      style={{ width: `${Math.min(100, Math.max(f.pctDoInicio ?? 0, 3))}%` }}
                     >
                       {f.eventos.toLocaleString("pt-BR")}
                     </div>
                   </div>
                   <div className="w-16 shrink-0 text-right text-xs tabular-nums text-[var(--text-muted)]">
-                    {f.pctDoAnterior != null ? formatPct(f.pctDoAnterior) : "início"}
+                    {formatPctFunil(f.pctDoAnterior)}
                   </div>
                 </div>
               ))}

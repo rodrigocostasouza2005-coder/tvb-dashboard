@@ -1,5 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
-import { getSalesByGrupoProduto, getReturnsByGrupoProduto, netByReturns, getStores, getMarcas, getTabelasPreco, getDistinctColecoes, getEstoqueAtualPorGrupoProduto, getTamanhoBreakdown } from "@/lib/metrics";
+import { getSalesByGrupoProduto, getReturnsByGrupoProduto, netByReturns, sortTopVendidosPorCriterio, getStores, getMarcas, getTabelasPreco, getDistinctColecoes, getEstoqueAtualPorGrupoProduto, getTamanhoBreakdown } from "@/lib/metrics";
 import { canSeeFinancials, getGrupoRestriction, getStoreRestriction, getMarcaRestriction, getTabelaPrecoRestrictionSemAtacado } from "@/lib/permissions";
 import { parseFilters, type RawSearchParams } from "@/lib/filters";
 import { requireTabAccess } from "@/lib/tabs";
@@ -39,14 +39,17 @@ export default async function TopMaisVendidosPage({
     getDistinctColecoes(),
     getEstoqueAtualPorGrupoProduto(filters),
   ]);
+  const showFinancials = canSeeFinancials(user);
+
   // Líquido (desconta devolução) — pedido do Rodrigo em 2026-08-24. Reordena depois de
-  // descontar, já que a devolução pode mudar quem é "mais vendido" de verdade.
-  const allRows = netByReturns(allRowsBrutas, returns).sort((a, b) => b.revenue - a.revenue);
+  // descontar, já que a devolução pode mudar quem é "mais vendido" de verdade. Critério de
+  // ordenação segue o rótulo exibido (receita líquida com financeiro, unidades líquidas sem —
+  // bug corrigido em 2026-11-26, antes ordenava sempre por receita independente do rótulo).
+  const allRows = sortTopVendidosPorCriterio(netByReturns(allRowsBrutas, returns), showFinancials);
 
   // Estoque atual ao lado do ranking de vendas — pedido do Rodrigo em 2026-09-28.
   const estoqueByProduto = new Map(estoquePorProduto.map((e) => [e.key, e.quantidade]));
 
-  const showFinancials = canSeeFinancials(user);
   const top = allRows.slice(0, LIMIT);
 
   // Dropdown de tamanho (estoque disponível + vendido) — só busca pros 10 produtos do ranking,
