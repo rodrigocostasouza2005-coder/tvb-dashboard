@@ -273,6 +273,11 @@ export default async function LaminaMensalPage({
             <button type="submit" className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-3 py-1.5 text-[var(--text-secondary)] hover:bg-[var(--page-plane)]">
               Comparar
             </button>
+            {isCurrentMonth && isComparing && (
+              <span className="text-[11px] text-[var(--text-muted)]">
+                ⚠ {formatMonthLabel(month)} ainda não terminou — comparação parcial vs. mês completo.
+              </span>
+            )}
           </form>
 
           <div className="flex gap-1">
@@ -388,6 +393,14 @@ export default async function LaminaMensalPage({
               status={trendPoint(ordersChange)}
             />
           </div>
+
+          {isCurrentMonth && isComparing && (
+            <p className="mb-6 -mt-4 flex items-center gap-1 text-xs text-[var(--text-muted)]">
+              <span aria-hidden="true">⚠</span>
+              {formatMonthLabel(month)} ainda não terminou — as variações (▲/▼) acima comparam um mês
+              parcial contra {compareLabel} completo, não dois meses equivalentes.
+            </p>
+          )}
 
           {canal === "b2b" && (
             <p className="mb-6 -mt-4 text-xs text-[var(--text-muted)]">

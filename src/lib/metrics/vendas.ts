@@ -963,6 +963,15 @@ export async function getMonthlySalesByStore(filters: DashboardFilters, canal: C
   // Cliente já classificado como atacado (mesma regra de canalWhere) conta em "b2b" mesmo em
   // linhas com tabelaPreco null (preço negociado) — sem isso, cliente atacado que negocia preço
   // ficava subcontado aqui.
+  //
+  // O OR do histórico do cliente só pode entrar como FALLBACK pra "tabelaPreco" NULL — nunca pode
+  // sobrescrever uma "tabelaPreco" explícita da própria venda. Essa condição de guarda
+  // ("tabelaPreco" IS NULL no b2b / "tabelaPreco" IS NOT NULL no b2c) é a MESMA regra de
+  // canalWhere() (core.ts) — correção de 2026-11-26 (auditoria "resumo executivo"): antes dessa
+  // correção, uma venda com tabelaPreco explícita não-atacado (ex: "Tabela varejo") de um cliente
+  // com histórico B2B virava B2B aqui e B2C em canalWhere(), divergindo do card de cabeçalho
+  // (getMonthlySnapshotKpi) que usa canalWhere() de verdade. Confirmado contra o Neon dev: 7
+  // vendas / R$1.617,30 / 3 clientes nos últimos 6 meses caindo nessa divergência.
   const b2bClientes = canal !== "todos" ? [...(await getB2BClienteNomes())] : [];
   const rows = await prisma.$queryRaw<{ month: Date; storeId: string; units: bigint; revenue: number }[]>`
     SELECT
@@ -978,8 +987,8 @@ export async function getMonthlySalesByStore(filters: DashboardFilters, canal: C
       ${filters.marcas !== undefined ? Prisma.sql`AND ("marca" = ANY(${filters.marcas}) OR "marca" IS NULL)` : Prisma.empty}
       ${filters.tabelasPreco !== undefined ? Prisma.sql`AND ("tabelaPreco" = ANY(${filters.tabelasPreco}) OR "tabelaPreco" IS NULL)` : Prisma.empty}
       ${filters.grupoIn ? Prisma.sql`AND "grupo" = ANY(${filters.grupoIn})` : Prisma.empty}
-      ${canal === "b2b" ? Prisma.sql`AND ("tabelaPreco" = 'Tabela atacado' OR "clienteNome" = ANY(${b2bClientes}))` : Prisma.empty}
-      ${canal === "b2c" ? Prisma.sql`AND "tabelaPreco" IS DISTINCT FROM 'Tabela atacado' AND ("clienteNome" IS NULL OR "clienteNome" <> ALL(${b2bClientes}))` : Prisma.empty}
+      ${canal === "b2b" ? Prisma.sql`AND ("tabelaPreco" = 'Tabela atacado' OR ("tabelaPreco" IS NULL AND "clienteNome" = ANY(${b2bClientes})))` : Prisma.empty}
+      ${canal === "b2c" ? Prisma.sql`AND "tabelaPreco" IS DISTINCT FROM 'Tabela atacado' AND ("tabelaPreco" IS NOT NULL OR "clienteNome" IS NULL OR "clienteNome" <> ALL(${b2bClientes}))` : Prisma.empty}
     GROUP BY month, "storeId"
     ORDER BY month ASC
   `;
@@ -1590,6 +1599,10 @@ export async function getTopVendidosPorLoja(desde: Date, ate: Date, limit = 3) {
 // Aba "Resumo do Dia" (pensada pro vendedor de loja física) — vendas de hoje (dia calendário
 // Brasília) comparadas com a média diária dos `diasComparacao` dias anteriores, pra saber se o
 // dia tá bom ou fraco sem precisar decorar histórico.
+// Líquido de devolução desde 2026-11-26 (auditoria "resumo executivo") — nasceu bruta junto com a
+// aba em 2026-09-09 (commit 59b5e139) e nunca foi corrigida quando getSalesByDay ganhou o mesmo
+// desconto 3h40min depois (commit 95cfad50, mesmo dia). Mesmo padrão: agrega Return via
+// returnWhere() no mesmo range de cada janela (hoje e comparação) e subtrai.
 export async function getVendasHojeComComparacao(
   filters: Pick<DashboardFilters, "storeIds" | "marcas" | "tabelasPreco" | "grupoIn">,
   diasComparacao = 14,
@@ -1605,21 +1618,31 @@ export async function getVendasHojeComComparacao(
   inicioComparacao.setDate(inicioComparacao.getDate() - diasComparacao);
   const fimComparacao = new Date(inicioHoje.getTime() - 1);
 
-  const [hojeAgg, comparacaoAgg] = await Promise.all([
+  const [hojeAgg, hojeReturnsAgg, comparacaoAgg, comparacaoReturnsAgg] = await Promise.all([
     prisma.sale.aggregate({
       where: saleWhere({ ...filters, from: inicioHoje, to: fimHoje }),
       _sum: { quantidade: true, valorTotalLiquido: true },
+    }),
+    prisma.return.aggregate({
+      where: returnWhere({ ...filters, from: inicioHoje, to: fimHoje }),
+      _sum: { quantidade: true, valorTotal: true },
     }),
     prisma.sale.aggregate({
       where: saleWhere({ ...filters, from: inicioComparacao, to: fimComparacao }),
       _sum: { quantidade: true, valorTotalLiquido: true },
     }),
+    prisma.return.aggregate({
+      where: returnWhere({ ...filters, from: inicioComparacao, to: fimComparacao }),
+      _sum: { quantidade: true, valorTotal: true },
+    }),
   ]);
 
-  const hojeUnidades = hojeAgg._sum.quantidade ?? 0;
-  const hojeReceita = hojeAgg._sum.valorTotalLiquido ?? 0;
-  const mediaDiariaUnidades = (comparacaoAgg._sum.quantidade ?? 0) / diasComparacao;
-  const mediaDiariaReceita = (comparacaoAgg._sum.valorTotalLiquido ?? 0) / diasComparacao;
+  const hojeUnidades = (hojeAgg._sum.quantidade ?? 0) - (hojeReturnsAgg._sum.quantidade ?? 0);
+  const hojeReceita = (hojeAgg._sum.valorTotalLiquido ?? 0) - (hojeReturnsAgg._sum.valorTotal ?? 0);
+  const comparacaoUnidades = (comparacaoAgg._sum.quantidade ?? 0) - (comparacaoReturnsAgg._sum.quantidade ?? 0);
+  const comparacaoReceita = (comparacaoAgg._sum.valorTotalLiquido ?? 0) - (comparacaoReturnsAgg._sum.valorTotal ?? 0);
+  const mediaDiariaUnidades = comparacaoUnidades / diasComparacao;
+  const mediaDiariaReceita = comparacaoReceita / diasComparacao;
 
   return {
     hojeUnidades,
@@ -1634,6 +1657,8 @@ export async function getVendasHojeComComparacao(
 
 // Ranking de produtos mais vendidos nos últimos 7 dias (dia calendário Brasília, inclusive
 // hoje) — janela de 1 dia só costuma ficar vazia/rala numa loja física pequena.
+// Líquido de devolução desde 2026-11-26 (mesma correção/motivo de getVendasHojeComComparacao,
+// ver comentário ali) — desconta por produto via returnWhere()/groupBy antes de ordenar o ranking.
 export async function getMaisVendidosSemana(
   filters: Pick<DashboardFilters, "storeIds" | "marcas" | "tabelasPreco" | "grupoIn">,
   limit = 10,
@@ -1645,18 +1670,30 @@ export async function getMaisVendidosSemana(
   const inicio = new Date(brasiliaDayStart(hojeStr));
   inicio.setDate(inicio.getDate() - 6);
 
-  const vendas = await prisma.sale.groupBy({
-    by: ["produto"],
-    where: saleWhere({ ...filters, from: inicio, to: fim }),
-    _sum: { quantidade: true, valorTotalLiquido: true },
-  });
+  const [vendas, devolucoes] = await Promise.all([
+    prisma.sale.groupBy({
+      by: ["produto"],
+      where: saleWhere({ ...filters, from: inicio, to: fim }),
+      _sum: { quantidade: true, valorTotalLiquido: true },
+    }),
+    prisma.return.groupBy({
+      by: ["produto"],
+      where: returnWhere({ ...filters, from: inicio, to: fim }),
+      _sum: { quantidade: true, valorTotal: true },
+    }),
+  ]);
+
+  const devolvidoPorProduto = new Map(devolucoes.map((d) => [d.produto, d]));
 
   return vendas
-    .map((v) => ({
-      produto: v.produto,
-      unidades: v._sum.quantidade ?? 0,
-      receita: v._sum.valorTotalLiquido ?? 0,
-    }))
+    .map((v) => {
+      const devolvido = devolvidoPorProduto.get(v.produto);
+      return {
+        produto: v.produto,
+        unidades: (v._sum.quantidade ?? 0) - (devolvido?._sum.quantidade ?? 0),
+        receita: (v._sum.valorTotalLiquido ?? 0) - (devolvido?._sum.valorTotal ?? 0),
+      };
+    })
     .sort((a, b) => b.unidades - a.unidades)
     .slice(0, limit);
 }
