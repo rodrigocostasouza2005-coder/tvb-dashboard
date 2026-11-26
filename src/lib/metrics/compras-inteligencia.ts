@@ -700,10 +700,20 @@ export async function getVendaMediaDiariaPorCod(cods: string[]): Promise<Map<str
   const to = new Date();
   const from = new Date(to.getTime() - JANELA_VELOCIDADE_VENDA_DIAS * 86_400_000);
 
-  const [vendasRecentes, primeiraVenda] = await Promise.all([
+  const [vendasRecentes, devolucaoRecente, primeiraVenda] = await Promise.all([
     prisma.sale.groupBy({
       by: ["cod"],
       where: { status: { not: "Cancelada" }, cod: { in: cods }, saleDate: { gte: from, lte: to } },
+      _sum: { quantidade: true },
+    }),
+    // Líquida de devolução na MESMA janela/filtro da venda (achado 1, auditoria 2026-11-26: esta
+    // função alimenta Best Seller, Drop E estoque-minimo-manual.ts via getVendaMediaDiariaPorCod —
+    // sem isso, a velocidade de venda usada pros 3 era sempre bruta, inflando quantidade sugerida
+    // de compra e nível de alerta de estoque mínimo). Math.max(0, ...) abaixo porque devolução de
+    // uma venda fora da janela pode, em teoria, superar a venda DENTRO da janela.
+    prisma.return.groupBy({
+      by: ["cod"],
+      where: { status: { not: "Cancelada" }, cod: { in: cods }, returnDate: { gte: from, lte: to } },
       _sum: { quantidade: true },
     }),
     prisma.sale.groupBy({
@@ -714,6 +724,7 @@ export async function getVendaMediaDiariaPorCod(cods: string[]): Promise<Map<str
   ]);
 
   const vendasByCod = new Map(vendasRecentes.map((v) => [v.cod, v._sum.quantidade ?? 0]));
+  const devolucaoByCod = new Map(devolucaoRecente.map((d) => [d.cod, d._sum.quantidade ?? 0]));
   const primeiraVendaByCod = new Map(primeiraVenda.map((v) => [v.cod, v._min.saleDate]));
 
   const resultado = new Map<string, { mediaDiaria: number; diasComDado: number }>();
@@ -721,7 +732,7 @@ export async function getVendaMediaDiariaPorCod(cods: string[]): Promise<Map<str
     const primeira = primeiraVendaByCod.get(cod);
     const diasDesdePrimeira = primeira ? Math.floor((to.getTime() - primeira.getTime()) / 86_400_000) : 0;
     const diasComDado = Math.min(diasDesdePrimeira, JANELA_VELOCIDADE_VENDA_DIAS);
-    const totalVendido = vendasByCod.get(cod) ?? 0;
+    const totalVendido = Math.max(0, (vendasByCod.get(cod) ?? 0) - (devolucaoByCod.get(cod) ?? 0));
     resultado.set(cod, {
       mediaDiaria: diasComDado > 0 ? totalVendido / diasComDado : 0,
       diasComDado,
@@ -914,17 +925,24 @@ export async function getRecomendacoesDrop(filters: ComprasFiltro = {}): Promise
   if (classificados.length === 0) return [];
 
   const cods = classificados.map((c) => c.cod);
-  const [velocidade, pedidosAberto, estoqueRows, vendasAcumuladasRows, custoPorCod, quantidadeOriginalPorCod] = await Promise.all([
+  const [velocidade, pedidosAberto, estoqueRows, vendasAcumuladasRows, devolucaoAcumuladaRows, custoPorCod, quantidadeOriginalPorCod] = await Promise.all([
     getVendaMediaDiariaPorCod(cods),
     getPedidosEmAbertoPorCod(cods),
     prisma.stockSnapshot.groupBy({ by: ["cod"], where: { cod: { in: cods } }, _sum: { quantidadeDisponivel: true } }),
     prisma.sale.groupBy({ by: ["cod"], where: { status: { not: "Cancelada" }, cod: { in: cods } }, _sum: { quantidade: true } }),
+    // Líquida de devolução pro mesmo acumulado (achado 1, auditoria 2026-11-26) — vendasAcumuladas
+    // alimenta sell-through (vendido/comprado) do Drop; sem isso, devolução inflava o sell-through
+    // reportado e, por tabela, o risco de sobra calculado em cima dele.
+    prisma.return.groupBy({ by: ["cod"], where: { status: { not: "Cancelada" }, cod: { in: cods } }, _sum: { quantidade: true } }),
     getCustoUnitarioPorCod(cods),
     getQuantidadeOriginalProduzidaPorCod(cods),
   ]);
 
   const estoqueByCod = new Map(estoqueRows.map((e) => [e.cod, e._sum.quantidadeDisponivel ?? 0]));
-  const vendasAcumuladasByCod = new Map(vendasAcumuladasRows.map((v) => [v.cod, v._sum.quantidade ?? 0]));
+  const devolucaoAcumuladaByCod = new Map(devolucaoAcumuladaRows.map((d) => [d.cod, d._sum.quantidade ?? 0]));
+  const vendasAcumuladasByCod = new Map(
+    vendasAcumuladasRows.map((v) => [v.cod, Math.max(0, (v._sum.quantidade ?? 0) - (devolucaoAcumuladaByCod.get(v.cod) ?? 0))])
+  );
   const hoje = new Date();
 
   return classificados.map((c) => {

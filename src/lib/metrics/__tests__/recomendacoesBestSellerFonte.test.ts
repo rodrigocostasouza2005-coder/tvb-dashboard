@@ -12,6 +12,7 @@ const classificacaoFindMany = vi.fn();
 const stockSnapshotFindMany = vi.fn();
 const stockSnapshotGroupBy = vi.fn();
 const saleGroupBy = vi.fn();
+const returnGroupBy = vi.fn();
 const productionOrderGroupBy = vi.fn();
 const coberturaMetaFindMany = vi.fn();
 
@@ -23,6 +24,9 @@ vi.mock("@/lib/prisma", () => ({
       groupBy: (...a: unknown[]) => stockSnapshotGroupBy(...a),
     },
     sale: { groupBy: (...a: unknown[]) => saleGroupBy(...a) },
+    // Líquida de devolução (achado 1, auditoria 2026-11-26) — [] aqui, nenhum cenário deste
+    // arquivo testa devolução (só a fonte de identidade Best Seller).
+    return: { groupBy: (...a: unknown[]) => returnGroupBy(...a) },
     productionOrder: { groupBy: (...a: unknown[]) => productionOrderGroupBy(...a) },
     coberturaMeta: { findMany: (...a: unknown[]) => coberturaMetaFindMany(...a) },
   },
@@ -33,6 +37,7 @@ beforeEach(() => {
   stockSnapshotFindMany.mockReset();
   stockSnapshotGroupBy.mockReset();
   saleGroupBy.mockReset();
+  returnGroupBy.mockReset().mockResolvedValue([]);
   productionOrderGroupBy.mockReset();
   coberturaMetaFindMany.mockReset();
 

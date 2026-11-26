@@ -275,8 +275,12 @@ export function avaliarDecisaoCompra(
 }
 
 // ---------------------------------------------------------------------------
-// CAMADA DE DADO — só esta parte toca Prisma. Sale/StockSnapshot nunca ganham histórico aqui,
-// são lidos exatamente como existem hoje (venda bruta por linha, estoque = estado atual).
+// CAMADA DE DADO — só esta parte toca Prisma. StockSnapshot nunca ganha histórico aqui, é lido
+// exatamente como existe hoje (estoque = estado atual). Sale JÁ FOI bruto por linha até a
+// auditoria de 2026-11-26 (achado 1) — agora é líquido de Return pela mesma chave/janela
+// (Math.max(0, ...) porque devolução de uma venda fora da janela pode, em teoria, superar a
+// venda DENTRO da janela), senão "vendas pós-decisão" reportava sempre mais do que o líquido real
+// e inflava a propensão a diagnosticar ruptura na avaliação retrospectiva.
 // ---------------------------------------------------------------------------
 
 async function somarVendasJanela(
@@ -288,21 +292,31 @@ async function somarVendasJanela(
   const fim = new Date(decididoEm.getTime() + dias * 86_400_000);
   // Janela ainda não decorreu inteira — nunca soma um pedaço e chama de "dias X" inteiro.
   if (fim > agora) return null;
-  const agg = await prisma.sale.aggregate({
-    where: { ...where, status: { not: "Cancelada" }, saleDate: { gte: decididoEm, lt: fim } },
-    _sum: { quantidade: true },
-  });
-  return agg._sum.quantidade ?? 0;
+  const [vendaAgg, devolucaoAgg] = await Promise.all([
+    prisma.sale.aggregate({
+      where: { ...where, status: { not: "Cancelada" }, saleDate: { gte: decididoEm, lt: fim } },
+      _sum: { quantidade: true },
+    }),
+    prisma.return.aggregate({
+      where: { ...where, status: { not: "Cancelada" }, returnDate: { gte: decididoEm, lt: fim } },
+      _sum: { quantidade: true },
+    }),
+  ]);
+  return Math.max(0, (vendaAgg._sum.quantidade ?? 0) - (devolucaoAgg._sum.quantidade ?? 0));
 }
 
 async function buscarDadosCruzados(decisao: DecisaoParaAvaliar, agora: Date): Promise<DadosCruzadosDecisao> {
   const where = decisao.cod ? { cod: decisao.cod } : { grupo: decisao.grupo };
 
-  const [stockAgg, vendasAteAgoraAgg, vendasNoPeriodoCount, vendasPosDecisao30, vendasPosDecisao60, vendasPosDecisao90] =
+  const [stockAgg, vendasAteAgoraAgg, devolucaoAteAgoraAgg, vendasNoPeriodoCount, vendasPosDecisao30, vendasPosDecisao60, vendasPosDecisao90] =
     await Promise.all([
       prisma.stockSnapshot.aggregate({ where, _sum: { quantidadeDisponivel: true }, _count: true }),
       prisma.sale.aggregate({
         where: { ...where, status: { not: "Cancelada" }, saleDate: { gte: decisao.decididoEm, lte: agora } },
+        _sum: { quantidade: true },
+      }),
+      prisma.return.aggregate({
+        where: { ...where, status: { not: "Cancelada" }, returnDate: { gte: decisao.decididoEm, lte: agora } },
         _sum: { quantidade: true },
       }),
       prisma.sale.count({ where: { ...where, status: { not: "Cancelada" }, saleDate: { gte: decisao.decididoEm, lte: agora } } }),
@@ -315,7 +329,7 @@ async function buscarDadosCruzados(decisao: DecisaoParaAvaliar, agora: Date): Pr
     stockRowCount: stockAgg._count,
     estoqueAtual: stockAgg._sum.quantidadeDisponivel ?? 0,
     vendasNoPeriodoCount,
-    vendasPosDecisaoAteAgora: vendasAteAgoraAgg._sum.quantidade ?? 0,
+    vendasPosDecisaoAteAgora: Math.max(0, (vendasAteAgoraAgg._sum.quantidade ?? 0) - (devolucaoAteAgoraAgg._sum.quantidade ?? 0)),
     vendasPosDecisao30,
     vendasPosDecisao60,
     vendasPosDecisao90,

@@ -12,6 +12,7 @@ import { TipoCompraProduto } from "@prisma/client";
 
 const storeFindMany = vi.fn();
 const saleGroupBy = vi.fn();
+const returnGroupBy = vi.fn();
 const stockSnapshotFindMany = vi.fn();
 const stockMinimumRuleFindMany = vi.fn();
 const classificacaoProdutoFindMany = vi.fn();
@@ -21,6 +22,10 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     store: { findMany: (...a: unknown[]) => storeFindMany(...a) },
     sale: { groupBy: (...a: unknown[]) => saleGroupBy(...a) },
+    // Líquida de devolução (achado 1, auditoria 2026-11-26) — [] em todo teste deste arquivo
+    // (nenhum cenário aqui testa devolução, só identidade Best Seller), preserva o número bruto
+    // já esperado.
+    return: { groupBy: (...a: unknown[]) => returnGroupBy(...a) },
     stockSnapshot: { findMany: (...a: unknown[]) => stockSnapshotFindMany(...a) },
     stockMinimumRule: { findMany: (...a: unknown[]) => stockMinimumRuleFindMany(...a) },
     classificacaoProduto: { findMany: (...a: unknown[]) => classificacaoProdutoFindMany(...a) },
@@ -74,6 +79,7 @@ describe("distribuicao-estoque (camada de dados) — identidade Best Seller inte
       // vendas30/60/90: by storeId+cod, _sum — sem venda (irrelevante pro que este teste cobre).
       return Promise.resolve([]);
     });
+    returnGroupBy.mockReset().mockResolvedValue([]); // sem devolução em nenhum cenário deste arquivo
 
     stockSnapshotFindMany.mockReset().mockImplementation((args: { distinct?: string[] }) => {
       const cods = [COD_BS_MANUAL, COD_BS_COLECAO, COD_DROP_SAZONAL, COD_MANUAL_OVERRIDE];

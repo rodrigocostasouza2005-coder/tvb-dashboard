@@ -18,6 +18,7 @@ import {
 // então pode ficar aqui sem afetar a ordem de execução dos outros testes.
 const classificacaoFindMany = vi.fn();
 const saleGroupBy = vi.fn();
+const returnGroupBy = vi.fn();
 const stockSnapshotGroupBy = vi.fn();
 const productionOrderGroupBy = vi.fn();
 const classificacaoFindUnique = vi.fn();
@@ -33,6 +34,10 @@ vi.mock("@/lib/prisma", () => ({
     },
     classificacaoProdutoHistorico: { createMany: (...a: unknown[]) => classificacaoHistoricoCreateMany(...a) },
     sale: { groupBy: (...a: unknown[]) => saleGroupBy(...a) },
+    // Líquida de devolução (achado 1, auditoria 2026-11-26) — default [] em todo teste que não
+    // configura devolução explicitamente, pra manter o comportamento antigo (sem devolução = sem
+    // mudança no número bruto já esperado pelos cenários existentes).
+    return: { groupBy: (...a: unknown[]) => returnGroupBy(...a) },
     stockSnapshot: { groupBy: (...a: unknown[]) => stockSnapshotGroupBy(...a) },
     productionOrder: { groupBy: (...a: unknown[]) => productionOrderGroupBy(...a) },
   },
@@ -219,6 +224,7 @@ describe("getRecomendacoesDrop (ciclo ativo)", () => {
   beforeEach(() => {
     classificacaoFindMany.mockReset();
     saleGroupBy.mockReset();
+    returnGroupBy.mockReset().mockResolvedValue([]); // sem devolução em nenhum cenário deste describe
     stockSnapshotGroupBy.mockReset();
     productionOrderGroupBy.mockReset();
 

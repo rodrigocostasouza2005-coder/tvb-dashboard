@@ -205,6 +205,7 @@ const decisaoCompraFindMany = vi.fn();
 const stockSnapshotAggregate = vi.fn();
 const saleAggregate = vi.fn();
 const saleCount = vi.fn();
+const returnAggregate = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -214,6 +215,10 @@ vi.mock("@/lib/prisma", () => ({
       aggregate: (...a: unknown[]) => saleAggregate(...a),
       count: (...a: unknown[]) => saleCount(...a),
     },
+    // Líquida de devolução (achado 1, auditoria 2026-11-26) — default zero em todo teste que não
+    // configura devolução explicitamente, pra manter o número bruto já esperado pelos cenários
+    // existentes (sem devolução = sem mudança).
+    return: { aggregate: (...a: unknown[]) => returnAggregate(...a) },
   },
 }));
 
@@ -222,6 +227,7 @@ beforeEach(() => {
   stockSnapshotAggregate.mockReset().mockResolvedValue({ _sum: { quantidadeDisponivel: 0 }, _count: 0 });
   saleAggregate.mockReset().mockResolvedValue({ _sum: { quantidade: 0 } });
   saleCount.mockReset().mockResolvedValue(0);
+  returnAggregate.mockReset().mockResolvedValue({ _sum: { quantidade: 0 } });
 });
 
 describe("getAvaliacaoDecisaoCompra — reaproveita getHistoricoDecisoesCompra, nunca duplica leitura de DecisaoCompra", () => {

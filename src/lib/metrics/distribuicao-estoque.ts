@@ -1315,7 +1315,18 @@ async function montarComparacaoSemCache(filters: ComparacaoFiltro): Promise<Comp
   const agora = new Date();
   const desde = (dias: number) => new Date(agora.getTime() - dias * 86_400_000);
 
-  const [vendas30, vendas60, vendas90, minimumRules, classificacoes, primeirasVendas, primeirasProducoes] = await Promise.all([
+  const [
+    vendas30,
+    vendas60,
+    vendas90,
+    devolucao30,
+    devolucao60,
+    devolucao90,
+    minimumRules,
+    classificacoes,
+    primeirasVendas,
+    primeirasProducoes,
+  ] = await Promise.all([
     prisma.sale.groupBy({
       by: ["storeId", "cod"],
       where: { status: { not: "Cancelada" }, storeId: { in: storeIds }, cod: { in: cods }, saleDate: { gte: desde(JANELA_DIAS.d30) } },
@@ -1329,6 +1340,28 @@ async function montarComparacaoSemCache(filters: ComparacaoFiltro): Promise<Comp
     prisma.sale.groupBy({
       by: ["storeId", "cod"],
       where: { status: { not: "Cancelada" }, storeId: { in: storeIds }, cod: { in: cods }, saleDate: { gte: desde(JANELA_DIAS.d90) } },
+      _sum: { quantidade: true },
+    }),
+    // Devolução no MESMO filtro/janela de cada vendas30/60/90 (achado 1, auditoria 2026-11-26:
+    // o motor de Distribuição nunca descontava devolução — venda bruta alimentava diagnóstico
+    // de ruptura/excesso e sugestão de transferência). Agregada por storeId+cod (não por
+    // dapicVendaId) — não há atribuição a cliente aqui, então a ressalva de correlação não
+    // confiável de CD/ATACADO (ver getSiteAtacadoStoreIds/devolucaoCdAtacadoSemCorrelacao.test.ts)
+    // não se aplica: estamos somando volume por produto/loja no período, não casando devolução
+    // individual com a venda que a originou.
+    prisma.return.groupBy({
+      by: ["storeId", "cod"],
+      where: { status: { not: "Cancelada" }, storeId: { in: storeIds }, cod: { in: cods }, returnDate: { gte: desde(JANELA_DIAS.d30) } },
+      _sum: { quantidade: true },
+    }),
+    prisma.return.groupBy({
+      by: ["storeId", "cod"],
+      where: { status: { not: "Cancelada" }, storeId: { in: storeIds }, cod: { in: cods }, returnDate: { gte: desde(JANELA_DIAS.d60) } },
+      _sum: { quantidade: true },
+    }),
+    prisma.return.groupBy({
+      by: ["storeId", "cod"],
+      where: { status: { not: "Cancelada" }, storeId: { in: storeIds }, cod: { in: cods }, returnDate: { gte: desde(JANELA_DIAS.d90) } },
       _sum: { quantidade: true },
     }),
     prisma.stockMinimumRule.findMany(),
@@ -1397,9 +1430,20 @@ async function montarComparacaoSemCache(filters: ComparacaoFiltro): Promise<Comp
     }
     return m;
   }
-  const v30 = agregarVendas(vendas30);
-  const v60 = agregarVendas(vendas60);
-  const v90 = agregarVendas(vendas90);
+  // Líquida de devolução (mesma chave posição::cod, mesmo padrão de netByReturns/core.ts) —
+  // achado 1 da auditoria 2026-11-26: sem isso, vendasDias30/60/90 (e tudo que depende delas:
+  // velocidadeDiaria, coberturaDias, diagnosticarVariante) usava venda bruta, inflando a
+  // propensão a classificar como ruptura/necessidade de transferência. Math.max(0, ...) porque
+  // devolução de uma compra fora da janela pode, em teoria, superar a venda DENTRO da janela.
+  function netarDevolucao(vendasMap: Map<string, number>, devolucaoRows: { storeId: string; cod: string; _sum: { quantidade: number | null } }[]) {
+    const devMap = agregarVendas(devolucaoRows);
+    const m = new Map<string, number>();
+    for (const [k, v] of vendasMap) m.set(k, Math.max(0, v - (devMap.get(k) ?? 0)));
+    return m;
+  }
+  const v30 = netarDevolucao(agregarVendas(vendas30), devolucao30);
+  const v60 = netarDevolucao(agregarVendas(vendas60), devolucao60);
+  const v90 = netarDevolucao(agregarVendas(vendas90), devolucao90);
 
   // Venda do SITE (ecommerce) por cod — só a store "CD", sem atacado (ver storeIdEcommerce).
   const siteStoreId = posicoes.cdSite?.storeIdEcommerce;
