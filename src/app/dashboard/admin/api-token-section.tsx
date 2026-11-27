@@ -6,7 +6,7 @@ import { generateApiTokenAction, revealApiTokenAction } from "./actions";
 type State = { ok: boolean; message: string; token?: string };
 
 const initialState: State = { ok: true, message: "" };
-const BASE_URL = "https://tvb-dashboard.vercel.app";
+const BASE_URL = "https://tvb-radar.vercel.app";
 
 export function ApiTokenSection({ hasToken, updatedAtLabel }: { hasToken: boolean; updatedAtLabel: string | null }) {
   const [genState, generateAction, generating] = useActionState<State, FormData>(

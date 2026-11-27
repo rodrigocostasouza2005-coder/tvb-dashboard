@@ -8,7 +8,7 @@ const OPENAPI_SPEC = {
     description: "Consulta vendas, estoque e grade de tamanho da TVB Shorts.",
     version: "1.0.0",
   },
-  servers: [{ url: "https://tvb-dashboard.vercel.app" }],
+  servers: [{ url: "https://tvb-radar.vercel.app" }],
   paths: {
     "/api/gpt": {
       get: {

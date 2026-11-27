@@ -14,7 +14,7 @@ name: Sync rápido de cancelamentos
 # src/app/api/sync-frequent/route.ts. /api/sync-cancelamentos usa o MESMO EXTERNAL_SYNC_SECRET e
 # o mesmo contrato (POST/GET + header x-sync-secret), então o passo que falta é só o Rodrigo
 # cadastrar um 2º monitor em cron-job.org apontando pra
-# https://tvb-dashboard.vercel.app/api/sync-cancelamentos a cada ~5min (mesma credencial que ele já
+# https://tvb-radar.vercel.app/api/sync-cancelamentos a cada ~5min (mesma credencial que ele já
 # tem salva lá pro sync-frequent) — nenhuma mudança de código é necessária pro endpoint em si.
 #
 # DESATIVADO EM 2026-11-12 (auditoria): o secret `EXTERNAL_SYNC_SECRET` nos GitHub Actions Secrets
@@ -40,7 +40,7 @@ permissions:
   contents: read
 
 env:
-  VERCEL_APP_URL: https://tvb-dashboard.vercel.app
+  VERCEL_APP_URL: https://tvb-radar.vercel.app
 
 jobs:
   sync-cancelamentos:

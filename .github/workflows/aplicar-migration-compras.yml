@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 env:
-  VERCEL_APP_URL: https://tvb-dashboard.vercel.app
+  VERCEL_APP_URL: https://tvb-radar.vercel.app
 
 jobs:
   aplicar-migration:
