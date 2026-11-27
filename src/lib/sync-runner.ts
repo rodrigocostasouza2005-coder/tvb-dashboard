@@ -1419,7 +1419,13 @@ async function doSync() {
     // (ok:true, legítimo — zero produção num período é plausível) de "a chamada à API falhou"
     // (ok:false), e o SyncLog usa isso pra não mentir "SUCCESS" quando foi erro.
     sleep(outrasLojas.length * STAGGER_MS)
-      .then(() => syncOrdensProducao(matrizClient))
+      .then(() => {
+        const t0 = Date.now();
+        return syncOrdensProducao(matrizClient).then((count) => {
+          console.log(`[doSync] syncOrdensProducao levou ${Date.now() - t0}ms`);
+          return count;
+        });
+      })
       .then((count) => ({ ok: true as const, count }))
       .catch((e) => {
         console.error("[syncOrdensProducao] falhou:", e?.message ?? e);
@@ -1430,15 +1436,30 @@ async function doSync() {
     // acima) — uma falha real de ClienteCadastro (rede, token expirado) desaparecia por completo,
     // sem nenhum rastro nem no console. Mesmo nível de visibilidade dos outros dois agora.
     sleep((outrasLojas.length + 1) * STAGGER_MS)
-      .then(() => (cdAtacadoClient ? syncClientes(cdAtacadoClient) : Promise.resolve(0)))
+      .then(() => {
+        if (!cdAtacadoClient) return Promise.resolve(0);
+        const t0 = Date.now();
+        return syncClientes(cdAtacadoClient).then((n) => {
+          console.log(`[doSync] syncClientes levou ${Date.now() - t0}ms`);
+          return n;
+        });
+      })
       .catch((e) => { console.error("[syncClientes] falhou:", e?.message ?? e); return 0; }),
     // Parcelas em aberto (inadimplência) — não é fatal se falhar. Mesmo client que syncClientes
     // (cd-atacado), então não soma outro slot no escalonamento — o dedup de login concorrente
     // (loginPromise em DapicClient) já evita 2 logins pro mesmo token aqui.
     sleep((outrasLojas.length + 1) * STAGGER_MS)
-      .then(() => (cdAtacadoClient ? syncParcelas(cdAtacadoClient) : Promise.resolve(0)))
+      .then(() => {
+        if (!cdAtacadoClient) return Promise.resolve(0);
+        const t0 = Date.now();
+        return syncParcelas(cdAtacadoClient).then((n) => {
+          console.log(`[doSync] syncParcelas levou ${Date.now() - t0}ms`);
+          return n;
+        });
+      })
       .catch((e) => { console.error("[syncParcelas] falhou:", e?.message ?? e); return 0; }),
   ]);
+  console.log(`[doSync] Promise.all (lojas+producao+clientes+parcelas) levou ${Date.now() - doSyncInicio}ms no total`);
 
   const totalEstoque = results.reduce((a, r) => a + r.estoque, 0);
   const totalVendas = results.reduce((a, r) => a + r.vendas, 0);
@@ -1474,8 +1495,10 @@ async function doSync() {
   // de verdade por último pra ele em cada loja — ver sincronizarAtribuicoesComVendaReal. Não
   // fatal: é uma correção contínua por cima da sync normal, não pode derrubar o sync se falhar.
   try {
+    const t0 = Date.now();
     const todasAsLojas = await prisma.store.findMany({ where: { sellsProducts: true } });
     await Promise.all(todasAsLojas.map((s) => sincronizarAtribuicoesComVendaReal(s.id)));
+    console.log(`[doSync] sincronizarAtribuicoesComVendaReal (${todasAsLojas.length} loja(s)) levou ${Date.now() - t0}ms`);
   } catch (e) {
     console.error("[sincronizarAtribuicoesComVendaReal] falhou:", (e as Error)?.message ?? e);
   }
@@ -2194,7 +2217,9 @@ async function runSyncLocked(silent: boolean, retryBudgetMs: number, checkDuplic
       const result = await doSync();
       const agora = new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" });
       if (!silent) {
+        const tResumo = Date.now();
         const resumo = await buildResumoMessage(result.desde, result.ate).catch(() => "");
+        console.log(`[doSync] buildResumoMessage levou ${Date.now() - tResumo}ms`);
         await sendTelegramMessage(`✅ Dashboard TVB atualizado (${agora})\n${resumo}`);
       }
       // Auditoria de vendedor corrigido — pedido do Rodrigo em 2026-09-01: "o ideal é sempre fazer
@@ -2228,7 +2253,9 @@ async function runSyncLocked(silent: boolean, retryBudgetMs: number, checkDuplic
       // Checagens periódicas (só na sync das 8h — ver checkDuplicates em /api/sync/route.ts —
       // pra não rodar 3x/dia à toa nem espalhar a lógica de "que dia é hoje" por vários lugares).
       if (checkDuplicates) {
+        const tDup = Date.now();
         const alertaDuplicata = await checkForDuplicateSales().catch(() => null);
+        console.log(`[doSync] checkForDuplicateSales levou ${Date.now() - tDup}ms`);
         if (alertaDuplicata) await sendTelegramMessage(alertaDuplicata, { adminOnly: true });
 
         const diaSemanaBrasilia = new Intl.DateTimeFormat("en-US", { timeZone: "America/Sao_Paulo", weekday: "long" }).format(new Date());
