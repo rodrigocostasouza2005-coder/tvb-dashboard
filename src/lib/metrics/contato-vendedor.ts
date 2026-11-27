@@ -247,13 +247,25 @@ async function garantirAtribuicoes(storeId: string, clientesNomes: string[]): Pr
 // quem ainda não tem continua por garantirAtribuicoes, que roda na tela) — nunca sobrescreve pra
 // um vendedor que não está mais ativo nessa loja (então uma venda antiga de alguém que já saiu,
 // reprocessada por engano, nunca rouba a carteira de volta pra ele).
+//
+// Achado em produção real (2026-11-27, mesmo incidente de timeout do /api/sync corrigido em
+// checkForDuplicateSales): esta função buscava TODO o histórico de Sale de cada loja, sem filtro
+// de data, pra TODAS as lojas a cada sync — custo que só cresce com o tempo. Correção é sempre
+// disparada por uma venda NOVA desde a última sync (rodando 5x/dia + self-heal, o intervalo real
+// entre syncs é de poucas horas); se a atribuição de um cliente já estava correta numa sync
+// anterior e ele não comprou de novo, não há nada a corrigir, então não precisa reler a venda dele
+// de novo. Janela de 30 dias dá folga enorme sobre esse intervalo real (mesma janela já usada em
+// checkForDuplicateSales) sem herdar o custo do histórico inteiro.
+const JANELA_ATRIBUICAO_VENDEDOR_DIAS = 30;
+
 export async function sincronizarAtribuicoesComVendaReal(storeId: string): Promise<number> {
   const vendedoresAtivos = await prisma.vendedor.findMany({ where: { storeId, ativo: true } });
   if (vendedoresAtivos.length === 0) return 0;
   const vendedorIdPorNome = new Map(vendedoresAtivos.map((v) => [v.nome.trim().toUpperCase(), v.id]));
 
+  const desde = new Date(Date.now() - JANELA_ATRIBUICAO_VENDEDOR_DIAS * 86_400_000);
   const vendas = await prisma.sale.findMany({
-    where: { storeId, status: { not: "Cancelada" }, clienteNome: { not: null }, vendedor: { not: null } },
+    where: { storeId, status: { not: "Cancelada" }, clienteNome: { not: null }, vendedor: { not: null }, saleDate: { gte: desde } },
     select: { clienteNome: true, vendedor: true, saleDate: true },
     orderBy: { saleDate: "desc" },
   });
