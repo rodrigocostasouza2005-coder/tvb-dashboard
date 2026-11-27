@@ -1163,14 +1163,29 @@ async function buildResumoMessage(desde: Date, ate: Date) {
 // produto+quantidade+valor com mais de 1 linha — não deveria mais acontecer com o índice
 // determinístico, mas mais vale checar sozinho do que descobrir de novo só quando o número já
 // tiver errado na tela. Silencioso quando não acha nada, pra não virar ruído diário.
-async function checkForDuplicateSales(): Promise<string | null> {
+//
+// Achado em 2026-11-27 (produção real: `/api/sync` — único dos 5 crons com checkDuplicates=true —
+// estourou os 300s de maxDuration e a Vercel matou a função antes do Telegram de sucesso):
+// `groupBy` sem filtro de data varria a tabela Sale/Return INTEIRA desde o começo do histórico,
+// toda vez, e só piora conforme o histórico cresce. O objetivo real é pegar uma REGRESSÃO NOVA no
+// índice determinístico (stableItemIndexes) — dado antigo já foi checado limpo em dias anteriores,
+// não precisa ser re-escaneado pra sempre. Janela de 30 dias cobre qualquer regressão recente com
+// folga (a sync roda diariamente, então uma regressão aparece bem dentro desses 30 dias) sem herdar
+// o custo do histórico inteiro. Isso NÃO afeta a segurança do dado em si — doSync() já grava todo
+// SyncLog/Sale/Return antes de chegar aqui; o que travava era só a checagem/aviso pós-sync.
+const JANELA_CHECAGEM_DUPLICATA_DIAS = 30;
+
+export async function checkForDuplicateSales(): Promise<string | null> {
+  const desde = new Date(Date.now() - JANELA_CHECAGEM_DUPLICATA_DIAS * 86_400_000);
   const [saleGroups, returnGroups] = await Promise.all([
     prisma.sale.groupBy({
       by: ["storeId", "dapicVendaId", "cod", "quantidade", "valorTotalLiquido"],
+      where: { saleDate: { gte: desde } },
       _count: { _all: true },
     }),
     prisma.return.groupBy({
       by: ["storeId", "dapicVendaId", "cod", "quantidade", "valorTotal"],
+      where: { returnDate: { gte: desde } },
       _count: { _all: true },
     }),
   ]);

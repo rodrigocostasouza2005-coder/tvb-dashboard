@@ -18,8 +18,10 @@ const parcelaCreateMany = vi.fn();
 const giftFindMany = vi.fn();
 const saleFindMany = vi.fn();
 const saleUpdateMany = vi.fn().mockResolvedValue({ count: 0 });
+const saleGroupBy = vi.fn().mockResolvedValue([]);
 const returnFindMany = vi.fn().mockResolvedValue([]);
 const returnUpdateMany = vi.fn().mockResolvedValue({ count: 0 });
+const returnGroupBy = vi.fn().mockResolvedValue([]);
 // Carregado 1x por syncVendas/syncFaturas pra resolver Sale.clienteCadastroId (ver
 // cliente-cadastro-link.ts) — vazio por padrão aqui, os testes deste arquivo não cobrem esse
 // vínculo especificamente (ver src/lib/__tests__/cliente-cadastro-link.test.ts pra lógica pura).
@@ -97,10 +99,12 @@ const mockPrisma = {
   sale: {
     findMany: (...a: unknown[]) => saleFindMany(...a),
     updateMany: (...a: unknown[]) => saleUpdateMany(...a),
+    groupBy: (...a: unknown[]) => saleGroupBy(...a),
   },
   return: {
     findMany: (...a: unknown[]) => returnFindMany(...a),
     updateMany: (...a: unknown[]) => returnUpdateMany(...a),
+    groupBy: (...a: unknown[]) => returnGroupBy(...a),
   },
   syncLog: {
     create: (...a: unknown[]) => syncLogCreate(...a),
@@ -172,8 +176,10 @@ beforeEach(() => {
   clienteCadastroFindMany.mockReset().mockResolvedValue([]);
   saleFindMany.mockReset().mockResolvedValue([]);
   saleUpdateMany.mockReset().mockResolvedValue({ count: 0 });
+  saleGroupBy.mockReset().mockResolvedValue([]);
   returnFindMany.mockReset().mockResolvedValue([]);
   returnUpdateMany.mockReset().mockResolvedValue({ count: 0 });
+  returnGroupBy.mockReset().mockResolvedValue([]);
   syncLogCreate.mockReset().mockResolvedValue({});
   executeRaw.mockClear();
   sendTelegramMessageMock.mockClear();
@@ -1664,5 +1670,70 @@ describe("syncEstoque — nunca grava insumo de produção (Grupo null) em Stock
     const count = await syncEstoque(client, new Map([[1, "store-a"]]));
 
     expect(count).toBe(1);
+  });
+});
+
+// Achado em produção real (2026-11-27): checkForDuplicateSales fazia groupBy SEM filtro de data —
+// varria Sale/Return inteiros desde o começo do histórico toda vez, e isso sozinho estourou os
+// 300s de maxDuration do /api/sync (único dos 5 crons com checkDuplicates=true). Corrigido pra
+// janela de 30 dias (regressão nova aparece dentro dela; dado mais velho já foi checado limpo em
+// dias anteriores).
+describe("checkForDuplicateSales — janela de 30 dias (achado de timeout em produção, 2026-11-27)", () => {
+  it("filtra Sale/Return por saleDate/returnDate >= 30 dias atrás, não varre o histórico inteiro", async () => {
+    const { checkForDuplicateSales } = await import("../sync-runner");
+    const antes = Date.now();
+    await checkForDuplicateSales();
+
+    expect(saleGroupBy).toHaveBeenCalledTimes(1);
+    expect(returnGroupBy).toHaveBeenCalledTimes(1);
+    const saleWhere = saleGroupBy.mock.calls[0][0].where;
+    const returnWhere = returnGroupBy.mock.calls[0][0].where;
+    expect(saleWhere.saleDate.gte).toBeInstanceOf(Date);
+    expect(returnWhere.returnDate.gte).toBeInstanceOf(Date);
+
+    const diasAtras = (antes - saleWhere.saleDate.gte.getTime()) / 86_400_000;
+    expect(diasAtras).toBeGreaterThan(29.9);
+    expect(diasAtras).toBeLessThan(30.1);
+  });
+
+  it("sem grupo duplicado (_count 1 em tudo) -> retorna null, sem alertar à toa", async () => {
+    saleGroupBy.mockResolvedValue([
+      { storeId: "s1", dapicVendaId: 1, cod: "C1", quantidade: 1, valorTotalLiquido: 100, _count: { _all: 1 } },
+    ]);
+    returnGroupBy.mockResolvedValue([]);
+
+    const { checkForDuplicateSales } = await import("../sync-runner");
+    const resultado = await checkForDuplicateSales();
+
+    expect(resultado).toBeNull();
+  });
+
+  it("grupo de Sale com _count > 1 -> alerta com a quantidade de grupos e valor inflado", async () => {
+    saleGroupBy.mockResolvedValue([
+      { storeId: "s1", dapicVendaId: 1, cod: "C1", quantidade: 1, valorTotalLiquido: 100, _count: { _all: 2 } },
+      { storeId: "s1", dapicVendaId: 2, cod: "C2", quantidade: 1, valorTotalLiquido: 50, _count: { _all: 1 } },
+    ]);
+    returnGroupBy.mockResolvedValue([]);
+
+    const { checkForDuplicateSales } = await import("../sync-runner");
+    const resultado = await checkForDuplicateSales();
+
+    expect(resultado).not.toBeNull();
+    expect(resultado).toContain("Vendas: 1 grupo(s) duplicado(s)");
+    expect(resultado).toContain("100"); // valorTotalLiquido (100) * (_count 2 - 1) = 100 inflado
+  });
+
+  it("grupo de Return com _count > 1 -> alerta reporta devolução duplicada, não mistura com Sale", async () => {
+    saleGroupBy.mockResolvedValue([]);
+    returnGroupBy.mockResolvedValue([
+      { storeId: "s1", dapicVendaId: 1, cod: "C1", quantidade: 1, valorTotal: 80, _count: { _all: 3 } },
+    ]);
+
+    const { checkForDuplicateSales } = await import("../sync-runner");
+    const resultado = await checkForDuplicateSales();
+
+    expect(resultado).not.toBeNull();
+    expect(resultado).toContain("Devoluções: 1 grupo(s) duplicado(s)");
+    expect(resultado).not.toContain("Vendas:");
   });
 });
