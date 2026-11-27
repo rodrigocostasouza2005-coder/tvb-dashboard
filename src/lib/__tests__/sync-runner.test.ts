@@ -997,6 +997,55 @@ describe("runSync — falha TOTAL de 1 loja não derruba as outras (integração
     consoleErrorSpy.mockRestore();
   });
 
+  // Achado em produção real (2026-11-27, migração de conta Vercel durante Black Friday):
+  // syncClientes(cd-atacado) ficou PENDURADA (fetchClientes busca histórico completo desde 2020,
+  // disputando rate limit do DAPIC com a sync pesada da própria loja cd-atacado no mesmo token) —
+  // sem nunca rejeitar nem resolver, consumiu os 300s inteiros de maxDuration da Vercel sozinha.
+  // A função foi morta ANTES de qualquer prisma.syncLog.create() rodar, mesmo com estoque/vendas
+  // já gravados com sucesso. withTimeout (120s) agora garante que uma tarefa NÃO-fatal travada
+  // nunca consegue derrubar a sync inteira — vira uma falha normal (já tratada pelo .catch
+  // existente), não um hang indefinido.
+  it("syncClientes pendurada pra sempre (nunca resolve nem rejeita) não trava a sync inteira — withTimeout força a falha em 120s", async () => {
+    vi.useFakeTimers();
+    storeFindFirst.mockResolvedValue(null);
+    storeCreate.mockImplementation(({ data }: { data: { code: string } }) => Promise.resolve({ id: `store-${data.code}` }));
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const cdAtacado = {
+      label: "cd-atacado",
+      fetchArmazenadores: () => Promise.resolve([{ Id: 3, Descricao: "CD" }]),
+      fetchEstoqueTodosArmazenadores: () =>
+        Promise.resolve([{ IdArmazenador: 3, IdGradeProduto: 500, Produto: "Camisa X", Grupo: "Camisas", QuantidadeReal: 10 }]),
+      fetchVendasPdv: () => Promise.resolve([]),
+      fetchVendaPdvDetalhe: () => Promise.resolve(null),
+      fetchVendasPdvModificadas: () => Promise.resolve([]),
+      fetchFaturas: () => Promise.resolve([]),
+      fetchFaturasModificadas: () => Promise.resolve([]),
+      // Nunca resolve nem rejeita — simula o hang real observado em produção (rate limit do DAPIC
+      // retentando página após página, sem nunca lançar um erro de verdade).
+      fetchClientes: () => new Promise(() => {}),
+      fetchParcelas: () => Promise.resolve([]),
+    } as unknown as DapicClient;
+
+    createDapicClientsMock.mockImplementationOnce(() => [cdAtacado]);
+
+    const { runSync } = await import("../sync-runner");
+    const responsePromise = runSync({ silent: true });
+    await vi.advanceTimersByTimeAsync(125_000); // stagger (poucos segundos) + os 120s do withTimeout
+    const response = await responsePromise;
+
+    expect(response.status ?? 200).not.toBe(500); // sync inteira NÃO trava/derruba por causa disso
+    const stockLogCall = syncLogCreate.mock.calls.find((c) => c[0]?.data?.source === "STOCK");
+    expect(stockLogCall?.[0]?.data?.status).toBe("SUCCESS"); // estoque gravado normalmente, SyncLog chegou a rodar
+
+    const chamadasClientes = consoleErrorSpy.mock.calls.filter((c) => String(c[0]).includes("lientes"));
+    expect(chamadasClientes.length).toBeGreaterThan(0);
+    expect(String(chamadasClientes[0][1] ?? chamadasClientes[0][0])).toContain("excedeu");
+
+    consoleErrorSpy.mockRestore();
+    vi.useRealTimers();
+  });
+
   // [RISCO RESIDUAL DOCUMENTADO, NÃO CORRIGIDO NESTA AUDITORIA — 2026-11-25] Achado investigando
   // item 7 (falha de uma fonte não deveria contaminar outra fonte independente): dentro de
   // syncOneClient, estoque/vendas/faturas rodam em try/catch SEQUENCIAIS, não independentes entre

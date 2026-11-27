@@ -1273,6 +1273,24 @@ async function falhaDeLoja(
   };
 }
 
+// Timeout de segurança (120s) pra tarefa OPCIONAL/não-fatal dentro de doSync (syncOrdensProducao,
+// syncClientes, syncParcelas) — achado real em produção, 2026-11-27 (migração de conta Vercel,
+// Black Friday): syncClientes(cd-atacado) ficou pendurada tempo suficiente pra consumir os 300s
+// inteiros de maxDuration sozinha (fetchClientes busca histórico completo desde 2020, disputando
+// rate limit do DAPIC com a sync pesada da PRÓPRIA loja cd-atacado, que usa o mesmo token — ver
+// comentário de contenção documentado mais abaixo, achado em 2026-08-12). Sem este limite, uma
+// tarefa "não crítica" travada derruba a sync inteira: a função é morta pela Vercel ANTES de
+// qualquer prisma.syncLog.create() rodar — ou seja, mesmo quando estoque/vendas já foram gravados
+// com sucesso pelas lojas, o SyncLog nunca é escrito e o Telegram de sucesso nunca sai. 120s dá
+// folga generosa pro caminho feliz (syncOrdensProducao/syncParcelas historicamente levam
+// 10-40s mesmo sob contenção) sem arriscar estourar o orçamento de 300s da função inteira.
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`${label}: excedeu ${ms}ms, abortado pra não travar a sync inteira`)), ms)),
+  ]);
+}
+
 // Um "attempt" da sync inteira — devolve o resumo em caso de sucesso, ou lança em caso de erro.
 // Separado de runSync() pra permitir tentar de novo (retryBudgetMs) sem duplicar a lógica de
 // notificação/log, que só acontece uma vez, no fim, em runSync().
@@ -1421,7 +1439,7 @@ async function doSync() {
     sleep(outrasLojas.length * STAGGER_MS)
       .then(() => {
         const t0 = Date.now();
-        return syncOrdensProducao(matrizClient).then((count) => {
+        return withTimeout(syncOrdensProducao(matrizClient), 120_000, "syncOrdensProducao").then((count) => {
           console.log(`[doSync] syncOrdensProducao levou ${Date.now() - t0}ms`);
           return count;
         });
@@ -1439,7 +1457,7 @@ async function doSync() {
       .then(() => {
         if (!cdAtacadoClient) return Promise.resolve(0);
         const t0 = Date.now();
-        return syncClientes(cdAtacadoClient).then((n) => {
+        return withTimeout(syncClientes(cdAtacadoClient), 120_000, "syncClientes").then((n) => {
           console.log(`[doSync] syncClientes levou ${Date.now() - t0}ms`);
           return n;
         });
@@ -1452,7 +1470,7 @@ async function doSync() {
       .then(() => {
         if (!cdAtacadoClient) return Promise.resolve(0);
         const t0 = Date.now();
-        return syncParcelas(cdAtacadoClient).then((n) => {
+        return withTimeout(syncParcelas(cdAtacadoClient), 120_000, "syncParcelas").then((n) => {
           console.log(`[doSync] syncParcelas levou ${Date.now() - t0}ms`);
           return n;
         });
