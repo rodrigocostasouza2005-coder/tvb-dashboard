@@ -749,6 +749,62 @@ describe("Ponto D — integridade: idempotência real (ON CONFLICT) e classifica
     expect(templateStrings).toContain("ON CONFLICT");
   });
 
+  // Achado em produção real (2026-11-28, volume de Black Friday): syncFaturas(cd-atacado) com
+  // 1772 linhas de Sale num único INSERT multi-row gerou 37212 bind variables (21 por linha),
+  // acima do limite do Postgres (32767) — "too many bind variables... expected maximum of 32767,
+  // received 37212". upsertSalesComVendedorAtualizavel agora quebra em lotes de no máximo 1000
+  // linhas; 1500 linhas tem que virar exatamente 2 chamadas de $executeRaw (1000 + 500), nunca 1.
+  it("upsertSalesComVendedorAtualizavel quebra lote grande em múltiplas chamadas de $executeRaw (nunca estoura o limite de bind variables do Postgres)", async () => {
+    const { upsertSalesComVendedorAtualizavel } = await import("../sync-runner");
+    const saleDataGrande = Array.from({ length: 1500 }, (_, i) => ({
+      storeId: "s1",
+      cod: `C${i}`,
+      produto: "P1",
+      grupo: "G1",
+      quantidade: 1,
+      valorTotalLiquido: 10,
+      saleDate: new Date(),
+      dapicVendaId: i,
+      itemIndex: 0,
+    }));
+    await upsertSalesComVendedorAtualizavel(saleDataGrande);
+    expect(executeRaw).toHaveBeenCalledTimes(2);
+  });
+
+  it("upsertReturnsComColecaoAtualizavel quebra lote grande em múltiplas chamadas de $executeRaw", async () => {
+    const { upsertReturnsComColecaoAtualizavel } = await import("../sync-runner");
+    const returnDataGrande = Array.from({ length: 2500 }, (_, i) => ({
+      storeId: "s1",
+      cod: `C${i}`,
+      produto: "P1",
+      grupo: "G1",
+      quantidade: 1,
+      valorTotal: 10,
+      returnDate: new Date(),
+      dapicVendaId: i,
+      itemIndex: 0,
+    }));
+    await upsertReturnsComColecaoAtualizavel(returnDataGrande);
+    expect(executeRaw).toHaveBeenCalledTimes(3);
+  });
+
+  it("upsertGiftsComColecaoAtualizavel quebra lote grande em múltiplas chamadas de $executeRaw", async () => {
+    const { upsertGiftsComColecaoAtualizavel } = await import("../sync-runner");
+    const giftDataGrande = Array.from({ length: 1001 }, (_, i) => ({
+      storeId: "s1",
+      cod: `C${i}`,
+      produto: "P1",
+      grupo: "G1",
+      quantidade: 1,
+      valorTotalLiquido: 10,
+      giftDate: new Date(),
+      dapicVendaId: i,
+      itemIndex: 0,
+    }));
+    await upsertGiftsComColecaoAtualizavel(giftDataGrande);
+    expect(executeRaw).toHaveBeenCalledTimes(2);
+  });
+
   it("CD e ATACADO no mesmo token são classificados em stores DIFERENTES, primaryStoreId é sempre CD", async () => {
     storeFindFirst.mockResolvedValue(null);
     storeCreate.mockImplementation(({ data }: { data: { code: string } }) => Promise.resolve({ id: `store-${data.code}` }));

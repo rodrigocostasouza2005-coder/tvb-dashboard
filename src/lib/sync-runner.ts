@@ -539,6 +539,21 @@ type VendedorCorrigido = {
   vendedorNovo: string | null;
 };
 
+// Achado em produção real (2026-11-28, volume de Black Friday): um único INSERT multi-row vira
+// 1 bind variable por campo por linha — o Postgres rejeita acima de 32767 no total ("too many
+// bind variables... expected maximum of 32767, received 37212"), e esse erro só aparece quando o
+// lote de UM sync fica grande o bastante (aqui, syncFaturas de cd-atacado num dia de pico: 1772
+// linhas de Sale × 21 params = 37212). Quebra em lotes bem abaixo do limite, por segurança — 1000
+// linhas é o pior caso real (Sale, 21 params/linha) ficando em 21000, com folga enorme sobre
+// 32767, e nem de longe o volume de 1 dia (mesmo de pico) excede uns poucos lotes.
+const MAX_LINHAS_POR_INSERT_RAW = 1000;
+
+function chunk<T>(items: T[], tamanho: number): T[][] {
+  const lotes: T[][] = [];
+  for (let i = 0; i < items.length; i += tamanho) lotes.push(items.slice(i, i + tamanho));
+  return lotes;
+}
+
 // Upsert em massa: insere venda nova normalmente, e no conflito (venda já sincronizada antes) só
 // atualiza o campo "vendedor" — ver comentário acima em syncVendas. Detecta e devolve os casos
 // onde o vendedor realmente mudou (não toda venda já existente, só as que tiveram correção de
@@ -564,39 +579,41 @@ export async function upsertSalesComVendedorAtualizavel(saleData: Prisma.SaleCre
   // ClienteCadastroMatchConfianca but expression is of type text" (código 42804), reportado pelo
   // Rodrigo como "sync de todas as lojas dando errado". Cast explícito resolve pra qualquer valor
   // (incluindo NULL, que o Postgres aceita castado sem problema).
-  const values = saleData.map(
-    (s) => Prisma.sql`(
-      ${randomUUID()}, ${s.storeId}, ${s.cod}, ${s.produto}, ${s.grupo}, ${s.cor ?? null}, ${s.tamanho ?? null},
-      ${s.colecao ?? null}, ${s.marca ?? null}, ${s.clienteNome ?? null}, ${s.vendedor ?? null}, ${s.tabelaPreco ?? null},
-      ${s.cidade ?? null}, ${s.estado ?? null}, ${s.quantidade}, ${s.valorTotalLiquido}, ${s.saleDate},
-      ${s.dapicVendaId}, ${s.itemIndex}, ${s.clienteCadastroId ?? null}, (${s.clienteCadastroMatchConfianca ?? null})::"ClienteCadastroMatchConfianca"
-    )`
-  );
+  for (const lote of chunk(saleData, MAX_LINHAS_POR_INSERT_RAW)) {
+    const values = lote.map(
+      (s) => Prisma.sql`(
+        ${randomUUID()}, ${s.storeId}, ${s.cod}, ${s.produto}, ${s.grupo}, ${s.cor ?? null}, ${s.tamanho ?? null},
+        ${s.colecao ?? null}, ${s.marca ?? null}, ${s.clienteNome ?? null}, ${s.vendedor ?? null}, ${s.tabelaPreco ?? null},
+        ${s.cidade ?? null}, ${s.estado ?? null}, ${s.quantidade}, ${s.valorTotalLiquido}, ${s.saleDate},
+        ${s.dapicVendaId}, ${s.itemIndex}, ${s.clienteCadastroId ?? null}, (${s.clienteCadastroMatchConfianca ?? null})::"ClienteCadastroMatchConfianca"
+      )`
+    );
 
-  await prisma.$executeRaw`
-    INSERT INTO "Sale" (
-      "id", "storeId", "cod", "produto", "grupo", "cor", "tamanho",
-      "colecao", "marca", "clienteNome", "vendedor", "tabelaPreco",
-      "cidade", "estado", "quantidade", "valorTotalLiquido", "saleDate",
-      "dapicVendaId", "itemIndex", "clienteCadastroId", "clienteCadastroMatchConfianca"
-    )
-    VALUES ${Prisma.join(values)}
-    ON CONFLICT ("storeId", "dapicVendaId", "itemIndex") DO UPDATE SET
-      "vendedor" = EXCLUDED."vendedor",
-      -- Recalculado a cada sync a partir do ClienteCadastro atual — nunca pior do que o que já
-      -- estava: ou mantém a mesma resolução, ou melhora (ex: ClienteCadastro daquele cliente foi
-      -- sincronizado/corrigido depois da 1ª vez que esta venda foi gravada).
-      "clienteCadastroId" = EXCLUDED."clienteCadastroId",
-      "clienteCadastroMatchConfianca" = EXCLUDED."clienteCadastroMatchConfianca",
-      -- Achado em 2026-11-26 (alerta real de reconciliarLotePersistido): valor não era atualizado
-      -- em conflito, só gravado na 1ª inserção. Se o DAPIC corrige/edita o valor do item DEPOIS
-      -- (ex: desconto aplicado, erro de digitação corrigido na loja) e a venda ainda cai dentro da
-      -- janela normal de 1 dia ou da janela de reconciliação por Modificacao, a sync seguinte
-      -- recalculava "esperado" certo mas nunca gravava — o banco ficava travado no valor velho pra
-      -- sempre, e reconciliarLotePersistido alertava pra sempre, sync após sync, sem nenhuma
-      -- correção automática possível. Mesmo princípio já aplicado a "vendedor" acima.
-      "valorTotalLiquido" = EXCLUDED."valorTotalLiquido"
-  `;
+    await prisma.$executeRaw`
+      INSERT INTO "Sale" (
+        "id", "storeId", "cod", "produto", "grupo", "cor", "tamanho",
+        "colecao", "marca", "clienteNome", "vendedor", "tabelaPreco",
+        "cidade", "estado", "quantidade", "valorTotalLiquido", "saleDate",
+        "dapicVendaId", "itemIndex", "clienteCadastroId", "clienteCadastroMatchConfianca"
+      )
+      VALUES ${Prisma.join(values)}
+      ON CONFLICT ("storeId", "dapicVendaId", "itemIndex") DO UPDATE SET
+        "vendedor" = EXCLUDED."vendedor",
+        -- Recalculado a cada sync a partir do ClienteCadastro atual — nunca pior do que o que já
+        -- estava: ou mantém a mesma resolução, ou melhora (ex: ClienteCadastro daquele cliente foi
+        -- sincronizado/corrigido depois da 1ª vez que esta venda foi gravada).
+        "clienteCadastroId" = EXCLUDED."clienteCadastroId",
+        "clienteCadastroMatchConfianca" = EXCLUDED."clienteCadastroMatchConfianca",
+        -- Achado em 2026-11-26 (alerta real de reconciliarLotePersistido): valor não era atualizado
+        -- em conflito, só gravado na 1ª inserção. Se o DAPIC corrige/edita o valor do item DEPOIS
+        -- (ex: desconto aplicado, erro de digitação corrigido na loja) e a venda ainda cai dentro da
+        -- janela normal de 1 dia ou da janela de reconciliação por Modificacao, a sync seguinte
+        -- recalculava "esperado" certo mas nunca gravava — o banco ficava travado no valor velho pra
+        -- sempre, e reconciliarLotePersistido alertava pra sempre, sync após sync, sem nenhuma
+        -- correção automática possível. Mesmo princípio já aplicado a "vendedor" acima.
+        "valorTotalLiquido" = EXCLUDED."valorTotalLiquido"
+    `;
+  }
 
   const corrigidos: VendedorCorrigido[] = [];
   for (const s of saleData) {
@@ -627,24 +644,26 @@ export async function upsertSalesComVendedorAtualizavel(saleData: Prisma.SaleCre
 // pra null se uma sync futura vier com o campo vazio por qualquer motivo transiente).
 export async function upsertReturnsComColecaoAtualizavel(returnData: Prisma.ReturnCreateManyInput[]): Promise<void> {
   if (returnData.length === 0) return;
-  const values = returnData.map(
-    (r) => Prisma.sql`(
-      ${randomUUID()}, ${r.storeId}, ${r.cod}, ${r.produto}, ${r.grupo}, ${r.cor ?? null}, ${r.tamanho ?? null},
-      ${r.marca ?? null}, ${r.tabelaPreco ?? null}, ${r.colecao ?? null}, ${r.quantidade}, ${r.valorTotal},
-      ${r.returnDate}, ${r.dapicVendaId}, ${r.itemIndex}
-    )`
-  );
+  for (const lote of chunk(returnData, MAX_LINHAS_POR_INSERT_RAW)) {
+    const values = lote.map(
+      (r) => Prisma.sql`(
+        ${randomUUID()}, ${r.storeId}, ${r.cod}, ${r.produto}, ${r.grupo}, ${r.cor ?? null}, ${r.tamanho ?? null},
+        ${r.marca ?? null}, ${r.tabelaPreco ?? null}, ${r.colecao ?? null}, ${r.quantidade}, ${r.valorTotal},
+        ${r.returnDate}, ${r.dapicVendaId}, ${r.itemIndex}
+      )`
+    );
 
-  await prisma.$executeRaw`
-    INSERT INTO "Return" (
-      "id", "storeId", "cod", "produto", "grupo", "cor", "tamanho",
-      "marca", "tabelaPreco", "colecao", "quantidade", "valorTotal",
-      "returnDate", "dapicVendaId", "itemIndex"
-    )
-    VALUES ${Prisma.join(values)}
-    ON CONFLICT ("storeId", "dapicVendaId", "itemIndex") DO UPDATE SET
-      "colecao" = COALESCE(EXCLUDED."colecao", "Return"."colecao")
-  `;
+    await prisma.$executeRaw`
+      INSERT INTO "Return" (
+        "id", "storeId", "cod", "produto", "grupo", "cor", "tamanho",
+        "marca", "tabelaPreco", "colecao", "quantidade", "valorTotal",
+        "returnDate", "dapicVendaId", "itemIndex"
+      )
+      VALUES ${Prisma.join(values)}
+      ON CONFLICT ("storeId", "dapicVendaId", "itemIndex") DO UPDATE SET
+        "colecao" = COALESCE(EXCLUDED."colecao", "Return"."colecao")
+    `;
+  }
 }
 
 // Achado em 2026-10-30: Gift (nos dois caminhos, vendaspdv e faturas) nunca atualizava em
@@ -655,24 +674,26 @@ export async function upsertReturnsComColecaoAtualizavel(returnData: Prisma.Retu
 // sem evidência de precisarem de correção, ao contrário de colecao.
 export async function upsertGiftsComColecaoAtualizavel(giftData: Prisma.GiftCreateManyInput[]): Promise<void> {
   if (giftData.length === 0) return;
-  const values = giftData.map(
-    (g) => Prisma.sql`(
-      ${randomUUID()}, ${g.storeId}, ${g.cod}, ${g.produto}, ${g.grupo}, ${g.cor ?? null}, ${g.tamanho ?? null},
-      ${g.colecao ?? null}, ${g.marca ?? null}, ${g.clienteNome ?? null}, ${g.quantidade}, ${g.valorTotalLiquido},
-      ${g.giftDate}, ${g.dapicVendaId}, ${g.itemIndex}
-    )`
-  );
+  for (const lote of chunk(giftData, MAX_LINHAS_POR_INSERT_RAW)) {
+    const values = lote.map(
+      (g) => Prisma.sql`(
+        ${randomUUID()}, ${g.storeId}, ${g.cod}, ${g.produto}, ${g.grupo}, ${g.cor ?? null}, ${g.tamanho ?? null},
+        ${g.colecao ?? null}, ${g.marca ?? null}, ${g.clienteNome ?? null}, ${g.quantidade}, ${g.valorTotalLiquido},
+        ${g.giftDate}, ${g.dapicVendaId}, ${g.itemIndex}
+      )`
+    );
 
-  await prisma.$executeRaw`
-    INSERT INTO "Gift" (
-      "id", "storeId", "cod", "produto", "grupo", "cor", "tamanho",
-      "colecao", "marca", "clienteNome", "quantidade", "valorTotalLiquido",
-      "giftDate", "dapicVendaId", "itemIndex"
-    )
-    VALUES ${Prisma.join(values)}
-    ON CONFLICT ("storeId", "dapicVendaId", "itemIndex") DO UPDATE SET
-      "colecao" = COALESCE(EXCLUDED."colecao", "Gift"."colecao")
-  `;
+    await prisma.$executeRaw`
+      INSERT INTO "Gift" (
+        "id", "storeId", "cod", "produto", "grupo", "cor", "tamanho",
+        "colecao", "marca", "clienteNome", "quantidade", "valorTotalLiquido",
+        "giftDate", "dapicVendaId", "itemIndex"
+      )
+      VALUES ${Prisma.join(values)}
+      ON CONFLICT ("storeId", "dapicVendaId", "itemIndex") DO UPDATE SET
+        "colecao" = COALESCE(EXCLUDED."colecao", "Gift"."colecao")
+    `;
+  }
 }
 
 // Venda de verdade do canal Site+Atacado (só cd-atacado tem acesso a /faturas). Mesma chave de
