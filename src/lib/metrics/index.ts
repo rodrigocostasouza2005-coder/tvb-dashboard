@@ -18,5 +18,7 @@ export * from "./planejamento-avaliacao";
 export * from "./planejamento-distribuicao";
 export * from "./planejamento-recomendacao";
 export * from "./estoque-minimo-manual";
+export * from "./mapa-compras-crescimento";
+export * from "./mapa-compras-visao-analitica";
 export * from "./reposicao-sinais";
 export * from "./reposicao-bestseller-consolidada";

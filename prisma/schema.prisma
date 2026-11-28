@@ -146,6 +146,12 @@ model MapaComprasConfig {
   // 2026-10-27: BEST SELLER vs DROP) — nullable porque é opcional configurar; sem valor, a
   // priorização de orçamento (priorizarOrcamentoCompras) não tem limite pra aplicar, só ordena.
   orcamentoTotalPlanejado Float?
+  // Qual dos 3 cenários (CrescimentoCenario) está ativo agora no motor de projeção (evolução do
+  // Mapa de Compras, 2026-11-27, seção 8 do briefing) — "base" por padrão, e o cenário "base"
+  // sempre usa `crescimentoPct` acima como seu valor (mesma linha, 1 fonte de verdade: nunca
+  // existem 2 números diferentes pra "crescimento base da empresa"). Ver getPremissasCrescimento
+  // em mapa-compras-crescimento.ts.
+  cenarioAtivo   String @default("base")
 }
 
 // Parâmetros de compra Best Seller por grupo (seção 4 do pedido do Rodrigo de 2026-10-27) —
@@ -164,6 +170,53 @@ model CoberturaMeta {
   leadTimeDias             Int?
   leadTimeUrgenteDias      Int?
   updatedAt      DateTime @updatedAt
+}
+
+// Premissas de Crescimento (evolução do Mapa de Compras, pedido do Rodrigo 2026-11-27, seções
+// 7-10 do briefing) — substitui o % único de MapaComprasConfig.crescimentoPct por um motor de
+// cenários (Conservador/Base/Agressivo) com ajuste relativo por loja/grupo/mês do calendário.
+// MapaComprasConfig.crescimentoPct é MANTIDO (nunca removido) — continua sendo a fonte real do
+// cenário "base" (getCrescimentoEsperado/updateCrescimentoAction não mudam, nenhuma tela antiga
+// quebra) — ver getPremissasCrescimento em mapa-compras-crescimento.ts pra como os dois modelos
+// se conectam numa fonte única de verdade. id fixo = "conservador" | "base" | "agressivo".
+model CrescimentoCenario {
+  id             String   @id
+  crescimentoPct Float
+  updatedAt      DateTime @updatedAt
+}
+
+// Ajuste relativo ao cenário escolhido, por POSIÇÃO de estoque (seção 9) — multiplicador sobre
+// o %/ano do cenário (1.0 = cresce exatamente na taxa do cenário; >1 mais rápido, <1 mais
+// devagar). Posição sem linha aqui = 1.0 (segue o cenário puro). `posicaoId` usa a MESMA
+// convenção de getPosicoesEstoque (core.ts) — um storeId sozinho pra loja de varejo (Leblon,
+// Rio Sul, Barra), ou "idCD|idAtacado" (ordenados, join "|") pro CD/Site, que é uma posição
+// combinada de 2 Stores — por isso NÃO é uma FK direta pra Store (uma posição pode cobrir mais
+// de 1 Store), só uma string livre com esse formato já estabelecido no resto do projeto.
+model CrescimentoAjusteLoja {
+  id            String   @id @default(cuid())
+  posicaoId     String   @unique
+  multiplicador Float
+  updatedAt     DateTime @updatedAt
+}
+
+// Mesmo conceito de CrescimentoAjusteLoja, por grupo de produto (seção 10) — grupo é string
+// livre vinda do DAPIC (ver Sale.grupo, mesma convenção de CoberturaMeta.grupo), não um enum
+// fixo. Grupo sem linha aqui = 1.0 (segue o cenário puro).
+model CrescimentoAjusteGrupo {
+  id            String   @id @default(cuid())
+  grupo         String   @unique
+  multiplicador Float
+  updatedAt     DateTime @updatedAt
+}
+
+// Ajuste manual (pontos percentuais somados ao crescimento efetivo), por MÊS DO CALENDÁRIO
+// (1=Janeiro..12=Dezembro, não um ano específico) — aplica todo ano no mesmo mês (ex: reforçar
+// Novembro pra Black Friday, seção 7/11 do briefing). Mês sem linha aqui = 0 (sem ajuste extra).
+model CrescimentoAjusteMensal {
+  id            String   @id @default(cuid())
+  mesCalendario Int      @unique
+  ajustePontos  Float
+  updatedAt     DateTime @updatedAt
 }
 
 // Matriz de desconto por Coleção × faixa de sell-through da Análises de Promoção — o "quadrinho"

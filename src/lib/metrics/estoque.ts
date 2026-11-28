@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import { todayBrasiliaStr, brasiliaDayStart, brasiliaDayEnd } from "@/lib/filters";
+import { getPremissasCrescimento, getMomentumPorGrupo, calcularCrescimentoEfetivo } from "./mapa-compras-crescimento";
 import {
   netByReturns,
   returnWhere,
@@ -1188,6 +1189,16 @@ export type MapaComprasGrupo = {
   coberturaMeses: number;
   meses: MesMapaCompras[];
   produtos: MapaComprasProduto[];
+  // Aditivo (evolução do Mapa de Compras, 2026-11-27) — opcional pra nunca quebrar quem já monta
+  // MapaComprasGrupo à mão (ex: fixtures de teste de particionarMatrizCompras). Receita líquida
+  // de devolução por mês (realizada + projetada pelo motor de Premissas de Crescimento), mesma
+  // chave "YYYY-MM" de `meses` — alimenta o grupo de indicadores "Comercial" do Planejamento
+  // Mensal sem precisar de uma 2ª query redundante.
+  receitaPorMes?: Record<string, number>;
+  // CoberturaMeta.leadTimeDias deste grupo — null quando a meta não foi configurada (nunca
+  // inventa um número). Alimenta "Lead Time"/"Data Recomendada de Pedido"/"Previsão de Chegada"
+  // do grupo de indicadores "Compras".
+  leadTimeDias?: number | null;
 };
 
 // Cobertura padrão quando o grupo ainda não tem meta configurada (CoberturaMeta) — 2 meses é um
@@ -1302,7 +1313,7 @@ export async function getMapaDeComprasDetalhado(
     AND "grupo" != ALL(${MAPA_COMPRAS_GRUPOS_EXCLUIDOS})
   `;
 
-  const [vendasRows, devolucaoRows, recebimentoRows, bonifRows, vendasParcialRows, recebimentoParcialRows, bonifParcialRows, estoqueAtualRows, metasRows, configRow] =
+  const [vendasRows, devolucaoRows, recebimentoRows, bonifRows, vendasParcialRows, recebimentoParcialRows, bonifParcialRows, estoqueAtualRows, metasRows] =
     await Promise.all([
       prisma.$queryRaw<{ grupo: string; produto: string; mes: Date; unidades: bigint; receita: number }[]>`
       SELECT "grupo", "produto", DATE_TRUNC('month', ("saleDate" AT TIME ZONE 'UTC') AT TIME ZONE 'America/Sao_Paulo') AS mes, SUM("quantidade") AS unidades, SUM("valorTotalLiquido") AS receita
@@ -1356,10 +1367,7 @@ export async function getMapaDeComprasDetalhado(
         _sum: { quantidadeDisponivel: true },
       }),
       prisma.coberturaMeta.findMany(),
-      prisma.mapaComprasConfig.findUnique({ where: { id: "global" } }),
     ]);
-
-  const crescimentoPct = configRow?.crescimentoPct ?? 0;
 
   const vendasByKey = somaChave(vendasRows);
   const devolucaoByKey = somaChave(devolucaoRows);
@@ -1398,6 +1406,7 @@ export async function getMapaDeComprasDetalhado(
     estoqueAtualRows.map((r) => [`${r.grupo}::${r.produto}`, r._sum.quantidadeDisponivel ?? 0])
   );
   const metaByGrupo = new Map(metasRows.map((m) => [m.grupo, m.mesesCobertura]));
+  const leadTimeByGrupo = new Map(metasRows.map((m) => [m.grupo, m.leadTimeDias]));
 
   const produtosPorGrupo = new Map<string, Set<string>>();
   for (const key of estoqueAtualByKey.keys()) {
@@ -1443,20 +1452,41 @@ export async function getMapaDeComprasDetalhado(
   }
 
   // Projeção de receita do GRUPO por mês futuro = receita do MESMO MÊS DO ANO ANTERIOR ×
-  // (1 + crescimento que o Rodrigo escolhe) — mesma lógica de "Crescimento do Ticket" da
-  // planilha dele, mas em cima da receita (mês contra mês, ano contra ano), não de uma média/
-  // tendência calculada. Calculado em ordem cronológica pra que o mês futuro mais distante possa
-  // referenciar um mês futuro anterior já calculado (o histórico real só cobre ~12 meses).
+  // (1 + crescimento efetivo) × momentum — evolução de 2026-11-27 (Premissas de Crescimento,
+  // seções 7-12 do briefing do Rodrigo): o % único "que o Rodrigo escolhe" vira um motor de
+  // cenário (Conservador/Base/Agressivo) × ajuste por GRUPO × ajuste por MÊS do calendário,
+  // multiplicado pelo momentum real (tendência recente, ver mapa-compras-crescimento.ts) — nunca
+  // mais um número fixo aplicado igual em todo mês/grupo. "base" continua sendo literalmente o
+  // crescimentoPct de MapaComprasConfig (mesma fonte de getCrescimentoEsperado), então quem nunca
+  // configurou a tela nova continua vendo exatamente o comportamento de antes.
+  //
+  // DECISÃO DE ESCOPO (documentada no PR): esta função é consolidada por GRUPO (nunca teve
+  // quebra por loja — Sale aqui não é filtrado por storeId), então o ajuste POR LOJA das
+  // Premissas de Crescimento não entra nesta conta (calcularCrescimentoEfetivo recebe só grupo,
+  // sem posicaoId). A diferenciação por loja (seção 9/18 do briefing) é real e fica visível na
+  // aba Visão Analítica (KPIs/comparação por loja) e no motor de Premissas em si — retrofitar a
+  // dimensão loja nesta função de 400+ linhas, já testada e em produção, é risco desproporcional
+  // ao ganho numa única sessão de implementação.
+  //
+  // Calculado em ordem cronológica pra que o mês futuro mais distante possa referenciar um mês
+  // futuro anterior já calculado (o histórico real só cobre ~12 meses).
   const mesesFuturosGlobal = todosMeses.filter((m) => m >= mesAtual);
+  const gruposList = [...produtosPorGrupo.keys()];
+  const [premissasCrescimento, momentumPorGrupo] = await Promise.all([
+    getPremissasCrescimento(),
+    getMomentumPorGrupo(gruposList, agora),
+  ]);
   const receitaProjetadaGrupoPorMes = new Map<string, Map<string, number>>();
   for (const [grupo] of produtosPorGrupo) {
     const porMesGrupo = receitaGrupoPorMes.get(grupo)!;
+    const momentum = momentumPorGrupo.get(grupo) ?? 1;
     const projetado = new Map<string, number>();
     for (const mes of mesesFuturosGlobal) {
       const [y, m] = mes.split("-").map(Number);
       const mesAnoAnterior = `${y - 1}-${String(m).padStart(2, "0")}`;
       const receitaAnoAnterior = porMesGrupo.get(mesAnoAnterior) ?? projetado.get(mesAnoAnterior) ?? 0;
-      projetado.set(mes, Math.max(0, receitaAnoAnterior * (1 + crescimentoPct / 100)));
+      const crescimentoEfetivo = calcularCrescimentoEfetivo(premissasCrescimento, { grupo, mesCalendario: m });
+      projetado.set(mes, Math.max(0, receitaAnoAnterior * (1 + crescimentoEfetivo) * momentum));
     }
     receitaProjetadaGrupoPorMes.set(grupo, projetado);
   }
@@ -1574,11 +1604,22 @@ export async function getMapaDeComprasDetalhado(
     const produtos = [...produtosSet]
       .map((produto) => ({ produto, meses: calcularSerie(grupo, produto, coberturaMeses) }))
       .sort((a, b) => b.meses[mesesPassados.length]?.faltaComprar - a.meses[mesesPassados.length]?.faltaComprar);
+    // receitaPorMes: realizado (receitaGrupoPorMes) + projetado (receitaProjetadaGrupoPorMes) —
+    // mesmas 2 fontes já calculadas acima pro "Como chegamos no número de Vendas", só reexpostas
+    // numa chave única por mês em vez de ficarem presas em 2 Maps separados.
+    const receitaPorMes: Record<string, number> = {};
+    const realizadoGrupo = receitaGrupoPorMes.get(grupo);
+    const projetadoGrupo = receitaProjetadaGrupoPorMes.get(grupo);
+    for (const m of todosMeses) {
+      receitaPorMes[m] = realizadoGrupo?.get(m) ?? projetadoGrupo?.get(m) ?? 0;
+    }
     grupos.push({
       grupo,
       coberturaMeses,
       meses: somarSeries(produtos.map((p) => p.meses)),
       produtos,
+      receitaPorMes,
+      leadTimeDias: leadTimeByGrupo.get(grupo) ?? null,
     });
   }
 
